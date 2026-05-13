@@ -44,6 +44,7 @@ Evolución futura: SaaS estilo Crescendo.ai donde el cliente gestiona su propio 
 - main → producción, solo recibe merges desde develop
 - develop → staging, aquí se integran todos los cambios
 - Ramas de trabajo: feature/nombre, fix/nombre
+- Ramas automáticas de Claude Code: claude/* (las crea el worktree, válidas tal cual; el PR igual va contra develop)
 - Nunca commitear directo a main ni develop
 - Formato de commits: feat:, fix:, chore:, docs:
 
