@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-13 (sesión 2)_
+_Última actualización: 2026-05-13 (sesión 2 — grafo LangGraph; reconcilia PR #4 scaffolding + PR #6 grafo)_
 
 ---
 
@@ -49,9 +49,12 @@ El repositorio contiene únicamente documentación. Ninguna carpeta de código (
 - [x] Scaffolding inicial de FastAPI (`apps/api/main.py`, estructura completa de carpetas)
   - `core/`, `db/`, `agents/`, `agents/nodes/`, `agents/prompts/`, `integrations/`, `routers/`, `tests/`
   - `pyproject.toml` con poetry, runtime stack (fastapi, langgraph, anthropic, openai, asyncpg+pgvector, langfuse, tenacity, structlog) y dev (pytest, ruff, mypy estricto)
+  - Hereda de PR #4: `Dockerfile`, `docker-compose.yml`, `integrations/chatwoot|zendesk|shopify.py` (puro httpx)
 - [x] Configuración de variables de entorno (`core/config.py`)
   - `Settings` con pydantic-settings v2; falla en boot si falta cualquier var requerida
   - Singleton vía `lru_cache`; validators para `rag_min_similarity ∈ [0,1]` y `embedding_dimensions == 1536`
+- [x] `.env.example` con todas las variables necesarias (raíz del repo)
+- [x] `docker-compose.yml` para levantar servicios localmente (heredado del PR #4)
 - [x] Esquema de Supabase con multi-tenant y RLS (`supabase/migrations/20260513000000_initial_schema.sql`)
   - Tablas: `tenants`, `users` (staff), `end_customers`, `conversations`, `messages`, `escalations`, `knowledge_base_documents`, `knowledge_base_chunks` (pgvector 1536), `tenant_configurations`, `tenant_prompts` (versionados)
   - RLS por JWT claim `tenant_id` + rol `super_admin` para Auyan
@@ -102,18 +105,20 @@ El repositorio contiene únicamente documentación. Ninguna carpeta de código (
 
 ### Infraestructura
 - [x] `.env.example` con todas las variables necesarias (raíz del repo, según CLAUDE.md)
-- [ ] `docker-compose.yml` para levantar servicios localmente (Postgres+pgvector, Langfuse local, API)
+- [x] `docker-compose.yml` y `apps/api/Dockerfile` (heredados del PR #4)
 - [ ] Deploy inicial en Railway (entorno staging)
 
 ### Deuda técnica registrada para Sprint 2
+- **Refactor de services + routers del PR #4 al paradigma asyncpg.** En el merge se eliminaron `apps/api/services/{tickets,tenants,escalation}.py`, `apps/api/routers/{tickets,tenants}.py`, `apps/api/core/security.py` y `apps/api/tests/test_health.py` porque dependían de `supabase-py` (Client sync), incompatible con el paradigma `asyncpg + tenant_scope` que requiere multi-tenant defense-in-depth y pgvector raw. Hay que reescribirlos usando `tenant_scope` y las queries del grafo: endpoint `POST /tickets/inbound` (interno, sin HMAC), `GET /tenants/{id}`, auth JWT vía Supabase, y test de `/health`.
 - Crear rol `auyan_backend` en Supabase con `NOBYPASSRLS` y grants equivalentes a `authenticated`. Actualmente conectamos con `postgres` (bypass RLS) y la defensa multi-tenant queda en (a) `WHERE tenant_id = $1` explícito en todas las queries y (b) GUC `app.tenant_id` seteado por request. Pragmático para v1 pero quita una capa de defensa.
 - Tests de integración contra Postgres+pgvector real (queries SQL, RLS, HNSW). Hoy todo es unit con mocks.
 - Validadores de `Settings` no testeados (requieren env vars reales).
+- Integraciones de canales (`chatwoot.py`, `zendesk.py`, `shopify.py`) son clientes HTTP esqueleto del PR #4 — cablear con el flujo del agente (recibir webhook específico → resolver tenant → invocar `agent_service`).
 
 ### Criterio de done del Sprint 1
 Un ticket enviado vía POST al endpoint de la API es procesado por el agente, genera una respuesta, y el trace completo aparece en Langfuse — todo bajo un `tenant_id` de prueba.
 
-**Estado actual del done:** falta sólo el `docker-compose.yml` + provisioning del tenant de prueba en una DB real + deploy. La lógica está toda armada y testeada con mocks.
+**Estado actual del done:** la lógica del agente + endpoint `/webhooks/inbound` con HMAC están testeados con mocks. Falta provisioning del tenant de prueba en una DB real y deploy en Railway.
 
 ---
 

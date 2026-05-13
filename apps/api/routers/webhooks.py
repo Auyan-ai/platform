@@ -19,9 +19,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from apps.api.core.config import Settings, get_settings
@@ -110,7 +110,7 @@ AgentServiceDep = Annotated["AgentService", Depends(get_agent_service)]
 
 
 # ----------------------------------------------------------------
-# Endpoint
+# Endpoint genérico (firma HMAC + flujo del agente)
 # ----------------------------------------------------------------
 
 
@@ -226,3 +226,33 @@ async def inbound(
         trace_id=outcome.trace_id,
         error=outcome.error,
     )
+
+
+# ----------------------------------------------------------------
+# Stubs de webhooks específicos por canal (heredados de PR #4)
+# Por ahora solo aceptan el payload y loguean. La integración real con cada
+# canal queda como deuda — debe terminar llamando al mismo flujo de `inbound`
+# (resolver tenant, persistir mensaje, invocar agent_service).
+# ----------------------------------------------------------------
+
+
+@router.post("/zendesk")
+async def zendesk_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    payload = await request.json()
+    logger.info("zendesk_webhook_received", extra={"payload_keys": list(payload.keys())})
+    # TODO Sprint 2: procesar en background_tasks llamando a agent_service
+    return {"received": True}
+
+
+@router.post("/chatwoot")
+async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    payload = await request.json()
+    logger.info("chatwoot_webhook_received", extra={"event": payload.get("event")})
+    return {"received": True}
+
+
+@router.post("/postmark")
+async def postmark_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    payload: dict[str, Any] = await request.json()
+    logger.info("postmark_webhook_received", extra={"from": payload.get("From")})
+    return {"received": True}
