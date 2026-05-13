@@ -1,0 +1,228 @@
+"""Webhook router para inbounds.
+
+V1 expone un endpoint genérico `/webhooks/inbound` para testear end-to-end.
+Webhooks específicos (Postmark, Zendesk, Intercom, Shopify) se montarán en
+endpoints aparte y deben terminar llamando al MISMO flujo:
+
+    1. Resolver tenant por algún identificador del payload.
+    2. Upsert end_customer (por email o external_id).
+    3. Find-or-create conversation (por (tenant, channel, external_id)).
+    4. INSERT message inbound (role='customer').
+    5. agent_service.process_inbound(...)
+    6. Devolver AgentOutcome al adapter del canal para enviar la respuesta.
+
+Seguridad: HMAC-SHA256 sobre el body, header `X-Auyan-Signature: sha256=<hex>`.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import logging
+from typing import TYPE_CHECKING, Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from apps.api.core.config import Settings, get_settings
+from apps.api.db.client import bootstrap_connection, tenant_scope
+from apps.api.db.models import ChannelType
+from apps.api.db.queries import (
+    create_conversation,
+    create_end_customer,
+    find_conversation_by_external,
+    find_end_customer_by_email,
+    get_tenant_by_slug,
+    insert_message,
+    update_conversation_last_message,
+)
+
+if TYPE_CHECKING:
+    from apps.api.agents.service import AgentService
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+
+
+# ----------------------------------------------------------------
+# Schemas
+# ----------------------------------------------------------------
+
+
+class InboundPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tenant_slug: str = Field(min_length=1, max_length=100)
+    channel: ChannelType
+    content: str = Field(min_length=1, max_length=20_000)
+
+    external_conversation_id: str | None = None
+    external_customer_id: str | None = None
+    customer_email: str | None = None
+    customer_name: str | None = None
+    subject: str | None = None
+
+
+class InboundResponse(BaseModel):
+    ok: bool
+    decision: str
+    conversation_id: str
+    inbound_message_id: str
+    output_message_id: str | None = None
+    escalation_id: str | None = None
+    response_text: str | None = None
+    escalation_reason: str | None = None
+    trace_id: str | None = None
+    error: str | None = None
+
+
+# ----------------------------------------------------------------
+# HMAC verification
+# ----------------------------------------------------------------
+
+
+def _verify_signature(body: bytes, header_value: str, secret: str) -> bool:
+    """HMAC-SHA256 sobre el body. Header esperado: `sha256=<hex>`."""
+    if not header_value.startswith("sha256="):
+        return False
+    provided = header_value[len("sha256="):]
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(provided, expected)
+
+
+# ----------------------------------------------------------------
+# Dependencies
+# ----------------------------------------------------------------
+
+
+def get_agent_service(request: Request) -> AgentService:
+    svc = getattr(request.app.state, "agent_service", None)
+    if svc is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, detail="agent_service_not_ready"
+        )
+    return svc
+
+
+SettingsDep = Annotated[Settings, Depends(get_settings)]
+AgentServiceDep = Annotated["AgentService", Depends(get_agent_service)]
+
+
+# ----------------------------------------------------------------
+# Endpoint
+# ----------------------------------------------------------------
+
+
+@router.post(
+    "/inbound",
+    response_model=InboundResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Inbound genérico — dispara el agente para un mensaje del cliente",
+)
+async def inbound(
+    request: Request,
+    settings: SettingsDep,
+    agent_service: AgentServiceDep,
+) -> InboundResponse:
+    body = await request.body()
+
+    signature_header = request.headers.get("X-Auyan-Signature", "")
+    if not _verify_signature(
+        body, signature_header, settings.webhook_secret.get_secret_value()
+    ):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="invalid_signature")
+
+    try:
+        payload = InboundPayload.model_validate_json(body)
+    except ValidationError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail=f"invalid_payload: {exc.errors()}"
+        ) from exc
+
+    # 1. Resolver tenant — sin tenant_scope todavía.
+    async with bootstrap_connection() as conn:
+        tenant = await get_tenant_by_slug(conn, payload.tenant_slug)
+    if tenant is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail=f"tenant_not_found: {payload.tenant_slug}"
+        )
+    if tenant.status != "active":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=f"tenant_not_active: status={tenant.status}"
+        )
+
+    # 2. Dentro del tenant_scope: customer, conversación, mensaje inbound.
+    async with tenant_scope(tenant.id) as conn:
+        customer = None
+        if payload.customer_email:
+            customer = await find_end_customer_by_email(
+                conn, tenant.id, payload.customer_email
+            )
+        if customer is None:
+            customer = await create_end_customer(
+                conn,
+                tenant_id=tenant.id,
+                email=payload.customer_email,
+                external_id=payload.external_customer_id,
+                full_name=payload.customer_name,
+            )
+
+        conversation = None
+        if payload.external_conversation_id:
+            conversation = await find_conversation_by_external(
+                conn, tenant.id, payload.channel, payload.external_conversation_id
+            )
+        if conversation is None:
+            conversation = await create_conversation(
+                conn,
+                tenant_id=tenant.id,
+                end_customer_id=customer.id,
+                channel=payload.channel,
+                external_id=payload.external_conversation_id,
+                subject=payload.subject,
+            )
+
+        inbound_msg = await insert_message(
+            conn,
+            tenant_id=tenant.id,
+            conversation_id=conversation.id,
+            role="customer",
+            direction="inbound",
+            content=payload.content,
+            metadata={"channel": payload.channel},
+        )
+        await update_conversation_last_message(conn, tenant.id, conversation.id)
+
+    # 3. Disparar el grafo.
+    outcome = await agent_service.process_inbound(
+        tenant_id=tenant.id,
+        conversation_id=conversation.id,
+        inbound_message_id=inbound_msg.id,
+        inbound_message_content=payload.content,
+        channel=payload.channel,
+        end_customer_id=customer.id,
+    )
+
+    logger.info(
+        "inbound_processed",
+        extra={
+            "tenant_id": str(tenant.id),
+            "conversation_id": str(conversation.id),
+            "decision": outcome.decision,
+            "trace_id": outcome.trace_id,
+        },
+    )
+
+    return InboundResponse(
+        ok=True,
+        decision=outcome.decision,
+        conversation_id=str(conversation.id),
+        inbound_message_id=str(inbound_msg.id),
+        output_message_id=outcome.output_message_id,
+        escalation_id=outcome.escalation_id,
+        response_text=outcome.response_text,
+        escalation_reason=outcome.escalation_reason,
+        trace_id=outcome.trace_id,
+        error=outcome.error,
+    )
