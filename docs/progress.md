@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-13_
+_Última actualización: 2026-05-13 (Sprint 1 — FastAPI scaffolding)_
 
 ---
 
@@ -46,8 +46,19 @@ El repositorio contiene únicamente documentación. Ninguna carpeta de código (
 **Objetivo:** Tener el sistema funcionando end-to-end con un solo tenant de prueba: ticket entra, agente responde, todo queda logueado.
 
 ### Backend (`apps/api`)
-- [ ] Scaffolding inicial de FastAPI (`main.py`, estructura de carpetas)
-- [ ] Configuración de variables de entorno (`core/config.py`)
+- [x] Scaffolding inicial de FastAPI — estructura completa de carpetas + 31 archivos
+  - `main.py` con CORS, lifespan, routers montados y `/health`
+  - `core/config.py` (pydantic-settings), `core/security.py` (JWT via Supabase)
+  - `db/client.py`, `db/models.py` (Pydantic ↔ schema SQL), `db/queries.py`
+  - `services/tickets.py`, `services/tenants.py`, `services/escalation.py`
+  - `routers/tickets.py` (`POST /tickets/inbound`), `routers/tenants.py`, `routers/webhooks.py`
+  - `agents/graph.py` (LangGraph StateGraph: context → generate → escalate), `agents/nodes/`
+  - `integrations/chatwoot.py`, `integrations/zendesk.py`, `integrations/shopify.py`
+  - `tests/test_health.py`
+  - `Dockerfile`, `requirements.txt`
+- [x] Configuración de variables de entorno (`core/config.py`)
+- [x] `.env.example` con todas las variables necesarias
+- [x] `docker-compose.yml` para levantar servicios localmente
 - [x] Esquema de Supabase con multi-tenant y RLS (`supabase/migrations/20260513000000_initial_schema.sql`)
   - Tablas: `tenants`, `users` (staff), `end_customers`, `conversations`, `messages`, `escalations`, `knowledge_base_documents`, `knowledge_base_chunks` (pgvector 1536), `tenant_configurations`, `tenant_prompts` (versionados)
   - RLS por JWT claim `tenant_id` + rol `super_admin` para Auyan
