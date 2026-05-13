@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -37,8 +37,7 @@ from apps.api.db.queries import (
     update_conversation_last_message,
 )
 
-if TYPE_CHECKING:
-    from apps.api.agents.service import AgentService
+from apps.api.agents.service import AgentService
 
 logger = logging.getLogger(__name__)
 
