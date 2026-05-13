@@ -72,6 +72,13 @@ Evolución futura: SaaS estilo Crescendo.ai donde el cliente gestiona su propio 
 - Instagram: vía Meta API
 - Postmark: email inbound
 
+## Selección de modelo
+
+- Al inicio de cada sesión, recomendar qué modelo usar según la tarea descrita antes de arrancar.
+- Si el usuario no especifica la tarea al inicio, preguntar qué va a hacer antes de arrancar.
+- **Sonnet** (`claude-sonnet-4-6`): tareas rutinarias de código, scaffolding, fixes, boilerplate y preguntas de contexto.
+- **Opus** (`claude-opus-4-7`): diseño de arquitectura, decisiones complejas del grafo de LangGraph, revisión de seguridad y RLS, y cuando Sonnet falle repetidamente en algo.
+
 ## Lo que nunca hay que hacer
 - Modificar datos de un tenant desde el contexto de otro
 - Responder al cliente final sin pasar por el grafo de LangGraph
