@@ -48,10 +48,11 @@ El repositorio contiene únicamente documentación. Ninguna carpeta de código (
 ### Backend (`apps/api`)
 - [ ] Scaffolding inicial de FastAPI (`main.py`, estructura de carpetas)
 - [ ] Configuración de variables de entorno (`core/config.py`)
-- [ ] Esquema de Supabase con multi-tenant y RLS
-  - Tablas: `tenants`, `users`, `tickets`, `messages`, `knowledge_base`
-  - Políticas RLS por tabla
-  - Migraciones versionadas
+- [x] Esquema de Supabase con multi-tenant y RLS (`supabase/migrations/20260513000000_initial_schema.sql`)
+  - Tablas: `tenants`, `users` (staff), `end_customers`, `conversations`, `messages`, `escalations`, `knowledge_base_documents`, `knowledge_base_chunks` (pgvector 1536), `tenant_configurations`, `tenant_prompts` (versionados)
+  - RLS por JWT claim `tenant_id` + rol `super_admin` para Auyan
+  - FKs compuestas `(id, tenant_id)` para impedir cross-tenant
+  - Soft delete (`deleted_at`) y `updated_at` automático en todas
 - [ ] Modelos y queries base (`db/models.py`, `db/queries.py`)
 - [ ] Grafo inicial de LangGraph (`agents/graph.py`)
   - Nodo: recuperar contexto del tenant
