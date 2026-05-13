@@ -1,0 +1,12 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+supabase==2.10.0
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+anthropic==0.40.0
+langfuse==2.57.6
+httpx==0.28.1
+
+# dev / test
+pytest==8.3.4
+pytest-asyncio==0.24.0
