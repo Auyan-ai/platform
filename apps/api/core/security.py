@@ -2,10 +2,13 @@
 
 Flujo de un request autenticado:
 1. Cliente manda `Authorization: Bearer <jwt>` (JWT emitido por Supabase Auth).
-2. `get_auth_context` decodifica con pyjwt — valida firma HS256, audience, expiry.
-3. Extrae `sub` (= id de `auth.users`, espejo en `public.users`).
-4. Lookup en `public.users` para traer `tenant_id`, `role`, `email` (con cache TTL).
-5. Devuelve `AuthContext`.
+2. `get_auth_context` lee el header del token para obtener el `kid` y el algoritmo.
+3. Para ES256 (proyectos nuevos): busca la clave pública en el JWKS de Supabase (cache 1 h).
+   Para HS256 (legacy): usa `SUPABASE_JWT_SECRET` de Settings.
+4. Valida firma, audience y expiración.
+5. Extrae `sub` (= id de `auth.users`, espejo en `public.users`).
+6. Lookup en `public.users` para traer `tenant_id`, `role`, `email` (con cache TTL).
+7. Devuelve `AuthContext`.
 
 Tenant scope:
 - `tenant_admin` / `tenant_agent` → su propio `tenant_id`. Si manda `X-Tenant-Id`
@@ -17,17 +20,25 @@ Cache de usuarios:
 - `TTLCache(maxsize=settings.auth_user_cache_maxsize, ttl=settings.auth_user_cache_ttl_seconds)`.
 - Maxsize acota memoria; ttl invalida cambios de role/tenant tras el TTL.
 - `reset_user_cache()` expuesto para tests.
+
+Cache de JWKS:
+- Dict plano con TTL manual (`supabase_jwks_cache_ttl_seconds`, default 1 h).
+- Re-fetch automático si el kid no está en cache (manejo de rotación de claves).
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import Annotated
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Annotated, Any
 from uuid import UUID
 
+import httpx
 import jwt
+from jwt.algorithms import ECAlgorithm, RSAAlgorithm
+
 from apps.api.core.config import Settings, get_settings
 from apps.api.core.errors import ForbiddenError, UnauthorizedError
 from apps.api.db.client import bootstrap_connection
@@ -39,9 +50,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 logger = logging.getLogger(__name__)
 
-# `auto_error=False` para que devolvamos UnauthorizedError nuestra en vez de la
-# 403 default de FastAPI cuando falta el header — así el handler global la mapea
-# consistente con el resto del dominio.
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 
@@ -110,6 +118,73 @@ async def _lookup_user(user_id: UUID, settings: Settings) -> UserRecord | None:
 
 
 # ----------------------------------------------------------------
+# Cache de JWKS (claves públicas para ES256 / RS256)
+# ----------------------------------------------------------------
+
+
+@dataclass
+class _JwksCache:
+    keys: dict[str, Any] = field(default_factory=dict)
+    fetched_at: datetime | None = None
+
+
+_jwks_cache = _JwksCache()
+
+
+def reset_jwks_cache() -> None:
+    """Limpia el cache de JWKS. Para tests."""
+    global _jwks_cache
+    _jwks_cache = _JwksCache()
+
+
+def _key_from_jwk(jwk: dict[str, Any]) -> Any:
+    alg = jwk.get("alg", "")
+    if alg.startswith("ES"):
+        return ECAlgorithm.from_jwk(jwk)
+    if alg.startswith("RS"):
+        return RSAAlgorithm.from_jwk(jwk)
+    raise ValueError(f"unsupported_jwk_alg:{alg}")
+
+
+async def _get_jwks_key(kid: str | None, settings: Settings) -> Any:
+    """Devuelve la clave pública del JWKS para el kid dado.
+
+    Refresca el cache si expiró o si el kid no está presente (rotación de claves).
+    """
+    now = datetime.now(UTC)
+    ttl = settings.supabase_jwks_cache_ttl_seconds
+
+    cache_stale = (
+        _jwks_cache.fetched_at is None
+        or (now - _jwks_cache.fetched_at).total_seconds() > ttl
+    )
+
+    if cache_stale or kid not in _jwks_cache.keys:
+        jwks_url = str(settings.supabase_url).rstrip("/") + "/auth/v1/.well-known/jwks.json"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(jwks_url)
+                resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise UnauthorizedError("jwks_fetch_failed", code="jwks_fetch_failed") from exc
+
+        new_keys: dict[str, Any] = {}
+        for jwk in resp.json().get("keys", []):
+            try:
+                new_keys[jwk["kid"]] = _key_from_jwk(jwk)
+            except Exception:
+                logger.warning("jwks_skip_unsupported_key kid=%s", jwk.get("kid"))
+
+        _jwks_cache.keys = new_keys
+        _jwks_cache.fetched_at = now
+
+    key = _jwks_cache.keys.get(kid or "")
+    if key is None:
+        raise UnauthorizedError("unknown_jwt_kid", code="unknown_jwt_kid")
+    return key
+
+
+# ----------------------------------------------------------------
 # Dependencies
 # ----------------------------------------------------------------
 
@@ -121,11 +196,32 @@ async def get_auth_context(
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise UnauthorizedError("missing_bearer_token", code="missing_bearer_token")
 
+    token = credentials.credentials
+
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.InvalidTokenError as exc:
+        raise UnauthorizedError("invalid_token", code="invalid_token") from exc
+
+    alg = header.get("alg", settings.supabase_jwt_algorithm)
+    kid = header.get("kid")
+
+    if alg in ("ES256", "RS256"):
+        signing_key = await _get_jwks_key(kid, settings)
+    elif alg == "HS256":
+        if settings.supabase_jwt_secret is None:
+            raise UnauthorizedError(
+                "hs256_secret_not_configured", code="hs256_secret_not_configured"
+            )
+        signing_key = settings.supabase_jwt_secret.get_secret_value()
+    else:
+        raise UnauthorizedError(f"unsupported_algorithm:{alg}", code="unsupported_algorithm")
+
     try:
         payload = jwt.decode(
-            credentials.credentials,
-            settings.supabase_jwt_secret.get_secret_value(),
-            algorithms=[settings.supabase_jwt_algorithm],
+            token,
+            signing_key,
+            algorithms=[alg],
             audience=settings.supabase_jwt_audience,
         )
     except jwt.ExpiredSignatureError as exc:
@@ -145,7 +241,6 @@ async def get_auth_context(
 
     user = await _lookup_user(user_id, settings)
     if user is None:
-        # JWT válido pero el user no existe (o soft-deleted) en `public.users`.
         raise UnauthorizedError("user_not_provisioned", code="user_not_provisioned")
 
     # Defensa en profundidad: la DB tiene constraint `users_tenant_required`,

@@ -59,11 +59,13 @@ class Settings(BaseSettings):
     )
 
     # --- Auth (Supabase JWT) ---
-    supabase_jwt_secret: SecretStr = Field(
-        ..., description="JWT secret de Supabase (Project Settings → API → JWT secret)"
-    )
-    supabase_jwt_algorithm: str = "HS256"
+    # Supabase usa ES256 (ECDSA) en proyectos nuevos — se valida con JWKS público.
+    # supabase_jwt_secret sólo se usa en proyectos legacy que aún tienen HS256.
+    supabase_jwt_secret: SecretStr | None = None
+    supabase_jwt_algorithm: str = "ES256"
     supabase_jwt_audience: str = "authenticated"
+    # TTL del cache de claves JWKS (segundos). Las keys de Supabase rotan con poca frecuencia.
+    supabase_jwks_cache_ttl_seconds: int = 3600
 
     # Cache del lookup de usuarios para auth. Se invalida por TTL — los cambios
     # de role/tenant_id tardan hasta `auth_user_cache_ttl_seconds` en propagarse.
