@@ -157,9 +157,12 @@ Reglas:
 | [PR #15](https://github.com/Auyan-ai/platform/pull/15) | `fix(auth): ES256 JWKS support`. Supabase usa ES256 (ECDSA) en proyectos nuevos. `security.py` reescrito para verificar JWT con clave pública del JWKS (`/auth/v1/.well-known/jwks.json`). Cache 1 h + re-fetch en rotación. `config.py`: `supabase_jwt_secret` opcional, default algorithm ES256. |
 | [PR #16](https://github.com/Auyan-ai/platform/pull/16) | `cryptography>=44.0` + `pyjwt[crypto]` en `poetry.lock`. Sin esto, `ECAlgorithm` no está disponible en runtime. |
 
-**Validado localmente:** `ECAlgorithm.from_jwk(jwk)` + `jwt.decode(token, key, algorithms=["ES256"], audience="authenticated")` → `SUCCESS email: agente@lunaria.test`.
+**Validado end-to-end en staging:**
+- `GET /tenants/me` con JWT de `agente@lunaria.test` → 200 con datos completos de Lunaria (id, slug, name, status)
+- `GET /tenants/me/config` con JWT → 200 con `agent_model`, `escalation_threshold`, `active_channels`, `branding`
+- `GET /tenants/me` sin token → 401 `missing_bearer_token`
 
-**Pendiente:** smoke test final contra Railway staging (deploy de PR #15+#16 pendiente por issues con Railway auto-deploy).
+**Issue resuelto sobre Railway auto-deploy:** el GitHub App de Railway dejó de disparar builds tras PR #14. Los botones "Redeploy" y las mutations `serviceInstanceDeploy*` fallan con "Problem processing request". El workaround que funciona es la mutation `environmentTriggersDeploy` por GraphQL con HTTP/1.1 — guardado en memoria para sesiones futuras. Reportable a soporte de Railway si vuelve a pasar.
 
 ### Pendiente del Sprint 2
 
@@ -168,8 +171,8 @@ Reglas:
 
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. Verificar Railway deployó el código de ES256 (PR #15 + #16) y correr smoke test: `GET /tenants/me` con JWT de `agente@lunaria.test` → debe devolver datos de Lunaria
-2. Arrancar Sprint 3: dashboard interno `apps/web` con Next.js + Supabase Auth
+1. Arrancar Sprint 3: dashboard interno `apps/web` con Next.js + Supabase Auth
+2. Opcional: escribir `docs/architecture-services.md` (1 página, patrón de 4 capas)
 
 ### Bloqueos NO arrastrados de Sprint 1 (siguen pendientes)
 
