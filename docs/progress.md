@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-14 (sesión 4 — Sprint 2 arrancado, fundación del refactor services/asyncpg)_
+_Última actualización: 2026-05-14 (sesión 5 — Sprint 2 completado: endpoints admin + auth JWT listos)_
 
 ---
 
@@ -129,31 +129,34 @@ Reglas:
 | `chore(api): agregar pyjwt + cachetools` | `pyjwt` para HS256 (preferido sobre python-jose por seguridad); `cachetools` para TTLCache acotado; `types-cachetools` en dev. |
 | `feat(api): auth Supabase JWT con AuthContext + dependencies` | `core/security.py` completo: `AuthContext`, `get_auth_context`, `get_tenant_id`, `require_role`, cache TTL. `db/queries.get_user_for_auth`. Settings JWT en config. Sección de auth en `.env.example`. |
 
-**Tests:** 30 nuevos (9 errors + 21 security). Suite total 157 verde. Ruff limpio.
+**Tests sesión 4:** 30 nuevos (9 errors + 21 security). Suite total 157 verde. Ruff limpio.
 
-### Pendiente del Sprint 2 (próxima sesión — usar Sonnet)
+### Avances sesión 5 (1 commit — [00b6612](https://github.com/Auyan-ai/platform/commit/00b6612))
 
-El plan completo está cerrado y aprobado. La implementación es ejecución directa del patrón. Estimado ~3h.
+| Área | Qué se hizo |
+|---|---|
+| `db/models.py` | `created_at` agregado a `Conversation` y `Escalation` |
+| `db/queries.py` | 6 queries nuevas: `list_conversations`, `get_messages_for_conversation`, `get_escalation`, `list_escalations`, `claim_escalation` (CAS), `resolve_escalation` (CAS) |
+| `services/tenants.py` | `get_tenant`, `get_tenant_config` con `NotFoundError` |
+| `services/conversations.py` | `list_tenant_conversations`, `get_conversation_detail`, `reply_to_conversation`, `escalate_conversation`, `close_conversation` |
+| `services/escalations.py` | `list_tenant_escalations`, `claim_tenant_escalation`, `resolve_tenant_escalation` |
+| `routers/tenants.py` | `GET /tenants/me`, `GET /tenants/me/config` |
+| `routers/conversations.py` | `GET /conversations`, `GET /conversations/{id}`, `POST /{id}/reply`, `POST /{id}/escalate`, `POST /{id}/close` |
+| `routers/escalations.py` | `GET /escalations`, `POST /{id}/claim`, `POST /{id}/resolve` |
+| `main.py` | Wire up de los 3 routers nuevos |
 
-1. **Queries adicionales en `db/queries.py`**:
-   - `list_conversations(conn, tenant_id, *, status, limit, before)`
-   - `get_messages_for_conversation(conn, tenant_id, conversation_id, *, include_system)`
-   - `get_escalation`, `list_escalations`, `claim_escalation`, `resolve_escalation`
+**Tests sesión 5:** 25 nuevos (5 tenants + 13 conversations + 7 escalations). Suite total **182 verde**. Ruff limpio.
 
-2. **`services/tenants.py` + `routers/tenants.py`** (más chico, empezar acá)
-   - `GET /tenants/me`, `GET /tenants/me/config`
+### Pendiente del Sprint 2
 
-3. **`services/conversations.py` + `routers/conversations.py`** (el más grande)
-   - `GET /conversations`, `GET /conversations/{id}`, `POST /conversations/{id}/reply`, `POST /conversations/{id}/escalate`, `POST /conversations/{id}/close`
+- [ ] **`docs/architecture-services.md`** — 1 página con el patrón de capas (quedó fuera de la sesión 5 por tiempo)
+- [ ] **PR contra develop** — la rama `feat/sprint2-services-asyncpg` está lista, falta abrir el PR y mergearlo
 
-4. **`services/escalations.py` + `routers/escalations.py`**
-   - `GET /escalations`, `POST /escalations/{id}/claim`, `POST /escalations/{id}/resolve`
+### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-5. **Wire up en `main.py`** + suite verde
-
-6. **`docs/architecture-services.md`** — 1 página con el patrón
-
-7. **PR contra develop** + actualizar progress.md
+1. Abrir PR de `feat/sprint2-services-asyncpg` contra `develop` (usar `/ship`)
+2. Opcional: escribir `docs/architecture-services.md` (1 página, patrón de 4 capas)
+3. Arrancar Sprint 3: dashboard interno `apps/web` con Next.js + Supabase Auth
 
 ### Bloqueos NO arrastrados de Sprint 1 (siguen pendientes)
 
