@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-13 (sesión 3 — Sprint 1 cerrado, deploy Railway staging, validación e2e)_
+_Última actualización: 2026-05-14 (sesión 4 — Sprint 2 arrancado, fundación del refactor services/asyncpg)_
 
 ---
 
@@ -87,14 +87,92 @@ _Última actualización: 2026-05-13 (sesión 3 — Sprint 1 cerrado, deploy Rail
 
 ---
 
-## Deuda técnica registrada para Sprint 2
+## Sprint 2 — Refactor services/routers a asyncpg (en curso)
+
+**Objetivo:** dejar listos los endpoints administrativos (tenants, conversations, escalations) sobre el paradigma asyncpg + `tenant_scope`, con auth Supabase JWT real, para poder arrancar el dashboard interno.
+
+**Branch:** `feat/sprint2-services-asyncpg` (local, sin push aún)
+
+### Diagnóstico inicial (clave para retomar)
+
+El progress.md anterior decía "refactor de services + routers a asyncpg" — pero al inspeccionar el código se descubrió que el **core del flujo inbound ya está reescrito en asyncpg** (vive en `routers/webhooks.py`). Lo que realmente se eliminó y no se reemplazó son:
+
+- `core/security.py` — auth Bearer JWT (no había reemplazo en absoluto)
+- `routers/tenants.py` — endpoint admin para tenants
+- `services/tenants.py`, `services/escalation.py` — escalación manual desde humanos
+- Endpoints admin para conversations y escalations (nunca existieron)
+
+Por eso este refactor en realidad **agrega los endpoints administrativos faltantes** + **auth real**, manteniendo el patrón asyncpg ya validado.
+
+### Patrón acordado
+
+```
+routers/   → HTTP + validación + scope de transacción (Depends auth + tenant_scope)
+services/  → reglas de negocio multi-paso, reciben `conn: asyncpg.Connection`
+db/queries → SQL puro, función + conn + params, devuelve modelos Pydantic
+core/      → security (JWT), errors (excepciones de dominio + handlers)
+```
+
+Reglas:
+- **El router decide el scope de la transacción**, no el service. Así combinar 2 services en una request mantiene atomicidad.
+- **Services no importan FastAPI.** Lanzan excepciones de dominio (`NotFoundError`, `ForbiddenError`); un exception handler global las traduce a HTTP.
+- **Auth via Supabase JWT** (HS256), `AuthContext` con `user_id`/`tenant_id`/`role`/`email`. `tenant_admin`/`tenant_agent` operan sobre su tenant; `super_admin` requiere header `X-Tenant-Id`.
+- **Cache de usuarios**: `TTLCache(maxsize=1000, ttl=60s)` configurable. Maxsize acotado.
+
+### Avances sesión 4 (5 commits)
+
+| Commit | Qué hace |
+|---|---|
+| `feat(api): excepciones de dominio + handler global` | `core/errors.py` con `DomainError` + subclases (`NotFoundError`, `ForbiddenError`, `UnauthorizedError`, `ConflictError`, `ValidationFailed`). Handler global mapea a `{"error": code, "detail": msg}`. |
+| `chore(api): agregar poetry.lock` | Cierra deuda del Sprint 1. Builds Railway ahora reproducibles. |
+| `style(tests): partir línea larga en test_defaults` | Lint fix preparatorio. |
+| `chore(api): agregar pyjwt + cachetools` | `pyjwt` para HS256 (preferido sobre python-jose por seguridad); `cachetools` para TTLCache acotado; `types-cachetools` en dev. |
+| `feat(api): auth Supabase JWT con AuthContext + dependencies` | `core/security.py` completo: `AuthContext`, `get_auth_context`, `get_tenant_id`, `require_role`, cache TTL. `db/queries.get_user_for_auth`. Settings JWT en config. Sección de auth en `.env.example`. |
+
+**Tests:** 30 nuevos (9 errors + 21 security). Suite total 157 verde. Ruff limpio.
+
+### Pendiente del Sprint 2 (próxima sesión — usar Sonnet)
+
+El plan completo está cerrado y aprobado. La implementación es ejecución directa del patrón. Estimado ~3h.
+
+1. **Queries adicionales en `db/queries.py`**:
+   - `list_conversations(conn, tenant_id, *, status, limit, before)`
+   - `get_messages_for_conversation(conn, tenant_id, conversation_id, *, include_system)`
+   - `get_escalation`, `list_escalations`, `claim_escalation`, `resolve_escalation`
+
+2. **`services/tenants.py` + `routers/tenants.py`** (más chico, empezar acá)
+   - `GET /tenants/me`, `GET /tenants/me/config`
+
+3. **`services/conversations.py` + `routers/conversations.py`** (el más grande)
+   - `GET /conversations`, `GET /conversations/{id}`, `POST /conversations/{id}/reply`, `POST /conversations/{id}/escalate`, `POST /conversations/{id}/close`
+
+4. **`services/escalations.py` + `routers/escalations.py`**
+   - `GET /escalations`, `POST /escalations/{id}/claim`, `POST /escalations/{id}/resolve`
+
+5. **Wire up en `main.py`** + suite verde
+
+6. **`docs/architecture-services.md`** — 1 página con el patrón
+
+7. **PR contra develop** + actualizar progress.md
+
+### Bloqueos NO arrastrados de Sprint 1 (siguen pendientes)
+
+- [ ] **Agregar créditos a OpenAI** — el agente sigue escalando por `429 insufficient_quota` en `retrieve_knowledge`. Bloquea respuesta real, no bloquea el refactor.
+- [ ] **Sincronizar `WEBHOOK_SECRET` local** con el de Railway.
+
+---
+
+## Deuda técnica registrada para Sprint 2+
 
 - **Script de upload de vars a Railway debe stripear comentarios inline** — el script actual toma todo lo que hay después del `=`, incluyendo `# comentarios`. Reescribirlo para parsear `.env` igual que bash.
-- **Refactor de services + routers al paradigma asyncpg** — se eliminaron `services/{tickets,tenants,escalation}.py`, `routers/{tickets,tenants}.py`, `core/security.py` durante el merge con el PR del grafo porque dependían de `supabase-py` (sync). Hay que reescribirlos con `asyncpg + tenant_scope`.
+- ~~**Refactor de services + routers al paradigma asyncpg**~~ → reinterpretado como "agregar endpoints admin faltantes + auth real". En curso (Sprint 2).
+- ~~**`poetry.lock` ausente**~~ → resuelto en sesión 4 ([commit 6d1023f](https://github.com/Auyan-ai/platform/commit/6d1023f)).
 - **Rol `auyan_backend` en Supabase con `NOBYPASSRLS`** — actualmente conectamos con `postgres` (bypass RLS). La defensa multi-tenant depende solo de `WHERE tenant_id = $1` y el GUC por request.
 - **Tests de integración contra Postgres+pgvector real** — hoy todo es unit con mocks.
 - **Integraciones de canales** (`chatwoot.py`, `zendesk.py`, `shopify.py`) son clientes HTTP esqueleto — cablear con el flujo del agente.
-- **`poetry.lock` ausente** — las builds de Railway resuelven dependencias en cada deploy. Generar el lock file para builds reproducibles.
+- **CI ausente** — hay `.github/workflows/` vacío. Configurar GitHub Actions con ruff + mypy + pytest sobre cada PR.
+- **`.claude/` no está en `.gitignore`** — task spawneada para PR aparte.
+- **Errores mypy preexistentes** en `db/models.py`, `db/queries.py`, `db/client.py`, `core/config.py` (14 errors `[type-arg]` y `[no-any-return]`). No bloquean la suite pero ensucian el typecheck.
 
 ---
 
