@@ -30,10 +30,16 @@ values (
 -- Password para ambos: "auyan-staging-2026" (hash bcrypt precomputado).
 -- Cambiar tras el primer login.
 -- ============================================================
+-- GoTrue escanea estos cuatro tokens como `string` (no `*string`). Si quedan
+-- NULL (que es lo que pasa cuando no se setean en el INSERT), el scan del
+-- schema rompe con "Database error querying schema" en cada operación de auth.
+-- Los seteamos a '' explícito.
 insert into auth.users (
   id, instance_id, aud, role, email,
   encrypted_password, email_confirmed_at,
   raw_app_meta_data, raw_user_meta_data,
+  confirmation_token, recovery_token,
+  email_change_token_new, email_change,
   created_at, updated_at
 ) values
 (
@@ -45,6 +51,7 @@ insert into auth.users (
   now(),
   jsonb_build_object('role', 'super_admin'),
   jsonb_build_object('full_name', 'Auyan Super Admin'),
+  '', '', '', '',
   now(), now()
 ),
 (
@@ -59,8 +66,30 @@ insert into auth.users (
     'tenant_id', '11111111-1111-1111-1111-111111111111'
   ),
   jsonb_build_object('full_name', 'María — Agente Lunaria'),
+  '', '', '', '',
   now(), now()
 );
+
+-- ============================================================
+-- Auth identities
+-- GoTrue moderno requiere una identity por usuario para que el login
+-- email/password funcione. provider_id debe ser el user_id como text
+-- (no el email, aunque parezca natural), e identity_data necesita
+-- email_verified=true para que la sesión se valide.
+-- ============================================================
+insert into auth.identities (
+  id, user_id, identity_data, provider, provider_id,
+  created_at, updated_at
+)
+select
+  gen_random_uuid(),
+  u.id,
+  jsonb_build_object('sub', u.id::text, 'email', u.email, 'email_verified', true),
+  'email',
+  u.id::text,
+  now(), now()
+from auth.users u
+where u.email in ('super-admin@auyan.ai', 'agente@lunaria.test');
 
 -- ============================================================
 -- Staff users (tabla public.users)
