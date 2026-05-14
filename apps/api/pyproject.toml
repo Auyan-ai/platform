@@ -40,7 +40,7 @@ python-dotenv = "^1.0.0"
 
 # Auth
 pyjwt = {extras = ["crypto"], version = "^2.10.0"}
-cryptography = "^44.0"
+cryptography = ">=44.0"
 cachetools = "^5.5.0"
 
 [tool.poetry.group.dev.dependencies]
