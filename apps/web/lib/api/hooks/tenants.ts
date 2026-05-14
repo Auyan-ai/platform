@@ -1,18 +1,9 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { createClient } from '@/lib/supabase/client'
 import { apiClient } from '@/lib/api/client'
+import { getToken } from '@/lib/api/get-token'
 import { queryKeys } from '@/lib/api/query-keys'
-
-async function getToken(): Promise<string> {
-  const supabase = createClient()
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-  if (!session?.access_token) throw new Error('Sin sesión activa')
-  return session.access_token
-}
 
 export function useMyTenant() {
   return useQuery({

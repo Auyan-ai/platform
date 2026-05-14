@@ -40,10 +40,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Con sesión en login → dashboard
+  // Con sesión en login → raíz del dashboard
   if (user && isLoginRoute) {
     const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
+    url.pathname = '/'
     return NextResponse.redirect(url)
   }
 
