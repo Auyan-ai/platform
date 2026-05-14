@@ -147,16 +147,32 @@ Reglas:
 
 **Tests sesión 5:** 25 nuevos (5 tenants + 13 conversations + 7 escalations). Suite total **182 verde**. Ruff limpio.
 
+### Avances sesión 6 — smoke test + fix ES256
+
+| PR | Qué hace |
+|---|---|
+| [PR #12](https://github.com/Auyan-ai/platform/pull/12) | `.claude/` agregado a `.gitignore` |
+| [PR #13](https://github.com/Auyan-ai/platform/pull/13) | `supabase/seed.sql`: columnas `confirmation_token`, `recovery_token`, `email_change_token_new`, `email_change` con `''` (no NULL) + insert en `auth.identities`. Fix al crash de GoTrue al arrancar. |
+| [PR #14](https://github.com/Auyan-ai/platform/pull/14) | `feat/sprint2-services-asyncpg` → `develop`. Sprint 2 completo mergeado a staging. |
+| [PR #15](https://github.com/Auyan-ai/platform/pull/15) | `fix(auth): ES256 JWKS support`. Supabase usa ES256 (ECDSA) en proyectos nuevos. `security.py` reescrito para verificar JWT con clave pública del JWKS (`/auth/v1/.well-known/jwks.json`). Cache 1 h + re-fetch en rotación. `config.py`: `supabase_jwt_secret` opcional, default algorithm ES256. |
+| [PR #16](https://github.com/Auyan-ai/platform/pull/16) | `cryptography>=44.0` + `pyjwt[crypto]` en `poetry.lock`. Sin esto, `ECAlgorithm` no está disponible en runtime. |
+
+**Validado end-to-end en staging:**
+- `GET /tenants/me` con JWT de `agente@lunaria.test` → 200 con datos completos de Lunaria (id, slug, name, status)
+- `GET /tenants/me/config` con JWT → 200 con `agent_model`, `escalation_threshold`, `active_channels`, `branding`
+- `GET /tenants/me` sin token → 401 `missing_bearer_token`
+
+**Issue resuelto sobre Railway auto-deploy:** el GitHub App de Railway dejó de disparar builds tras PR #14. Los botones "Redeploy" y las mutations `serviceInstanceDeploy*` fallan con "Problem processing request". El workaround que funciona es la mutation `environmentTriggersDeploy` por GraphQL con HTTP/1.1 — guardado en memoria para sesiones futuras. Reportable a soporte de Railway si vuelve a pasar.
+
 ### Pendiente del Sprint 2
 
-- [ ] **`docs/architecture-services.md`** — 1 página con el patrón de capas (quedó fuera de la sesión 5 por tiempo)
-- [ ] **PR contra develop** — la rama `feat/sprint2-services-asyncpg` está lista, falta abrir el PR y mergearlo
+- [ ] **`docs/architecture-services.md`** — 1 página con el patrón de capas
+- [x] **PR contra develop** — mergeado (PR #14)
 
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. Abrir PR de `feat/sprint2-services-asyncpg` contra `develop` (usar `/ship`)
+1. Arrancar Sprint 3: dashboard interno `apps/web` con Next.js + Supabase Auth
 2. Opcional: escribir `docs/architecture-services.md` (1 página, patrón de 4 capas)
-3. Arrancar Sprint 3: dashboard interno `apps/web` con Next.js + Supabase Auth
 
 ---
 
@@ -211,7 +227,7 @@ Reglas:
 - **Tests de integración contra Postgres+pgvector real** — hoy todo es unit con mocks.
 - **Integraciones de canales** (`chatwoot.py`, `zendesk.py`, `shopify.py`) son clientes HTTP esqueleto — cablear con el flujo del agente.
 - **CI ausente** — hay `.github/workflows/` vacío. Configurar GitHub Actions con ruff + mypy + pytest sobre cada PR.
-- **`.claude/` no está en `.gitignore`** — task spawneada para PR aparte.
+- ~~**`.claude/` no está en `.gitignore`**~~ → resuelto en sesión 6 ([PR #12](https://github.com/Auyan-ai/platform/pull/12)).
 - **Errores mypy preexistentes** en `db/models.py`, `db/queries.py`, `db/client.py`, `core/config.py` (14 errors `[type-arg]` y `[no-any-return]`). No bloquean la suite pero ensucian el typecheck.
 
 ---
