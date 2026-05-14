@@ -1,0 +1,70 @@
+"""Endpoints de tenant — perfil y configuración del tenant autenticado."""
+
+from __future__ import annotations
+
+from typing import Annotated
+from uuid import UUID
+
+from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
+from apps.api.db.client import tenant_scope
+from apps.api.db.models import ChannelType
+from apps.api.services.tenants import get_tenant, get_tenant_config
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, ConfigDict
+
+router = APIRouter(prefix="/tenants", tags=["tenants"])
+
+AuthDep = Annotated[AuthContext, Depends(get_auth_context)]
+TenantIdDep = Annotated[UUID, Depends(get_tenant_id)]
+
+
+# ----------------------------------------------------------------
+# Response schemas
+# ----------------------------------------------------------------
+
+
+class TenantResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    slug: str
+    name: str
+    status: str
+
+
+class TenantConfigResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    tenant_id: UUID
+    agent_model: str
+    escalation_threshold: float
+    active_channels: list[ChannelType]
+    branding: dict
+    extra: dict
+
+
+# ----------------------------------------------------------------
+# Endpoints
+# ----------------------------------------------------------------
+
+
+@router.get(
+    "/me",
+    response_model=TenantResponse,
+    summary="Perfil del tenant del caller",
+)
+async def get_my_tenant(tenant_id: TenantIdDep) -> TenantResponse:
+    async with tenant_scope(tenant_id) as conn:
+        tenant = await get_tenant(conn, tenant_id)
+    return TenantResponse.model_validate(tenant)
+
+
+@router.get(
+    "/me/config",
+    response_model=TenantConfigResponse,
+    summary="Configuración del tenant del caller",
+)
+async def get_my_tenant_config(tenant_id: TenantIdDep) -> TenantConfigResponse:
+    async with tenant_scope(tenant_id) as conn:
+        config = await get_tenant_config(conn, tenant_id)
+    return TenantConfigResponse.model_validate(config)

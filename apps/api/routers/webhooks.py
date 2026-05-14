@@ -21,9 +21,7 @@ import hmac
 import logging
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
-
+from apps.api.agents.service import AgentService
 from apps.api.core.config import Settings, get_settings
 from apps.api.db.client import bootstrap_connection, tenant_scope
 from apps.api.db.models import ChannelType
@@ -36,8 +34,8 @@ from apps.api.db.queries import (
     insert_message,
     update_conversation_last_message,
 )
-
-from apps.api.agents.service import AgentService
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 

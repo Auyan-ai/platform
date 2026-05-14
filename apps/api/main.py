@@ -33,6 +33,9 @@ from apps.api.db.client import close_pool, init_pool
 from apps.api.integrations.anthropic_client import build_anthropic_client
 from apps.api.integrations.langfuse_client import build_langfuse_client
 from apps.api.integrations.openai_embeddings import build_openai_client
+from apps.api.routers.conversations import router as conversations_router
+from apps.api.routers.escalations import router as escalations_router
+from apps.api.routers.tenants import router as tenants_router
 from apps.api.routers.webhooks import router as webhooks_router
 
 if TYPE_CHECKING:
@@ -79,6 +82,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Auyan API", version="0.1.0", lifespan=lifespan)
 register_exception_handlers(app)
 app.include_router(webhooks_router)
+app.include_router(tenants_router)
+app.include_router(conversations_router)
+app.include_router(escalations_router)
 
 
 @app.get("/health", tags=["health"])
