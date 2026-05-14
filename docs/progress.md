@@ -180,7 +180,20 @@ Reglas:
 | Dashboard shell | Layout protegido en RSC que valida sesión antes de renderizar |
 | `.gitignore` | Reglas Next.js + pnpm + corrección de `lib/` anclada a raíz (no pisaba `apps/web/lib/`) |
 
-**Siguiente:** Sub-PR 3.2 — `openapi-typescript` + `lib/api/client.ts` + TanStack Query provider + smoke test con `GET /tenants/me`.
+### Sub-PR 3.2 — completado (commit 0596f07)
+
+| Área | Qué se hizo |
+|---|---|
+| `packages/shared` | `api-types.ts` generado desde staging `/openapi.json`; export path `@auyan/shared/api-types` |
+| `apps/web/next.config.ts` | `transpilePackages: ['@auyan/shared']` — Next.js compila TS del workspace sin build |
+| `lib/api/client.ts` | Factory `apiClient(token, tenantId?)` con `openapi-fetch` + tipos generados |
+| `lib/api/query-keys.ts` | Fábrica de query keys normalizada para TanStack Query |
+| `lib/api/hooks/tenants.ts` | `useMyTenant()`, `useMyTenantConfig()` client-side |
+| `components/providers.tsx` | `QueryClientProvider` con staleTime 1 min |
+| `app/layout.tsx` | Envuelve árbol en `<Providers>` |
+| `app/(dashboard)/page.tsx` | Smoke test RSC — `GET /tenants/me` con manejo explícito de 403 para super_admin |
+
+**Siguiente:** Sub-PR 3.3 — lista de conversaciones con filtros de status, paginación y polling 5s.
 
 ### Bloqueos NO arrastrados de Sprint 1 (siguen pendientes)
 
