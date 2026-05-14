@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from apps.api.core.errors import (
     ConflictError,
     DomainError,
@@ -15,6 +12,8 @@ from apps.api.core.errors import (
     ValidationFailed,
     register_exception_handlers,
 )
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 class TestDomainErrorClasses:
@@ -30,7 +29,12 @@ class TestDomainErrorClasses:
             (ValidationFailed, "validation_failed", 422),
         ],
     )
-    def test_defaults(self, cls: type[DomainError], expected_code: str, expected_status: int) -> None:
+    def test_defaults(
+        self,
+        cls: type[DomainError],
+        expected_code: str,
+        expected_status: int,
+    ) -> None:
         err = cls("algo pasó")
         assert err.code == expected_code
         assert err.status_code == expected_status
