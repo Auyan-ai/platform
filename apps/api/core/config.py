@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     auth_user_cache_ttl_seconds: int = 60
     auth_user_cache_maxsize: int = 1000
 
+    # --- CORS ---
+    # Orígenes permitidos, separados por comas.
+    # Ejemplo Railway: ALLOWED_ORIGINS=https://platform-web-staging.up.railway.app
+    allowed_origins: str = "http://localhost:3000,http://localhost:3001"
+
     # --- Defaults del agente (overridables por tenant_configurations) ---
     default_agent_model: str = "claude-sonnet-4-6"
     embedding_model: str = "text-embedding-3-small"
