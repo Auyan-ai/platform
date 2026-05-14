@@ -26,10 +26,37 @@ from apps.api.db.models import (
     MessageRole,
     Tenant,
     TenantConfiguration,
+    UserRole,
 )
 
 if TYPE_CHECKING:
     import asyncpg
+
+
+# ============================================================
+# Users (lookup para auth — SIN tenant_scope; corre con bootstrap_connection)
+# ============================================================
+
+
+async def get_user_for_auth(
+    conn: asyncpg.Connection, user_id: UUID
+) -> tuple[UUID | None, UserRole, str] | None:
+    """Devuelve (tenant_id, role, email) del usuario o None si no existe / soft-deleted.
+
+    Sin tenant_scope a propósito: la auth tiene que correr antes de saber el tenant.
+    `tenant_id` puede ser None solo cuando role = 'super_admin'.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT tenant_id, role, email
+          FROM users
+         WHERE id = $1 AND deleted_at IS NULL
+        """,
+        user_id,
+    )
+    if row is None:
+        return None
+    return row["tenant_id"], row["role"], row["email"]
 
 
 # ============================================================
