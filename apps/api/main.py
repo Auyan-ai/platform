@@ -28,6 +28,7 @@ from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.graph import build_graph
 from apps.api.agents.service import AgentService
 from apps.api.core.config import get_settings
+from apps.api.core.errors import register_exception_handlers
 from apps.api.db.client import close_pool, init_pool
 from apps.api.integrations.anthropic_client import build_anthropic_client
 from apps.api.integrations.langfuse_client import build_langfuse_client
@@ -76,6 +77,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Auyan API", version="0.1.0", lifespan=lifespan)
+register_exception_handlers(app)
 app.include_router(webhooks_router)
 
 
