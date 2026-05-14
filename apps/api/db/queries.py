@@ -20,16 +20,44 @@ from apps.api.db.models import (
     ConversationStatus,
     EndCustomer,
     Escalation,
+    EscalationStatus,
     KnowledgeChunk,
     Message,
     MessageDirection,
     MessageRole,
     Tenant,
     TenantConfiguration,
+    UserRole,
 )
 
 if TYPE_CHECKING:
     import asyncpg
+
+
+# ============================================================
+# Users (lookup para auth — SIN tenant_scope; corre con bootstrap_connection)
+# ============================================================
+
+
+async def get_user_for_auth(
+    conn: asyncpg.Connection, user_id: UUID
+) -> tuple[UUID | None, UserRole, str] | None:
+    """Devuelve (tenant_id, role, email) del usuario o None si no existe / soft-deleted.
+
+    Sin tenant_scope a propósito: la auth tiene que correr antes de saber el tenant.
+    `tenant_id` puede ser None solo cuando role = 'super_admin'.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT tenant_id, role, email
+          FROM users
+         WHERE id = $1 AND deleted_at IS NULL
+        """,
+        user_id,
+    )
+    if row is None:
+        return None
+    return row["tenant_id"], row["role"], row["email"]
 
 
 # ============================================================
@@ -175,7 +203,7 @@ async def get_conversation(
     row = await conn.fetchrow(
         """
         SELECT id, tenant_id, end_customer_id, channel, external_id,
-               subject, status, assigned_user_id, last_message_at
+               subject, status, assigned_user_id, last_message_at, created_at
           FROM conversations
          WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
         """,
@@ -194,7 +222,7 @@ async def find_conversation_by_external(
     row = await conn.fetchrow(
         """
         SELECT id, tenant_id, end_customer_id, channel, external_id,
-               subject, status, assigned_user_id, last_message_at
+               subject, status, assigned_user_id, last_message_at, created_at
           FROM conversations
          WHERE tenant_id = $1 AND channel = $2::channel_type AND external_id = $3
            AND deleted_at IS NULL
@@ -222,7 +250,7 @@ async def create_conversation(
             tenant_id, end_customer_id, channel, external_id, subject, status
         ) VALUES ($1, $2, $3::channel_type, $4, $5, 'open'::conversation_status)
         RETURNING id, tenant_id, end_customer_id, channel, external_id,
-                  subject, status, assigned_user_id, last_message_at
+                  subject, status, assigned_user_id, last_message_at, created_at
         """,
         tenant_id,
         end_customer_id,
@@ -266,9 +294,62 @@ async def update_conversation_status(
     )
 
 
+async def list_conversations(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    status: ConversationStatus | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Conversation]:
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, end_customer_id, channel, external_id,
+               subject, status, assigned_user_id, last_message_at, created_at
+          FROM conversations
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+           AND ($2::conversation_status IS NULL OR status = $2::conversation_status)
+         ORDER BY created_at DESC
+         LIMIT $3 OFFSET $4
+        """,
+        tenant_id,
+        status,
+        limit,
+        offset,
+    )
+    return [Conversation(**dict(r)) for r in rows]
+
+
 # ============================================================
 # Messages
 # ============================================================
+
+
+async def get_messages_for_conversation(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    *,
+    include_system: bool = False,
+) -> list[Message]:
+    """Todos los mensajes de una conversación en orden cronológico ASC.
+
+    `include_system=False` excluye mensajes de role='system' (prompts internos).
+    """
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, conversation_id, role, direction,
+               author_user_id, content, attachments, metadata, created_at
+          FROM messages
+         WHERE tenant_id = $1 AND conversation_id = $2 AND deleted_at IS NULL
+           AND ($3 = true OR role != 'system')
+         ORDER BY created_at ASC
+        """,
+        tenant_id,
+        conversation_id,
+        include_system,
+    )
+    return [Message(**dict(r)) for r in rows]
 
 
 async def get_recent_messages(
@@ -356,7 +437,7 @@ async def insert_escalation(
             $1, $2, $3, $4, 'pending'::escalation_status, $5
         )
         RETURNING id, tenant_id, conversation_id, reason,
-                  triggered_by_message_id, status, assigned_user_id, metadata
+                  triggered_by_message_id, status, assigned_user_id, metadata, created_at
         """,
         tenant_id,
         conversation_id,
@@ -366,6 +447,101 @@ async def insert_escalation(
     )
     assert row is not None
     return Escalation(**dict(row))
+
+
+async def get_escalation(
+    conn: asyncpg.Connection, tenant_id: UUID, escalation_id: UUID
+) -> Escalation | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, conversation_id, reason,
+               triggered_by_message_id, status, assigned_user_id, metadata, created_at
+          FROM escalations
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        """,
+        tenant_id,
+        escalation_id,
+    )
+    return None if row is None else Escalation(**dict(row))
+
+
+async def list_escalations(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    status: EscalationStatus | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Escalation]:
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, conversation_id, reason,
+               triggered_by_message_id, status, assigned_user_id, metadata, created_at
+          FROM escalations
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+           AND ($2::escalation_status IS NULL OR status = $2::escalation_status)
+         ORDER BY created_at DESC
+         LIMIT $3 OFFSET $4
+        """,
+        tenant_id,
+        status,
+        limit,
+        offset,
+    )
+    return [Escalation(**dict(r)) for r in rows]
+
+
+async def claim_escalation(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    escalation_id: UUID,
+    agent_user_id: UUID,
+) -> Escalation | None:
+    """Marca la escalación como 'claimed' y asigna al agente.
+
+    Devuelve None si la escalación no estaba en estado 'pending' (CAS pattern).
+    """
+    row = await conn.fetchrow(
+        """
+        UPDATE escalations
+           SET status = 'claimed'::escalation_status,
+               assigned_user_id = $3
+         WHERE tenant_id = $1 AND id = $2
+           AND status = 'pending'::escalation_status
+           AND deleted_at IS NULL
+        RETURNING id, tenant_id, conversation_id, reason,
+                  triggered_by_message_id, status, assigned_user_id, metadata, created_at
+        """,
+        tenant_id,
+        escalation_id,
+        agent_user_id,
+    )
+    return None if row is None else Escalation(**dict(row))
+
+
+async def resolve_escalation(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    escalation_id: UUID,
+) -> Escalation | None:
+    """Marca la escalación como 'resolved'.
+
+    Devuelve None si no estaba en estado 'claimed' (CAS pattern).
+    """
+    row = await conn.fetchrow(
+        """
+        UPDATE escalations
+           SET status = 'resolved'::escalation_status
+         WHERE tenant_id = $1 AND id = $2
+           AND status = 'claimed'::escalation_status
+           AND deleted_at IS NULL
+        RETURNING id, tenant_id, conversation_id, reason,
+                  triggered_by_message_id, status, assigned_user_id, metadata, created_at
+        """,
+        tenant_id,
+        escalation_id,
+    )
+    return None if row is None else Escalation(**dict(row))
 
 
 # ============================================================

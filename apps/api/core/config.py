@@ -58,6 +58,20 @@ class Settings(BaseSettings):
         ..., description="HMAC shared secret para validar webhooks entrantes"
     )
 
+    # --- Auth (Supabase JWT) ---
+    supabase_jwt_secret: SecretStr = Field(
+        ..., description="JWT secret de Supabase (Project Settings → API → JWT secret)"
+    )
+    supabase_jwt_algorithm: str = "HS256"
+    supabase_jwt_audience: str = "authenticated"
+
+    # Cache del lookup de usuarios para auth. Se invalida por TTL — los cambios
+    # de role/tenant_id tardan hasta `auth_user_cache_ttl_seconds` en propagarse.
+    # `maxsize` acota la memoria: 1000 entries ≈ 1000 usuarios activos en paralelo;
+    # subirlo si en producción se ven más usuarios concurrentes.
+    auth_user_cache_ttl_seconds: int = 60
+    auth_user_cache_maxsize: int = 1000
+
     # --- Defaults del agente (overridables por tenant_configurations) ---
     default_agent_model: str = "claude-sonnet-4-6"
     embedding_model: str = "text-embedding-3-small"
