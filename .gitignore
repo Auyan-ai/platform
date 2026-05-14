@@ -6,16 +6,16 @@ __pycache__/
 # C extensions
 *.so
 
-# Distribution / packaging
+# Distribution / packaging (anclados a la raíz para no pisar apps/web/lib/, apps/web/dist/, etc.)
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
+/build/
+/develop-eggs/
+/dist/
+/downloads/
+/eggs/
+/.eggs/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -221,3 +221,18 @@ __marimo__/
 
 # Claude Code (worktrees, settings locales, sesiones)
 .claude/
+
+# Next.js
+apps/web/.next/
+apps/web/out/
+apps/web/.turbo/
+apps/web/next-env.d.ts
+*.tsbuildinfo
+
+# pnpm
+node_modules/
+.pnpm-debug.log*
+
+# Env files locales (el .env.local de apps/web)
+apps/web/.env.local
+apps/web/.env*.local

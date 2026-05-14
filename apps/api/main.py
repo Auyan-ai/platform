@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.graph import build_graph
@@ -81,6 +82,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Auyan API", version="0.1.0", lifespan=lifespan)
 register_exception_handlers(app)
+
+_settings = get_settings()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _settings.allowed_origins.split(",") if o.strip()],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Tenant-Id"],
+)
+
 app.include_router(webhooks_router)
 app.include_router(tenants_router)
 app.include_router(conversations_router)

@@ -1,0 +1,15 @@
+{
+  "name": "auyan-platform",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev:web": "pnpm --filter @auyan/web dev",
+    "build:web": "pnpm --filter @auyan/web build",
+    "typecheck": "pnpm -r typecheck",
+    "gen:api-types": "openapi-typescript ${API_URL:-http://localhost:8000}/openapi.json -o packages/shared/src/api-types.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "openapi-typescript": "^7.4.0"
+  }
+}

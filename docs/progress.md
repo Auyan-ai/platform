@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-14 (sesión 6 — smoke test staging: Supabase ES256 fix + JWT verificado localmente)_
+_Última actualización: 2026-05-14 (sesión 6 — Sprint 3 arrancado: monorepo Node + apps/web scaffoldeado)_
 
 ---
 
@@ -173,6 +173,43 @@ Reglas:
 
 1. Arrancar Sprint 3: dashboard interno `apps/web` con Next.js + Supabase Auth
 2. Opcional: escribir `docs/architecture-services.md` (1 página, patrón de 4 capas)
+
+---
+
+## Sprint 3 — Dashboard interno (en curso)
+
+**Objetivo:** Dashboard `apps/web` que consuma los 10 endpoints admin del API como super_admin. Solo `/dashboard/*` en este sprint; `/clients/*` es Sprint 4.
+
+**Branch activo:** `feat/sprint3-monorepo-scaffold` (sub-PR 3.1 listo, falta mergear)
+
+**Diseño de arquitectura:** [docs/architecture-web.md](architecture-web.md) — aprobado al inicio del sprint.
+
+### Sub-PR 3.1 — completado (commit b1bb9c5)
+
+| Área | Qué se hizo |
+|---|---|
+| Monorepo Node | pnpm 11.1.2 + workspaces, `biome.json` raíz, `package.json` con scripts `gen:api-types` y `build:web` |
+| `packages/shared` | `enums.ts` con los Literal types espejando `db/models.py`, `index.ts` re-exporta |
+| `apps/web` base | Next.js 15 App Router, TypeScript strict, Tailwind v4, shadcn configurado (`components.json`), Biome |
+| Auth | `@supabase/ssr`: `lib/supabase/client.ts` (browser) + `lib/supabase/server.ts` (RSC), middleware de sesión con redirect |
+| Login | `/login` funcional — `signInWithPassword` + redirect a `/dashboard` post-login |
+| Dashboard shell | Layout protegido en RSC que valida sesión antes de renderizar |
+| `.gitignore` | Reglas Next.js + pnpm + corrección de `lib/` anclada a raíz (no pisaba `apps/web/lib/`) |
+
+### Sub-PR 3.2 — completado (commit 0596f07)
+
+| Área | Qué se hizo |
+|---|---|
+| `packages/shared` | `api-types.ts` generado desde staging `/openapi.json`; export path `@auyan/shared/api-types` |
+| `apps/web/next.config.ts` | `transpilePackages: ['@auyan/shared']` — Next.js compila TS del workspace sin build |
+| `lib/api/client.ts` | Factory `apiClient(token, tenantId?)` con `openapi-fetch` + tipos generados |
+| `lib/api/query-keys.ts` | Fábrica de query keys normalizada para TanStack Query |
+| `lib/api/hooks/tenants.ts` | `useMyTenant()`, `useMyTenantConfig()` client-side |
+| `components/providers.tsx` | `QueryClientProvider` con staleTime 1 min |
+| `app/layout.tsx` | Envuelve árbol en `<Providers>` |
+| `app/(dashboard)/page.tsx` | Smoke test RSC — `GET /tenants/me` con manejo explícito de 403 para super_admin |
+
+**Siguiente:** Sub-PR 3.3 — lista de conversaciones con filtros de status, paginación y polling 5s.
 
 ### Bloqueos NO arrastrados de Sprint 1 (siguen pendientes)
 
