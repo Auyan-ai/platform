@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { fetchCurrentUser } from '@/lib/api/users'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -17,12 +18,25 @@ export default function LoginPage() {
     setError(null)
 
     const supabase = createClient()
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
 
     if (signInError) {
       setError(signInError.message)
       setLoading(false)
       return
+    }
+
+    const token = data.session?.access_token
+    if (token) {
+      const user = await fetchCurrentUser(token)
+      if (user?.role === 'tenant_admin' && user.tenant_id) {
+        router.push(`/clients/${user.tenant_id}/overview`)
+        router.refresh()
+        return
+      }
     }
 
     router.push('/dashboard')
