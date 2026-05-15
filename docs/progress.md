@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-15 (sesión 7 — Sprint 3 sub-PRs 3.1–3.6 completados y mergeados a develop)_
+_Última actualización: 2026-05-15 (sesión 7 — Sprint 3 completo, apps/web desplegado en staging)_
 
 ---
 
@@ -176,11 +176,13 @@ Reglas:
 
 ---
 
-## Sprint 3 — Dashboard interno (en curso)
+## Sprint 3 — Dashboard interno (completado ✅)
 
-**Objetivo:** Dashboard `apps/web` que consuma los 10 endpoints admin del API como super_admin. Solo `/dashboard/*` en este sprint; `/clients/*` es Sprint 4.
+**Objetivo:** Dashboard `apps/web` que consuma los 10 endpoints admin del API como super_admin. Solo `(dashboard)` en este sprint; `/clients/` es Sprint 4.
 
-**Branch activo:** `feat/sprint3-monorepo-scaffold` (sub-PR 3.1 listo, falta mergear)
+**URLs de staging:**
+- API: `https://platform-staging-fdb7.up.railway.app`
+- Web: `https://auyan-web-staging.up.railway.app`
 
 **Diseño de arquitectura:** [docs/architecture-web.md](architecture-web.md) — aprobado al inicio del sprint.
 
@@ -249,11 +251,22 @@ Reglas:
 
 **Conversaciones de prueba creadas** para Lunaria via webhook inbound (agente escaló por cuota OpenAI).
 
+### Sub-PR 3.7 — completado ([PR #24](https://github.com/Auyan-ai/platform/pull/24))
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/web/Dockerfile` | Build multistage pnpm workspace desde raíz, Next.js standalone, runner mínimo |
+| `next.config.ts` | `output: standalone` + `outputFileTracingRoot` para monorepo |
+| `api-types.ts` | Regenerado — incluye `GET /tenants/admin/list` tipado |
+| `useAdminTenants` | Migrado de fetch manual a openapi-fetch tipado |
+| Railway | Servicio `auyan-web` creado, dominio `https://auyan-web-staging.up.railway.app` |
+| `ALLOWED_ORIGINS` | Actualizado en el servicio API de Railway para incluir la URL web |
+
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. **Sub-PR 3.7** — Deploy `apps/web` a Railway staging + regenerar `api-types.ts` con el nuevo endpoint `/tenants/admin/list`
-2. Opcional: e2e Playwright (login → inbox → reply → escalation)
-3. Sprint 4: dashboard cliente por tenant (`/clients/`)
+1. Sprint 4: dashboard cliente por tenant (`/clients/`) — vista read-only para el cliente final
+2. Deuda: CI con GitHub Actions (ruff + pytest + tsc en cada PR)
+3. Deuda: diseño visual del dashboard (el UX funciona pero es feo — pendiente de refinar)
 
 ### Bloqueos NO arrastrados de Sprint 1 (siguen pendientes)
 
