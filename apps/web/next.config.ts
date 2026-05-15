@@ -1,8 +1,11 @@
+import path from 'path'
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  // Permite importar TypeScript de packages/ sin paso de build previo
   transpilePackages: ['@auyan/shared'],
+  output: 'standalone',
+  // Asegura que el trazado de archivos en standalone incluya packages/ del monorepo
+  outputFileTracingRoot: path.join(__dirname, '../../'),
 }
 
 export default nextConfig
