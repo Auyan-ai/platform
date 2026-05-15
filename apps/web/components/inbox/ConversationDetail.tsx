@@ -241,9 +241,13 @@ function Composer({
 export function ConversationDetail({
   tenantId,
   conversationId,
+  readOnly = false,
+  backHref,
 }: {
   tenantId: string
   conversationId: string
+  readOnly?: boolean
+  backHref?: string
 }) {
   const { data, isLoading, isError, error } = useConversation(tenantId, conversationId)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -275,7 +279,7 @@ export function ConversationDetail({
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-neutral-200 px-4 py-3">
         <Link
-          href={`/tenants/${tenantId}/conversations`}
+          href={backHref ?? `/tenants/${tenantId}/conversations`}
           className="text-neutral-400 hover:text-neutral-900 text-sm"
         >
           ← Volver
@@ -308,12 +312,19 @@ export function ConversationDetail({
         <div ref={bottomRef} />
       </div>
 
-      {/* Composer */}
-      <Composer
-        tenantId={tenantId}
-        conversationId={conversationId}
-        status={conversation.status}
-      />
+      {/* Composer — oculto en modo read-only */}
+      {!readOnly && (
+        <Composer
+          tenantId={tenantId}
+          conversationId={conversationId}
+          status={conversation.status}
+        />
+      )}
+      {readOnly && (
+        <div className="border-t border-neutral-200 px-4 py-3 text-center text-sm text-neutral-400">
+          Vista de solo lectura
+        </div>
+      )}
     </div>
   )
 }

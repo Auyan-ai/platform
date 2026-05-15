@@ -63,7 +63,13 @@ const STATUS_FILTERS: Array<ConversationStatus | 'all'> = [
 // Component
 // ----------------------------------------------------------------
 
-export function ConversationList({ tenantId }: { tenantId: string }) {
+export function ConversationList({
+  tenantId,
+  basePath,
+}: {
+  tenantId: string
+  basePath?: string
+}) {
   const [activeStatus, setActiveStatus] = useState<ConversationStatus | 'all'>('all')
   const [offset, setOffset] = useState(0)
 
@@ -79,6 +85,7 @@ export function ConversationList({ tenantId }: { tenantId: string }) {
   const conversations = data?.conversations ?? []
   const hasMore = conversations.length === LIMIT
   const hasPrev = offset > 0
+  const resolvedBasePath = basePath ?? `/tenants/${tenantId}/conversations`
 
   function handleFilterChange(next: ConversationStatus | 'all') {
     setActiveStatus(next)
@@ -128,7 +135,7 @@ export function ConversationList({ tenantId }: { tenantId: string }) {
           {conversations.map((conv) => (
             <Link
               key={conv.id}
-              href={`/tenants/${tenantId}/conversations/${conv.id}`}
+              href={`${resolvedBasePath}/${conv.id}`}
               className="flex items-center gap-3 px-4 py-3 hover:bg-neutral-50 transition-colors"
             >
               {/* Status badge */}

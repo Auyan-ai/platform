@@ -1,0 +1,17 @@
+import { ConversationDetail } from '@/components/inbox/ConversationDetail'
+
+interface Props {
+  params: Promise<{ tenantId: string; id: string }>
+}
+
+export default async function ClientConversationDetailPage({ params }: Props) {
+  const { tenantId, id } = await params
+  return (
+    <ConversationDetail
+      tenantId={tenantId}
+      conversationId={id}
+      readOnly
+      backHref={`/clients/${tenantId}/conversations`}
+    />
+  )
+}
