@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-14 (sesión 6 — Sprint 3 arrancado: monorepo Node + apps/web scaffoldeado)_
+_Última actualización: 2026-05-15 (sesión 7 — Sprint 3 sub-PRs 3.1–3.6 completados y mergeados a develop)_
 
 ---
 
@@ -209,7 +209,51 @@ Reglas:
 | `app/layout.tsx` | Envuelve árbol en `<Providers>` |
 | `app/(dashboard)/page.tsx` | Smoke test RSC — `GET /tenants/me` con manejo explícito de 403 para super_admin |
 
-**Siguiente:** Sub-PR 3.3 — lista de conversaciones con filtros de status, paginación y polling 5s.
+### Sub-PR 3.3 — completado ([PR #19](https://github.com/Auyan-ai/platform/pull/19))
+
+| Área | Qué se hizo |
+|---|---|
+| `components/inbox/ConversationList.tsx` | Inbox con filtros de status (6 tabs), polling 5 s, paginación prev/next |
+| `lib/api/hooks/conversations.ts` | `useConversations()` con TanStack Query, staleTime 0, refetchInterval 5 s |
+| `app/(dashboard)/tenants/[tenantId]/conversations/page.tsx` | Página de lista por tenant |
+| `apps/api/main.py` | `CORSMiddleware` — fix crítico para peticiones cross-origin del browser |
+| `apps/api/core/config.py` | `allowed_origins` con default `localhost:3000,localhost:3001` |
+
+**Tenant correcto para Lunaria:** `11111111-1111-1111-1111-111111111111` (no el 33333333... de pruebas iniciales).
+
+### Sub-PR 3.4 — completado ([PR #20](https://github.com/Auyan-ai/platform/pull/20))
+
+| Área | Qué se hizo |
+|---|---|
+| `components/inbox/ConversationDetail.tsx` | Hilo de mensajes con burbujas por rol, scroll al último, polling 5 s |
+| Composer | Responder (Cmd+Enter), Escalar (razón inline), Cerrar — sólo lectura si closed/resolved |
+| Hooks | `useConversation`, `useReplyMutation`, `useEscalateMutation`, `useCloseMutation` |
+| Layout | `conversations/[id]/layout.tsx` — chat a pantalla completa (-m-8) |
+
+### Sub-PR 3.5 — completado ([PR #21](https://github.com/Auyan-ai/platform/pull/21))
+
+| Área | Qué se hizo |
+|---|---|
+| `components/inbox/EscalationQueue.tsx` | Cola con filtros, botones Tomar/Resolver por fila, link a conversación |
+| Hooks | `useEscalations`, `useClaimMutation`, `useResolveMutation` |
+| Nav sidebar | Links a Conversaciones y Escalaciones (hardcodeado a Lunaria, reemplazado en 3.6) |
+
+### Sub-PR 3.6 — completado ([PR #22](https://github.com/Auyan-ai/platform/pull/22))
+
+| Área | Qué se hizo |
+|---|---|
+| `GET /tenants/admin/list` | Endpoint `super_admin` only, sin tenant_scope, lista todos los tenants activos |
+| `db/queries.list_all_tenants` | Query sin tenant_scope para super_admin |
+| `components/nav/TenantSwitcher.tsx` | Dropdown de tenants con dot de status, navega manteniendo sección activa |
+| `components/nav/Sidebar.tsx` | Sidebar dinámico: extrae tenantId de la URL, resalta item activo |
+
+**Conversaciones de prueba creadas** para Lunaria via webhook inbound (agente escaló por cuota OpenAI).
+
+### Empezar aquí en la próxima sesión — usar **Sonnet**
+
+1. **Sub-PR 3.7** — Deploy `apps/web` a Railway staging + regenerar `api-types.ts` con el nuevo endpoint `/tenants/admin/list`
+2. Opcional: e2e Playwright (login → inbox → reply → escalation)
+3. Sprint 4: dashboard cliente por tenant (`/clients/`)
 
 ### Bloqueos NO arrastrados de Sprint 1 (siguen pendientes)
 
