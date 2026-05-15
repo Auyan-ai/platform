@@ -251,7 +251,7 @@ Reglas:
 
 **Conversaciones de prueba creadas** para Lunaria via webhook inbound (agente escaló por cuota OpenAI).
 
-### Sub-PR 3.7 — completado ([PR #24](https://github.com/Auyan-ai/platform/pull/24))
+### Sub-PR 3.7 — completado ([PR #24](https://github.com/Auyan-ai/platform/pull/24) + fixes #26–#29)
 
 | Área | Qué se hizo |
 |---|---|
@@ -260,13 +260,23 @@ Reglas:
 | `api-types.ts` | Regenerado — incluye `GET /tenants/admin/list` tipado |
 | `useAdminTenants` | Migrado de fetch manual a openapi-fetch tipado |
 | Railway | Servicio `auyan-web` creado, dominio `https://auyan-web-staging.up.railway.app` |
-| `ALLOWED_ORIGINS` | Actualizado en el servicio API de Railway para incluir la URL web |
+| `ALLOWED_ORIGINS` | Seteado en Railway para el servicio API: `localhost:3001,auyan-web-staging.up.railway.app` |
+
+**Fixes de deploy resueltos:**
+- [PR #26](https://github.com/Auyan-ai/platform/pull/26) — eliminado `railway.toml` raíz (conflicto: aplicaba a todos los servicios, web arrancaba con imagen Python)
+- [PR #27](https://github.com/Auyan-ai/platform/pull/27) — eliminado `--mount=type=cache` no soportado en Railway
+- [PR #28](https://github.com/Auyan-ai/platform/pull/28) — cambiado `node:20-slim` → `node:22-slim` (pnpm 11 requiere Node ≥ 22)
+- [PR #29](https://github.com/Auyan-ai/platform/pull/29) — eliminado `COPY public` inexistente
+
+**Configuración manual en Railway dashboard (no en código):**
+- `auyan-web`: `PORT=3000` como variable de entorno (Railway inyecta 8080 por defecto)
+- `platform` (API): healthcheck path `/health` y restart policy seteados vía dashboard (ya no viene de railway.toml)
 
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. Sprint 4: dashboard cliente por tenant (`/clients/`) — vista read-only para el cliente final
-2. Deuda: CI con GitHub Actions (ruff + pytest + tsc en cada PR)
-3. Deuda: diseño visual del dashboard (el UX funciona pero es feo — pendiente de refinar)
+1. **Sprint 4:** dashboard cliente por tenant — vista para que el cliente vea sus conversaciones y métricas
+2. **Deuda UI:** el dashboard funciona pero es feo — refinar diseño con shadcn/ui components
+3. **Deuda CI:** GitHub Actions con ruff + pytest + tsc en cada PR (`.github/workflows/` está vacío)
 
 ### Bloqueos NO arrastrados de Sprint 1 (siguen pendientes)
 
