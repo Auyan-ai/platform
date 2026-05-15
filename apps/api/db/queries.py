@@ -586,3 +586,16 @@ async def search_knowledge_chunks(
         min_similarity,
     )
     return [KnowledgeChunk(**dict(r)) for r in rows]
+
+
+async def list_all_tenants(conn: asyncpg.Connection) -> list[Tenant]:
+    """Super-admin: listar todos los tenants activos sin tenant_scope."""
+    rows = await conn.fetch(
+        """
+        SELECT id, slug, name, status
+          FROM tenants
+         WHERE deleted_at IS NULL
+         ORDER BY name
+        """,
+    )
+    return [Tenant(**dict(r)) for r in rows]

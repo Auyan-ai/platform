@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
-from apps.api.db.client import tenant_scope
+from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id, require_role
+from apps.api.db.client import bootstrap_connection, tenant_scope
 from apps.api.db.models import ChannelType
+from apps.api.db.queries import list_all_tenants
 from apps.api.services.tenants import get_tenant, get_tenant_config
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
@@ -46,6 +47,18 @@ class TenantConfigResponse(BaseModel):
 # ----------------------------------------------------------------
 # Endpoints
 # ----------------------------------------------------------------
+
+
+@router.get(
+    "/admin/list",
+    response_model=list[TenantResponse],
+    summary="Listar todos los tenants — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def list_tenants_admin() -> list[TenantResponse]:
+    async with bootstrap_connection() as conn:
+        tenants = await list_all_tenants(conn)
+    return [TenantResponse.model_validate(t) for t in tenants]
 
 
 @router.get(
