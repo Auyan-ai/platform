@@ -6,6 +6,7 @@ export const queryKeys = {
   tenants: {
     me: () => ['tenants', 'me'] as const,
     config: () => ['tenants', 'me', 'config'] as const,
+    adminList: () => ['tenants', 'admin', 'list'] as const,
   },
   conversations: {
     list: (tenantId: string, filters?: Record<string, unknown>) =>
