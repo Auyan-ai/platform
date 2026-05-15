@@ -37,12 +37,9 @@ export function useAdminTenants() {
     queryKey: queryKeys.tenants.adminList(),
     queryFn: async () => {
       const token = await getToken()
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
-      const res = await fetch(`${baseUrl}/tenants/admin/list`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) throw new Error(`Error ${res.status} al listar tenants`)
-      return res.json() as Promise<TenantResponse[]>
+      const { data, error } = await apiClient(token).GET('/tenants/admin/list')
+      if (error) throw error
+      return data as TenantResponse[]
     },
     staleTime: 60_000,
   })
