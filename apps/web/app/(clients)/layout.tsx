@@ -16,7 +16,7 @@ export default async function ClientsLayout({ children }: { children: ReactNode 
   const user = await fetchCurrentUser(session.access_token)
 
   if (!user || user.role !== 'tenant_admin' || !user.tenant_id) {
-    redirect('/dashboard')
+    redirect('/')
   }
 
   let tenantName = user.tenant_id
