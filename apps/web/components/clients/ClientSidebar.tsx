@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import { LogoutButton } from '@/components/nav/LogoutButton'
 
 const NAV_ITEMS = [
   { label: 'Overview', icon: '📊', section: 'overview' },
@@ -13,9 +14,10 @@ const NAV_ITEMS = [
 interface ClientSidebarProps {
   tenantId: string
   tenantName: string
+  userEmail?: string
 }
 
-export function ClientSidebar({ tenantId, tenantName }: ClientSidebarProps) {
+export function ClientSidebar({ tenantId, tenantName, userEmail }: ClientSidebarProps) {
   const pathname = usePathname()
 
   return (
@@ -51,6 +53,8 @@ export function ClientSidebar({ tenantId, tenantName }: ClientSidebarProps) {
           )
         })}
       </nav>
+
+      <LogoutButton email={userEmail} />
     </aside>
   )
 }
