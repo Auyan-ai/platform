@@ -5,8 +5,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-
 from apps.api.agents.nodes.load_tenant_context import make_load_tenant_context_node
+
 from tests.conftest import (
     TENANT_ID,
     make_fake_tenant_scope,

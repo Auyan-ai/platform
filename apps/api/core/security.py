@@ -37,8 +37,6 @@ from uuid import UUID
 
 import httpx
 import jwt
-from jwt.algorithms import ECAlgorithm, RSAAlgorithm
-
 from apps.api.core.config import Settings, get_settings
 from apps.api.core.errors import ForbiddenError, UnauthorizedError
 from apps.api.db.client import bootstrap_connection
@@ -47,6 +45,7 @@ from apps.api.db.queries import get_user_for_auth
 from cachetools import TTLCache
 from fastapi import Depends, Header
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt.algorithms import ECAlgorithm, RSAAlgorithm
 
 logger = logging.getLogger(__name__)
 

@@ -84,7 +84,9 @@ class AgentDecisionTool(BaseModel):
     def _coherent(self) -> AgentDecisionTool:
         if self.decision == "respond":
             if not self.response_text or not self.response_text.strip():
-                raise ValueError("response_text es obligatorio y no vacío cuando decision='respond'")
+                raise ValueError(
+                    "response_text es obligatorio y no vacío cuando decision='respond'"
+                )
         else:  # escalate
             if not self.escalation_reason or not self.escalation_reason.strip():
                 raise ValueError(

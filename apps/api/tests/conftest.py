@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
-
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.db.models import (
     Conversation,

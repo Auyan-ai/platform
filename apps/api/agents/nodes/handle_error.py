@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def make_handle_error_node(
-    deps: AgentDependencies,  # noqa: ARG001
+    deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict]]:
     async def _node(state: AgentState) -> dict:
         tenant_id_str = state.get("tenant_id")

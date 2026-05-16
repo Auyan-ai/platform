@@ -19,7 +19,10 @@ class ChatwootClient:
     async def send_message(
         self, account_id: int, conversation_id: int, content: str, message_type: str = "outgoing"
     ) -> dict[str, Any]:
-        url = f"{self.base_url}/api/v1/accounts/{account_id}/conversations/{conversation_id}/messages"
+        url = (
+            f"{self.base_url}/api/v1/accounts/{account_id}"
+            f"/conversations/{conversation_id}/messages"
+        )
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 url,
@@ -33,7 +36,10 @@ class ChatwootClient:
     async def assign_conversation(
         self, account_id: int, conversation_id: int, assignee_id: int
     ) -> dict[str, Any]:
-        url = f"{self.base_url}/api/v1/accounts/{account_id}/conversations/{conversation_id}/assignments"
+        url = (
+            f"{self.base_url}/api/v1/accounts/{account_id}"
+            f"/conversations/{conversation_id}/assignments"
+        )
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 url,

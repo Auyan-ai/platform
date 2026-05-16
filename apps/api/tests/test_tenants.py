@@ -6,23 +6,25 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any
+from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
 
 import jwt
 import pytest
-from fastapi import Depends, FastAPI
-from fastapi.testclient import TestClient
-
 from apps.api.core.errors import register_exception_handlers
-from apps.api.core.security import AuthContext, UserRecord, get_auth_context, get_tenant_id, reset_user_cache
+from apps.api.core.security import (
+    UserRecord,
+    reset_user_cache,
+)
 from apps.api.routers.tenants import router as tenants_router
 from apps.api.tests.conftest import (
     TENANT_ID,
     make_tenant,
     make_tenant_configuration,
 )
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 JWT_SECRET = "test-jwt-secret-for-unit-tests-32b!"
 JWT_ALG = "HS256"

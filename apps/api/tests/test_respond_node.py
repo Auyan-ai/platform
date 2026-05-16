@@ -5,8 +5,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-
 from apps.api.agents.nodes.respond import make_respond_node
+
 from tests.conftest import (
     CONVERSATION_ID,
     OUTBOUND_MSG_ID,

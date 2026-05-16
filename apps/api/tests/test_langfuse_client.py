@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-
 from apps.api.integrations.langfuse_client import LangfuseClient
 
 

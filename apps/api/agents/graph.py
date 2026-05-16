@@ -27,8 +27,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from langgraph.graph import END, START, StateGraph
-
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes.escalate import make_escalate_node
 from apps.api.agents.nodes.finalize_trace import make_finalize_trace_node
@@ -39,6 +37,7 @@ from apps.api.agents.nodes.reason import make_reason_node
 from apps.api.agents.nodes.respond import make_respond_node
 from apps.api.agents.nodes.retrieve_knowledge import make_retrieve_knowledge_node
 from apps.api.agents.state import AgentState
+from langgraph.graph import END, START, StateGraph
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph

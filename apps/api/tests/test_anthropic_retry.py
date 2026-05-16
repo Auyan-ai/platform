@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock, MagicMock
 import anthropic
 import httpx
 import pytest
-
 from apps.api.agents.schemas import RESPOND_OR_ESCALATE_TOOL
 from apps.api.integrations.anthropic_client import call_claude_with_tool
 

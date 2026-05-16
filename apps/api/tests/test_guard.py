@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from apps.api.agents.nodes._guard import guarded
 
 

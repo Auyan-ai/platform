@@ -7,7 +7,6 @@ import hmac
 
 from apps.api.routers.webhooks import _verify_signature
 
-
 SECRET = "test-shared-secret"
 BODY = b'{"hello":"world"}'
 

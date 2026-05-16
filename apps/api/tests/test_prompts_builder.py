@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from apps.api.agents.prompts.builder import (
     build_message_history,
     build_system_prompt,

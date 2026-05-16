@@ -17,7 +17,7 @@ from apps.api.db.queries import insert_message, update_conversation_last_message
 
 
 def make_respond_node(
-    deps: AgentDependencies,  # noqa: ARG001
+    deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict]]:
     @guarded(name="respond")
     async def _node(state: AgentState) -> dict:

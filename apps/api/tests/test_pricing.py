@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from apps.api.integrations.pricing import (
     LLM_PRICING_PER_MILLION_TOKENS,
     compute_llm_cost,
