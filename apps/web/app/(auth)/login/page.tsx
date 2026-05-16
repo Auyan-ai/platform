@@ -34,13 +34,11 @@ export default function LoginPage() {
       const user = await fetchCurrentUser(token)
       if (user?.role === 'tenant_admin' && user.tenant_id) {
         router.push(`/clients/${user.tenant_id}/overview`)
-        router.refresh()
         return
       }
     }
 
     router.push('/dashboard')
-    router.refresh()
   }
 
   return (
