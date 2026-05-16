@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-16 (sesión 8 — Sprint 4 completo, PR #31 listo para merge)_
+_Última actualización: 2026-05-16 (sesión 9 — pruebas e2e del agente, Sprint 5 completo, CI configurado)_
 
 ---
 
@@ -325,17 +325,17 @@ Reglas:
 
 - **Tiempo promedio de respuesta**: requiere cálculo de timestamps de mensajes en API — postergado por bajo volumen de datos.
 
+### Estado final del Sprint 4
+
+- PR #31 mergeado ✅
+- Flujo `tenant_admin` validado en staging ✅ (PRs #37–#39 cerraron bugs de redirect y logout)
+- Créditos OpenAI y Anthropic cargados ✅ — agente responde en modo real
+- `WEBHOOK_SECRET` local sincronizado con Railway ✅
+
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. **Merge PR #31** a develop y triggear deploy Railway del API + web
-2. **Crear usuario `tenant_admin`** en Supabase staging para Lunaria y validar el flujo end-to-end
-3. **Deuda UI:** el dashboard funciona pero es feo — refinar diseño con shadcn/ui components
-4. **Deuda CI:** GitHub Actions con ruff + pytest + tsc en cada PR (`.github/workflows/` está vacío)
-
-### Bloqueos NO arrastrados de Sprint 1 (siguen pendientes)
-
-- [ ] **Agregar créditos a OpenAI** — el agente sigue escalando por `429 insufficient_quota` en `retrieve_knowledge`. Bloquea respuesta real, no bloquea el refactor.
-- [ ] **Sincronizar `WEBHOOK_SECRET` local** con el de Railway.
+1. **UI polish** — dashboard funcional pero sin diseño fino, refinar con shadcn/ui
+2. **Integraciones** — cablear Chatwoot, Zendesk, Shopify al flujo del agente
 
 ---
 
@@ -347,9 +347,21 @@ Reglas:
 - **Rol `auyan_backend` en Supabase con `NOBYPASSRLS`** — actualmente conectamos con `postgres` (bypass RLS). La defensa multi-tenant depende solo de `WHERE tenant_id = $1` y el GUC por request.
 - **Tests de integración contra Postgres+pgvector real** — hoy todo es unit con mocks.
 - **Integraciones de canales** (`chatwoot.py`, `zendesk.py`, `shopify.py`) son clientes HTTP esqueleto — cablear con el flujo del agente.
-- **CI ausente** — hay `.github/workflows/` vacío. Configurar GitHub Actions con ruff + mypy + pytest sobre cada PR.
+- ~~**CI ausente**~~ → resuelto en sesión 9 ([PR #41](https://github.com/Auyan-ai/platform/pull/41)). GitHub Actions con ruff + pytest + tsc en cada PR.
 - ~~**`.claude/` no está en `.gitignore`**~~ → resuelto en sesión 6 ([PR #12](https://github.com/Auyan-ai/platform/pull/12)).
 - **Errores mypy preexistentes** en `db/models.py`, `db/queries.py`, `db/client.py`, `core/config.py` (14 errors `[type-arg]` y `[no-any-return]`). No bloquean la suite pero ensucian el typecheck.
+
+---
+
+## Sprint 5 — Mejoras al grafo (completado ✅)
+
+Bugs encontrados y corregidos en sesión de pruebas end-to-end (2026-05-16) → [PR #40](https://github.com/Auyan-ai/platform/pull/40):
+
+- **`escalate.py` persiste el mensaje del agente** — el nodo ahora llama `insert_message(role="agent_ai", direction="outbound")` igual que `respond.py`. El mensaje de handoff aparece en el hilo del dashboard.
+
+- **Sin escalaciones duplicadas** — nueva query `get_open_escalation_for_conversation` que detecta escalaciones activas (`pending`/`claimed`). Si ya existe una, el nodo la reutiliza sin crear duplicados.
+
+- Suite: **193/193** verde. Validado en staging con flujo de dos mensajes consecutivos.
 
 ---
 

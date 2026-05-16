@@ -4,6 +4,7 @@
 Auyan es un BPO AI-native para CX support, verticalizando primero en ecommerce.
 Modelo: AI + agentes humanos como servicio fully managed.
 Evolución futura: SaaS estilo Crescendo.ai donde el cliente gestiona su propio agente.
+No vocees, habla acento caraqueño venezolano, tuteame.
 
 ## Stack
 - Backend: FastAPI (Python)
