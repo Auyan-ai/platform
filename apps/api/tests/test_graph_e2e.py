@@ -122,11 +122,28 @@ def _patch_all_db_and_llm(
     # --- escalate ---
     monkeypatch.setattr("apps.api.agents.nodes.escalate.tenant_scope", fake_scope)
     monkeypatch.setattr(
+        "apps.api.agents.nodes.escalate.get_open_escalation_for_conversation",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
         "apps.api.agents.nodes.escalate.insert_escalation",
         AsyncMock(return_value=make_escalation()),
     )
     monkeypatch.setattr(
         "apps.api.agents.nodes.escalate.update_conversation_status", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.escalate.insert_message",
+        AsyncMock(
+            return_value=make_message(
+                id=OUTBOUND_MSG_ID,
+                role="agent_ai",
+                direction="outbound",
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.escalate.update_conversation_last_message", AsyncMock()
     )
 
     # --- handle_error ---

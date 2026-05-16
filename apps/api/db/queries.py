@@ -449,6 +449,27 @@ async def insert_escalation(
     return Escalation(**dict(row))
 
 
+async def get_open_escalation_for_conversation(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> Escalation | None:
+    """Devuelve la escalación activa (pending/claimed) de una conversación, si existe."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, conversation_id, reason,
+               triggered_by_message_id, status, assigned_user_id, metadata, created_at
+          FROM escalations
+         WHERE tenant_id = $1
+           AND conversation_id = $2
+           AND status IN ('pending', 'claimed')
+           AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return None if row is None else Escalation(**dict(row))
+
+
 async def get_escalation(
     conn: asyncpg.Connection, tenant_id: UUID, escalation_id: UUID
 ) -> Escalation | None:
