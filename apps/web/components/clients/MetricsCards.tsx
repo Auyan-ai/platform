@@ -1,6 +1,6 @@
 'use client'
 
-import { useMetrics } from '@/lib/api/hooks/metrics'
+import { useMetrics, type TenantMetrics } from '@/lib/api/hooks/metrics'
 
 interface MetricsCardsProps {
   tenantId: string
