@@ -31,14 +31,21 @@ export default function LoginPage() {
 
     const token = data.session?.access_token
     if (token) {
-      const user = await fetchCurrentUser(token)
-      if (user?.role === 'tenant_admin' && user.tenant_id) {
-        router.push(`/clients/${user.tenant_id}/overview`)
-        return
+      try {
+        const user = await Promise.race([
+          fetchCurrentUser(token),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+        ])
+        if (user?.role === 'tenant_admin' && user.tenant_id) {
+          router.push(`/clients/${user.tenant_id}/overview`)
+          return
+        }
+      } catch {
+        // silently fall through to dashboard
       }
     }
 
-    router.push('/dashboard')
+    router.push('/')
   }
 
   return (
