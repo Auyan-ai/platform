@@ -11,9 +11,11 @@ from tests.conftest import (
     CONVERSATION_ID,
     ESCALATION_ID,
     INBOUND_MSG_ID,
+    OUTBOUND_MSG_ID,
     TENANT_ID,
     make_escalation,
     make_fake_tenant_scope,
+    make_message,
 )
 
 MODULE = "apps.api.agents.nodes.escalate"
@@ -25,6 +27,7 @@ def _state(**overrides) -> dict:
         "conversation_id": str(CONVERSATION_ID),
         "inbound_message_id": str(INBOUND_MSG_ID),
         "escalation_reason": "customer_requested_human",
+        "agent_response": "Te paso con un agente ahora mismo.",
         "confidence": 0.55,
         "model_used": "claude-sonnet-4-6",
         "langfuse_trace_id": "trace-xyz",
@@ -32,14 +35,23 @@ def _state(**overrides) -> dict:
     return {**base, **overrides}
 
 
+def _mock_no_existing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        f"{MODULE}.get_open_escalation_for_conversation", AsyncMock(return_value=None)
+    )
+
+
 @pytest.mark.asyncio
 async def test_creates_escalation_with_reason(fake_deps, monkeypatch) -> None:
     esc = make_escalation(reason="customer_requested_human")
     insert_mock = AsyncMock(return_value=esc)
-    update_mock = AsyncMock()
+    out_msg = make_message(id=OUTBOUND_MSG_ID, role="agent_ai", direction="outbound")
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    _mock_no_existing(monkeypatch)
     monkeypatch.setattr(f"{MODULE}.insert_escalation", insert_mock)
-    monkeypatch.setattr(f"{MODULE}.update_conversation_status", update_mock)
+    monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
+    monkeypatch.setattr(f"{MODULE}.insert_message", AsyncMock(return_value=out_msg))
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
     node = make_escalate_node(fake_deps)
 
     out = await node(_state())
@@ -53,11 +65,14 @@ async def test_creates_escalation_with_reason(fake_deps, monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_sets_conversation_status_to_escalated(fake_deps, monkeypatch) -> None:
-    insert_mock = AsyncMock(return_value=make_escalation())
     update_mock = AsyncMock()
+    out_msg = make_message(id=OUTBOUND_MSG_ID, role="agent_ai", direction="outbound")
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
-    monkeypatch.setattr(f"{MODULE}.insert_escalation", insert_mock)
+    _mock_no_existing(monkeypatch)
+    monkeypatch.setattr(f"{MODULE}.insert_escalation", AsyncMock(return_value=make_escalation()))
     monkeypatch.setattr(f"{MODULE}.update_conversation_status", update_mock)
+    monkeypatch.setattr(f"{MODULE}.insert_message", AsyncMock(return_value=out_msg))
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
     node = make_escalate_node(fake_deps)
 
     await node(_state())
@@ -69,9 +84,13 @@ async def test_sets_conversation_status_to_escalated(fake_deps, monkeypatch) -> 
 @pytest.mark.asyncio
 async def test_metadata_includes_confidence_and_trace(fake_deps, monkeypatch) -> None:
     insert_mock = AsyncMock(return_value=make_escalation())
+    out_msg = make_message(id=OUTBOUND_MSG_ID, role="agent_ai", direction="outbound")
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    _mock_no_existing(monkeypatch)
     monkeypatch.setattr(f"{MODULE}.insert_escalation", insert_mock)
     monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
+    monkeypatch.setattr(f"{MODULE}.insert_message", AsyncMock(return_value=out_msg))
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
     node = make_escalate_node(fake_deps)
 
     await node(_state())
@@ -86,9 +105,13 @@ async def test_metadata_includes_confidence_and_trace(fake_deps, monkeypatch) ->
 async def test_falls_back_to_unspecified_reason(fake_deps, monkeypatch) -> None:
     """Si por algún motivo no hay escalation_reason, no rompe — usa fallback."""
     insert_mock = AsyncMock(return_value=make_escalation())
+    out_msg = make_message(id=OUTBOUND_MSG_ID, role="agent_ai", direction="outbound")
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    _mock_no_existing(monkeypatch)
     monkeypatch.setattr(f"{MODULE}.insert_escalation", insert_mock)
     monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
+    monkeypatch.setattr(f"{MODULE}.insert_message", AsyncMock(return_value=out_msg))
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
     node = make_escalate_node(fake_deps)
 
     state = _state()
@@ -96,3 +119,91 @@ async def test_falls_back_to_unspecified_reason(fake_deps, monkeypatch) -> None:
     await node(state)
 
     assert insert_mock.await_args.kwargs["reason"] == "unspecified_escalation"
+
+
+@pytest.mark.asyncio
+async def test_persists_agent_response_as_outbound_message(fake_deps, monkeypatch) -> None:
+    """El mensaje de handoff del agente debe guardarse en la DB."""
+    out_msg = make_message(id=OUTBOUND_MSG_ID, role="agent_ai", direction="outbound")
+    insert_msg_mock = AsyncMock(return_value=out_msg)
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    _mock_no_existing(monkeypatch)
+    monkeypatch.setattr(f"{MODULE}.insert_escalation", AsyncMock(return_value=make_escalation()))
+    monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
+    monkeypatch.setattr(f"{MODULE}.insert_message", insert_msg_mock)
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    node = make_escalate_node(fake_deps)
+
+    out = await node(_state())
+
+    insert_msg_mock.assert_awaited_once()
+    kwargs = insert_msg_mock.await_args.kwargs
+    assert kwargs["role"] == "agent_ai"
+    assert kwargs["direction"] == "outbound"
+    assert kwargs["content"] == "Te paso con un agente ahora mismo."
+    assert out["output_message_id"] == str(OUTBOUND_MSG_ID)
+
+
+@pytest.mark.asyncio
+async def test_no_message_inserted_when_response_empty(fake_deps, monkeypatch) -> None:
+    """Si no hay agent_response, no se inserta mensaje — no rompe."""
+    insert_msg_mock = AsyncMock()
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    _mock_no_existing(monkeypatch)
+    monkeypatch.setattr(f"{MODULE}.insert_escalation", AsyncMock(return_value=make_escalation()))
+    monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
+    monkeypatch.setattr(f"{MODULE}.insert_message", insert_msg_mock)
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    node = make_escalate_node(fake_deps)
+
+    out = await node(_state(agent_response=""))
+
+    insert_msg_mock.assert_not_awaited()
+    assert "output_message_id" not in out
+
+
+@pytest.mark.asyncio
+async def test_reuses_existing_open_escalation(fake_deps, monkeypatch) -> None:
+    """Si ya hay una escalación activa, no crea una nueva."""
+    existing_esc = make_escalation(reason="customer_requested_human", status="pending")
+    insert_mock = AsyncMock()
+    update_status_mock = AsyncMock()
+    out_msg = make_message(id=OUTBOUND_MSG_ID, role="agent_ai", direction="outbound")
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.get_open_escalation_for_conversation",
+        AsyncMock(return_value=existing_esc),
+    )
+    monkeypatch.setattr(f"{MODULE}.insert_escalation", insert_mock)
+    monkeypatch.setattr(f"{MODULE}.update_conversation_status", update_status_mock)
+    monkeypatch.setattr(f"{MODULE}.insert_message", AsyncMock(return_value=out_msg))
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    node = make_escalate_node(fake_deps)
+
+    out = await node(_state())
+
+    insert_mock.assert_not_awaited()
+    update_status_mock.assert_not_awaited()
+    assert out["escalation_id"] == str(ESCALATION_ID)
+
+
+@pytest.mark.asyncio
+async def test_claimed_escalation_also_reused(fake_deps, monkeypatch) -> None:
+    """Una escalación ya tomada por un agente (claimed) tampoco genera duplicado."""
+    existing_esc = make_escalation(reason="customer_requested_human", status="claimed")
+    insert_mock = AsyncMock()
+    out_msg = make_message(id=OUTBOUND_MSG_ID, role="agent_ai", direction="outbound")
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.get_open_escalation_for_conversation",
+        AsyncMock(return_value=existing_esc),
+    )
+    monkeypatch.setattr(f"{MODULE}.insert_escalation", insert_mock)
+    monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
+    monkeypatch.setattr(f"{MODULE}.insert_message", AsyncMock(return_value=out_msg))
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    node = make_escalate_node(fake_deps)
+
+    await node(_state())
+
+    insert_mock.assert_not_awaited()
