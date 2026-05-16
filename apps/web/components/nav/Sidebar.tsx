@@ -4,13 +4,18 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { TenantSwitcher } from './TenantSwitcher'
+import { LogoutButton } from './LogoutButton'
 
 const NAV_ITEMS = [
   { label: 'Conversaciones', icon: '💬', section: 'conversations' },
   { label: 'Escalaciones', icon: '🚨', section: 'escalations' },
 ]
 
-export function Sidebar() {
+interface SidebarProps {
+  userEmail?: string
+}
+
+export function Sidebar({ userEmail }: SidebarProps) {
   const pathname = usePathname()
   const tenantMatch = pathname.match(/\/tenants\/([^/]+)/)
   const activeTenantId = tenantMatch?.[1] ?? null
@@ -49,6 +54,8 @@ export function Sidebar() {
             )
           })}
       </nav>
+
+      <LogoutButton email={userEmail} />
     </aside>
   )
 }

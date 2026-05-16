@@ -42,7 +42,7 @@ export default async function ClientsLayout({ children, params }: Props) {
 
   return (
     <div className="flex min-h-screen bg-neutral-50">
-      <ClientSidebar tenantId={user.tenant_id} tenantName={tenantName} />
+      <ClientSidebar tenantId={user.tenant_id} tenantName={tenantName} userEmail={user.email} />
       <main className="ml-60 flex-1 p-8">{children}</main>
     </div>
   )
