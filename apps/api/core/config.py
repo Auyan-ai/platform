@@ -106,7 +106,8 @@ class Settings(BaseSettings):
         # El schema de Supabase usa vector(1536). Cambiar ambos a la vez.
         if v != 1536:
             raise ValueError(
-                "embedding_dimensions debe ser 1536 — el schema de Supabase está fijado a ese tamaño"
+                "embedding_dimensions debe ser 1536 "
+                "— el schema de Supabase está fijado a ese tamaño"
             )
         return v
 

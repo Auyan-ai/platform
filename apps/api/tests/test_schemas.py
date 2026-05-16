@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
-
 from apps.api.agents.schemas import AgentDecisionTool
+from pydantic import ValidationError
 
 
 class TestRespondDecision:

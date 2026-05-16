@@ -5,8 +5,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-
 from apps.api.agents.nodes.retrieve_knowledge import make_retrieve_knowledge_node
+
 from tests.conftest import (
     CONVERSATION_ID,
     CUSTOMER_ID,

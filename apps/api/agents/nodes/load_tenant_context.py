@@ -21,7 +21,7 @@ from apps.api.db.queries import (
 
 
 def make_load_tenant_context_node(
-    deps: AgentDependencies,  # noqa: ARG001 — no se usa, mantiene firma uniforme
+    deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict]]:
     @guarded(name="load_tenant_context")
     async def _node(state: AgentState) -> dict:

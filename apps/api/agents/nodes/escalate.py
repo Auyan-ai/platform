@@ -26,7 +26,7 @@ from apps.api.db.queries import (
 
 
 def make_escalate_node(
-    deps: AgentDependencies,  # noqa: ARG001
+    deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict]]:
     @guarded(name="escalate")
     async def _node(state: AgentState) -> dict:

@@ -19,9 +19,9 @@ from apps.api.agents.state import AgentState
 
 
 def make_finalize_trace_node(
-    deps: AgentDependencies,  # noqa: ARG001
+    deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict]]:
-    async def _node(state: AgentState) -> dict:  # noqa: ARG001
+    async def _node(state: AgentState) -> dict:
         return {}
 
     return _node

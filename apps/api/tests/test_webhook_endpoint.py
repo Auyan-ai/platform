@@ -12,20 +12,16 @@ import hmac
 import json
 from unittest.mock import AsyncMock
 
-import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from apps.api.agents.service import AgentOutcome
 from apps.api.core.config import get_settings
 from apps.api.routers.webhooks import router as webhooks_router
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from tests.conftest import (
-    CONVERSATION_ID,
-    CUSTOMER_ID,
     ESCALATION_ID,
     INBOUND_MSG_ID,
     OUTBOUND_MSG_ID,
-    TENANT_ID,
     FakeSettings,
     make_conversation,
     make_end_customer,

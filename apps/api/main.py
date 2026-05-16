@@ -22,9 +22,6 @@ import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.graph import build_graph
 from apps.api.agents.service import AgentService
@@ -39,6 +36,8 @@ from apps.api.routers.escalations import router as escalations_router
 from apps.api.routers.tenants import router as tenants_router
 from apps.api.routers.users import router as users_router
 from apps.api.routers.webhooks import router as webhooks_router
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

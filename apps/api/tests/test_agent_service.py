@@ -5,8 +5,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from apps.api.agents.service import AgentOutcome, AgentService
+
 from tests.conftest import (
     CONVERSATION_ID,
     CUSTOMER_ID,

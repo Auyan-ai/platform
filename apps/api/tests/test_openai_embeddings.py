@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import openai
 import pytest
-
 from apps.api.integrations.openai_embeddings import get_query_embedding
 
 

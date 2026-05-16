@@ -8,7 +8,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-
 from apps.api.agents.nodes.reason import make_reason_node
 
 

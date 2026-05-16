@@ -10,7 +10,8 @@ from uuid import UUID
 
 from apps.api.core.errors import NotFoundError
 from apps.api.db.models import Tenant, TenantConfiguration
-from apps.api.db.queries import get_tenant_by_id, get_tenant_configuration, get_tenant_metrics as _get_tenant_metrics
+from apps.api.db.queries import get_tenant_by_id, get_tenant_configuration
+from apps.api.db.queries import get_tenant_metrics as _get_tenant_metrics
 
 if TYPE_CHECKING:
     import asyncpg

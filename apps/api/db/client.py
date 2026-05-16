@@ -19,9 +19,8 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 import asyncpg
-from pgvector.asyncpg import register_vector
-
 from apps.api.core.config import get_settings
+from pgvector.asyncpg import register_vector
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

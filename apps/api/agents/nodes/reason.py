@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
-from pydantic import ValidationError
-
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.prompts.builder import (
@@ -24,6 +22,7 @@ from apps.api.agents.schemas import RESPOND_OR_ESCALATE_TOOL, AgentDecisionTool
 from apps.api.agents.state import AgentState
 from apps.api.integrations.anthropic_client import call_claude_with_tool
 from apps.api.integrations.pricing import compute_llm_cost
+from pydantic import ValidationError
 
 
 def make_reason_node(

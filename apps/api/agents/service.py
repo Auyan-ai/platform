@@ -20,9 +20,8 @@ from uuid import UUID
 from apps.api.agents.state import AgentState
 
 if TYPE_CHECKING:
-    from langgraph.graph.state import CompiledStateGraph
-
     from apps.api.integrations.langfuse_client import LangfuseClient
+    from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
 

@@ -14,9 +14,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
-    from openai import AsyncOpenAI
-
     from apps.api.core.config import Settings
+    from openai import AsyncOpenAI
 
 
 @dataclass(frozen=True)

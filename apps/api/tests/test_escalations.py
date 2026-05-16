@@ -12,9 +12,6 @@ from uuid import UUID
 
 import jwt
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from apps.api.core.errors import ConflictError, NotFoundError, register_exception_handlers
 from apps.api.core.security import UserRecord, reset_user_cache
 from apps.api.routers.escalations import router as escalations_router
@@ -23,6 +20,8 @@ from apps.api.tests.conftest import (
     TENANT_ID,
     make_escalation,
 )
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 JWT_SECRET = "test-jwt-secret-for-unit-tests-32b!"
 JWT_ALG = "HS256"
