@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { apiClient } from '@/lib/api/client'
 import { redirect } from 'next/navigation'
+import { fetchCurrentUser } from '@/lib/api/users'
 import type { components } from '@auyan/shared/api-types'
 
 type TenantResponse = components['schemas']['TenantResponse']
@@ -12,6 +13,12 @@ export default async function DashboardPage() {
   } = await supabase.auth.getSession()
 
   if (!session) redirect('/login')
+
+  // Redirect de rol server-side — más confiable que desde el cliente (sin CORS)
+  const currentUser = await fetchCurrentUser(session.access_token)
+  if (currentUser?.role === 'tenant_admin' && currentUser.tenant_id) {
+    redirect(`/clients/${currentUser.tenant_id}/overview`)
+  }
 
   // Smoke test: GET /tenants/me funciona para tenant_admin/tenant_agent.
   // super_admin sin X-Tenant-Id → 403 del API.
