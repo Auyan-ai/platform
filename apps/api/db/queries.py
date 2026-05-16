@@ -588,6 +588,32 @@ async def search_knowledge_chunks(
     return [KnowledgeChunk(**dict(r)) for r in rows]
 
 
+async def get_tenant_metrics(
+    conn: asyncpg.Connection, tenant_id: UUID
+) -> dict[str, int]:
+    """Conteos de conversaciones por status para un tenant.
+
+    Devuelve un dict con claves: total, open, pending, escalated, resolved, closed.
+    Corre dentro del tenant_scope del caller.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT
+            COUNT(*)                                           AS total,
+            COUNT(*) FILTER (WHERE status = 'open')           AS open_count,
+            COUNT(*) FILTER (WHERE status = 'pending')        AS pending_count,
+            COUNT(*) FILTER (WHERE status = 'escalated')      AS escalated_count,
+            COUNT(*) FILTER (WHERE status = 'resolved')       AS resolved_count,
+            COUNT(*) FILTER (WHERE status = 'closed')         AS closed_count
+          FROM conversations
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+        """,
+        tenant_id,
+    )
+    assert row is not None
+    return dict(row)
+
+
 async def list_all_tenants(conn: asyncpg.Connection) -> list[Tenant]:
     """Super-admin: listar todos los tenants activos sin tenant_scope."""
     rows = await conn.fetch(

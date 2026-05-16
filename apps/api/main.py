@@ -37,6 +37,7 @@ from apps.api.integrations.openai_embeddings import build_openai_client
 from apps.api.routers.conversations import router as conversations_router
 from apps.api.routers.escalations import router as escalations_router
 from apps.api.routers.tenants import router as tenants_router
+from apps.api.routers.users import router as users_router
 from apps.api.routers.webhooks import router as webhooks_router
 
 if TYPE_CHECKING:
@@ -93,6 +94,7 @@ app.add_middleware(
 )
 
 app.include_router(webhooks_router)
+app.include_router(users_router)
 app.include_router(tenants_router)
 app.include_router(conversations_router)
 app.include_router(escalations_router)

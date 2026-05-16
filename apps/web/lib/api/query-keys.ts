@@ -7,6 +7,7 @@ export const queryKeys = {
     me: () => ['tenants', 'me'] as const,
     config: () => ['tenants', 'me', 'config'] as const,
     adminList: () => ['tenants', 'admin', 'list'] as const,
+    metrics: (tenantId: string) => ['tenants', tenantId, 'metrics'] as const,
   },
   conversations: {
     list: (tenantId: string, filters?: Record<string, unknown>) =>

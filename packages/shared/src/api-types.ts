@@ -72,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/users/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Identidad del usuario autenticado — role, tenant_id, email */
+        get: operations["get_current_user_users_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/admin/list": {
         parameters: {
             query?: never;
@@ -115,6 +132,23 @@ export interface paths {
         };
         /** Configuración del tenant del caller */
         get: operations["get_my_tenant_config_tenants_me_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Métricas agregadas del tenant — conteos y tasas */
+        get: operations["get_my_tenant_metrics_tenants_me_metrics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -333,6 +367,33 @@ export interface components {
             /** Created At */
             created_at: string | null;
         };
+        /** ConversationStatusCounts */
+        ConversationStatusCounts: {
+            /** Open */
+            open: number;
+            /** Pending */
+            pending: number;
+            /** Escalated */
+            escalated: number;
+            /** Resolved */
+            resolved: number;
+            /** Closed */
+            closed: number;
+        };
+        /** CurrentUserResponse */
+        CurrentUserResponse: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Tenant Id */
+            tenant_id: string | null;
+            /** Role */
+            role: string;
+            /** Email */
+            email: string;
+        };
         /** EscalateBody */
         EscalateBody: {
             /** Reason */
@@ -445,6 +506,16 @@ export interface components {
             extra: {
                 [key: string]: unknown;
             };
+        };
+        /** TenantMetricsResponse */
+        TenantMetricsResponse: {
+            /** Total */
+            total: number;
+            by_status: components["schemas"]["ConversationStatusCounts"];
+            /** Resolution Rate */
+            resolution_rate: number;
+            /** Escalation Rate */
+            escalation_rate: number;
         };
         /** TenantResponse */
         TenantResponse: {
@@ -564,6 +635,26 @@ export interface operations {
             };
         };
     };
+    get_current_user_users_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrentUserResponse"];
+                };
+            };
+        };
+    };
     list_tenants_admin_tenants_admin_list_get: {
         parameters: {
             query?: never;
@@ -633,6 +724,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TenantConfigResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_tenant_metrics_tenants_me_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantMetricsResponse"];
                 };
             };
             /** @description Validation Error */

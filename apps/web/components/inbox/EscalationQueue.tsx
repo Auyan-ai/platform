@@ -51,16 +51,18 @@ function relativeTime(dateStr: string | null | undefined): string {
 
 function EscalationRow({
   esc,
-  tenantId,
+  conversationBasePath,
   onClaim,
   onResolve,
   isActing,
+  readOnly,
 }: {
   esc: EscalationOut
-  tenantId: string
+  conversationBasePath: string
   onClaim: (id: string) => void
   onResolve: (id: string) => void
   isActing: boolean
+  readOnly: boolean
 }) {
   return (
     <div className="flex items-start gap-3 px-4 py-3 hover:bg-neutral-50 transition-colors">
@@ -79,7 +81,7 @@ function EscalationRow({
         <p className="text-sm text-neutral-800 line-clamp-2">{esc.reason}</p>
         <div className="mt-1 flex items-center gap-2 text-xs text-neutral-400">
           <Link
-            href={`/tenants/${tenantId}/conversations/${esc.conversation_id}`}
+            href={`${conversationBasePath}/${esc.conversation_id}`}
             className="hover:text-neutral-700 underline underline-offset-2"
           >
             Ver conversación
@@ -89,27 +91,29 @@ function EscalationRow({
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="shrink-0 flex gap-2">
-        {esc.status === 'pending' && (
-          <button
-            onClick={() => onClaim(esc.id)}
-            disabled={isActing}
-            className="px-3 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-700 disabled:opacity-40"
-          >
-            Tomar
-          </button>
-        )}
-        {esc.status === 'claimed' && (
-          <button
-            onClick={() => onResolve(esc.id)}
-            disabled={isActing}
-            className="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 disabled:opacity-40"
-          >
-            Resolver
-          </button>
-        )}
-      </div>
+      {/* Actions — ocultos en modo read-only */}
+      {!readOnly && (
+        <div className="shrink-0 flex gap-2">
+          {esc.status === 'pending' && (
+            <button
+              onClick={() => onClaim(esc.id)}
+              disabled={isActing}
+              className="px-3 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-700 disabled:opacity-40"
+            >
+              Tomar
+            </button>
+          )}
+          {esc.status === 'claimed' && (
+            <button
+              onClick={() => onResolve(esc.id)}
+              disabled={isActing}
+              className="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 disabled:opacity-40"
+            >
+              Resolver
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -120,7 +124,15 @@ function EscalationRow({
 
 const LIMIT = 50
 
-export function EscalationQueue({ tenantId }: { tenantId: string }) {
+export function EscalationQueue({
+  tenantId,
+  readOnly = false,
+  conversationBasePath,
+}: {
+  tenantId: string
+  readOnly?: boolean
+  conversationBasePath?: string
+}) {
   const [activeStatus, setActiveStatus] = useState<EscalationStatus | 'all'>('pending')
   const [offset, setOffset] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -140,6 +152,8 @@ export function EscalationQueue({ tenantId }: { tenantId: string }) {
 
   const escalations = data?.escalations ?? []
   const hasMore = escalations.length === LIMIT
+  const resolvedConvBasePath =
+    conversationBasePath ?? `/tenants/${tenantId}/conversations`
 
   async function handleClaim(id: string) {
     setError(null)
@@ -204,10 +218,11 @@ export function EscalationQueue({ tenantId }: { tenantId: string }) {
             <EscalationRow
               key={esc.id}
               esc={esc}
-              tenantId={tenantId}
+              conversationBasePath={resolvedConvBasePath}
               onClaim={handleClaim}
               onResolve={handleResolve}
               isActing={isActing}
+              readOnly={readOnly}
             />
           ))}
         </div>

@@ -9,7 +9,7 @@ from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id,
 from apps.api.db.client import bootstrap_connection, tenant_scope
 from apps.api.db.models import ChannelType
 from apps.api.db.queries import list_all_tenants
-from apps.api.services.tenants import get_tenant, get_tenant_config
+from apps.api.services.tenants import get_tenant, get_tenant_config, get_tenant_metrics
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict
 
@@ -42,6 +42,21 @@ class TenantConfigResponse(BaseModel):
     active_channels: list[ChannelType]
     branding: dict
     extra: dict
+
+
+class ConversationStatusCounts(BaseModel):
+    open: int
+    pending: int
+    escalated: int
+    resolved: int
+    closed: int
+
+
+class TenantMetricsResponse(BaseModel):
+    total: int
+    by_status: ConversationStatusCounts
+    resolution_rate: float
+    escalation_rate: float
 
 
 # ----------------------------------------------------------------
@@ -81,3 +96,20 @@ async def get_my_tenant_config(tenant_id: TenantIdDep) -> TenantConfigResponse:
     async with tenant_scope(tenant_id) as conn:
         config = await get_tenant_config(conn, tenant_id)
     return TenantConfigResponse.model_validate(config)
+
+
+@router.get(
+    "/me/metrics",
+    response_model=TenantMetricsResponse,
+    summary="Métricas agregadas del tenant — conteos y tasas",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def get_my_tenant_metrics(tenant_id: TenantIdDep) -> TenantMetricsResponse:
+    async with tenant_scope(tenant_id) as conn:
+        data = await get_tenant_metrics(conn, tenant_id)
+    return TenantMetricsResponse(
+        total=data["total"],  # type: ignore[arg-type]
+        by_status=ConversationStatusCounts(**data["by_status"]),  # type: ignore[arg-type]
+        resolution_rate=data["resolution_rate"],  # type: ignore[arg-type]
+        escalation_rate=data["escalation_rate"],  # type: ignore[arg-type]
+    )

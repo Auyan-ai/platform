@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-15 (sesión 7 — Sprint 3 completo, apps/web desplegado en staging)_
+_Última actualización: 2026-05-16 (sesión 8 — Sprint 4 completo, PR #31 listo para merge)_
 
 ---
 
@@ -272,11 +272,65 @@ Reglas:
 - `auyan-web`: `PORT=3000` como variable de entorno (Railway inyecta 8080 por defecto)
 - `platform` (API): healthcheck path `/health` y restart policy seteados vía dashboard (ya no viene de railway.toml)
 
+---
+
+## Sprint 4 — Dashboard cliente por tenant ([PR #31](https://github.com/Auyan-ai/platform/pull/31))
+
+**Objetivo:** Vista read-only para `tenant_admin` — el cliente observa su soporte sin tener herramientas de agente.
+
+**Estado:** PR listo para merge. Pendiente validación en staging con usuario `tenant_admin` real.
+
+### Sub-PR 4.1 — API (commit e7b23bd)
+
+| Área | Qué se hizo |
+|---|---|
+| `routers/users.py` | `GET /users/me` → `{ user_id, tenant_id, role, email }` — accesible a cualquier rol |
+| `routers/tenants.py` | `GET /tenants/me/metrics` → `{ total, by_status, resolution_rate, escalation_rate }` — solo `tenant_admin` y `super_admin` |
+| `db/queries.py` | `get_tenant_metrics` con COUNT FILTER por status en una sola query |
+| `services/tenants.py` | `get_tenant_metrics` calcula rates en Python |
+| Tests | 7 nuevos — suite total **189 verde** |
+
+### Sub-PR 4.2 — Auth routing + layout cliente (commit 5e2867a)
+
+| Área | Qué se hizo |
+|---|---|
+| `lib/api/users.ts` | `fetchCurrentUser(token)` — helper sin tipos generados, usable en SSR y CSR |
+| `login/page.tsx` | Post-login llama `/users/me`; `tenant_admin` → `/clients/{id}/overview`, otros → `/dashboard` |
+| `app/(clients)/layout.tsx` | RSC: verifica sesión + rol `tenant_admin`, obtiene nombre del tenant, renderiza `ClientSidebar` |
+| `components/clients/ClientSidebar.tsx` | Sidebar con tenant name, nav a Overview / Conversaciones / Escalaciones |
+
+### Sub-PR 4.3 — Overview con métricas (commit f51cf72)
+
+| Área | Qué se hizo |
+|---|---|
+| `lib/api/hooks/metrics.ts` | `useMetrics(tenantId)` → `GET /tenants/me/metrics`, stale 30s / refetch 60s |
+| `components/clients/MetricsCards.tsx` | 4 cards (total, activas, escaladas, resueltas) + 2 stat badges (tasas) con skeleton |
+| `components/clients/RecentConversations.tsx` | Tabla últimas 10 conversaciones con links al detalle cliente |
+| `app/(clients)/[tenantId]/overview/page.tsx` | RSC que compone las dos secciones |
+
+### Sub-PR 4.4 — Vistas read-only (commit ec0a993)
+
+| Área | Qué se hizo |
+|---|---|
+| `ConversationList.tsx` | Prop `basePath?` para controlar destino de links |
+| `ConversationDetail.tsx` | Props `readOnly?` + `backHref?` — oculta Composer si `readOnly=true` |
+| `EscalationQueue.tsx` | Props `readOnly?` + `conversationBasePath?` — oculta botones claim/resolve |
+| Páginas `/clients/[tenantId]/...` | conversations, conversations/[id], escalations — todas reutilizan componentes internos |
+
+### Tipos regenerados (commit 4c5a659)
+
+`api-types.ts` regenerado — incluye `CurrentUserResponse`, `TenantMetricsResponse`, `ConversationStatusCounts`. Hook `useMetrics` migrado a `apiClient` tipado.
+
+### Deuda registrada en Sprint 4
+
+- **Tiempo promedio de respuesta**: requiere cálculo de timestamps de mensajes en API — postergado por bajo volumen de datos.
+
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. **Sprint 4:** dashboard cliente por tenant — vista para que el cliente vea sus conversaciones y métricas
-2. **Deuda UI:** el dashboard funciona pero es feo — refinar diseño con shadcn/ui components
-3. **Deuda CI:** GitHub Actions con ruff + pytest + tsc en cada PR (`.github/workflows/` está vacío)
+1. **Merge PR #31** a develop y triggear deploy Railway del API + web
+2. **Crear usuario `tenant_admin`** en Supabase staging para Lunaria y validar el flujo end-to-end
+3. **Deuda UI:** el dashboard funciona pero es feo — refinar diseño con shadcn/ui components
+4. **Deuda CI:** GitHub Actions con ruff + pytest + tsc en cada PR (`.github/workflows/` está vacío)
 
 ### Bloqueos NO arrastrados de Sprint 1 (siguen pendientes)
 
@@ -305,7 +359,7 @@ Reglas:
 - Integración Zendesk (webhook receiver + API)
 - Integración Shopify (pedidos, cancelaciones, devoluciones)
 - Dashboard interno (`apps/web/app/dashboard/`)
-- Dashboard cliente por tenant (`apps/web/app/clients/`)
+- ~~Dashboard cliente por tenant (`apps/web/app/clients/`)~~ → completado Sprint 4 ([PR #31](https://github.com/Auyan-ai/platform/pull/31))
 - Chat widget embebible (`apps/widget`)
 - WhatsApp vía Twilio o 360dialog
 - Instagram vía Meta API
