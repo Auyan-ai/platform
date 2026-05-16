@@ -5,7 +5,14 @@ import { fetchCurrentUser } from '@/lib/api/users'
 import { apiClient } from '@/lib/api/client'
 import { ClientSidebar } from '@/components/clients/ClientSidebar'
 
-export default async function ClientsLayout({ children }: { children: ReactNode }) {
+interface Props {
+  children: ReactNode
+  params: Promise<{ tenantId: string }>
+}
+
+export default async function ClientsLayout({ children, params }: Props) {
+  const { tenantId: urlTenantId } = await params
+
   const supabase = await createClient()
   const {
     data: { session },
@@ -17,6 +24,12 @@ export default async function ClientsLayout({ children }: { children: ReactNode 
 
   if (!user || user.role !== 'tenant_admin' || !user.tenant_id) {
     redirect('/')
+  }
+
+  // AISLAMIENTO DE TENANT: el tenantId de la URL debe coincidir con el del usuario.
+  // Sin esta verificación, un tenant_admin podría ver datos de otro tenant.
+  if (urlTenantId !== user.tenant_id) {
+    redirect(`/clients/${user.tenant_id}/overview`)
   }
 
   let tenantName = user.tenant_id
