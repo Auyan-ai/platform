@@ -24,4 +24,8 @@ export const queryKeys = {
       ['aops', tenantId, workspace ?? 'production'] as const,
     detail: (tenantId: string, aopId: string) => ['aops', tenantId, aopId] as const,
   },
+  reasoning: {
+    events: (tenantId: string, conversationId: string) =>
+      ['reasoning', tenantId, conversationId] as const,
+  },
 } as const

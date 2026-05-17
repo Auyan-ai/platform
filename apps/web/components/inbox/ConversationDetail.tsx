@@ -9,6 +9,7 @@ import {
   useEscalateMutation,
   useCloseMutation,
 } from '@/lib/api/hooks/conversations'
+import { AgentReasoningPanel } from '@/components/reasoning/AgentReasoningPanel'
 import type { components } from '@auyan/shared/api-types'
 
 type ConversationOut = components['schemas']['ConversationOut']
@@ -242,15 +243,20 @@ export function ConversationDetail({
   tenantId,
   conversationId,
   readOnly = false,
+  maskPII = false,
   backHref,
 }: {
   tenantId: string
   conversationId: string
   readOnly?: boolean
+  maskPII?: boolean
   backHref?: string
 }) {
   const { data, isLoading, isError, error } = useConversation(tenantId, conversationId)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  const isActive =
+    data?.conversation.status === 'open' || data?.conversation.status === 'pending'
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -310,6 +316,16 @@ export function ConversationDetail({
           messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)
         )}
         <div ref={bottomRef} />
+      </div>
+
+      {/* Agent reasoning panel */}
+      <div className="border-t border-neutral-200 px-4 py-3">
+        <AgentReasoningPanel
+          tenantId={tenantId}
+          conversationId={conversationId}
+          isActive={isActive}
+          maskPII={maskPII}
+        />
       </div>
 
       {/* Composer — oculto en modo read-only */}
