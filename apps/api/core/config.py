@@ -93,6 +93,11 @@ class Settings(BaseSettings):
     db_pool_min_size: int = 2
     db_pool_max_size: int = 10
 
+    # --- Cleanup job ---
+    # Intervalo entre ciclos de cierre de conversaciones abandonadas (segundos).
+    # 900 = 15 minutos. Overrideable vía CLEANUP_INTERVAL_SECONDS en entorno.
+    cleanup_interval_seconds: int = 900
+
     @field_validator("rag_min_similarity")
     @classmethod
     def _validate_similarity(cls, v: float) -> float:

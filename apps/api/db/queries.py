@@ -11,6 +11,7 @@ Reglas:
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -646,3 +647,63 @@ async def list_all_tenants(conn: asyncpg.Connection) -> list[Tenant]:
         """,
     )
     return [Tenant(**dict(r)) for r in rows]
+
+
+# ============================================================
+# Lifecycle de conversación — cleanup de abandonadas
+# ============================================================
+
+
+async def get_stale_conversations(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    cutoff: datetime,
+) -> list[tuple[UUID, str, datetime]]:
+    """Retorna (id, channel, last_activity) para conversaciones open/pending
+    cuya última actividad es anterior a `cutoff`.
+
+    Se usa `COALESCE(last_message_at, created_at)` como proxy de actividad para
+    no perder tickets recién creados que aún no tienen mensajes registrados.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT id,
+               channel::text,
+               COALESCE(last_message_at, created_at) AS last_activity
+          FROM conversations
+         WHERE tenant_id = $1
+           AND deleted_at IS NULL
+           AND status IN ('open', 'pending')
+           AND COALESCE(last_message_at, created_at) < $2
+        """,
+        tenant_id,
+        cutoff,
+    )
+    return [(row["id"], row["channel"], row["last_activity"]) for row in rows]
+
+
+async def mark_conversations_abandoned(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_ids: list[UUID],
+) -> int:
+    """Marca conversaciones como `closed_abandoned`. Retorna el nº de filas actualizadas.
+
+    El filtro `status IN ('open', 'pending')` evita doble-cierre si el job
+    corre dos veces en paralelo (race condition en deploys).
+    """
+    result = await conn.execute(
+        """
+        UPDATE conversations
+           SET status     = 'closed_abandoned'::conversation_status,
+               updated_at = now()
+         WHERE tenant_id = $1
+           AND id         = ANY($2::uuid[])
+           AND deleted_at IS NULL
+           AND status IN ('open', 'pending')
+        """,
+        tenant_id,
+        conversation_ids,
+    )
+    # asyncpg devuelve "UPDATE N" como string
+    return int(result.split()[-1])

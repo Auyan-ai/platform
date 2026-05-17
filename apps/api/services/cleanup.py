@@ -1,0 +1,127 @@
+"""Job de limpieza: cierra conversaciones abandonadas por inactividad.
+
+Se ejecuta cada `cleanup_interval_seconds` (default 15 min) como asyncio task
+arrancado en el lifespan de FastAPI. Itera todos los tenants y aplica los
+timeouts por canal definidos en `tenant_configurations.extra.conversation_timeouts`.
+
+Formato de `extra.conversation_timeouts` (segundos):
+    {
+        "conversation_timeouts": {
+            "email":     259200,   # 72 h
+            "chat":      86400,    # 24 h
+            "default":   172800    # 48 h — fallback para canales no definidos
+        }
+    }
+Si un tenant no define `conversation_timeouts`, se usan los defaults del módulo.
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
+
+from apps.api.db.client import bootstrap_connection, tenant_scope
+from apps.api.db.models import TenantConfiguration
+from apps.api.db.queries import (
+    get_stale_conversations,
+    get_tenant_configuration,
+    list_all_tenants,
+    mark_conversations_abandoned,
+)
+
+logger = logging.getLogger(__name__)
+
+# Timeouts por canal (segundos). Overrideable por tenant via extra.conversation_timeouts.
+DEFAULT_TIMEOUTS: dict[str, int] = {
+    "email": 259_200,     # 72 h — email es asíncrono, dar más margen
+    "chat": 86_400,       # 24 h
+    "widget": 86_400,     # 24 h
+    "whatsapp": 172_800,  # 48 h
+    "instagram": 172_800, # 48 h
+    "zendesk": 259_200,   # 72 h
+    "intercom": 259_200,  # 72 h
+    "chatwoot": 172_800,  # 48 h
+    "default": 172_800,   # 48 h — fallback para canales nuevos
+}
+
+
+def _build_cutoffs(
+    config: TenantConfiguration | None,
+    now: datetime,
+) -> tuple[dict[str, datetime], datetime]:
+    """Retorna (cutoffs_por_canal, default_cutoff) con los datetimes de corte.
+
+    Los overrides del tenant se mezclan sobre los defaults del módulo.
+    """
+    overrides: dict[str, int] = {}
+    if config and isinstance(config.extra.get("conversation_timeouts"), dict):
+        overrides = config.extra["conversation_timeouts"]
+
+    merged = {**DEFAULT_TIMEOUTS, **overrides}
+
+    default_cutoff = now - timedelta(seconds=merged.get("default", DEFAULT_TIMEOUTS["default"]))
+    cutoffs = {
+        ch: now - timedelta(seconds=secs)
+        for ch, secs in merged.items()
+        if ch != "default"
+    }
+    return cutoffs, default_cutoff
+
+
+async def _close_abandoned_for_tenant(
+    tenant_id: UUID,
+    config: TenantConfiguration | None,
+) -> int:
+    """Cierra conversaciones abandonadas para un tenant. Retorna el nº cerradas."""
+    now = datetime.now(UTC)
+    channel_cutoffs, default_cutoff = _build_cutoffs(config, now)
+
+    # Pre-filtro SQL: cutoff más permisivo (timeout más corto → datetime más reciente)
+    lenient_cutoff = max(channel_cutoffs.values()) if channel_cutoffs else default_cutoff
+
+    async with tenant_scope(tenant_id) as conn:
+        candidates = await get_stale_conversations(conn, tenant_id, lenient_cutoff)
+        if not candidates:
+            return 0
+
+        # Filtro Python: aplica timeout específico por canal
+        stale_ids = [
+            conv_id
+            for conv_id, channel, last_activity in candidates
+            if last_activity.replace(tzinfo=UTC) < channel_cutoffs.get(channel, default_cutoff)
+        ]
+        if not stale_ids:
+            return 0
+
+        count = await mark_conversations_abandoned(conn, tenant_id, stale_ids)
+
+    return count
+
+
+async def run_abandoned_cleanup() -> dict[str, int]:
+    """Punto de entrada del job: itera todos los tenants y cierra abandonadas.
+
+    Retorna {tenant_slug: conversations_closed} solo para tenants con cierres > 0.
+    Errores por tenant se loguean y no interrumpen los demás tenants.
+    """
+    async with bootstrap_connection() as conn:
+        tenants = await list_all_tenants(conn)
+
+    results: dict[str, int] = {}
+    for tenant in tenants:
+        try:
+            async with bootstrap_connection() as conn:
+                config = await get_tenant_configuration(conn, tenant.id)
+            count = await _close_abandoned_for_tenant(tenant.id, config)
+            if count > 0:
+                results[tenant.slug] = count
+                logger.info(
+                    "abandoned_closed tenant=%s count=%d",
+                    tenant.slug,
+                    count,
+                )
+        except Exception:
+            logger.exception("cleanup_tenant_error tenant=%s", tenant.slug)
+
+    return results

@@ -516,3 +516,108 @@ Trace IDs de referencia:
 
 1. **Sub-PR 6.4** — Lifecycle de conversación: estado `closed_abandoned`, timeouts por canal en `tenant_config`, job de limpieza cada 15 min
 2. **Sprint 7** — AOPs en DB + selector de intent + workspaces prod/staging + UI editor + eval harness
+3. **Sprint 8** — Agent Reasoning UI (ver sección más abajo)
+
+---
+
+## Sprint 8 — Agent Reasoning UI (transparencia del agente)
+
+**Objetivo:** Que los operadores (internos y tenants) puedan ver en tiempo real qué está pensando y haciendo el agente mientras procesa un ticket — sin necesidad de ir a Langfuse.
+
+### Motivación
+
+En los dashboards (interno y tenant) cada ticket tendrá un dropdown colapsable "Agent reasoning" que muestra las fases del agente secuencialmente con un checkmark al completarse, similar a la UI de Sierra/Decagon. Esto da:
+- Observabilidad operativa sin salir del dashboard
+- Contexto inmediato cuando hay que revisar una respuesta
+- Confianza del tenant en que el agente trabajó correctamente
+- Debugging rápido sin tener que buscar trace IDs en Langfuse
+
+### Diseño de la UI
+
+El dropdown muestra tres secciones con ícono propio:
+
+```
+👁  Supervisors          ✓
+    Detect abuse         ✓
+    Observations         ✓
+
+📖  Decisions            ✓
+    [AccessCustomerHistory]   ✓   ← chip expandible con los args JSON
+         { "email": "•••@•••", "orderId": "1234" }
+    Searched [TroubleshootingGuide]  ✓
+
+🔧  Responses            ✓
+    Start troubleshooting  ✓
+```
+
+- Las secciones aparecen en orden mientras el agente trabaja (streaming)
+- Cada ítem tiene checkmark al completarse
+- Los tool calls son chips clickeables que expanden los args (con PII ofuscado en vista tenant)
+- En el dashboard interno se ve el JSON completo; en el dashboard tenant los valores sensibles se enmascaran (`•••`)
+
+### Arquitectura técnica
+
+#### Backend
+
+**1. Tabla nueva: `agent_reasoning_events`**
+```sql
+CREATE TABLE agent_reasoning_events (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   uuid NOT NULL REFERENCES tenants(id),
+  ticket_id   uuid NOT NULL REFERENCES tickets(id),
+  phase       text NOT NULL,          -- 'supervisor' | 'decision' | 'response'
+  event_type  text NOT NULL,          -- 'check' | 'tool_call' | 'tool_result' | 'choice'
+  label       text NOT NULL,          -- texto legible: "Detect abuse", "shopify.get_order_by_email"
+  detail      jsonb,                  -- args del tool call, resultado, etc.
+  status      text NOT NULL DEFAULT 'pending',  -- 'pending' | 'done' | 'error'
+  seq         integer NOT NULL,       -- orden dentro del ticket
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  deleted_at  timestamptz
+);
+```
+
+**2. Emisión de eventos desde los nodos del grafo**
+- Cada nodo llama a `reasoning_tracker.emit(ticket_id, phase, event_type, label, detail)` al iniciar y al terminar
+- `reasoning_tracker` es un servicio liviano que inserta en Supabase (async, no bloquea el grafo)
+- Nodos que emiten:
+  - `load_tenant_context` → fase supervisor: "Load context"
+  - `reason` → fase supervisor: "Observations"; fase decision: cada tool_use que proponga el LLM
+  - `execute_skill` → fase decision: resultado del tool call (done/error)
+  - `respond` → fase response: tipo de respuesta elegida
+  - `escalate` → fase response: "Escalate to human" + razón
+
+**3. API endpoints**
+- `GET /tickets/{ticket_id}/reasoning` — historial completo (REST, para cargar al abrir el dropdown)
+- `GET /tickets/{ticket_id}/reasoning/stream` — SSE para actualizaciones en tiempo real mientras el agente trabaja
+
+#### Frontend (`apps/web`)
+
+**Componentes:**
+- `<AgentReasoningPanel ticket_id>` — contenedor colapsable (toggle dropdown)
+  - `<ReasoningPhase phase label items>` — sección con ícono (Supervisors / Decisions / Responses)
+    - `<ReasoningItem label status>` — fila con checkmark animado
+      - `<ToolCallChip label args masked?>` — chip expandible para tool calls
+
+**Comportamiento:**
+- Panel empieza colapsado; se expande con un click
+- Si el agente sigue activo, se conecta al SSE y agrega ítems en tiempo real con animación
+- Si el ticket ya está cerrado, carga el historial via REST y muestra todo estático
+- En vista tenant: args de tool calls se enmascaran (regex sobre campos `email`, `phone`, `token`, `card`)
+- En vista interna: se ve todo el JSON completo
+
+### Sub-PRs propuestos
+
+| Sub-PR | Qué incluye | Modelo |
+|--------|-------------|--------|
+| 8.1 | Migración SQL `agent_reasoning_events` + `ReasoningTracker` service + emisión desde nodos + tests | Sonnet |
+| 8.2 | Endpoint REST + SSE `/reasoning` y `/reasoning/stream` + tests de integración | Sonnet |
+| 8.3 | Componentes React: `AgentReasoningPanel`, `ReasoningPhase`, `ReasoningItem`, `ToolCallChip` + Storybook | Sonnet |
+| 8.4 | Integración en `TicketDetail` (dashboard interno) + `ClientTicketDetail` (dashboard tenant) con PII masking | Sonnet |
+
+### Criterio de éxito
+
+- Abrir un ticket en el dashboard y ver, en tiempo real, las fases del agente completándose con checkmarks
+- Al expandir un chip de tool call, ver los argumentos (enmascarados en vista tenant)
+- Sin impacto en latencia del agente (la emisión es async fire-and-forget)
+- Sin acceso cruzado: tenant A no ve razonamientos de tenant B (RLS en `agent_reasoning_events`)

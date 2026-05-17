@@ -16,7 +16,9 @@ from pydantic import BaseModel, ConfigDict, Field
 # Enums espejados desde supabase/migrations/20260513000000_initial_schema.sql
 MessageRole = Literal["customer", "agent_ai", "agent_human", "system"]
 MessageDirection = Literal["inbound", "outbound"]
-ConversationStatus = Literal["open", "pending", "resolved", "escalated", "closed"]
+ConversationStatus = Literal[
+    "open", "pending", "resolved", "escalated", "closed", "closed_abandoned"
+]
 EscalationStatus = Literal["pending", "claimed", "resolved"]
 ChannelType = Literal[
     "email", "chat", "widget", "whatsapp", "instagram", "zendesk", "intercom", "chatwoot"
