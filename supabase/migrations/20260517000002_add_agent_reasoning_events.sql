@@ -29,7 +29,7 @@ CREATE INDEX idx_reasoning_events_conv_seq
     ON agent_reasoning_events(conversation_id, seq)
     WHERE deleted_at IS NULL;
 
--- Función trigger para updated_at automático
+-- Función trigger para updated_at automático (set_updated_at vive en public)
 CREATE TRIGGER trg_reasoning_events_updated_at
     BEFORE UPDATE ON agent_reasoning_events
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
