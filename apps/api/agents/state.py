@@ -58,3 +58,22 @@ class AgentState(TypedDict, total=False):
 
     # --- Control de flujo: si está poblado, el grafo rutea a handle_error ---
     error: str | None
+
+    # --- ReAct loop (Sprint 6.3+) ---
+    # pending_tool_call: lo setea reason cuando el LLM pidió una skill.
+    # execute_skill lo consume, ejecuta y lo limpia.
+    # Estructura: {"id": str, "slug": str, "input": dict}
+    pending_tool_call: dict | None
+
+    # tool_results: historial acumulado de skill executions en este turno.
+    # Cada entry: {"id", "slug", "input", "output", "is_error", "error"}.
+    # reason lo lee para reconstruir el contexto multi-turn de Anthropic.
+    tool_results: list[dict]
+
+    # Contadores del loop ReAct.
+    tool_iterations: int
+    max_tool_iterations: int
+
+    # Skills habilitadas para este turno (lo setea select_aop en Sprint 7).
+    # Lista vacía = ninguna skill permitida (fail-safe).
+    allowed_skills: list[str]
