@@ -1,0 +1,39 @@
+"""Skill L1: busca información de productos en Shopify."""
+
+from __future__ import annotations
+
+from apps.api.integrations.shopify import ShopifyClient
+from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
+from apps.api.skills.registry import SkillRegistry
+from apps.api.skills.shopify._models import ProductSummary, map_product_summary
+
+
+class GetProductInfoInput(SkillInput):
+    query: str  # nombre o keyword del producto
+
+
+class GetProductInfoOutput(SkillOutput):
+    products: list[ProductSummary]
+    total_found: int
+
+
+@SkillRegistry.register
+class GetProductInfo(Skill):
+    slug = "shopify.get_product_info"
+    description = (
+        "Busca productos activos en Shopify por nombre o keyword. "
+        "Devuelve título, tipo, variantes (precio, disponibilidad) y descripción."
+    )
+    tier: SkillTier = "L1"
+    input_schema = GetProductInfoInput
+    output_schema = GetProductInfoOutput
+    default_threshold = 0.70
+
+    async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
+        assert isinstance(inputs, GetProductInfoInput)
+        if not ctx.shopify_domain or not ctx.shopify_token:
+            raise ValueError("shopify_not_configured")
+        shopify = ShopifyClient(ctx.shopify_domain, ctx.shopify_token)
+        raw_products = await shopify.search_products(inputs.query)
+        products = [map_product_summary(p) for p in raw_products]
+        return GetProductInfoOutput(products=products, total_found=len(products))

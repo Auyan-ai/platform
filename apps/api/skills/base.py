@@ -27,14 +27,13 @@ class SkillOutput(BaseModel):
 
 @dataclass(frozen=True)
 class SkillContext:
-    """Contexto inmutable que el grafo pasa a cada skill al ejecutar.
-
-    Sprint 6.1: solo IDs universales.
-    Sprint 6.3+: agregar credenciales de integración (shopify_domain, shopify_token, etc.)
-    """
+    """Contexto inmutable que el grafo pasa a cada skill al ejecutar."""
 
     tenant_id: str
     conversation_id: str
+    # Credenciales Shopify — presentes solo si el tenant tiene integración Shopify
+    shopify_domain: str | None = None
+    shopify_token: str | None = None
 
 
 class Skill(ABC):

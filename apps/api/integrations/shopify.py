@@ -1,3 +1,11 @@
+"""Cliente HTTP para la Admin REST API de Shopify.
+
+Cubre las operaciones L1 (read-only) de Sprint 6.
+Las operaciones L2/L3 (write) se agregan en Sprints 9-10.
+"""
+
+from __future__ import annotations
+
 import logging
 from typing import Any
 
@@ -5,46 +13,146 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+_API_VERSION = "2024-10"
+
 
 class ShopifyClient:
     def __init__(self, shop_domain: str, access_token: str) -> None:
-        self.shop_domain = shop_domain.rstrip("/")
-        self.access_token = access_token
+        self._domain = shop_domain.rstrip("/")
+        self._token = access_token
 
     @property
-    def base_url(self) -> str:
-        return f"https://{self.shop_domain}/admin/api/2024-10"
+    def _base_url(self) -> str:
+        return f"https://{self._domain}/admin/api/{_API_VERSION}"
 
-    def _headers(self) -> dict:
-        return {"X-Shopify-Access-Token": self.access_token, "Content-Type": "application/json"}
+    def _headers(self) -> dict[str, str]:
+        return {
+            "X-Shopify-Access-Token": self._token,
+            "Content-Type": "application/json",
+        }
+
+    # ----------------------------------------------------------------
+    # Orders
+    # ----------------------------------------------------------------
 
     async def get_order(self, order_id: int) -> dict[str, Any]:
+        """Devuelve un pedido por su ID numérico."""
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"{self.base_url}/orders/{order_id}.json",
+                f"{self._base_url}/orders/{order_id}.json",
                 headers=self._headers(),
                 timeout=10,
             )
             response.raise_for_status()
-            return response.json()["order"]
+            return response.json()["order"]  # type: ignore[no-any-return]
 
-    async def get_orders_by_email(self, email: str) -> list[dict[str, Any]]:
+    async def get_order_by_name(self, order_name: str) -> dict[str, Any] | None:
+        """Devuelve el pedido que coincide con el nombre (ej. '#1234' o '1234').
+
+        Normaliza el prefijo '#' automáticamente. Devuelve None si no existe.
+        """
+        if not order_name.startswith("#"):
+            order_name = f"#{order_name}"
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"{self.base_url}/orders.json",
+                f"{self._base_url}/orders.json",
                 headers=self._headers(),
-                params={"email": email, "status": "any", "limit": 10},
+                params={"name": order_name, "status": "any"},
                 timeout=10,
             )
             response.raise_for_status()
-            return response.json()["orders"]
+            orders: list[dict[str, Any]] = response.json()["orders"]
+            return orders[0] if orders else None
+
+    async def get_orders_by_email(
+        self, email: str, *, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """Devuelve hasta `limit` pedidos del email dado (más recientes primero)."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self._base_url}/orders.json",
+                headers=self._headers(),
+                params={"email": email, "status": "any", "limit": limit},
+                timeout=10,
+            )
+            response.raise_for_status()
+            return response.json()["orders"]  # type: ignore[no-any-return]
+
+    # ----------------------------------------------------------------
+    # Products
+    # ----------------------------------------------------------------
+
+    async def search_products(
+        self, query: str, *, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """Busca productos activos por título/keyword."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self._base_url}/products.json",
+                headers=self._headers(),
+                params={"title": query, "limit": limit, "status": "active"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            return response.json()["products"]  # type: ignore[no-any-return]
+
+    # ----------------------------------------------------------------
+    # Customers
+    # ----------------------------------------------------------------
+
+    async def get_customer_by_email(self, email: str) -> dict[str, Any] | None:
+        """Busca un customer por email. Devuelve None si no existe."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self._base_url}/customers/search.json",
+                headers=self._headers(),
+                params={"query": f"email:{email}", "limit": 1},
+                timeout=10,
+            )
+            response.raise_for_status()
+            customers: list[dict[str, Any]] = response.json()["customers"]
+            return customers[0] if customers else None
+
+    async def get_orders_by_customer_id(
+        self, customer_id: int, *, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """Devuelve hasta `limit` pedidos de un customer por su ID."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self._base_url}/customers/{customer_id}/orders.json",
+                headers=self._headers(),
+                params={"status": "any", "limit": limit},
+                timeout=10,
+            )
+            response.raise_for_status()
+            return response.json()["orders"]  # type: ignore[no-any-return]
+
+    # ----------------------------------------------------------------
+    # Shop
+    # ----------------------------------------------------------------
+
+    async def get_policies(self) -> list[dict[str, Any]]:
+        """Devuelve todas las políticas de la tienda."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self._base_url}/policies.json",
+                headers=self._headers(),
+                timeout=10,
+            )
+            response.raise_for_status()
+            return response.json()["policies"]  # type: ignore[no-any-return]
+
+    # ----------------------------------------------------------------
+    # Write (L3 — Sprint 10)
+    # ----------------------------------------------------------------
 
     async def cancel_order(self, order_id: int) -> dict[str, Any]:
+        """Cancela un pedido. Acción L3 — requiere supervisor Opus."""
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{self.base_url}/orders/{order_id}/cancel.json",
+                f"{self._base_url}/orders/{order_id}/cancel.json",
                 headers=self._headers(),
                 timeout=10,
             )
             response.raise_for_status()
-            return response.json()["order"]
+            return response.json()["order"]  # type: ignore[no-any-return]
