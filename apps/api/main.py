@@ -18,10 +18,15 @@ Para correr localmente:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
+# Side-effect import: dispara `@SkillRegistry.register` de cada skill.
+# Sin esto, el grafo arranca con el registry vacío y `execute_skill` siempre
+# devuelve `unknown_skill`.
+import apps.api.skills  # noqa: F401
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.graph import build_graph
 from apps.api.agents.service import AgentService
@@ -36,18 +41,28 @@ from apps.api.routers.escalations import router as escalations_router
 from apps.api.routers.tenants import router as tenants_router
 from apps.api.routers.users import router as users_router
 from apps.api.routers.webhooks import router as webhooks_router
+from apps.api.services.cleanup import run_abandoned_cleanup
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-# Side-effect import: dispara `@SkillRegistry.register` de cada skill.
-# Sin esto, el grafo arranca con el registry vacío y `execute_skill` siempre
-# devuelve `unknown_skill`.
-import apps.api.skills  # noqa: E402, F401, I001
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
+
+
+async def _cleanup_loop(interval_seconds: int) -> None:
+    """Corre `run_abandoned_cleanup` cada `interval_seconds`. Se cancela en shutdown."""
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            results = await run_abandoned_cleanup()
+            if results:
+                logger.info("cleanup_cycle_done results=%s", results)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("cleanup_job_error")
 
 
 @asynccontextmanager
@@ -76,10 +91,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     logger.info("agent_service_ready langfuse_enabled=%s", langfuse.is_enabled)
 
+    cleanup_task = asyncio.create_task(
+        _cleanup_loop(settings.cleanup_interval_seconds),
+        name="abandoned-conversation-cleanup",
+    )
+    logger.info("cleanup_job_started interval_seconds=%d", settings.cleanup_interval_seconds)
+
     try:
         yield
     finally:
         logger.info("shutdown_initiated")
+        cleanup_task.cancel()
+        await asyncio.gather(cleanup_task, return_exceptions=True)
         await langfuse.flush()
         await close_pool()
         logger.info("shutdown_complete")
