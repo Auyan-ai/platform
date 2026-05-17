@@ -49,8 +49,8 @@ def make_load_tenant_context_node(
             "system_prompt": system_prompt,
             "model_used": config.agent_model,
         }
-        # Hooks de loop ReAct (Sprint 6.3+): el tenant puede opt-in a skills
-        # vía tenant_config.extra hasta que select_aop tome posta en Sprint 7.
+        # Fallback sin AOPs: el tenant puede opt-in a skills vía tenant_config.extra.
+        # select_aop (Sprint 7+) sobreescribe estos si el tenant tiene AOPs configurados.
         if isinstance(extra.get("allowed_skills"), list):
             out["allowed_skills"] = list(extra["allowed_skills"])
         if isinstance(extra.get("max_tool_iterations"), int):

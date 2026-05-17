@@ -77,3 +77,19 @@ class AgentState(TypedDict, total=False):
     # Skills habilitadas para este turno (lo setea select_aop en Sprint 7).
     # Lista vacía = ninguna skill permitida (fail-safe).
     allowed_skills: list[str]
+
+    # --- AOP (Sprint 7+) ---
+    # select_aop setea estos campos. Si no están presentes, reason usa el
+    # system_prompt legacy de tenant_prompts (backward compat sin AOPs).
+    aop_slug: str
+    aop_version: int
+    aop_workspace: str
+    intent_confidence: float
+
+    # Control de persistencia del AOP entre turnos.
+    # aop_locked_until_turn: nº de turno hasta el que el AOP está locked (Sprint 9+).
+    # aop_completed_signal: el flujo del AOP terminó, reclasificar en el próximo turno.
+    # pending_intent: slug del intent alternativo detectado por el clasificador.
+    aop_locked_until_turn: int
+    aop_completed_signal: bool
+    pending_intent: str

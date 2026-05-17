@@ -98,6 +98,12 @@ class Settings(BaseSettings):
     # 900 = 15 minutos. Overrideable vía CLEANUP_INTERVAL_SECONDS en entorno.
     cleanup_interval_seconds: int = 900
 
+    # --- Intent classifier (Sprint 7+) ---
+    # Confidence mínima para usar el AOP seleccionado. Por debajo, se usa 'default'.
+    intent_min_confidence: float = 0.60
+    # Modelo para el clasificador de intent. Haiku: rápido y barato para clasificación.
+    intent_classifier_model: str = "claude-haiku-4-5-20251001"
+
     @field_validator("rag_min_similarity")
     @classmethod
     def _validate_similarity(cls, v: float) -> float:
