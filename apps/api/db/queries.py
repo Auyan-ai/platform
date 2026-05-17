@@ -1068,7 +1068,8 @@ async def insert_reasoning_event(
                 0
             )
         )
-        RETURNING id, tenant_id, conversation_id, phase, event_type, label, detail, status, seq, created_at
+        RETURNING id, tenant_id, conversation_id, phase, event_type, label, detail,
+                  status, seq, created_at
         """,
         tenant_id,
         conversation_id,
@@ -1093,7 +1094,8 @@ async def list_reasoning_events(
     """Lista eventos de razonamiento para una conversación, ordenados por seq."""
     rows = await conn.fetch(
         """
-        SELECT id, tenant_id, conversation_id, phase, event_type, label, detail, status, seq, created_at
+        SELECT id, tenant_id, conversation_id, phase, event_type, label, detail,
+               status, seq, created_at
           FROM agent_reasoning_events
          WHERE tenant_id = $1
            AND conversation_id = $2

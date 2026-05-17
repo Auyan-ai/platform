@@ -9,15 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any, ClassVar
 from uuid import UUID
 
 from apps.api.db.client import tenant_scope
 from apps.api.db.models import ReasoningEventType, ReasoningPhase, ReasoningStatus
 from apps.api.db.queries import insert_reasoning_event
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +24,10 @@ class ReasoningTracker:
 
     Instanciar una vez en startup y pasar vía AgentDependencies.
     """
+
+    # Guardamos refs fuertes a las tasks en vuelo para que asyncio no las pueda
+    # recolectar antes de que terminen (ver RUF006). Se limpian solas al terminar.
+    _pending_tasks: ClassVar[set[asyncio.Task[None]]] = set()
 
     def emit(
         self,
@@ -47,7 +48,7 @@ class ReasoningTracker:
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                asyncio.create_task(
+                task = asyncio.create_task(
                     self._insert(
                         tenant_id=UUID(str(tenant_id)),
                         conversation_id=UUID(str(conversation_id)),
@@ -59,6 +60,8 @@ class ReasoningTracker:
                     ),
                     name=f"reasoning_event_{phase}_{event_type}",
                 )
+                self._pending_tasks.add(task)
+                task.add_done_callback(self._pending_tasks.discard)
         except RuntimeError:
             pass  # sin event loop — contexto de test síncrono
 

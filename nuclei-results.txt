@@ -1,0 +1,3 @@
+[swagger-api] [http] [info] https://platform-staging-fdb7.up.railway.app/docs [paths="/docs"]
+[redoc-api-docs] [http] [info] https://platform-staging-fdb7.up.railway.app/redoc
+[openapi] [http] [info] https://platform-staging-fdb7.up.railway.app/openapi.json

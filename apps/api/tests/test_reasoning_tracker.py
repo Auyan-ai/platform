@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
@@ -141,8 +141,8 @@ class TestFakeReasoningTrackerInNodes:
         self, fake_deps: Any, initial_state: dict
     ) -> None:
         from apps.api.agents.nodes.reason import make_reason_node
-        from apps.api.skills.registry import SkillRegistry
         from apps.api.skills.base import Skill, SkillInput, SkillOutput
+        from apps.api.skills.registry import SkillRegistry
 
         class _FakeInput(SkillInput):
             email: str

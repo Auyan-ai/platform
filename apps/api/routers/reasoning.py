@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import TYPE_CHECKING
+from typing import Annotated
 from uuid import UUID
 
 from apps.api.core.errors import ForbiddenError, NotFoundError
@@ -22,12 +22,12 @@ from apps.api.db.queries import get_conversation, list_reasoning_events
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/conversations", tags=["reasoning"])
+
+AuthDep = Annotated[AuthContext, Depends(get_auth_context)]
+TenantIdDep = Annotated[UUID, Depends(get_tenant_id)]
 
 SSE_POLL_INTERVAL = 1.0   # segundos entre polls en el stream SSE
 SSE_MAX_DURATION  = 300   # segundos máximos del stream (5 min)
@@ -51,8 +51,8 @@ async def _get_conversation_or_404(tenant_id: UUID, conversation_id: UUID) -> No
 @router.get("/{conversation_id}/reasoning")
 async def get_reasoning_events(
     conversation_id: UUID,
-    auth: AuthContext = Depends(get_auth_context),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthDep,
+    tenant_id: TenantIdDep,
 ) -> dict:
     """Historial completo de eventos de razonamiento para una conversación."""
     _check_access(auth, tenant_id)
@@ -87,8 +87,8 @@ async def get_reasoning_events(
 async def stream_reasoning_events(
     conversation_id: UUID,
     request: Request,
-    auth: AuthContext = Depends(get_auth_context),
-    tenant_id: UUID = Depends(get_tenant_id),
+    auth: AuthDep,
+    tenant_id: TenantIdDep,
 ) -> StreamingResponse:
     """SSE stream de eventos de razonamiento en tiempo real.
 

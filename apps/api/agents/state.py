@@ -100,7 +100,8 @@ class AgentState(TypedDict, total=False):
     supervisor_verdict: Literal["approve", "reject"]   # resultado del supervisor
     supervisor_reason: str                             # explicación del supervisor
     supervisor_reject_kind: Literal["tactical", "structural"]  # tactical=reintentable
-    supervisor_retried: bool                           # ya se reintentó → si rechaza de nuevo, escala
+    # ya se reintentó → si rechaza de nuevo, escala
+    supervisor_retried: bool
     supervisor_model_used: str                         # qué modelo fue el supervisor
     supervisor_tokens_in: int                          # tokens del supervisor
     supervisor_tokens_out: int                         # tokens del supervisor

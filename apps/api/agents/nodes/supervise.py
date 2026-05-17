@@ -115,8 +115,6 @@ def _build_supervisor_prompt(state: AgentState) -> str:
     aop_slug = state.get("aop_slug", "unknown")
     parts.append(f"## AOP activo: {aop_slug}")
 
-    # Guardrails del AOP (si están disponibles en tenant_config o tool_results)
-    tenant_config = state.get("tenant_config") or {}
     # Los guardrails están compilados en system_prompt; los extraemos de ahí si podemos
     system_prompt = state.get("system_prompt", "")
     if "Reglas NO negociables" in system_prompt:
