@@ -1,6 +1,7 @@
 """Endpoints de AOPs — gestión de Agent Operating Procedures desde el dashboard.
 
 CRUD completo + endpoint de validación (test inmediato / preview del prompt compilado).
+PATCH /aops/{id}/promote — gate de calidad antes de copiar staging → production.
 Todos los endpoints requieren auth y operan sobre el tenant del caller.
 """
 
@@ -18,12 +19,14 @@ from apps.api.db.models import AopWithContent, AopWorkspace, TenantConfiguration
 from apps.api.db.queries import (
     create_aop,
     get_aop_by_id,
+    get_aop_by_slug,
     get_tenant_configuration,
     list_aops,
     save_aop_version,
     soft_delete_aop,
     toggle_aop_active,
 )
+from apps.api.evals.harness import run_eval
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -317,6 +320,7 @@ async def toggle_tenant_aop(
 @router.delete(
     "/{aop_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     summary="Soft-delete de un AOP",
     dependencies=[AdminDep],
 )
@@ -332,6 +336,137 @@ async def delete_tenant_aop(
             )
         await soft_delete_aop(conn, tenant_id=tenant_id, aop_id=aop_id)
     logger.info("aop.deleted tenant=%s aop_id=%s", tenant_id, aop_id)
+
+
+class PromoteAopResponse(BaseModel):
+    """Respuesta del endpoint PATCH /aops/{id}/promote."""
+
+    aop_id: UUID
+    slug: str
+    eval_pass_rate: float
+    eval_passed_fixtures: int
+    eval_total_fixtures: int
+    meets_gate: bool
+    promoted_to_production: bool
+    production_aop_id: UUID | None = None
+    fixture_details: list[dict] = Field(default_factory=list)
+
+
+@router.patch(
+    "/{aop_id}/promote",
+    response_model=PromoteAopResponse,
+    summary="Evalúa el AOP y lo promueve a production si pasa el eval harness",
+    dependencies=[AdminDep],
+)
+async def promote_tenant_aop(
+    aop_id: UUID,
+    tenant_id: TenantIdDep,
+) -> PromoteAopResponse:
+    """Ejecuta el eval harness (fixtures YAML) contra el AOP.
+
+    Si pass_rate >= 80% y hay al menos 1 fixture:
+    - Copia el contenido al AOP de production con el mismo slug (crea o actualiza).
+    - Retorna promoted_to_production=True.
+
+    Si falla el gate (pass_rate < 80% o sin fixtures):
+    - Retorna HTTP 422 con detalles de qué fixtures fallaron.
+    - No modifica el AOP de production.
+    """
+    async with tenant_scope(tenant_id) as conn:
+        aop = await get_aop_by_id(conn, tenant_id, aop_id)
+    if aop is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="aop_not_found")
+
+    # ── 1. Cargar tenant config para compilar ────────────────────────────────
+    async with tenant_scope(tenant_id) as conn:
+        config_row = await get_tenant_configuration(conn, tenant_id)
+    if config_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="tenant_config_not_found",
+        )
+    tenant_config = TenantConfiguration.model_validate(config_row)
+
+    # ── 2. Correr eval harness ───────────────────────────────────────────────
+    eval_result = run_eval(aop, tenant_config)
+
+    fixture_details = [
+        {
+            "name": fr.fixture_name,
+            "passed": fr.passed,
+            "assertions": [
+                {"kind": ar.kind, "passed": ar.passed, "message": ar.message}
+                for ar in fr.assertion_results
+            ],
+        }
+        for fr in eval_result.fixture_results
+    ]
+
+    if not eval_result.meets_gate:
+        reason = (
+            "no_fixtures_found"
+            if eval_result.total_fixtures == 0
+            else f"pass_rate={eval_result.pass_rate:.0%} < 80%"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "eval_gate_failed",
+                "reason": reason,
+                "pass_rate": eval_result.pass_rate,
+                "passed_fixtures": eval_result.passed_fixtures,
+                "total_fixtures": eval_result.total_fixtures,
+                "fixtures": fixture_details,
+            },
+        )
+
+    # ── 3. Promover a production ─────────────────────────────────────────────
+    async with tenant_scope(tenant_id) as conn:
+        prod_aop = await get_aop_by_slug(conn, tenant_id, aop.slug, "production")
+
+        if prod_aop is None:
+            prod_aop = await create_aop(
+                conn,
+                tenant_id=tenant_id,
+                slug=aop.slug,
+                workspace="production",
+                yaml_frontmatter=aop.yaml_frontmatter,
+                body_markdown=aop.body_markdown,
+                raw_source=aop.raw_source,
+                created_by=None,
+            )
+        else:
+            await save_aop_version(
+                conn,
+                tenant_id=tenant_id,
+                aop_id=prod_aop.id,
+                yaml_frontmatter=aop.yaml_frontmatter,
+                body_markdown=aop.body_markdown,
+                raw_source=aop.raw_source,
+                created_by=None,
+            )
+            prod_aop = await get_aop_by_id(conn, tenant_id, prod_aop.id)
+
+    assert prod_aop is not None
+    logger.info(
+        "aop.promoted tenant=%s slug=%s pass_rate=%.2f prod_aop_id=%s",
+        tenant_id,
+        aop.slug,
+        eval_result.pass_rate,
+        prod_aop.id,
+    )
+
+    return PromoteAopResponse(
+        aop_id=aop_id,
+        slug=aop.slug,
+        eval_pass_rate=eval_result.pass_rate,
+        eval_passed_fixtures=eval_result.passed_fixtures,
+        eval_total_fixtures=eval_result.total_fixtures,
+        meets_gate=True,
+        promoted_to_production=True,
+        production_aop_id=prod_aop.id,
+        fixture_details=fixture_details,
+    )
 
 
 @router.post(

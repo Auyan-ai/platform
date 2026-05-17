@@ -1,0 +1,4 @@
+name: "Compila sin errores"
+description: "El AOP debe compilar a un CompiledAOP sin lanzar excepciones"
+assertions:
+  - kind: compile_ok

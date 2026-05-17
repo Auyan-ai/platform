@@ -1,0 +1,10 @@
+name: "No tiene skills destructivas (L3)"
+description: >
+  Un AOP de consulta de envío es de solo lectura. No debe tener acceso a
+  cancel_order ni refund_order — esas acciones son L3 y requieren supervisión.
+assertions:
+  - kind: skills_not_include
+    expected:
+      - shopify.cancel_order
+      - shopify.refund_order
+      - shopify.update_order

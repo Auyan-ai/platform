@@ -1,0 +1,8 @@
+name: "confidence_threshold está en rango válido"
+description: >
+  El campo confidence_threshold debe ser un valor entre 0.0 y 1.0.
+  El AOP default típicamente tiene un threshold bajo (0.40–0.65) porque
+  es el fallback para casos de baja confianza.
+assertions:
+  - kind: confidence_threshold_between
+    expected: [0.0, 1.0]
