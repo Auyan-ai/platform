@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-16 (sesión 9 — pruebas e2e del agente, Sprint 5 completo, CI configurado)_
+_Última actualización: 2026-05-17 (sesión 10 — diseño arquitectural del agente v2: skills + AOPs + supervisor + slow agent; plan multi-sprint 6-14 lockeado)_
 
 ---
 
@@ -365,15 +365,75 @@ Bugs encontrados y corregidos en sesión de pruebas end-to-end (2026-05-16) → 
 
 ---
 
-## Backlog (Sprint 2+)
+## Sesión 10 — Diseño arquitectural agente v2 (2026-05-17)
 
-- Integración Chatwoot bidireccional
-- Integración Zendesk (webhook receiver + API)
-- Integración Shopify (pedidos, cancelaciones, devoluciones)
-- Dashboard interno (`apps/web/app/dashboard/`)
-- ~~Dashboard cliente por tenant (`apps/web/app/clients/`)~~ → completado Sprint 4 ([PR #31](https://github.com/Auyan-ai/platform/pull/31))
+**Sin commits ni código** — sesión de diseño puro. Resultado: [`docs/architecture-agent-v2.md`](architecture-agent-v2.md) (~1500 líneas, 18 secciones).
+
+### Lo que se decidió
+
+Cuatro cambios estructurales sobre el agente actual, inspirados en Sierra (Constellation, Skills) y Decagon (AOPs, Duet):
+
+1. **Skills framework** — cada acción del agente es clase tipada con I/O Pydantic, registrada en registry, con tier L1/L2/L3.
+2. **AOPs (Agent Operating Procedures)** — comportamiento del agente en YAML frontmatter + markdown body, editable runtime desde dashboard. Tools scopeadas por AOP.
+3. **Supervisor pattern** — Sonnet supervisa tools L1/L2, Opus supervisa L3 (acciones financieras).
+4. **Slow agent** — job LLM-as-judge que propone diffs a los AOPs (con sampling + Sonnet first para controlar costo).
+
+### Decisiones lockeadas
+- **AOP storage:** DB con versionado append-only + workspaces (prod/staging). Editor en dashboard interno.
+- **MCP:** Sprint 14+. Primero validar con skills nativos Python.
+- **Supervisor:** Sonnet para L1/L2, Opus para L3, con `reject_kind: tactical | structural` para distinguir reintento vs escalación.
+- **Eval harness:** obligatorio Sprint 7, no opcional. Mínimo 13 fixtures/AOP. Gate de promotion `staging → production`.
+- **PII policy:** pseudonimización con salt por tenant, retención 90d hot / 180d hash. GDPR-ready.
+- **Conversation lifecycle:** estado `closed_abandoned`, timeouts por canal en `tenant_config`, job cada 15min.
+
+### Correcciones post-revisión del user
+- **Math honesta:** removido "90%×90%=99%" (falso por correlación de errores). Apuntamos a 40-60% reducción de errores write, a medir.
+- **Tono fuera del AOP** — vive en `tenant_config.agent_voice`. AOPs solo describen QUÉ hacer.
+- **Multi-intent:** clasificador devuelve top-2 + `ambiguity_detected`. Persistencia del AOP entre turnos con `lock_for_turns`.
+- **Cache invalidation multi-worker:** plan Sprint 9 con Redis pub/sub o Postgres NOTIFY.
+- **Slow agent realista:** sampling (escaladas + L2/L3 + 10% sample), Sonnet first, semanal manual antes de nightly.
+
+### Plan multi-sprint (lockeado en sección 16 del doc)
+
+| Sprint | Foco |
+|---|---|
+| **6** | Skills framework + Shopify read tools L1 + ReAct loop + lifecycle básico |
+| **7** | AOPs en DB + selector de intent + workspaces + UI editor + **eval harness obligatorio** |
+| **8** | Supervisor pattern (Sonnet/Opus por tier) con tactical/structural |
+| **9** | Skills L2 + permissions + audit log con PII + idempotency + cache invalidation |
+| **10** | Skills L3 + human approval mode |
+| **11** | Slow agent skeleton (sampling + Sonnet judge) |
+| **12** | Unified KB + Zendesk bidireccional + reapertura |
+| **13** | Versionado activo + A/B testing |
+| **14+** | MCP server |
+
+### Backlog futuro (no asignado a sprint)
+- Modo proactivo / concierge (carritos abandonados, upsell, recuperación pasivos)
+- WhatsApp (Twilio o 360dialog)
+- Instagram (Meta API)
+- Postmark email canal completo
+- Embedding router pre-filtro al `select_aop`
 - Chat widget embebible (`apps/widget`)
-- WhatsApp vía Twilio o 360dialog
-- Instagram vía Meta API
-- Email inbound vía Postmark
 - Onboarding flow para nuevos tenants
+
+---
+
+## Sprint 6 — Skills framework + Shopify L1 + ReAct loop
+
+### Sub-PR 6.1 — Skills framework (en curso, sesión 11)
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/skills/__init__.py` | Módulo creado |
+| `apps/api/skills/base.py` | `SkillTier`, `SkillInput`, `SkillOutput`, `SkillContext` (frozen dataclass), `Skill` ABC con `slug/description/tier/input_schema/output_schema/requires_idempotency/default_threshold` como ClassVar + `to_anthropic_tool()` + `TIER_THRESHOLDS` |
+| `apps/api/skills/registry.py` | `SkillRegistry` singleton de clase: `register()` (decorator-compatible), `get()`, `list_for_aop()`, `_reset()` para tests |
+| `apps/api/tests/skills/test_base.py` | 25 tests: instanciación, validación I/O, `SkillContext` inmutable, `to_anthropic_tool()` shape/schema/required, `execute()` async |
+| `apps/api/tests/skills/test_registry.py` | 14 tests: registro, lookup, decorador, overwrite, unknown slug, list_for_aop orden/vacío/error |
+
+**Suite total:** 232/232 verde. Ruff limpio.
+
+### Siguiente sesión (Sprint 6.2+)
+
+1. **Sub-PR 6.2** — Shopify read skills L1 (`shopify.get_order_by_email`, `get_order_status`, `get_product_info`, `get_customer_history`, `get_shop_policies`) + `integrations/shopify.py` cliente HTTP real
+2. **Sub-PR 6.3** — Extender `SkillContext` con credenciales Shopify + cablear skills al registry con `@SkillRegistry.register`
+3. **Sub-PR 6.4** — Nodo `execute_skill` en el grafo + loop ReAct (`reason ⇄ execute_skill`)
