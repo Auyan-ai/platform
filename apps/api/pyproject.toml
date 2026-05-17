@@ -69,7 +69,9 @@ select = ["E", "F", "I", "B", "UP", "ASYNC", "S", "RUF"]
 ignore = ["S101"]  # asserts permitidos en tests
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S105", "S106", "E501", "RUF012"]  # secrets y líneas largas en fixtures
+"tests/**" = ["S105", "S106", "S603", "E501", "RUF012"]  # secrets, subprocess en tests, líneas largas
+"evals/**" = ["E501"]  # strings de mensajes de aserción inevitablemente largos
+"scripts/**" = ["E501", "S603"]  # scripts de CLI y utilitarios
 "integrations/pricing.py" = ["RUF003"]  # en-dash y × en comentarios técnicos son intencionales
 
 [tool.mypy]

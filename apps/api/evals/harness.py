@@ -29,7 +29,6 @@ from typing import Any
 from uuid import uuid4
 
 import yaml
-
 from apps.api.aops.compiler import CompiledAOP, compile_aop
 from apps.api.db.models import AopWithContent, TenantConfiguration
 
