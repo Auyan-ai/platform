@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-17 (sesión 12 — Sprint 6 completo: fix registry bootstrap #49 + validación e2e Shopify loop ReAct en staging)_
+_Última actualización: 2026-05-17 (sesión 13 — Sub-PR 6.4 completo: lifecycle closed_abandoned + cleanup job #51 + migración aplicada en staging)_
 
 ---
 
@@ -514,11 +514,28 @@ Trace IDs de referencia:
 
 **Sprint 6 completado ✅** — Skills framework + Shopify L1 + loop ReAct validado e2e en staging.
 
+### Sub-PR 6.4 — Lifecycle de conversación ([PR #51](https://github.com/Auyan-ai/platform/pull/51))
+
+| Área | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260517000000_add_closed_abandoned.sql` | Agrega `closed_abandoned` al enum `conversation_status` — aplicada en staging vía SQL Editor |
+| `apps/api/db/models.py` | `ConversationStatus` extendido con `closed_abandoned` |
+| `apps/api/db/queries.py` | `get_stale_conversations` (pre-filtro SQL con COALESCE) + `mark_conversations_abandoned` (UPDATE idempotente) |
+| `apps/api/services/cleanup.py` | Orquestador: itera tenants, mezcla timeouts por canal (overrideable en `extra.conversation_timeouts`), cierra abandonadas |
+| `apps/api/main.py` | asyncio task `_cleanup_loop` en lifespan — arranca en startup, cancela en shutdown |
+| `apps/api/core/config.py` | `cleanup_interval_seconds` (default 900 = 15 min, overrideable por env) |
+| `apps/api/tests/test_cleanup.py` | 14 tests nuevos |
+
+**Timeouts por canal (defaults):** email/zendesk/intercom → 72h · whatsapp/instagram/chatwoot → 48h · chat/widget → 24h
+
+**Verificado en Railway staging:** log `cleanup_job_started interval_seconds=900` visible en startup ✅
+
+**Suite total:** 331/331 verde. Ruff limpio.
+
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. **Sub-PR 6.4** — Lifecycle de conversación: estado `closed_abandoned`, timeouts por canal en `tenant_config`, job de limpieza cada 15 min
-2. **Sprint 7** — AOPs en DB + selector de intent + workspaces prod/staging + UI editor + eval harness
-3. **Sprint 8** — Agent Reasoning UI (ver sección más abajo)
+1. **Sprint 7** — AOPs en DB + selector de intent + workspaces prod/staging + UI editor + eval harness
+2. **Sprint 8** — Agent Reasoning UI (ver sección más abajo)
 
 ---
 
