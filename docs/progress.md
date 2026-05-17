@@ -432,8 +432,19 @@ Cuatro cambios estructurales sobre el agente actual, inspirados en Sierra (Const
 
 **Suite total:** 232/232 verde. Ruff limpio.
 
-### Siguiente sesión (Sprint 6.2+)
+### Sub-PR 6.2 — Shopify L1 skills + cliente ([PR #44](https://github.com/Auyan-ai/platform/pull/44))
 
-1. **Sub-PR 6.2** — Shopify read skills L1 (`shopify.get_order_by_email`, `get_order_status`, `get_product_info`, `get_customer_history`, `get_shop_policies`) + `integrations/shopify.py` cliente HTTP real
-2. **Sub-PR 6.3** — Extender `SkillContext` con credenciales Shopify + cablear skills al registry con `@SkillRegistry.register`
-3. **Sub-PR 6.4** — Nodo `execute_skill` en el grafo + loop ReAct (`reason ⇄ execute_skill`)
+| Área | Qué se hizo |
+|---|---|
+| `skills/base.py` | `SkillContext` extendido con `shopify_domain` y `shopify_token` opcionales (backward compatible) |
+| `integrations/shopify.py` | Reescrito: `get_order`, `get_order_by_name`, `get_orders_by_email`, `search_products`, `get_customer_by_email`, `get_orders_by_customer_id`, `get_policies`, `cancel_order` (L3 placeholder) |
+| `skills/shopify/_models.py` | Modelos compartidos: `OrderSummary`, `FulfillmentInfo`, `ProductSummary`, `ProductVariant`, `CustomerInfo`, `PolicyInfo` + helpers `first_tracking_url`, `strip_html`, `map_order_summary`, `map_product_summary` |
+| 5 skills L1 | `shopify.get_order_by_email`, `shopify.get_order_status`, `shopify.get_product_info`, `shopify.get_customer_history`, `shopify.get_shop_policies` — todas con `@SkillRegistry.register` |
+| Tests | 39 nuevos (17 cliente httpx mockeado + 22 skills ShopifyClient mockeado) |
+
+**Suite total:** 270/270 verde.
+
+### Siguiente sesión (Sprint 6.3+)
+
+1. **Sub-PR 6.3** — Nodo `execute_skill` en el grafo + loop ReAct básico (`reason ⇄ execute_skill`, max 5 iteraciones)
+2. **Sub-PR 6.4** — Lifecycle de conversación: `closed_abandoned`, timeouts por canal, job de limpieza
