@@ -55,6 +55,18 @@ def make_load_tenant_context_node(
             out["allowed_skills"] = list(extra["allowed_skills"])
         if isinstance(extra.get("max_tool_iterations"), int):
             out["max_tool_iterations"] = extra["max_tool_iterations"]
+
+        if state.get("conversation_id"):
+            deps.reasoning_tracker.emit(
+                tenant_id=state["tenant_id"],
+                conversation_id=state["conversation_id"],
+                phase="supervisor",
+                event_type="check",
+                label="Load context",
+                detail={"model": config.agent_model, "tenant": tenant.slug},
+                status="done",
+            )
+
         return out
 
     return _node

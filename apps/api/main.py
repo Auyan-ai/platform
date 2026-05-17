@@ -39,10 +39,12 @@ from apps.api.integrations.openai_embeddings import build_openai_client
 from apps.api.routers.aops import router as aops_router
 from apps.api.routers.conversations import router as conversations_router
 from apps.api.routers.escalations import router as escalations_router
+from apps.api.routers.reasoning import router as reasoning_router
 from apps.api.routers.tenants import router as tenants_router
 from apps.api.routers.users import router as users_router
 from apps.api.routers.webhooks import router as webhooks_router
 from apps.api.services.cleanup import run_abandoned_cleanup
+from apps.api.services.reasoning import ReasoningTracker
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -83,7 +85,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     openai = build_openai_client(settings.openai_api_key.get_secret_value())
     langfuse = build_langfuse_client(settings)
 
-    deps = AgentDependencies(anthropic=anthropic, openai=openai, settings=settings)
+    reasoning_tracker = ReasoningTracker()
+    deps = AgentDependencies(
+        anthropic=anthropic,
+        openai=openai,
+        settings=settings,
+        reasoning_tracker=reasoning_tracker,
+    )
     graph = build_graph(deps)
     service = AgentService(graph=graph, langfuse=langfuse)
 
@@ -127,6 +135,7 @@ app.include_router(tenants_router)
 app.include_router(conversations_router)
 app.include_router(escalations_router)
 app.include_router(aops_router)
+app.include_router(reasoning_router)
 
 
 @app.get("/health", tags=["health"])

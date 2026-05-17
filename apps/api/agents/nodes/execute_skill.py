@@ -68,11 +68,8 @@ def _error_entry(
 def make_execute_skill_node(
     deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict[str, Any]]]:
-    # deps no se usa hoy — mantenemos la firma uniforme con los otros nodos
-    # del grafo (load_tenant_context, reason, etc.) para que build_graph los
-    # cablée de la misma manera. Cuando agreguemos audit logging (Sprint 9),
-    # deps.langfuse u otras dependencias entrarán acá.
-    del deps
+    tracker = deps.reasoning_tracker
+
     @guarded(name="execute_skill")
     async def _node(state: AgentState) -> dict[str, Any]:
         pending = state.get("pending_tool_call")
@@ -155,25 +152,45 @@ def make_execute_skill_node(
                     "error_type": type(exc).__name__,
                 },
             )
+            error_msg = f"skill_failed: {type(exc).__name__}: {exc!s}"
+            if state.get("conversation_id") and state.get("tenant_id"):
+                tracker.emit(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    phase="decision",
+                    event_type="tool_result",
+                    label=slug,
+                    detail={"error": error_msg},
+                    status="error",
+                )
             return _append_and_finish(
                 _error_entry(
                     tool_use_id=tool_use_id,
                     slug=slug,
                     raw_input=raw_input,
-                    error=f"skill_failed: {type(exc).__name__}: {exc!s}",
+                    error=error_msg,
                 )
             )
 
         # 5) Éxito.
-        return _append_and_finish(
-            {
-                "id": tool_use_id,
-                "slug": slug,
-                "input": raw_input,
-                "output": output.model_dump(mode="json"),
-                "is_error": False,
-                "error": None,
-            }
-        )
+        result_entry = {
+            "id": tool_use_id,
+            "slug": slug,
+            "input": raw_input,
+            "output": output.model_dump(mode="json"),
+            "is_error": False,
+            "error": None,
+        }
+        if state.get("conversation_id") and state.get("tenant_id"):
+            tracker.emit(
+                tenant_id=state["tenant_id"],
+                conversation_id=state["conversation_id"],
+                phase="decision",
+                event_type="tool_result",
+                label=slug,
+                detail={"output": result_entry["output"]},
+                status="done",
+            )
+        return _append_and_finish(result_entry)
 
     return _node

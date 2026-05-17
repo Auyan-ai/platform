@@ -144,6 +144,8 @@ def _handle_decide_tool(
 def make_reason_node(
     deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict[str, Any]]]:
+    tracker = deps.reasoning_tracker
+
     @guarded(name="reason")
     async def _node(state: AgentState) -> dict[str, Any]:
         system_prompt = build_system_prompt(
@@ -191,10 +193,29 @@ def make_reason_node(
         }
 
         tool_name: str = tool_block.name
+        conv_id = state.get("conversation_id")
+        tenant_id = state.get("tenant_id")
 
         # ¿Decide tool o skill tool?
         if tool_name == DECIDE_TOOL_NAME:
-            return _handle_decide_tool(tool_block.input, state, tokens_update)
+            result = _handle_decide_tool(tool_block.input, state, tokens_update)
+            # Emitir evento de decisión final (respond o escalate)
+            if conv_id and tenant_id and not result.get("error"):
+                decision = result.get("decision", "unknown")
+                tracker.emit(
+                    tenant_id=tenant_id,
+                    conversation_id=conv_id,
+                    phase="response",
+                    event_type="choice",
+                    label=f"Decision: {decision}",
+                    detail={
+                        "decision": decision,
+                        "confidence": result.get("confidence"),
+                        "escalation_reason": result.get("escalation_reason"),
+                    },
+                    status="done",
+                )
+            return result
 
         # Skill tool — mapear name → slug y emitir pending_tool_call.
         slug = _slug_from_anthropic_name(tool_name, allowed_skills)
@@ -203,6 +224,18 @@ def make_reason_node(
                 "error": f"llm_chose_unknown_tool: {tool_name}",
                 **tokens_update,
             }
+
+        # Emitir evento de tool_call antes de ejecutar
+        if conv_id and tenant_id:
+            tracker.emit(
+                tenant_id=tenant_id,
+                conversation_id=conv_id,
+                phase="decision",
+                event_type="tool_call",
+                label=slug,
+                detail={"input": tool_block.input},
+                status="pending",
+            )
 
         return {
             "pending_tool_call": {

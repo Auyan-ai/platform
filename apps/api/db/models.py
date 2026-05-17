@@ -158,3 +158,23 @@ class IntentClassifierRun(_BaseModel):
     was_reclassification: bool
     human_correction: str | None = None
     created_at: datetime
+
+
+# ─── Agent Reasoning Events (Sprint 8) ───────────────────────────────────────
+
+ReasoningPhase = Literal["supervisor", "decision", "response"]
+ReasoningEventType = Literal["check", "tool_call", "tool_result", "choice"]
+ReasoningStatus = Literal["pending", "done", "error"]
+
+
+class AgentReasoningEvent(_BaseModel):
+    id: UUID
+    tenant_id: UUID
+    conversation_id: UUID
+    phase: ReasoningPhase
+    event_type: ReasoningEventType
+    label: str
+    detail: dict | None = None
+    status: ReasoningStatus
+    seq: int
+    created_at: datetime
