@@ -46,24 +46,24 @@ class ReasoningTracker:
         Si no hay event loop activo (tests síncronos), lo ignora silenciosamente.
         """
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                task = asyncio.create_task(
-                    self._insert(
-                        tenant_id=UUID(str(tenant_id)),
-                        conversation_id=UUID(str(conversation_id)),
-                        phase=phase,
-                        event_type=event_type,
-                        label=label,
-                        detail=detail,
-                        status=status,
-                    ),
-                    name=f"reasoning_event_{phase}_{event_type}",
-                )
-                self._pending_tasks.add(task)
-                task.add_done_callback(self._pending_tasks.discard)
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            pass  # sin event loop — contexto de test síncrono
+            return  # sin event loop activo — contexto de test síncrono
+
+        task = loop.create_task(
+            self._insert(
+                tenant_id=UUID(str(tenant_id)),
+                conversation_id=UUID(str(conversation_id)),
+                phase=phase,
+                event_type=event_type,
+                label=label,
+                detail=detail,
+                status=status,
+            ),
+            name=f"reasoning_event_{phase}_{event_type}",
+        )
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
 
     async def _insert(
         self,
