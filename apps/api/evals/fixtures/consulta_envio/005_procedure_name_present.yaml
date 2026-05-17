@@ -1,0 +1,7 @@
+name: "El frontmatter tiene nombre del procedimiento"
+description: >
+  El campo 'name' en el frontmatter es obligatorio para el AOP editor y para
+  que compile_aop incluya el nombre en el bloque de procedimiento del system prompt.
+assertions:
+  - kind: frontmatter_has_key
+    expected: name

@@ -1,0 +1,7 @@
+name: "Todas las skills tienen tool definitions registradas"
+description: >
+  Cada slug en allowed_skills debe estar registrado en SkillRegistry para que
+  compile_aop genere su tool definition. Si hay slugs no registrados, el agente
+  puede intentar llamar herramientas que no existen en runtime.
+assertions:
+  - kind: tool_count_matches_skills

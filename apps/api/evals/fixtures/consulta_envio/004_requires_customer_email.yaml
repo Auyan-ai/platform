@@ -1,0 +1,9 @@
+name: "El prompt menciona que se requiere el email del cliente"
+description: >
+  Para buscar pedidos en Shopify se necesita el email del cliente.
+  El system prompt debe indicar este requerimiento para que el agente lo pida
+  si no lo tiene.
+assertions:
+  - kind: prompt_contains
+    expected:
+      - email

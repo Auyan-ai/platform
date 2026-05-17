@@ -78,6 +78,15 @@ def _patch_all_db_and_llm(
         AsyncMock(return_value=[make_message(content="¿envíos a Argentina?")]),
     )
 
+    # --- select_aop: no-op (tenant sin AOPs → degradación elegante al prompt legacy) ---
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.select_aop.tenant_scope", fake_scope
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.select_aop.load_active_aops",
+        AsyncMock(return_value=[]),
+    )
+
     # --- retrieve_knowledge ---
     monkeypatch.setattr(
         "apps.api.agents.nodes.retrieve_knowledge.tenant_scope", fake_scope

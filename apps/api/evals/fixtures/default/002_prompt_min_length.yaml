@@ -1,0 +1,8 @@
+name: "System prompt no está vacío"
+description: >
+  El AOP default es el fallback universal. Su system prompt debe tener
+  suficiente contenido para guiar al agente aunque no haya un procedimiento
+  específico — al menos la identidad del agente y las reglas globales.
+assertions:
+  - kind: prompt_min_length
+    expected: 50

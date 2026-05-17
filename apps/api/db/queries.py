@@ -16,12 +16,16 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from apps.api.db.models import (
+    AopVersion,
+    AopWithContent,
+    AopWorkspace,
     ChannelType,
     Conversation,
     ConversationStatus,
     EndCustomer,
     Escalation,
     EscalationStatus,
+    IntentClassifierRun,
     KnowledgeChunk,
     Message,
     MessageDirection,
@@ -707,3 +711,319 @@ async def mark_conversations_abandoned(
     )
     # asyncpg devuelve "UPDATE N" como string
     return int(result.split()[-1])
+
+
+# ============================================================
+# AOPs — Agent Operating Procedures
+# ============================================================
+
+
+def _row_to_aop_with_content(row: asyncpg.Record) -> AopWithContent:
+    data = dict(row)
+    data["yaml_frontmatter"] = dict(data["yaml_frontmatter"])
+    return AopWithContent(**data)
+
+
+async def get_active_aops(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    workspace: AopWorkspace = "production",
+) -> list[AopWithContent]:
+    """Catálogo de AOPs activos para un tenant+workspace.
+
+    Usado por select_aop para construir la lista de slugs/descriptions
+    que se le pasa al clasificador de intent.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT a.id, a.tenant_id, a.slug, a.workspace, a.current_version, a.is_active,
+               v.yaml_frontmatter, v.body_markdown, v.raw_source
+          FROM aops a
+          JOIN aop_versions v
+            ON v.aop_id = a.id AND v.version = a.current_version
+               AND v.tenant_id = a.tenant_id
+         WHERE a.tenant_id = $1
+           AND a.workspace = $2
+           AND a.is_active = true
+           AND a.deleted_at IS NULL
+         ORDER BY a.slug
+        """,
+        tenant_id,
+        workspace,
+    )
+    return [_row_to_aop_with_content(r) for r in rows]
+
+
+async def get_aop_by_slug(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    slug: str,
+    workspace: AopWorkspace = "production",
+) -> AopWithContent | None:
+    """AOP con su contenido actual para un slug específico."""
+    row = await conn.fetchrow(
+        """
+        SELECT a.id, a.tenant_id, a.slug, a.workspace, a.current_version, a.is_active,
+               v.yaml_frontmatter, v.body_markdown, v.raw_source
+          FROM aops a
+          JOIN aop_versions v
+            ON v.aop_id = a.id AND v.version = a.current_version
+               AND v.tenant_id = a.tenant_id
+         WHERE a.tenant_id = $1
+           AND a.slug = $2
+           AND a.workspace = $3
+           AND a.is_active = true
+           AND a.deleted_at IS NULL
+        """,
+        tenant_id,
+        slug,
+        workspace,
+    )
+    return None if row is None else _row_to_aop_with_content(row)
+
+
+async def create_aop(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    slug: str,
+    workspace: AopWorkspace,
+    yaml_frontmatter: dict,
+    body_markdown: str,
+    raw_source: str,
+    created_by: UUID | None = None,
+) -> AopWithContent:
+    """Crea un AOP con su versión inicial (version=1). Operación en dos pasos dentro
+    de la transacción del caller.
+
+    Levanta `asyncpg.UniqueViolationError` si ya existe un AOP con el mismo
+    (tenant_id, slug, workspace).
+    """
+    import json
+
+    aop_row = await conn.fetchrow(
+        """
+        INSERT INTO aops (tenant_id, slug, workspace, current_version, is_active)
+        VALUES ($1, $2, $3, 1, true)
+        RETURNING id, tenant_id, slug, workspace, current_version
+        """,
+        tenant_id,
+        slug,
+        workspace,
+    )
+    assert aop_row is not None
+    aop_id = aop_row["id"]
+
+    await conn.execute(
+        """
+        INSERT INTO aop_versions
+               (aop_id, tenant_id, version, yaml_frontmatter, body_markdown, raw_source, created_by)
+        VALUES ($1, $2, 1, $3::jsonb, $4, $5, $6)
+        """,
+        aop_id,
+        tenant_id,
+        json.dumps(yaml_frontmatter),
+        body_markdown,
+        raw_source,
+        created_by,
+    )
+
+    result = await get_aop_by_slug(conn, tenant_id, slug, workspace)
+    assert result is not None
+    return result
+
+
+async def save_aop_version(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    aop_id: UUID,
+    yaml_frontmatter: dict,
+    body_markdown: str,
+    raw_source: str,
+    created_by: UUID | None = None,
+) -> AopVersion:
+    """Añade una nueva versión al AOP y actualiza current_version.
+
+    Usa la versión actual del AOP como base para el número de versión nuevo.
+    El caller debe estar dentro de una transacción para garantizar atomicidad.
+    """
+    import json
+
+    version_row = await conn.fetchrow(
+        """
+        INSERT INTO aop_versions
+               (aop_id, tenant_id, version, yaml_frontmatter, body_markdown, raw_source, created_by)
+        SELECT $1, $2, current_version + 1, $3::jsonb, $4, $5, $6
+          FROM aops
+         WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+        RETURNING id, aop_id, tenant_id, version, yaml_frontmatter, body_markdown,
+                  raw_source, created_by, created_at
+        """,
+        aop_id,
+        tenant_id,
+        json.dumps(yaml_frontmatter),
+        body_markdown,
+        raw_source,
+        created_by,
+    )
+    if version_row is None:
+        raise ValueError(f"AOP {aop_id} no encontrado para tenant {tenant_id}")
+
+    await conn.execute(
+        """
+        UPDATE aops
+           SET current_version = current_version + 1
+         WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+        """,
+        aop_id,
+        tenant_id,
+    )
+
+    data = dict(version_row)
+    data["yaml_frontmatter"] = dict(data["yaml_frontmatter"])
+    return AopVersion(**data)
+
+
+# ============================================================
+# Intent classifier runs
+# ============================================================
+
+
+async def insert_intent_classifier_run(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    turn_number: int,
+    primary_slug: str,
+    primary_confidence: float,
+    alternative_slug: str | None = None,
+    alternative_confidence: float | None = None,
+    ambiguity_detected: bool,
+    was_reclassification: bool,
+) -> IntentClassifierRun:
+    """Registra una ejecución del clasificador de intent. Siempre se persiste, incluso
+    cuando se cae al AOP 'default' — eso es exactamente lo que queremos auditar.
+    """
+    row = await conn.fetchrow(
+        """
+        INSERT INTO intent_classifier_runs (
+            tenant_id, conversation_id, turn_number,
+            primary_slug, primary_confidence,
+            alternative_slug, alternative_confidence,
+            ambiguity_detected, was_reclassification
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id, tenant_id, conversation_id, turn_number,
+                  primary_slug, primary_confidence::float,
+                  alternative_slug, alternative_confidence::float,
+                  ambiguity_detected, was_reclassification,
+                  human_correction, created_at
+        """,
+        tenant_id,
+        conversation_id,
+        turn_number,
+        primary_slug,
+        primary_confidence,
+        alternative_slug,
+        alternative_confidence,
+        ambiguity_detected,
+        was_reclassification,
+    )
+    assert row is not None
+    return IntentClassifierRun(**dict(row))
+
+
+# ============================================================
+# AOP management queries (dashboard editor)
+# ============================================================
+
+
+async def list_aops(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    workspace: AopWorkspace = "production",
+) -> list[AopWithContent]:
+    """Todos los AOPs del tenant (activos e inactivos), sin deleted.
+
+    Para el dashboard editor — incluye is_active para gestión.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT a.id, a.tenant_id, a.slug, a.workspace, a.current_version, a.is_active,
+               v.yaml_frontmatter, v.body_markdown, v.raw_source
+          FROM aops a
+          JOIN aop_versions v
+            ON v.aop_id = a.id AND v.version = a.current_version
+               AND v.tenant_id = a.tenant_id
+         WHERE a.tenant_id = $1
+           AND a.workspace = $2
+           AND a.deleted_at IS NULL
+         ORDER BY a.slug
+        """,
+        tenant_id,
+        workspace,
+    )
+    return [_row_to_aop_with_content(r) for r in rows]
+
+
+async def get_aop_by_id(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    aop_id: UUID,
+) -> AopWithContent | None:
+    """AOP con contenido actual por UUID. No filtra is_active."""
+    row = await conn.fetchrow(
+        """
+        SELECT a.id, a.tenant_id, a.slug, a.workspace, a.current_version, a.is_active,
+               v.yaml_frontmatter, v.body_markdown, v.raw_source
+          FROM aops a
+          JOIN aop_versions v
+            ON v.aop_id = a.id AND v.version = a.current_version
+               AND v.tenant_id = a.tenant_id
+         WHERE a.id = $1
+           AND a.tenant_id = $2
+           AND a.deleted_at IS NULL
+        """,
+        aop_id,
+        tenant_id,
+    )
+    return None if row is None else _row_to_aop_with_content(row)
+
+
+async def toggle_aop_active(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    aop_id: UUID,
+    is_active: bool,
+) -> None:
+    """Activa o desactiva un AOP sin borrarlo."""
+    await conn.execute(
+        """
+        UPDATE aops
+           SET is_active = $3, updated_at = now()
+         WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+        """,
+        aop_id,
+        tenant_id,
+        is_active,
+    )
+
+
+async def soft_delete_aop(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    aop_id: UUID,
+) -> None:
+    """Soft-delete un AOP — nunca borra la fila ni las versiones."""
+    await conn.execute(
+        """
+        UPDATE aops
+           SET deleted_at = now(), updated_at = now(), is_active = false
+         WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+        """,
+        aop_id,
+        tenant_id,
+    )

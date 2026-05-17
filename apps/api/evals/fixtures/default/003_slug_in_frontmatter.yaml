@@ -1,0 +1,7 @@
+name: "El frontmatter declara el slug"
+description: >
+  El campo 'slug' en el frontmatter debe estar presente. Es el identificador
+  que select_aop usa para cargar este AOP desde el catálogo y para el TTL cache.
+assertions:
+  - kind: frontmatter_has_key
+    expected: slug

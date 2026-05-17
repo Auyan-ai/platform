@@ -36,6 +36,7 @@ from apps.api.db.client import close_pool, init_pool
 from apps.api.integrations.anthropic_client import build_anthropic_client
 from apps.api.integrations.langfuse_client import build_langfuse_client
 from apps.api.integrations.openai_embeddings import build_openai_client
+from apps.api.routers.aops import router as aops_router
 from apps.api.routers.conversations import router as conversations_router
 from apps.api.routers.escalations import router as escalations_router
 from apps.api.routers.tenants import router as tenants_router
@@ -125,6 +126,7 @@ app.include_router(users_router)
 app.include_router(tenants_router)
 app.include_router(conversations_router)
 app.include_router(escalations_router)
+app.include_router(aops_router)
 
 
 @app.get("/health", tags=["health"])

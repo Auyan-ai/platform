@@ -1,12 +1,14 @@
 """Construcción y compilación del grafo de LangGraph.
 
-Diagrama actual (ReAct loop activado en Sprint 6.3):
+Diagrama actual (Sprint 7 — AOPs + ReAct loop):
 
     START
       ↓
     load_tenant_context
       ↓
     load_conversation
+      ↓
+    select_aop          ← clasifica intent → elige AOP → compila system_prompt
       ↓
     retrieve_knowledge
       ↓
@@ -27,6 +29,9 @@ Diagrama actual (ReAct loop activado en Sprint 6.3):
             finalize_trace
                   ↓
                  END
+
+select_aop: si el tenant no tiene AOPs configurados, es no-op (degradación
+elegante al sistema de prompts legacy de tenant_prompts).
 
 Loop ReAct: `reason` puede emitir `pending_tool_call` → `execute_skill` →
 volver a `reason` con `tool_results` poblado. Máximo `max_tool_iterations`
@@ -50,6 +55,7 @@ from apps.api.agents.nodes.load_tenant_context import make_load_tenant_context_n
 from apps.api.agents.nodes.reason import make_reason_node
 from apps.api.agents.nodes.respond import make_respond_node
 from apps.api.agents.nodes.retrieve_knowledge import make_retrieve_knowledge_node
+from apps.api.agents.nodes.select_aop import make_select_aop_node
 from apps.api.agents.state import AgentState
 from langgraph.graph import END, START, StateGraph
 
@@ -91,6 +97,7 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
 
     graph.add_node("load_tenant_context", make_load_tenant_context_node(deps))
     graph.add_node("load_conversation", make_load_conversation_node(deps))
+    graph.add_node("select_aop", make_select_aop_node(deps))
     graph.add_node("retrieve_knowledge", make_retrieve_knowledge_node(deps))
     graph.add_node("reason", make_reason_node(deps))
     graph.add_node("execute_skill", make_execute_skill_node(deps))
@@ -101,7 +108,8 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
 
     graph.add_edge(START, "load_tenant_context")
     graph.add_edge("load_tenant_context", "load_conversation")
-    graph.add_edge("load_conversation", "retrieve_knowledge")
+    graph.add_edge("load_conversation", "select_aop")
+    graph.add_edge("select_aop", "retrieve_knowledge")
     graph.add_edge("retrieve_knowledge", "reason")
 
     graph.add_conditional_edges(

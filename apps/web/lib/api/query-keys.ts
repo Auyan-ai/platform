@@ -19,4 +19,9 @@ export const queryKeys = {
     list: (tenantId: string, filters?: Record<string, unknown>) =>
       ['escalations', tenantId, filters] as const,
   },
+  aops: {
+    list: (tenantId: string, workspace?: string) =>
+      ['aops', tenantId, workspace ?? 'production'] as const,
+    detail: (tenantId: string, aopId: string) => ['aops', tenantId, aopId] as const,
+  },
 } as const

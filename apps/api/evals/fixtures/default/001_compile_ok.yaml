@@ -1,0 +1,4 @@
+name: "Compila sin errores"
+description: "El AOP default debe compilar correctamente como fallback para cualquier intent"
+assertions:
+  - kind: compile_ok

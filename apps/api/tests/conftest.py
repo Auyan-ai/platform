@@ -55,6 +55,8 @@ class FakeSettings:
     history_limit: int = 20
     llm_max_retries: int = 3
     llm_timeout_seconds: int = 30
+    intent_min_confidence: float = 0.60
+    intent_classifier_model: str = "claude-haiku-4-5-20251001"
 
 
 @pytest.fixture

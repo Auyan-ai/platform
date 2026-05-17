@@ -1,0 +1,8 @@
+name: "max_tool_iterations es suficiente para consultas de envío"
+description: >
+  Una consulta de envío típica requiere al menos: buscar pedidos por email,
+  luego obtener el estado de tracking. max_iterations debe ser >= 3 para
+  manejar flujos con un retry o una consulta adicional.
+assertions:
+  - kind: max_iterations_gte
+    expected: 3

@@ -1,0 +1,11 @@
+name: "No tiene skills destructivas (L3)"
+description: >
+  El AOP default no debe tener skills de escritura que requieren supervisión.
+  Como fallback para casos no clasificados, no se puede asumir que el agente
+  tenga el contexto suficiente para ejecutar acciones irreversibles.
+assertions:
+  - kind: skills_not_include
+    expected:
+      - shopify.cancel_order
+      - shopify.refund_order
+      - shopify.update_order
