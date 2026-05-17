@@ -39,6 +39,11 @@ from apps.api.routers.webhooks import router as webhooks_router
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+# Side-effect import: dispara `@SkillRegistry.register` de cada skill.
+# Sin esto, el grafo arranca con el registry vacío y `execute_skill` siempre
+# devuelve `unknown_skill`.
+import apps.api.skills  # noqa: E402, F401, I001
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
