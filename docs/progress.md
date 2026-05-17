@@ -350,6 +350,8 @@ Reglas:
 - ~~**CI ausente**~~ → resuelto en sesión 9 ([PR #41](https://github.com/Auyan-ai/platform/pull/41)). GitHub Actions con ruff + pytest + tsc en cada PR.
 - ~~**`.claude/` no está en `.gitignore`**~~ → resuelto en sesión 6 ([PR #12](https://github.com/Auyan-ai/platform/pull/12)).
 - **Errores mypy preexistentes** en `db/models.py`, `db/queries.py`, `db/client.py`, `core/config.py` (14 errors `[type-arg]` y `[no-any-return]`). No bloquean la suite pero ensucian el typecheck.
+- **`search_products` usa `?title=` (coincidencia exacta)** — la Admin REST API de Shopify no hace substring search. Migrar a Admin GraphQL API (`products(first: N, query: $q)`) para búsqueda full-text real.
+- **Razonamiento del agente visible en el dashboard** — mostrar en el hilo de conversación (dashboard interno y cliente) qué skills llamó el agente, input/output de cada una, y confianza de la decisión final. Da transparencia a operadores y tenants. Opciones: (A) mensaje `role="agent_trace"` en Supabase sin migración, (B) leer trace de Langfuse via API, (C) campo `agent_trace` jsonb en `messages`. Evaluar A primero.
 
 ---
 
