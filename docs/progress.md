@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-17 (sesión 10 — diseño arquitectural del agente v2: skills + AOPs + supervisor + slow agent; plan multi-sprint 6-14 lockeado)_
+_Última actualización: 2026-05-17 (sesión 12 — Sprint 6 completo: fix registry bootstrap #49 + validación e2e Shopify loop ReAct en staging)_
 
 ---
 
@@ -480,8 +480,39 @@ Sin AOPs aún (Sprint 7), los tenants pueden opt-in agregando a `tenant_configur
 }
 ```
 
-### Siguiente sesión
+### Sub-PR 6.3c — fix crítico: bootstrap del SkillRegistry ([PR #49](https://github.com/Auyan-ai/platform/pull/49))
 
-1. **Probar end-to-end en staging** con Lunaria — activar Shopify via `tenant_config.extra`
-2. **Sub-PR 6.4** — Lifecycle de conversación: `closed_abandoned`, timeouts por canal, job de limpieza
-3. **Sprint 7** — AOPs en DB + selector de intent + workspaces
+Bug encontrado durante pruebas e2e: el `SkillRegistry` quedaba vacío al arrancar el API en producción porque nadie importaba los módulos de skills. El decorador `@SkillRegistry.register` se ejecuta al importarse el módulo, pero `main.py` no los importaba.
+
+| Archivo | Cambio |
+|---|---|
+| `apps/api/skills/__init__.py` | Side-effect import del subpaquete `shopify` |
+| `apps/api/skills/shopify/__init__.py` | Side-effect imports de los 5 módulos L1 |
+| `apps/api/main.py` | `import apps.api.skills` al cargar el módulo |
+| `apps/api/tests/skills/test_bootstrap.py` | 6 tests nuevos (5 paramétricos via subprocess + 1 estático) |
+
+**Suite total:** 317/317 verde.
+
+### Validación end-to-end en staging (sesión 12 — 2026-05-17)
+
+Tienda Shopify de prueba: `lunaria-eleq1sc5.myshopify.com` (activada via `scripts/activate_shopify.py`).
+Scripts creados: `apps/api/scripts/activate_shopify.py` y `apps/api/scripts/send_test_webhook.py`.
+
+| Prueba | Skill llamada | Resultado |
+|---|---|---|
+| "¿Cuál es la política de devoluciones?" | `shopify.get_shop_policies` | Respuesta con datos reales: 30 días, condición original ✅ |
+| "¿Dónde está mi pedido?" (sin email) | ninguna | Agente pidió email/número — comportamiento correcto ✅ |
+| "Mi email es auyan.cx@gmail.com, ¿mis pedidos?" | `shopify.get_order_by_email` | Consultó Shopify, 0 pedidos → respuesta apropiada ✅ |
+| "¿Tienen vestidos de noche?" | `shopify.get_product_info` | Buscó catálogo → detectó que es tienda de joyería ✅ |
+
+Trace IDs de referencia:
+- `b24de5bd` — políticas
+- `eaeb97fc` — pedido por email
+- `9179a2c4` — producto
+
+**Sprint 6 completado ✅** — Skills framework + Shopify L1 + loop ReAct validado e2e en staging.
+
+### Empezar aquí en la próxima sesión — usar **Sonnet**
+
+1. **Sub-PR 6.4** — Lifecycle de conversación: estado `closed_abandoned`, timeouts por canal en `tenant_config`, job de limpieza cada 15 min
+2. **Sprint 7** — AOPs en DB + selector de intent + workspaces prod/staging + UI editor + eval harness
