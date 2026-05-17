@@ -139,6 +139,7 @@ class AopWithContent(_BaseModel):
     slug: str
     workspace: AopWorkspace
     current_version: int
+    is_active: bool = True
     yaml_frontmatter: dict
     body_markdown: str
     raw_source: str

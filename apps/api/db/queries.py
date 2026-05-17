@@ -736,7 +736,7 @@ async def get_active_aops(
     """
     rows = await conn.fetch(
         """
-        SELECT a.id, a.tenant_id, a.slug, a.workspace, a.current_version,
+        SELECT a.id, a.tenant_id, a.slug, a.workspace, a.current_version, a.is_active,
                v.yaml_frontmatter, v.body_markdown, v.raw_source
           FROM aops a
           JOIN aop_versions v
@@ -763,7 +763,7 @@ async def get_aop_by_slug(
     """AOP con su contenido actual para un slug específico."""
     row = await conn.fetchrow(
         """
-        SELECT a.id, a.tenant_id, a.slug, a.workspace, a.current_version,
+        SELECT a.id, a.tenant_id, a.slug, a.workspace, a.current_version, a.is_active,
                v.yaml_frontmatter, v.body_markdown, v.raw_source
           FROM aops a
           JOIN aop_versions v
@@ -932,3 +932,98 @@ async def insert_intent_classifier_run(
     )
     assert row is not None
     return IntentClassifierRun(**dict(row))
+
+
+# ============================================================
+# AOP management queries (dashboard editor)
+# ============================================================
+
+
+async def list_aops(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    workspace: AopWorkspace = "production",
+) -> list[AopWithContent]:
+    """Todos los AOPs del tenant (activos e inactivos), sin deleted.
+
+    Para el dashboard editor — incluye is_active para gestión.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT a.id, a.tenant_id, a.slug, a.workspace, a.current_version, a.is_active,
+               v.yaml_frontmatter, v.body_markdown, v.raw_source
+          FROM aops a
+          JOIN aop_versions v
+            ON v.aop_id = a.id AND v.version = a.current_version
+               AND v.tenant_id = a.tenant_id
+         WHERE a.tenant_id = $1
+           AND a.workspace = $2
+           AND a.deleted_at IS NULL
+         ORDER BY a.slug
+        """,
+        tenant_id,
+        workspace,
+    )
+    return [_row_to_aop_with_content(r) for r in rows]
+
+
+async def get_aop_by_id(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    aop_id: UUID,
+) -> AopWithContent | None:
+    """AOP con contenido actual por UUID. No filtra is_active."""
+    row = await conn.fetchrow(
+        """
+        SELECT a.id, a.tenant_id, a.slug, a.workspace, a.current_version, a.is_active,
+               v.yaml_frontmatter, v.body_markdown, v.raw_source
+          FROM aops a
+          JOIN aop_versions v
+            ON v.aop_id = a.id AND v.version = a.current_version
+               AND v.tenant_id = a.tenant_id
+         WHERE a.id = $1
+           AND a.tenant_id = $2
+           AND a.deleted_at IS NULL
+        """,
+        aop_id,
+        tenant_id,
+    )
+    return None if row is None else _row_to_aop_with_content(row)
+
+
+async def toggle_aop_active(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    aop_id: UUID,
+    is_active: bool,
+) -> None:
+    """Activa o desactiva un AOP sin borrarlo."""
+    await conn.execute(
+        """
+        UPDATE aops
+           SET is_active = $3, updated_at = now()
+         WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+        """,
+        aop_id,
+        tenant_id,
+        is_active,
+    )
+
+
+async def soft_delete_aop(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    aop_id: UUID,
+) -> None:
+    """Soft-delete un AOP — nunca borra la fila ni las versiones."""
+    await conn.execute(
+        """
+        UPDATE aops
+           SET deleted_at = now(), updated_at = now(), is_active = false
+         WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+        """,
+        aop_id,
+        tenant_id,
+    )

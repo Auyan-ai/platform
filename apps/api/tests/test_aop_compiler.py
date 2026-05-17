@@ -7,8 +7,8 @@ from uuid import UUID
 
 import pytest
 from apps.api.aops.compiler import (
-    CompiledAOP,
     _AOP_CACHE,
+    CompiledAOP,
     _render_aop_procedure,
     _render_global_rules,
     _render_guardrails,
@@ -18,7 +18,7 @@ from apps.api.aops.compiler import (
     compile_aop,
     load_aop,
 )
-from apps.api.db.models import AopWithContent, KnowledgeChunk
+from apps.api.db.models import AopWithContent
 from apps.api.skills.registry import SkillRegistry
 from apps.api.tests.conftest import (
     TENANT_ID,
