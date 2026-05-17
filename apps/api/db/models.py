@@ -102,3 +102,58 @@ class KnowledgeChunk(_BaseModel):
     document_title: str
     content: str
     similarity: float  # 0.0 - 1.0 (1.0 = idéntico)
+
+
+# ─── AOPs ────────────────────────────────────────────────────────────────────
+
+AopWorkspace = Literal["production", "staging"]
+
+
+class Aop(_BaseModel):
+    id: UUID
+    tenant_id: UUID
+    slug: str
+    workspace: AopWorkspace
+    current_version: int
+    is_active: bool
+    created_at: datetime | None = None
+
+
+class AopVersion(_BaseModel):
+    id: UUID
+    aop_id: UUID
+    tenant_id: UUID
+    version: int
+    yaml_frontmatter: dict
+    body_markdown: str
+    raw_source: str
+    created_by: UUID | None = None
+    created_at: datetime
+
+
+class AopWithContent(_BaseModel):
+    """AOP + contenido de su versión actual — lo que el compiler y select_aop necesitan."""
+
+    id: UUID
+    tenant_id: UUID
+    slug: str
+    workspace: AopWorkspace
+    current_version: int
+    yaml_frontmatter: dict
+    body_markdown: str
+    raw_source: str
+
+
+class IntentClassifierRun(_BaseModel):
+    id: UUID
+    tenant_id: UUID
+    conversation_id: UUID
+    turn_number: int
+    primary_slug: str
+    primary_confidence: float
+    alternative_slug: str | None = None
+    alternative_confidence: float | None = None
+    ambiguity_detected: bool
+    was_reclassification: bool
+    human_correction: str | None = None
+    created_at: datetime
