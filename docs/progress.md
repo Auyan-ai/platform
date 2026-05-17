@@ -444,7 +444,44 @@ Cuatro cambios estructurales sobre el agente actual, inspirados en Sierra (Const
 
 **Suite total:** 270/270 verde.
 
-### Siguiente sesión (Sprint 6.3+)
+### Sub-PR 6.3a — execute_skill node + state ([PR #46](https://github.com/Auyan-ai/platform/pull/46))
 
-1. **Sub-PR 6.3** — Nodo `execute_skill` en el grafo + loop ReAct básico (`reason ⇄ execute_skill`, max 5 iteraciones)
+| Área | Qué se hizo |
+|---|---|
+| `agents/state.py` | Campos del loop ReAct: `pending_tool_call`, `tool_results`, `tool_iterations`, `max_tool_iterations`, `allowed_skills` |
+| `agents/nodes/execute_skill.py` | Resuelve slug en registry, valida input contra schema Pydantic, ejecuta. Errores operacionales (no permitida, slug inexistente, input inválido, skill que lanza) → `tool_result` con `is_error=True`. `build_skill_context` lee creds Shopify de `tenant_config.extra`. |
+| Tests | 21 tests con cobertura completa |
+
+**Sin tocar `reason` ni el grafo** — preparación para 6.3b.
+
+### Sub-PR 6.3b — loop ReAct cableado al grafo ([PR #47](https://github.com/Auyan-ai/platform/pull/47))
+
+| Área | Qué se hizo |
+|---|---|
+| `integrations/anthropic_client.py` | `call_claude_with_tools` (plural) acepta lista de tools + `tool_choice` configurable |
+| `agents/nodes/reason.py` | Reescrito: construye `tools = [decide, *skill_tools]` desde `allowed_skills`, `tool_choice={"type":"any"}`. Si LLM elige skill → `pending_tool_call`. Reconstruye mensajes multi-turn con bloques `tool_use`/`tool_result` de iteraciones previas. Acumula tokens. |
+| `agents/graph.py` | Nodo `execute_skill` cableado. `route_after_execute_skill` → `reason` o `escalate` si max_iter. Edges del loop ReAct. |
+| `agents/service.py` | State inicial con defaults del loop |
+| `agents/nodes/load_tenant_context.py` | Lee `tenant_config.extra.allowed_skills` y `max_tool_iterations` para opt-in per tenant antes de Sprint 7 |
+| `agents/nodes/execute_skill.py` | Setea `escalation_reason` cuando se hit max_iter |
+| Tests | 8 adaptados + 7 nuevos en `test_reason_node.py` + tests del routing + 2 E2E del loop ReAct |
+
+**Suite total:** 311/311 verde. Ruff limpio.
+
+### Activación per tenant (Sprint 6.4+)
+
+Sin AOPs aún (Sprint 7), los tenants pueden opt-in agregando a `tenant_configurations.extra`:
+```json
+{
+  "allowed_skills": ["shopify.get_order_by_email", "shopify.get_order_status"],
+  "max_tool_iterations": 5,
+  "shopify_domain": "mishop.myshopify.com",
+  "shopify_token": "shpat_..."
+}
+```
+
+### Siguiente sesión
+
+1. **Probar end-to-end en staging** con Lunaria — activar Shopify via `tenant_config.extra`
 2. **Sub-PR 6.4** — Lifecycle de conversación: `closed_abandoned`, timeouts por canal, job de limpieza
+3. **Sprint 7** — AOPs en DB + selector de intent + workspaces
