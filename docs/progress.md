@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-17 (sesión 14 — Sprint 7 sub-PRs 7.1–7.5 completos: AOPs en DB + compiler + select_aop node + UI editor)_
+_Última actualización: 2026-05-17 (sesión 15 — Sprint 7 completado: sub-PR 7.6 eval harness + PATCH /aops/{id}/promote, 450 tests)_
 
 ---
 
@@ -578,13 +578,29 @@ Trace IDs de referencia:
 
 **411/411 tests verde. TypeScript sin errores. Ruff limpio.**
 
+### Sub-PR 7.6 — Eval harness + promote endpoint (commit `3b1546a`)
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/evals/__init__.py` | Módulo creado |
+| `apps/api/evals/harness.py` | Runner puro (sin I/O): 10 tipos de aserciones (`compile_ok`, `prompt_contains`, `prompt_not_contains`, `prompt_min_length`, `skills_include`, `skills_not_include`, `max_iterations_gte`, `confidence_threshold_between`, `tool_count_matches_skills`, `frontmatter_has_key`), `load_fixtures`, `run_fixture`, `run_eval` con gate 80% |
+| `apps/api/evals/fixtures/consulta_envio/` | 8 fixtures YAML: compilación, skills Shopify read, no L3, requiere email, nombre del procedimiento, max_iterations >= 3, escalation_triggers, tool defs match skills |
+| `apps/api/evals/fixtures/default/` | 5 fixtures YAML: compilación, prompt no vacío, slug en frontmatter, confidence_threshold válido, no L3 |
+| `apps/api/routers/aops.py` | `PATCH /aops/{id}/promote` — corre eval, bloquea si pass_rate < 80% (422 con detalles), copia contenido a production workspace si pasa |
+| Fix | `response_model=None` en `DELETE /aops/{id}` (FastAPI assertion 204) |
+| Tests | 39 nuevos (harness + promote endpoint) |
+
+**Suite total: 450/450 verde. Ruff limpio.**
+
+**Sprint 7 completado ✅** — AOPs en DB + compiler + selector de intent + UI editor + eval harness.
+
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. **Sub-PR 7.6** — Eval harness (obligatorio como gate staging→production)
-   - Mínimo 13 fixtures para AOPs `consulta_envio` y `default`
-   - Framework: pytest + fixtures YAML/JSON, runner que llama al compilador + select_aop
-   - Gate: si < 80% pasan, el endpoint `PATCH /aops/{id}/promote` rechaza la promoción
-2. **Sprint 8** — Agent Reasoning UI (ver sección más abajo)
+1. **Sprint 8** — Agent Reasoning UI (ver sección más abajo)
+   - 8.1: Migración `agent_reasoning_events` + `ReasoningTracker` service + emisión desde nodos
+   - 8.2: Endpoints REST + SSE `/reasoning` y `/reasoning/stream`
+   - 8.3: Componentes React (`AgentReasoningPanel`, `ReasoningPhase`, `ReasoningItem`, `ToolCallChip`)
+   - 8.4: Integración en `TicketDetail` (dashboard interno) y `ClientTicketDetail` (dashboard tenant)
 
 ---
 
