@@ -74,16 +74,33 @@ def fake_openai() -> AsyncMock:
     return AsyncMock()
 
 
+class FakeReasoningTracker:
+    """Tracker sin-op para tests — registra las llamadas pero no toca DB ni event loop."""
+
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    def emit(self, **kwargs: Any) -> None:
+        self.events.append(kwargs)
+
+
+@pytest.fixture
+def fake_reasoning_tracker() -> FakeReasoningTracker:
+    return FakeReasoningTracker()
+
+
 @pytest.fixture
 def fake_deps(
     fake_anthropic: AsyncMock,
     fake_openai: AsyncMock,
     fake_settings: FakeSettings,
+    fake_reasoning_tracker: FakeReasoningTracker,
 ) -> AgentDependencies:
     return AgentDependencies(
         anthropic=fake_anthropic,  # type: ignore[arg-type]
         openai=fake_openai,  # type: ignore[arg-type]
         settings=fake_settings,  # type: ignore[arg-type]
+        reasoning_tracker=fake_reasoning_tracker,  # type: ignore[arg-type]
     )
 
 

@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-17 (sesión 16 — bugs de prod post-Sprint 7: FK composite + migración AOPs no aplicada)_
+_Última actualización: 2026-05-17 (sesión 17 — Sprint 8: Agent Reasoning UI + Supervisor Pattern)_
 
 ---
 
@@ -723,3 +723,60 @@ CREATE TABLE agent_reasoning_events (
 - Al expandir un chip de tool call, ver los argumentos (enmascarados en vista tenant)
 - Sin impacto en latencia del agente (la emisión es async fire-and-forget)
 - Sin acceso cruzado: tenant A no ve razonamientos de tenant B (RLS en `agent_reasoning_events`)
+
+### Sub-PR 8.1 — Migración + ReasoningTracker + emisión desde nodos (commit en [PR #59](https://github.com/Auyan-ai/platform/pull/59))
+
+| Área | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260517000002_add_agent_reasoning_events.sql` | Tabla `agent_reasoning_events` con RLS, índice `(conversation_id, seq)`, trigger `updated_at` |
+| `apps/api/services/reasoning.py` | `ReasoningTracker`: `emit()` fire-and-forget vía `asyncio.create_task`, falla silencioso — no bloquea el grafo |
+| `apps/api/db/models.py` | Literals `ReasoningPhase`, `ReasoningEventType`, `ReasoningStatus` + Pydantic `AgentReasoningEvent` |
+| `apps/api/db/queries.py` | `insert_reasoning_event` (MAX(seq)+1 subquery) + `list_reasoning_events` |
+| `apps/api/agents/dependencies.py` | Campo `reasoning_tracker: ReasoningTracker` |
+| `apps/api/agents/state.py` | 7 campos supervisor: `supervisor_verdict`, `supervisor_reason`, `supervisor_reject_kind`, `supervisor_retried`, `supervisor_model_used`, `supervisor_tokens_in`, `supervisor_tokens_out` |
+| Nodos | `load_tenant_context`, `reason`, `execute_skill`, `respond`, `escalate` emiten eventos a `reasoning_tracker` |
+| `apps/api/tests/conftest.py` | `FakeReasoningTracker` + `fake_reasoning_tracker` fixture + `fake_deps` actualizado |
+| `apps/api/tests/test_reasoning_tracker.py` | 7 tests: emit sin loop, DB failure silente, task creation, emit en nodo |
+
+### Sub-PR 8.2 — Endpoints REST + SSE (commit en [PR #59](https://github.com/Auyan-ai/platform/pull/59))
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/routers/reasoning.py` | `GET /conversations/{id}/reasoning` (historial REST) + `GET /conversations/{id}/reasoning/stream` (SSE, poll cada 1 s, max 5 min, Last-Event-ID para reconexión) |
+| `apps/api/main.py` | `reasoning_router` wired + `ReasoningTracker()` instanciado en lifespan |
+
+### Sub-PR 8.3 — Componentes React (commit en [PR #59](https://github.com/Auyan-ai/platform/pull/59))
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/web/lib/api/hooks/reasoning.ts` | `useReasoningEvents` (TanStack Query, staleTime 5s) + `useReasoningStream` (fetch+ReadableStream — EventSource no soporta headers auth) |
+| `apps/web/lib/api/query-keys.ts` | `reasoning.events(tenantId, conversationId)` |
+| `apps/web/components/reasoning/ToolCallChip.tsx` | Chip expandible con ChevronRight/Down, detalle JSON en `<pre>`, PII masking por regex |
+| `apps/web/components/reasoning/ReasoningItem.tsx` | Fila con `StatusIcon`: Check=done, X=error, Clock=pending (animate-pulse) |
+| `apps/web/components/reasoning/ReasoningPhase.tsx` | Agrupa eventos por fase: Eye=supervisor, GitBranch=decision, MessageSquare=response; ✓ cuando allDone |
+| `apps/web/components/reasoning/AgentReasoningPanel.tsx` | Panel colapsable: REST siempre + SSE solo cuando `open && isActive`; spinner cuando activa+loading |
+
+### Sub-PR 8.4 — Integración en dashboards (commit en [PR #59](https://github.com/Auyan-ai/platform/pull/59))
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/web/components/inbox/ConversationDetail.tsx` | Prop `maskPII?: boolean` + `isActive` desde `conversation.status`; `AgentReasoningPanel` entre mensajes y composer |
+| `apps/web/app/clients/.../conversations/[id]/page.tsx` | Pasa `maskPII` a `ConversationDetail` para vista tenant |
+
+### Sub-PR 8.5 — Supervisor pattern (commit en [PR #59](https://github.com/Auyan-ai/platform/pull/59))
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/agents/nodes/supervise.py` | `needs_supervision`: True si L2/L3 pending o `require_supervision` en config; `_select_supervisor_model`: Opus para L3, Sonnet resto; primer rechazo táctico → retry con feedback; rechazo estructural/segundo → `escalation_reason` |
+| `apps/api/agents/graph.py` | `route_after_reason` verifica `needs_supervision`; `route_after_supervise`: approve→execute/respond/escalate, reject con `escalation_reason`→escalate, sin `escalation_reason`→reason |
+| `apps/api/tests/test_supervise_node.py` | 16 tests: `needs_supervision`, approve, tactical, structural, Opus/Sonnet selection, token accumulation, event emission |
+
+**Suite total: 477/477 verde. tsc --noEmit limpio.**
+
+**⚠️ Antes de deployar a staging:** aplicar migración `20260517000002_add_agent_reasoning_events.sql` vía `psql` o SQL Editor de Supabase.
+
+### Empezar aquí en la próxima sesión — usar **Sonnet**
+
+1. Mergear [PR #59](https://github.com/Auyan-ai/platform/pull/59) a `develop`
+2. Aplicar migración `20260517000002` en Supabase staging
+3. **Sprint 9** — Skills L2 + permissions + audit log con PII + idempotency

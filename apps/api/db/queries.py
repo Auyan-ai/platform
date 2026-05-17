@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from apps.api.db.models import (
+    AgentReasoningEvent,
     AopVersion,
     AopWithContent,
     AopWorkspace,
@@ -30,6 +31,9 @@ from apps.api.db.models import (
     Message,
     MessageDirection,
     MessageRole,
+    ReasoningEventType,
+    ReasoningPhase,
+    ReasoningStatus,
     Tenant,
     TenantConfiguration,
     UserRole,
@@ -1027,3 +1031,83 @@ async def soft_delete_aop(
         aop_id,
         tenant_id,
     )
+
+
+# ============================================================
+# Agent Reasoning Events (Sprint 8)
+# ============================================================
+
+
+async def insert_reasoning_event(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    phase: ReasoningPhase,
+    event_type: ReasoningEventType,
+    label: str,
+    detail: dict | None = None,
+    status: ReasoningStatus = "done",
+) -> AgentReasoningEvent:
+    """Inserta un evento de razonamiento. El seq se auto-calcula como MAX(seq)+1
+    por conversation_id — es seguro porque los eventos son secuenciales dentro
+    de una sola invocación del grafo.
+    """
+    import json
+
+    row = await conn.fetchrow(
+        """
+        INSERT INTO agent_reasoning_events
+               (tenant_id, conversation_id, phase, event_type, label, detail, status, seq)
+        VALUES (
+            $1, $2, $3, $4, $5, $6::jsonb, $7,
+            COALESCE(
+                (SELECT MAX(seq) + 1
+                   FROM agent_reasoning_events
+                  WHERE conversation_id = $2 AND deleted_at IS NULL),
+                0
+            )
+        )
+        RETURNING id, tenant_id, conversation_id, phase, event_type, label, detail,
+                  status, seq, created_at
+        """,
+        tenant_id,
+        conversation_id,
+        phase,
+        event_type,
+        label,
+        json.dumps(detail) if detail is not None else None,
+        status,
+    )
+    assert row is not None
+    data = dict(row)
+    data["detail"] = dict(data["detail"]) if data["detail"] is not None else None
+    return AgentReasoningEvent(**data)
+
+
+async def list_reasoning_events(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    conversation_id: UUID,
+) -> list[AgentReasoningEvent]:
+    """Lista eventos de razonamiento para una conversación, ordenados por seq."""
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, conversation_id, phase, event_type, label, detail,
+               status, seq, created_at
+          FROM agent_reasoning_events
+         WHERE tenant_id = $1
+           AND conversation_id = $2
+           AND deleted_at IS NULL
+         ORDER BY seq ASC, created_at ASC
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    result = []
+    for r in rows:
+        data = dict(r)
+        data["detail"] = dict(data["detail"]) if data["detail"] is not None else None
+        result.append(AgentReasoningEvent(**data))
+    return result

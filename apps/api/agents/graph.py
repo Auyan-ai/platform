@@ -1,6 +1,6 @@
 """Construcción y compilación del grafo de LangGraph.
 
-Diagrama actual (Sprint 7 — AOPs + ReAct loop):
+Diagrama actual (Sprint 8 — AOPs + ReAct loop + Supervisor):
 
     START
       ↓
@@ -12,17 +12,16 @@ Diagrama actual (Sprint 7 — AOPs + ReAct loop):
       ↓
     retrieve_knowledge
       ↓
-    reason  ←──────────────┐
-      ↓                    │
-    (conditional)          │
-      ↓                    │
-    ┌─────────────────┬────┴─────────┬──────────────┐
-    ▼                 ▼              ▼              ▼
-  execute_skill   respond        escalate      handle_error
-      ↓
-    (conditional: max_tool_iterations?)
-      ↓
-    ─→ reason (loop) | escalate (loop infinito)
+    reason  ←──────────────────────┐ (reintento si supervisor rechaza tactical)
+      ↓                            │
+    (conditional)                  │
+      ↓                            │
+    ┌──────────────┬───────────────┴──┬──────────────┐
+    ▼              ▼                  ▼              ▼
+  execute_skill supervise          respond      handle_error
+      ↓              ↓ approve→ respond|escalate
+    ─→ reason    reject+structural→ escalate
+    | escalate   reject+tactical → reason (una vez)
 
       respond / escalate / handle_error
                   ↓
@@ -30,15 +29,8 @@ Diagrama actual (Sprint 7 — AOPs + ReAct loop):
                   ↓
                  END
 
-select_aop: si el tenant no tiene AOPs configurados, es no-op (degradación
-elegante al sistema de prompts legacy de tenant_prompts).
-
-Loop ReAct: `reason` puede emitir `pending_tool_call` → `execute_skill` →
-volver a `reason` con `tool_results` poblado. Máximo `max_tool_iterations`
-vueltas; si se excede, escalamos.
-
-Todos los nodos están envueltos por `@guarded`: si alguno setea `error`, los
-siguientes hacen passthrough y el routing condicional lleva a `handle_error`.
+Supervisor: se activa cuando el AOP tiene require_supervision=true o la
+tool pendiente es L2/L3. Usa Sonnet para L1/L2, Opus para L3.
 """
 
 from __future__ import annotations
@@ -56,6 +48,7 @@ from apps.api.agents.nodes.reason import make_reason_node
 from apps.api.agents.nodes.respond import make_respond_node
 from apps.api.agents.nodes.retrieve_knowledge import make_retrieve_knowledge_node
 from apps.api.agents.nodes.select_aop import make_select_aop_node
+from apps.api.agents.nodes.supervise import make_supervise_node, needs_supervision
 from apps.api.agents.state import AgentState
 from langgraph.graph import END, START, StateGraph
 
@@ -67,18 +60,55 @@ DEFAULT_MAX_TOOL_ITERATIONS = 5
 
 
 def route_after_reason(state: AgentState) -> str:
-    """Routing tras `reason`. Cuatro destinos posibles."""
+    """Routing tras `reason`. Cinco destinos posibles (incluye supervise)."""
     if state.get("error"):
         return "handle_error"
     if state.get("pending_tool_call"):
+        # Skill pendiente — ¿necesita supervisión antes de ejecutar?
+        if needs_supervision(state):
+            return "supervise"
         return "execute_skill"
     decision = state.get("decision")
     if decision == "respond":
+        # ¿La respuesta necesita supervisión? (AOP con require_supervision=true)
+        if needs_supervision(state):
+            return "supervise"
         return "respond"
     if decision == "escalate":
         return "escalate"
     # Sin decisión válida y sin pending_tool_call: defensive — handle_error.
     return "handle_error"
+
+
+def route_after_supervise(state: AgentState) -> str:
+    """Routing tras `supervise`.
+
+    approve → destino según la decisión original (respond | escalate | execute_skill)
+    reject sin escalation_reason → tactical primer rechazo → volver a reason
+    reject con escalation_reason → structural o segundo rechazo → escalar
+
+    El nodo `supervise` setea `escalation_reason` cuando no hay reintento posible
+    (structural o segundo rechazo tactical). Usamos su presencia como señal.
+    """
+    if state.get("error"):
+        return "handle_error"
+
+    verdict = state.get("supervisor_verdict")
+
+    if verdict == "approve":
+        if state.get("pending_tool_call"):
+            return "execute_skill"
+        decision = state.get("decision")
+        if decision == "respond":
+            return "respond"
+        return "escalate"
+
+    # Reject: si el nodo puso escalation_reason → no reintentar
+    if state.get("escalation_reason"):
+        return "escalate"
+
+    # Primer rechazo tactical: el nodo no puso escalation_reason → reintentar reason
+    return "reason"
 
 
 def route_after_execute_skill(state: AgentState) -> str:
@@ -101,6 +131,7 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
     graph.add_node("retrieve_knowledge", make_retrieve_knowledge_node(deps))
     graph.add_node("reason", make_reason_node(deps))
     graph.add_node("execute_skill", make_execute_skill_node(deps))
+    graph.add_node("supervise", make_supervise_node(deps))
     graph.add_node("respond", make_respond_node(deps))
     graph.add_node("escalate", make_escalate_node(deps))
     graph.add_node("handle_error", make_handle_error_node(deps))
@@ -117,8 +148,21 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
         route_after_reason,
         {
             "execute_skill": "execute_skill",
+            "supervise": "supervise",
             "respond": "respond",
             "escalate": "escalate",
+            "handle_error": "handle_error",
+        },
+    )
+
+    graph.add_conditional_edges(
+        "supervise",
+        route_after_supervise,
+        {
+            "execute_skill": "execute_skill",
+            "respond": "respond",
+            "escalate": "escalate",
+            "reason": "reason",
             "handle_error": "handle_error",
         },
     )

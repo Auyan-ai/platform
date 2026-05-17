@@ -93,3 +93,15 @@ class AgentState(TypedDict, total=False):
     aop_locked_until_turn: int
     aop_completed_signal: bool
     pending_intent: str
+
+    # --- Supervisor pattern (Sprint 8) ---
+    # El nodo `supervise` evalúa la decisión propuesta por `reason` cuando el AOP
+    # tiene require_supervision=true o cuando la tool es L2/L3.
+    supervisor_verdict: Literal["approve", "reject"]   # resultado del supervisor
+    supervisor_reason: str                             # explicación del supervisor
+    supervisor_reject_kind: Literal["tactical", "structural"]  # tactical=reintentable
+    # ya se reintentó → si rechaza de nuevo, escala
+    supervisor_retried: bool
+    supervisor_model_used: str                         # qué modelo fue el supervisor
+    supervisor_tokens_in: int                          # tokens del supervisor
+    supervisor_tokens_out: int                         # tokens del supervisor

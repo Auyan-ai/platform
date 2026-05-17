@@ -19,6 +19,8 @@ from apps.api.db.queries import insert_message, update_conversation_last_message
 def make_respond_node(
     deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict]]:
+    tracker = deps.reasoning_tracker
+
     @guarded(name="respond")
     async def _node(state: AgentState) -> dict:
         tenant_id = UUID(state["tenant_id"])
@@ -50,6 +52,16 @@ def make_respond_node(
                 metadata=metadata,
             )
             await update_conversation_last_message(conn, tenant_id, conversation_id)
+
+        tracker.emit(
+            tenant_id=state["tenant_id"],
+            conversation_id=state["conversation_id"],
+            phase="response",
+            event_type="choice",
+            label="Agent responded",
+            detail={"message_id": str(msg.id)},
+            status="done",
+        )
 
         return {"output_message_id": str(msg.id)}
 

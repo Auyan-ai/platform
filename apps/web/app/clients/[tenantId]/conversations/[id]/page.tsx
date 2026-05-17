@@ -11,6 +11,7 @@ export default async function ClientConversationDetailPage({ params }: Props) {
       tenantId={tenantId}
       conversationId={id}
       readOnly
+      maskPII
       backHref={`/clients/${tenantId}/conversations`}
     />
   )

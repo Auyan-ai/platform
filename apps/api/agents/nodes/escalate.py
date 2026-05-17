@@ -28,6 +28,8 @@ from apps.api.db.queries import (
 def make_escalate_node(
     deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict]]:
+    tracker = deps.reasoning_tracker
+
     @guarded(name="escalate")
     async def _node(state: AgentState) -> dict:
         tenant_id = UUID(state["tenant_id"])
@@ -87,6 +89,16 @@ def make_escalate_node(
                 )
                 await update_conversation_last_message(conn, tenant_id, conversation_id)
                 result["output_message_id"] = str(msg.id)
+
+        tracker.emit(
+            tenant_id=state["tenant_id"],
+            conversation_id=state["conversation_id"],
+            phase="response",
+            event_type="choice",
+            label="Escalated to human",
+            detail={"reason": reason, "escalation_id": result.get("escalation_id")},
+            status="done",
+        )
 
         return result
 

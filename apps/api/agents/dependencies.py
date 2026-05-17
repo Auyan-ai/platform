@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
     from apps.api.core.config import Settings
+    from apps.api.services.reasoning import ReasoningTracker
     from openai import AsyncOpenAI
 
 
@@ -25,3 +26,4 @@ class AgentDependencies:
     anthropic: AsyncAnthropic
     openai: AsyncOpenAI
     settings: Settings
+    reasoning_tracker: ReasoningTracker
