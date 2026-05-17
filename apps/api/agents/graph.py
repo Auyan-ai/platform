@@ -1,6 +1,6 @@
 """Construcción y compilación del grafo de LangGraph.
 
-Diagrama (ver `docs/architecture.md` para el detalle):
+Diagrama actual (ReAct loop activado en Sprint 6.3):
 
     START
       ↓
@@ -10,17 +10,30 @@ Diagrama (ver `docs/architecture.md` para el detalle):
       ↓
     retrieve_knowledge
       ↓
-    reason
+    reason  ←──────────────┐
+      ↓                    │
+    (conditional)          │
+      ↓                    │
+    ┌─────────────────┬────┴─────────┬──────────────┐
+    ▼                 ▼              ▼              ▼
+  execute_skill   respond        escalate      handle_error
       ↓
-    (conditional) → respond | escalate | handle_error
-      ↓                 ↓                ↓
-                  finalize_trace
-                        ↓
-                      END
+    (conditional: max_tool_iterations?)
+      ↓
+    ─→ reason (loop) | escalate (loop infinito)
 
-Los nodos `load_*`, `retrieve_*` y `reason` están envueltos por `@guarded`:
-si alguno setea `error` (o lanza), los siguientes hacen passthrough y el
-routing condicional lleva a `handle_error`.
+      respond / escalate / handle_error
+                  ↓
+            finalize_trace
+                  ↓
+                 END
+
+Loop ReAct: `reason` puede emitir `pending_tool_call` → `execute_skill` →
+volver a `reason` con `tool_results` poblado. Máximo `max_tool_iterations`
+vueltas; si se excede, escalamos.
+
+Todos los nodos están envueltos por `@guarded`: si alguno setea `error`, los
+siguientes hacen passthrough y el routing condicional lleva a `handle_error`.
 """
 
 from __future__ import annotations
@@ -29,6 +42,7 @@ from typing import TYPE_CHECKING
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes.escalate import make_escalate_node
+from apps.api.agents.nodes.execute_skill import make_execute_skill_node
 from apps.api.agents.nodes.finalize_trace import make_finalize_trace_node
 from apps.api.agents.nodes.handle_error import make_handle_error_node
 from apps.api.agents.nodes.load_conversation import make_load_conversation_node
@@ -43,17 +57,32 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
 
+DEFAULT_MAX_TOOL_ITERATIONS = 5
+
+
 def route_after_reason(state: AgentState) -> str:
-    """Conditional edge tras `reason`. Tres destinos posibles."""
+    """Routing tras `reason`. Cuatro destinos posibles."""
     if state.get("error"):
         return "handle_error"
+    if state.get("pending_tool_call"):
+        return "execute_skill"
     decision = state.get("decision")
     if decision == "respond":
         return "respond"
     if decision == "escalate":
         return "escalate"
-    # Si llegamos sin decisión válida, escalamos via error path.
+    # Sin decisión válida y sin pending_tool_call: defensive — handle_error.
     return "handle_error"
+
+
+def route_after_execute_skill(state: AgentState) -> str:
+    """Routing tras `execute_skill`. Si excedimos el límite del loop, escalamos."""
+    if state.get("error"):
+        return "handle_error"
+    max_iter = state.get("max_tool_iterations") or DEFAULT_MAX_TOOL_ITERATIONS
+    if state.get("tool_iterations", 0) >= max_iter:
+        return "escalate"
+    return "reason"
 
 
 def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
@@ -64,6 +93,7 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
     graph.add_node("load_conversation", make_load_conversation_node(deps))
     graph.add_node("retrieve_knowledge", make_retrieve_knowledge_node(deps))
     graph.add_node("reason", make_reason_node(deps))
+    graph.add_node("execute_skill", make_execute_skill_node(deps))
     graph.add_node("respond", make_respond_node(deps))
     graph.add_node("escalate", make_escalate_node(deps))
     graph.add_node("handle_error", make_handle_error_node(deps))
@@ -78,7 +108,18 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
         "reason",
         route_after_reason,
         {
+            "execute_skill": "execute_skill",
             "respond": "respond",
+            "escalate": "escalate",
+            "handle_error": "handle_error",
+        },
+    )
+
+    graph.add_conditional_edges(
+        "execute_skill",
+        route_after_execute_skill,
+        {
+            "reason": "reason",
             "escalate": "escalate",
             "handle_error": "handle_error",
         },
