@@ -1,6 +1,7 @@
-"""Tests del retry behavior de `call_claude_with_tool`.
+"""Tests del retry behavior de `call_claude_with_tools`.
 
-Verifica que tenacity reintenta sólo errores transitorios y que respeta `max_retries`.
+Verifica que tenacity reintenta sólo errores transitorios, que respeta
+`max_retries`, y que el wrapper pasa `tool_choice` correctamente al cliente.
 Parchea `asyncio.sleep` para que el test sea instantáneo en lugar de esperar
 los backoffs reales.
 """
@@ -13,7 +14,7 @@ import anthropic
 import httpx
 import pytest
 from apps.api.agents.schemas import RESPOND_OR_ESCALATE_TOOL
-from apps.api.integrations.anthropic_client import call_claude_with_tool
+from apps.api.integrations.anthropic_client import call_claude_with_tools
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +35,7 @@ def _conn_error() -> anthropic.APIConnectionError:
 
 
 def _fake_response() -> MagicMock:
-    """Mock con la forma mínima que call_claude_with_tool espera devolver."""
+    """Mock con la forma mínima que call_claude_with_tools espera devolver."""
     resp = MagicMock()
     resp.content = []
     resp.usage = MagicMock(input_tokens=10, output_tokens=5)
@@ -47,12 +48,13 @@ async def test_succeeds_on_first_attempt() -> None:
     fake_resp = _fake_response()
     client.messages.create = AsyncMock(return_value=fake_resp)
 
-    result = await call_claude_with_tool(
+    result = await call_claude_with_tools(
         client=client,
         model="claude-sonnet-4-6",
         system="x",
         messages=[{"role": "user", "content": "y"}],
-        tool=RESPOND_OR_ESCALATE_TOOL,
+        tools=[RESPOND_OR_ESCALATE_TOOL],
+        tool_choice={"type": "any"},
         max_retries=3,
     )
 
@@ -69,12 +71,13 @@ async def test_retries_on_connection_error_and_succeeds() -> None:
         side_effect=[_conn_error(), _conn_error(), fake_resp]
     )
 
-    result = await call_claude_with_tool(
+    result = await call_claude_with_tools(
         client=client,
         model="claude-sonnet-4-6",
         system="x",
         messages=[{"role": "user", "content": "y"}],
-        tool=RESPOND_OR_ESCALATE_TOOL,
+        tools=[RESPOND_OR_ESCALATE_TOOL],
+        tool_choice={"type": "any"},
         max_retries=3,
     )
 
@@ -89,12 +92,13 @@ async def test_raises_after_exhausting_retries() -> None:
     client.messages.create = AsyncMock(side_effect=_conn_error())
 
     with pytest.raises(anthropic.APIConnectionError):
-        await call_claude_with_tool(
+        await call_claude_with_tools(
             client=client,
             model="claude-sonnet-4-6",
             system="x",
             messages=[{"role": "user", "content": "y"}],
-            tool=RESPOND_OR_ESCALATE_TOOL,
+            tools=[RESPOND_OR_ESCALATE_TOOL],
+            tool_choice={"type": "any"},
             max_retries=3,
         )
 
@@ -105,7 +109,6 @@ async def test_raises_after_exhausting_retries() -> None:
 async def test_does_not_retry_non_transient_errors() -> None:
     """`anthropic.BadRequestError` (4xx) no es retryable — falla al primer intento."""
     client = MagicMock()
-    # BadRequestError no está en RETRYABLE_ERRORS
     bad_request = anthropic.BadRequestError(
         message="invalid request",
         response=MagicMock(status_code=400, headers={}),
@@ -114,34 +117,97 @@ async def test_does_not_retry_non_transient_errors() -> None:
     client.messages.create = AsyncMock(side_effect=bad_request)
 
     with pytest.raises(anthropic.BadRequestError):
-        await call_claude_with_tool(
+        await call_claude_with_tools(
             client=client,
             model="claude-sonnet-4-6",
             system="x",
             messages=[{"role": "user", "content": "y"}],
-            tool=RESPOND_OR_ESCALATE_TOOL,
+            tools=[RESPOND_OR_ESCALATE_TOOL],
+            tool_choice={"type": "any"},
             max_retries=3,
         )
 
-    # Sólo un intento — no retries en 4xx
     assert client.messages.create.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_forces_tool_choice() -> None:
-    """Verifica que enviamos tool_choice=forced (no opcional) para garantizar tool use."""
+async def test_passes_tool_choice_any() -> None:
+    """Verifica que `tool_choice={"type":"any"}` llega al cliente."""
     client = MagicMock()
     client.messages.create = AsyncMock(return_value=_fake_response())
 
-    await call_claude_with_tool(
+    await call_claude_with_tools(
         client=client,
         model="claude-sonnet-4-6",
         system="x",
         messages=[{"role": "user", "content": "y"}],
-        tool=RESPOND_OR_ESCALATE_TOOL,
+        tools=[RESPOND_OR_ESCALATE_TOOL],
+        tool_choice={"type": "any"},
+        max_retries=1,
+    )
+
+    kwargs = client.messages.create.await_args.kwargs
+    assert kwargs["tool_choice"] == {"type": "any"}
+    assert kwargs["tools"] == [RESPOND_OR_ESCALATE_TOOL]
+
+
+@pytest.mark.asyncio
+async def test_passes_specific_tool_choice() -> None:
+    """tool_choice puede forzar una tool específica por nombre."""
+    client = MagicMock()
+    client.messages.create = AsyncMock(return_value=_fake_response())
+
+    await call_claude_with_tools(
+        client=client,
+        model="claude-sonnet-4-6",
+        system="x",
+        messages=[{"role": "user", "content": "y"}],
+        tools=[RESPOND_OR_ESCALATE_TOOL],
+        tool_choice={"type": "tool", "name": "respond_or_escalate"},
         max_retries=1,
     )
 
     kwargs = client.messages.create.await_args.kwargs
     assert kwargs["tool_choice"]["type"] == "tool"
     assert kwargs["tool_choice"]["name"] == "respond_or_escalate"
+
+
+@pytest.mark.asyncio
+async def test_no_tool_choice_means_auto() -> None:
+    """Si no se pasa tool_choice, no se envía al cliente (Claude decide libre)."""
+    client = MagicMock()
+    client.messages.create = AsyncMock(return_value=_fake_response())
+
+    await call_claude_with_tools(
+        client=client,
+        model="claude-sonnet-4-6",
+        system="x",
+        messages=[{"role": "user", "content": "y"}],
+        tools=[RESPOND_OR_ESCALATE_TOOL],
+        max_retries=1,
+    )
+
+    kwargs = client.messages.create.await_args.kwargs
+    assert "tool_choice" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_passes_multiple_tools() -> None:
+    """call_claude_with_tools acepta lista de tools (loop ReAct)."""
+    client = MagicMock()
+    client.messages.create = AsyncMock(return_value=_fake_response())
+
+    extra_tool = {"name": "shopify_get_order", "description": "x", "input_schema": {}}
+
+    await call_claude_with_tools(
+        client=client,
+        model="claude-sonnet-4-6",
+        system="x",
+        messages=[{"role": "user", "content": "y"}],
+        tools=[RESPOND_OR_ESCALATE_TOOL, extra_tool],
+        tool_choice={"type": "any"},
+        max_retries=1,
+    )
+
+    kwargs = client.messages.create.await_args.kwargs
+    assert len(kwargs["tools"]) == 2

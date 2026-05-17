@@ -94,12 +94,12 @@ def _patch_all_db_and_llm(
     # --- reason ---
     if llm_raises is not None:
         monkeypatch.setattr(
-            "apps.api.agents.nodes.reason.call_claude_with_tool",
+            "apps.api.agents.nodes.reason.call_claude_with_tools",
             AsyncMock(side_effect=llm_raises),
         )
     elif llm_response is not None:
         monkeypatch.setattr(
-            "apps.api.agents.nodes.reason.call_claude_with_tool",
+            "apps.api.agents.nodes.reason.call_claude_with_tools",
             AsyncMock(return_value=llm_response),
         )
 
@@ -303,3 +303,154 @@ async def test_state_carries_through_all_nodes(fake_deps, monkeypatch) -> None:
     assert final["tokens_in"] > 0
     assert final["tokens_out"] > 0
     assert final["cost_usd"] >= 0
+
+
+# ----------------------------------------------------------------
+# Loop ReAct end-to-end
+# ----------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_react_loop_two_iterations(fake_deps, monkeypatch) -> None:
+    """E2E: 1ra iter de reason pide skill → execute_skill corre → 2da iter responde.
+
+    Verifica que:
+    - El loop reason ⇄ execute_skill funciona
+    - tool_results acumula el output de la skill
+    - tokens se acumulan entre iteraciones
+    - El estado final es 'respond' con la respuesta de la segunda iter
+    """
+    from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
+    from apps.api.skills.registry import SkillRegistry
+
+    class PingInput(SkillInput):
+        pass
+
+    class PingOutput(SkillOutput):
+        pong: bool
+
+    class PingSkill(Skill):
+        slug = "test.ping"
+        description = "Pings."
+        tier: SkillTier = "L1"
+        input_schema = PingInput
+        output_schema = PingOutput
+        default_threshold = 0.70
+
+        async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
+            return PingOutput(pong=True)
+
+    SkillRegistry._reset()
+    SkillRegistry.register(PingSkill)
+
+    config = make_tenant_configuration(extra={"allowed_skills": ["test.ping"]})
+    _patch_all_db_and_llm(monkeypatch)
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.load_tenant_context.get_tenant_configuration",
+        AsyncMock(return_value=config),
+    )
+
+    responses = [
+        FakeAnthropicResponse(
+            {},
+            tool_name="test_ping",
+            tool_id="toolu_iter1",
+            input_tokens=80,
+            output_tokens=20,
+        ),
+        FakeAnthropicResponse(
+            {"decision": "respond", "confidence": 0.95, "response_text": "El servicio está activo."},
+            tool_name="respond_or_escalate",
+            tool_id="toolu_iter2",
+            input_tokens=120,
+            output_tokens=40,
+        ),
+    ]
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        AsyncMock(side_effect=responses),
+    )
+
+    graph = build_graph(fake_deps)
+    initial = _initial_state()
+    initial["tool_results"] = []
+    initial["tool_iterations"] = 0
+    initial["max_tool_iterations"] = 5
+    initial["allowed_skills"] = []
+
+    final = await graph.ainvoke(initial)
+    SkillRegistry._reset()
+
+    assert final["decision"] == "respond"
+    assert final["agent_response"] == "El servicio está activo."
+    assert final["tool_iterations"] == 1
+    assert len(final["tool_results"]) == 1
+    entry = final["tool_results"][0]
+    assert entry["slug"] == "test.ping"
+    assert entry["is_error"] is False
+    assert entry["output"] == {"pong": True}
+    assert final["tokens_in"] == 200
+    assert final["tokens_out"] == 60
+
+
+@pytest.mark.asyncio
+async def test_react_loop_max_iterations_escalates(fake_deps, monkeypatch) -> None:
+    """E2E: si el LLM no para de pedir skill, se llega a max_tool_iterations y escala."""
+    from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
+    from apps.api.skills.registry import SkillRegistry
+
+    class LoopInput(SkillInput):
+        pass
+
+    class LoopOutput(SkillOutput):
+        n: int
+
+    class LoopSkill(Skill):
+        slug = "test.loop"
+        description = "Loops."
+        tier: SkillTier = "L1"
+        input_schema = LoopInput
+        output_schema = LoopOutput
+        default_threshold = 0.70
+
+        async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
+            return LoopOutput(n=1)
+
+    SkillRegistry._reset()
+    SkillRegistry.register(LoopSkill)
+
+    config = make_tenant_configuration(
+        extra={"allowed_skills": ["test.loop"], "max_tool_iterations": 2}
+    )
+    _patch_all_db_and_llm(monkeypatch)
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.load_tenant_context.get_tenant_configuration",
+        AsyncMock(return_value=config),
+    )
+
+    def _always_skill(**kwargs: object) -> FakeAnthropicResponse:
+        return FakeAnthropicResponse(
+            {},
+            tool_name="test_loop",
+            tool_id="toolu_loop",
+            input_tokens=50,
+            output_tokens=10,
+        )
+
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        AsyncMock(side_effect=_always_skill),
+    )
+
+    graph = build_graph(fake_deps)
+    initial = _initial_state()
+    initial["tool_results"] = []
+    initial["tool_iterations"] = 0
+    initial["max_tool_iterations"] = 5
+
+    final = await graph.ainvoke(initial)
+    SkillRegistry._reset()
+
+    assert final["tool_iterations"] == 2
+    assert "escalation_id" in final
+    assert "max_tool_iterations_exceeded" in (final.get("escalation_reason") or "")

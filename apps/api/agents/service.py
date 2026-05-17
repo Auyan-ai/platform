@@ -76,6 +76,13 @@ class AgentService:
             "channel": channel,
             "end_customer_id": str(end_customer_id),
             "langfuse_trace_id": trace_id,
+            # ReAct loop defaults — load_tenant_context puede overridear desde
+            # tenant_config.extra. allowed_skills queda vacío hasta Sprint 7
+            # (select_aop) salvo opt-in explícito del tenant.
+            "tool_results": [],
+            "tool_iterations": 0,
+            "max_tool_iterations": 5,
+            "allowed_skills": [],
         }
 
         try:

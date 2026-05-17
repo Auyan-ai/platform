@@ -126,9 +126,17 @@ def fake_conn() -> AsyncMock:
 
 
 class _ToolUseBlock:
-    def __init__(self, input_payload: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        input_payload: dict[str, Any],
+        *,
+        name: str = "respond_or_escalate",
+        id: str = "toolu_test_001",
+    ) -> None:
         self.type = "tool_use"
         self.input = input_payload
+        self.name = name
+        self.id = id
 
 
 class _Usage:
@@ -142,10 +150,12 @@ class FakeAnthropicResponse:
         self,
         tool_input: dict[str, Any],
         *,
+        tool_name: str = "respond_or_escalate",
+        tool_id: str = "toolu_test_001",
         input_tokens: int = 100,
         output_tokens: int = 50,
     ) -> None:
-        self.content = [_ToolUseBlock(tool_input)]
+        self.content = [_ToolUseBlock(tool_input, name=tool_name, id=tool_id)]
         self.usage = _Usage(input_tokens, output_tokens)
 
 
@@ -154,11 +164,17 @@ def make_anthropic_response() -> Callable:
     def _factory(
         tool_input: dict[str, Any],
         *,
+        tool_name: str = "respond_or_escalate",
+        tool_id: str = "toolu_test_001",
         input_tokens: int = 100,
         output_tokens: int = 50,
     ) -> FakeAnthropicResponse:
         return FakeAnthropicResponse(
-            tool_input, input_tokens=input_tokens, output_tokens=output_tokens
+            tool_input,
+            tool_name=tool_name,
+            tool_id=tool_id,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
 
     return _factory

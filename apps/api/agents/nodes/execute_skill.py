@@ -85,13 +85,22 @@ def make_execute_skill_node(
 
         existing_results: list[dict[str, Any]] = list(state.get("tool_results", []))
         iter_count: int = state.get("tool_iterations", 0)
+        max_iter: int = state.get("max_tool_iterations") or 5
 
         def _append_and_finish(entry: dict[str, Any]) -> dict[str, Any]:
-            return {
+            new_iter = iter_count + 1
+            result: dict[str, Any] = {
                 "tool_results": [*existing_results, entry],
                 "pending_tool_call": None,
-                "tool_iterations": iter_count + 1,
+                "tool_iterations": new_iter,
             }
+            # Si el routing va a hit el límite, dejamos lista la escalation_reason
+            # para que el nodo `escalate` tenga contexto.
+            if new_iter >= max_iter:
+                result["escalation_reason"] = (
+                    f"max_tool_iterations_exceeded ({new_iter}/{max_iter})"
+                )
+            return result
 
         # 1) Skill permitida por el AOP (lista vacía = ninguna, fail-safe).
         allowed = state.get("allowed_skills") or []

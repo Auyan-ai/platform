@@ -41,10 +41,20 @@ def make_load_tenant_context_node(
             if not system_prompt:
                 return {"error": "no_active_system_prompt"}
 
-        return {
-            "tenant_config": config.model_dump(mode="json"),
+        config_dump = config.model_dump(mode="json")
+        extra = config_dump.get("extra") or {}
+
+        out: dict = {
+            "tenant_config": config_dump,
             "system_prompt": system_prompt,
             "model_used": config.agent_model,
         }
+        # Hooks de loop ReAct (Sprint 6.3+): el tenant puede opt-in a skills
+        # vía tenant_config.extra hasta que select_aop tome posta en Sprint 7.
+        if isinstance(extra.get("allowed_skills"), list):
+            out["allowed_skills"] = list(extra["allowed_skills"])
+        if isinstance(extra.get("max_tool_iterations"), int):
+            out["max_tool_iterations"] = extra["max_tool_iterations"]
+        return out
 
     return _node
