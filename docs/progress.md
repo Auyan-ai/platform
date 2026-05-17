@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-17 (sesión 15 — Sprint 7 completado: sub-PR 7.6 eval harness + PATCH /aops/{id}/promote, 450 tests)_
+_Última actualización: 2026-05-17 (sesión 16 — bugs de prod post-Sprint 7: FK composite + migración AOPs no aplicada)_
 
 ---
 
@@ -593,6 +593,24 @@ Trace IDs de referencia:
 **Suite total: 450/450 verde. Ruff limpio.**
 
 **Sprint 7 completado ✅** — AOPs en DB + compiler + selector de intent + UI editor + eval harness.
+
+### Bugs post-Sprint 7 (sesión 16, 2026-05-17)
+
+Validación e2e en staging del dashboard interno descubrió 3 bugs distintos. Los 3 se manifestaban con "Load failed" + Status 500 + CORS aparentemente roto (porque el error pasa antes del CORSMiddleware).
+
+| Bug | Síntoma | Causa raíz | Fix |
+|---|---|---|---|
+| Tomar escalación falla | 500 + `escalations_assigned_user_id_tenant_id_fkey` | FK composite `(assigned_user_id, tenant_id) → users(id, tenant_id)` bloquea a super_admin (vive en su propio tenant) | [PR #56](https://github.com/Auyan-ai/platform/pull/56): FK simple a `users(id)` en `escalations` y `conversations` |
+| Responder conversación falla | 500 + `messages_author_user_id_tenant_id_fkey` | Mismo problema en `messages.author_user_id` | [PR #57](https://github.com/Auyan-ai/platform/pull/57): FK simple a `users(id)` en `messages` |
+| AOPs no carga | 500 + `UndefinedTableError: relation "aops" does not exist` | Migración `20260517000001_add_aops.sql` nunca se aplicó a staging — Railway deploya código pero NO SQL | Aplicada manualmente vía `psql` |
+
+**Lección guardada en memoria:**
+- Las migraciones de Supabase **no se auto-aplican** en deploy. Hay que correrlas a mano vía `psql` o SQL Editor.
+- Nunca usar FK composite `(user_id, tenant_id) → users(id, tenant_id)` en tablas operacionales — bloquea a super_admin. Validar tenant en service layer, no en DB.
+
+**CORS también:** `ALLOWED_ORIGINS` en Railway estaba sin `https://` prefix. Corregido manualmente a `http://localhost:3000,http://localhost:3001,https://auyan-web-staging.up.railway.app`.
+
+**Ruff fix:** PR #55 — `per-file-ignores` para `evals/`, `scripts/` y `tests/` (S603 + E501 en strings de mensajes).
 
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
