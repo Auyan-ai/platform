@@ -10,20 +10,19 @@ Cubre:
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import pytest
+from apps.api.db.models import AopWithContent
 from apps.api.evals.harness import (
     PASS_RATE_GATE,
     Assertion,
     EvalFixture,
     _check_assertion,
-    _default_tenant_config,
     load_fixtures,
     run_eval,
     run_fixture,
 )
-from apps.api.db.models import AopWithContent
 from apps.api.tests.conftest import TENANT_ID, make_tenant_configuration
 
 AOP_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
