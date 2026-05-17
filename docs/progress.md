@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-17 (sesión 13 — Sub-PR 6.4 completo: lifecycle closed_abandoned + cleanup job #51 + migración aplicada en staging)_
+_Última actualización: 2026-05-17 (sesión 14 — Sprint 7 sub-PRs 7.1–7.5 completos: AOPs en DB + compiler + select_aop node + UI editor)_
 
 ---
 
@@ -532,9 +532,58 @@ Trace IDs de referencia:
 
 **Suite total:** 331/331 verde. Ruff limpio.
 
+---
+
+## Sprint 7 — AOPs en DB + selector de intent + UI editor (en curso)
+
+### Sub-PR 7.1 — Tablas DB + modelos + queries (commit `cd4ade8`)
+
+| Área | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260517000001_add_aops.sql` | Tablas `aops`, `aop_versions` (trigger immutabilidad), `intent_classifier_runs`; RLS en las tres |
+| `apps/api/db/models.py` | `AopWorkspace`, `Aop`, `AopVersion`, `AopWithContent` (con `is_active`), `IntentClassifierRun` |
+| `apps/api/db/queries.py` | `get_active_aops`, `get_aop_by_slug`, `create_aop`, `save_aop_version`, `insert_intent_classifier_run` |
+| `apps/api/tests/test_aop_queries.py` | 19 tests unitarios |
+
+### Sub-PR 7.2 — AOP compiler + TTL cache (commit `4ddcd68`)
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/aops/compiler.py` | `compile_aop` (6 bloques), `load_aop` con `TTLCache(maxsize=1000, ttl=60)`, `load_active_aops` |
+| `apps/api/tests/test_aop_compiler.py` | 38 tests: cada `_render_*` + `compile_aop` + cache behavior |
+
+### Sub-PR 7.3/7.4 — Nodo select_aop + cableado al grafo (commit `a3ae094`)
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/agents/nodes/select_aop.py` | Clasificador de intent con Haiku (tool-forced), fallback a 'default', `_should_reclassify` |
+| `apps/api/agents/graph.py` | `select_aop` wired entre `load_conversation` y `retrieve_knowledge` |
+| `apps/api/agents/state.py` | Campos AOP: `aop_slug`, `aop_version`, `intent_confidence`, `aop_locked_until_turn`, etc. |
+| `apps/api/core/config.py` | `intent_min_confidence=0.60`, `intent_classifier_model=claude-haiku-4-5-20251001` |
+| `apps/api/tests/test_select_aop_node.py` | 23 tests; `apps/api/tests/test_graph_e2e.py` actualizado |
+
+**Degradación elegante:** tenants sin AOPs siguen usando `tenant_prompts` legacy sin cambio alguno.
+
+### Sub-PR 7.5 — UI editor de AOPs (commit `bd8cce5`)
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/db/queries.py` | Queries de gestión: `list_aops`, `get_aop_by_id`, `toggle_aop_active`, `soft_delete_aop` |
+| `apps/api/routers/aops.py` | CRUD completo + `POST /aops/validate` (preview del prompt compilado sin guardar) |
+| `apps/api/main.py` | Router `aops_router` wired |
+| `apps/web/lib/api/hooks/aops.ts` | `useAops`, `useAop`, `useCreateAop`, `useSaveAop`, `useToggleAop`, `useDeleteAop`, `useValidateAop` |
+| `apps/web/components/aops/` | `AopList`, `AopEditor`, `AopEditView` |
+| `apps/web/app/(dashboard)/tenants/[tenantId]/aops/` | Páginas list, new, `[aopId]` |
+| `apps/web/components/nav/Sidebar.tsx` | Ítem "AOPs" en la nav |
+
+**411/411 tests verde. TypeScript sin errores. Ruff limpio.**
+
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. **Sprint 7** — AOPs en DB + selector de intent + workspaces prod/staging + UI editor + eval harness
+1. **Sub-PR 7.6** — Eval harness (obligatorio como gate staging→production)
+   - Mínimo 13 fixtures para AOPs `consulta_envio` y `default`
+   - Framework: pytest + fixtures YAML/JSON, runner que llama al compilador + select_aop
+   - Gate: si < 80% pasan, el endpoint `PATCH /aops/{id}/promote` rechaza la promoción
 2. **Sprint 8** — Agent Reasoning UI (ver sección más abajo)
 
 ---
