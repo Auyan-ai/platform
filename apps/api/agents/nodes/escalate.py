@@ -40,13 +40,26 @@ def make_escalate_node(
             else None
         )
         reason = state.get("escalation_reason") or "unspecified_escalation"
-        agent_response = state.get("agent_response") or ""
 
-        metadata = {
+        # Si la escalación es por pending_approval, construir mensaje de cortesía
+        # automáticamente si el agente no generó uno.
+        pending_approval_id = state.get("pending_approval_id")
+        if pending_approval_id and not state.get("agent_response"):
+            agent_response = (
+                "Tu solicitud requiere revisión por parte de nuestro equipo. "
+                "Un agente la revisará en breve y te confirmaremos el resultado. "
+                "¡Gracias por tu paciencia!"
+            )
+        else:
+            agent_response = state.get("agent_response") or ""
+
+        metadata: dict = {
             "confidence": state.get("confidence"),
             "langfuse_trace_id": state.get("langfuse_trace_id"),
             "model_used": state.get("model_used"),
         }
+        if state.get("pending_approval_id"):
+            metadata["pending_approval_id"] = state["pending_approval_id"]
 
         async with tenant_scope(tenant_id) as conn:
             existing = await get_open_escalation_for_conversation(
