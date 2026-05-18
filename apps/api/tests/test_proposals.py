@@ -3,22 +3,61 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
+import jwt
 import pytest
 from apps.api.core.errors import register_exception_handlers
+from apps.api.core.security import UserRecord, reset_user_cache
 from apps.api.db.models import AopWithContent, ImprovementProposal
 from apps.api.routers.proposals import router as proposals_router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-TENANT = uuid.uuid4()
+JWT_SECRET = "test-jwt-secret-for-unit-tests-32b!"
+JWT_ALG = "HS256"
+JWT_AUD = "authenticated"
+USER_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+TENANT = UUID("11111111-1111-1111-1111-111111111111")
 PROPOSAL_ID = uuid.uuid4()
 RUN_ID = uuid.uuid4()
 AOP_ID = uuid.uuid4()
-USER_ID = uuid.uuid4()
 NOW = datetime(2026, 5, 19, 12, 0, 0)
+
+
+class _SecretWrap:
+    def get_secret_value(self) -> str:
+        return JWT_SECRET
+
+
+@dataclass
+class FakeAuthSettings:
+    auth_user_cache_maxsize: int = 1000
+    auth_user_cache_ttl_seconds: int = 60
+    supabase_jwt_algorithm: str = JWT_ALG
+    supabase_jwt_audience: str = JWT_AUD
+
+    @property
+    def supabase_jwt_secret(self) -> _SecretWrap:
+        return _SecretWrap()
+
+
+def _make_jwt() -> str:
+    now = datetime.now(UTC)
+    return jwt.encode(
+        {"aud": JWT_AUD, "sub": str(USER_ID), "exp": now + timedelta(hours=1), "iat": now},
+        JWT_SECRET,
+        algorithm=JWT_ALG,
+    )
+
+
+def _admin_record() -> UserRecord:
+    return UserRecord(tenant_id=TENANT, role="tenant_admin", email="admin@acme.io")
+
 
 _PENDING_PROPOSAL = ImprovementProposal(
     id=PROPOSAL_ID,
@@ -49,33 +88,29 @@ _FAKE_AOP = AopWithContent(
 )
 
 
-def _auth_headers() -> dict:
-    return {"Authorization": "Bearer fake-token"}
-
-
-def _mock_auth():
-    from apps.api.core.security import AuthContext
-    return AuthContext(
-        user_id=USER_ID,
-        tenant_id=TENANT,
-        role="tenant_admin",
-        email="admin@test.com",
-    )
+@pytest.fixture(autouse=True)
+def _clear_cache() -> None:
+    reset_user_cache()
+    yield  # type: ignore[misc]
+    reset_user_cache()
 
 
 def _make_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    monkeypatch.setattr(
-        "apps.api.routers.proposals.get_auth_context",
-        lambda: _mock_auth(),
-    )
-    monkeypatch.setattr(
-        "apps.api.routers.proposals.get_tenant_id",
-        lambda: TENANT,
-    )
+    async def _fake_lookup(user_id: UUID, settings: Any) -> UserRecord:
+        return _admin_record()
+
+    monkeypatch.setattr("apps.api.core.security._lookup_user", _fake_lookup)
+
+    from apps.api.core.config import get_settings
     app = FastAPI()
     register_exception_handlers(app)
+    app.dependency_overrides[get_settings] = lambda: FakeAuthSettings()
     app.include_router(proposals_router)
     return app
+
+
+def _auth() -> dict:
+    return {"Authorization": f"Bearer {_make_jwt()}"}
 
 
 # ─── list proposals ───────────────────────────────────────────────────────────
@@ -93,9 +128,12 @@ def test_list_proposals_ok(monkeypatch):
 
         app = _make_app(monkeypatch)
         client = TestClient(app)
-        resp = client.get("/proposals", headers=_auth_headers())
+        resp = client.get("/proposals", headers=_auth())
 
-    assert resp.status_code in (200, 401, 422)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["status"] == "pending"
 
 
 def test_get_proposal_not_found(monkeypatch):
@@ -110,9 +148,9 @@ def test_get_proposal_not_found(monkeypatch):
 
         app = _make_app(monkeypatch)
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.get(f"/proposals/{uuid.uuid4()}", headers=_auth_headers())
+        resp = client.get(f"/proposals/{uuid.uuid4()}", headers=_auth())
 
-    assert resp.status_code in (401, 404, 422)
+    assert resp.status_code == 404
 
 
 # ─── ProposalResponse.from_model ─────────────────────────────────────────────
@@ -145,8 +183,7 @@ def test_approve_proposal_non_pending_rejected(monkeypatch):
     )
     with patch("apps.api.routers.proposals.tenant_scope") as mock_scope, \
          patch("apps.api.routers.proposals.get_improvement_proposal",
-               new_callable=AsyncMock) as mock_get, \
-         patch("apps.api.routers.proposals.require_role", return_value=lambda: None):
+               new_callable=AsyncMock) as mock_get:
 
         conn = AsyncMock()
         mock_scope.return_value.__aenter__ = AsyncMock(return_value=conn)
@@ -157,17 +194,16 @@ def test_approve_proposal_non_pending_rejected(monkeypatch):
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post(
             f"/proposals/{PROPOSAL_ID}/approve",
-            headers=_auth_headers(),
+            headers=_auth(),
         )
 
-    assert resp.status_code in (401, 409, 422)
+    assert resp.status_code == 409
 
 
 def test_reject_proposal_missing_proposal(monkeypatch):
     with patch("apps.api.routers.proposals.tenant_scope") as mock_scope, \
          patch("apps.api.routers.proposals.get_improvement_proposal",
-               new_callable=AsyncMock) as mock_get, \
-         patch("apps.api.routers.proposals.require_role", return_value=lambda: None):
+               new_callable=AsyncMock) as mock_get:
 
         conn = AsyncMock()
         mock_scope.return_value.__aenter__ = AsyncMock(return_value=conn)
@@ -178,11 +214,11 @@ def test_reject_proposal_missing_proposal(monkeypatch):
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post(
             f"/proposals/{uuid.uuid4()}/reject",
-            headers=_auth_headers(),
+            headers=_auth(),
             json={"comment": "No aplica"},
         )
 
-    assert resp.status_code in (401, 404, 422)
+    assert resp.status_code == 404
 
 
 # ─── metrics ──────────────────────────────────────────────────────────────────
@@ -206,6 +242,9 @@ def test_metrics_response_fields(monkeypatch):
 
         app = _make_app(monkeypatch)
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.get("/proposals/metrics", headers=_auth_headers())
+        resp = client.get("/proposals/metrics", headers=_auth())
 
-    assert resp.status_code in (200, 401, 422)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["pending"] == 3
+    assert data["acceptance_rate"] == 0.5
