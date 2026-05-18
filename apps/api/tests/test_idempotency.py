@@ -17,7 +17,6 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import UUID
 
-import pytest
 from apps.api.agents.service import AgentOutcome
 from apps.api.core.config import get_settings
 from apps.api.db.models import IdempotencyRecord
