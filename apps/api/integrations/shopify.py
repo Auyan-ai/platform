@@ -143,7 +143,54 @@ class ShopifyClient:
             return response.json()["policies"]  # type: ignore[no-any-return]
 
     # ----------------------------------------------------------------
-    # Write (L3 — Sprint 10)
+    # Write — L2 (Sprint 9)
+    # ----------------------------------------------------------------
+
+    async def add_order_note(self, order_id: int, note: str) -> dict[str, Any]:
+        """Reemplaza la nota interna de un pedido. Acción L2."""
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"{self._base_url}/orders/{order_id}.json",
+                headers=self._headers(),
+                json={"order": {"id": order_id, "note": note}},
+                timeout=10,
+            )
+            response.raise_for_status()
+            return response.json()["order"]  # type: ignore[no-any-return]
+
+    async def tag_order(self, order_id: int, tags_to_add: list[str]) -> dict[str, Any]:
+        """Añade tags a un pedido (merge no-destructivo). Acción L2.
+
+        Lee los tags actuales del pedido y añade los nuevos sin duplicar.
+        """
+        async with httpx.AsyncClient() as client:
+            # Leer tags actuales
+            get_resp = await client.get(
+                f"{self._base_url}/orders/{order_id}.json",
+                headers=self._headers(),
+                params={"fields": "id,tags"},
+                timeout=10,
+            )
+            get_resp.raise_for_status()
+            order = get_resp.json()["order"]
+            current_tags: set[str] = {
+                t.strip() for t in order.get("tags", "").split(",") if t.strip()
+            }
+            merged = sorted(current_tags | set(tags_to_add))
+            merged_str = ", ".join(merged)
+
+            # Actualizar con tags fusionados
+            put_resp = await client.put(
+                f"{self._base_url}/orders/{order_id}.json",
+                headers=self._headers(),
+                json={"order": {"id": order_id, "tags": merged_str}},
+                timeout=10,
+            )
+            put_resp.raise_for_status()
+            return put_resp.json()["order"]  # type: ignore[no-any-return]
+
+    # ----------------------------------------------------------------
+    # Write — L3 (Sprint 10)
     # ----------------------------------------------------------------
 
     async def cancel_order(self, order_id: int) -> dict[str, Any]:
