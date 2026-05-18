@@ -353,6 +353,16 @@ Reglas:
 - **`search_products` usa `?title=` (coincidencia exacta)** — la Admin REST API de Shopify no hace substring search. Migrar a Admin GraphQL API (`products(first: N, query: $q)`) para búsqueda full-text real.
 - **Razonamiento del agente visible en el dashboard** — mostrar en el hilo de conversación (dashboard interno y cliente) qué skills llamó el agente, input/output de cada una, y confianza de la decisión final. Da transparencia a operadores y tenants. Opciones: (A) mensaje `role="agent_trace"` en Supabase sin migración, (B) leer trace de Langfuse via API, (C) campo `agent_trace` jsonb en `messages`. Evaluar A primero.
 
+**Context engineering — gaps identificados (sesión 19, 2026-05-18):**
+- **Memory cross-conversación** (alta prioridad) — solo cargamos historial de la conversación actual. Un cliente recurrente no tiene contexto de su historial previo. Fix: cargar últimas N conversaciones resueltas del mismo `end_customer_id` al arrancar el grafo.
+- **Glossary block** (alta prioridad) — no hay bloque dedicado para terminología de la marca. Fix: campo `glossary` en YAML frontmatter del AOP + `_render_glossary()` en compiler.
+- **Condiciones por observación mid-turno** (media prioridad) — el AOP se clasifica una vez; si el cliente cambia de tema mid-turno, no hay re-inyección de contexto. Fix: detección de señales críticas en el nodo `reason`.
+- **Brand voice por AOP** (media prioridad) — voice está en `tenant_config` global, no overrideable por AOP. Fix: `voice_override` en frontmatter.
+- **Detección de alucinaciones automática** — actualmente solo detección manual en Langfuse. Plan: LLM-as-judge en Slow Agent (Sprint 11). Mientras tanto, usar KB con datos fantasiosos específicos (script `seed_kb.py`).
+- **Webhook idempotency** (bloqueador de producción) — reintentos del cliente pueden duplicar mensajes/escalaciones. Agregar `idempotency_key` deduplication.
+- **Rate limiting + cost controls** (bloqueador de producción) — no hay límites por tenant ni presupuesto de tokens. Riesgo de DDoS y bills explosivos.
+- Ver análisis completo en `docs/architecture-agent-v2.md` sección 19.
+
 ---
 
 ## Sprint 5 — Mejoras al grafo (completado ✅)
@@ -806,3 +816,34 @@ Tres bugs distintos descubiertos al mandar el primer webhook real contra staging
 
 1. Probar conversación multi-turno con varias preguntas seguidas
 2. **Sprint 9** — Skills L2 + permissions + audit log con PII + idempotency
+
+---
+
+## Sesión 19 — Context engineering analysis + KB seeding (2026-05-18)
+
+**Sin cambios al grafo** — sesión de análisis + infraestructura de pruebas.
+
+### Lo que se hizo
+
+| Área | Qué se hizo |
+|---|---|
+| Análisis context engineering | Revisión del artículo de Neil Rahilly (Sierra) contra el codebase actual. Ver `docs/architecture-agent-v2.md` sección 19. |
+| `apps/api/scripts/seed_kb.py` | Script para poblar la KB de un tenant con contenido fantasioso de Lunaria (5 documentos, 20 chunks). Uso: `poetry run python -m scripts.seed_kb --clear` |
+| `docs/architecture-agent-v2.md` sección 19 | Análisis completo de gaps de context engineering + roadmap de detección de alucinaciones |
+| `docs/progress.md` | Gaps priorizados añadidos a deuda técnica |
+
+### KB de Lunaria — datos fantasiosos para anti-alucinación
+
+El contenido de `seed_kb.py` usa datos deliberadamente impares e inventados:
+- Devoluciones: **49 días** (7 lunas llenas), reembolso solo en **Crédito Estelar**
+- Envío gratis desde **€137**, modalidades: **Constelación Express / Tránsito Lunar / Viaje Estelar**
+- Tracking con código **LN-XXXXXXX** vía sistema **Órbita**
+- Precios impares: €137, €189, €743, €311, €521, €1.107...
+- Membresía **Guardianas de la Luna** a **€89/año** con 3 niveles
+- Si el agente dice "30 días" o "envío gratis sin mínimo" → **alucinación confirmada**
+
+### Empezar aquí en la próxima sesión — usar **Sonnet**
+
+1. Correr `seed_kb.py` contra staging y verificar que chunks quedan en DB
+2. Probar conversación multi-turno con preguntas sobre políticas de Lunaria
+3. **Sprint 9** — Skills L2 + permissions + audit log con PII + idempotency
