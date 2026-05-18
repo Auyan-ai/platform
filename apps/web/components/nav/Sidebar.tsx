@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { label: 'Escalaciones', icon: '🚨', section: 'escalations' },
   { label: 'Aprobaciones', icon: '✅', section: 'approvals' },
   { label: 'AOPs', icon: '📋', section: 'aops' },
+  { label: 'Mejoras propuestas', icon: '✨', section: 'proposals' },
 ]
 
 interface SidebarProps {
