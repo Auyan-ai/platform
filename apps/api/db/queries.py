@@ -33,12 +33,14 @@ from apps.api.db.models import (
     Message,
     MessageDirection,
     MessageRole,
+    PendingApproval,
     ReasoningEventType,
     ReasoningPhase,
     ReasoningStatus,
     SkillAuditLog,
     Tenant,
     TenantConfiguration,
+    TenantToolPermission,
     UserRole,
 )
 
@@ -1441,4 +1443,244 @@ async def notify_aop_cache_invalidated(
     """
     payload = json.dumps({"tenant_id": str(tenant_id), "slug": slug, "workspace": workspace})
     await conn.execute("SELECT pg_notify('aop_cache_invalidated', $1)", payload)
+
+
+# ============================================================
+# Tenant Tool Permissions (Sprint 10)
+# ============================================================
+
+
+async def get_tool_permissions(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    slugs: list[str],
+) -> dict[str, TenantToolPermission]:
+    """Devuelve un dict slug→TenantToolPermission para los slugs solicitados.
+
+    Si un slug no tiene row en la tabla, no aparece en el resultado — el caller
+    debe tratarlo como deshabilitado (fail-safe).
+    """
+    if not slugs:
+        return {}
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, skill_slug, is_enabled, threshold_override,
+               human_approval_required, enabled_at, enabled_by, created_at
+          FROM tenant_tool_permissions
+         WHERE tenant_id = $1
+           AND skill_slug = ANY($2::text[])
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        slugs,
+    )
+    return {r["skill_slug"]: TenantToolPermission(**dict(r)) for r in rows}
+
+
+async def upsert_tool_permission(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    skill_slug: str,
+    is_enabled: bool,
+    human_approval_required: bool = False,
+    threshold_override: float | None = None,
+    enabled_by: UUID | None = None,
+) -> TenantToolPermission:
+    """Crea o actualiza el permiso de una skill para un tenant."""
+    row = await conn.fetchrow(
+        """
+        INSERT INTO tenant_tool_permissions
+            (tenant_id, skill_slug, is_enabled, human_approval_required,
+             threshold_override, enabled_at, enabled_by)
+        VALUES ($1, $2, $3, $4, $5, CASE WHEN $3 THEN NOW() ELSE NULL END, $6)
+        ON CONFLICT (tenant_id, skill_slug)
+        DO UPDATE SET
+            is_enabled              = EXCLUDED.is_enabled,
+            human_approval_required = EXCLUDED.human_approval_required,
+            threshold_override      = EXCLUDED.threshold_override,
+            enabled_at              = CASE WHEN EXCLUDED.is_enabled THEN NOW() ELSE tenant_tool_permissions.enabled_at END,
+            enabled_by              = COALESCE(EXCLUDED.enabled_by, tenant_tool_permissions.enabled_by),
+            updated_at              = NOW()
+        RETURNING id, tenant_id, skill_slug, is_enabled, threshold_override,
+                  human_approval_required, enabled_at, enabled_by, created_at
+        """,
+        tenant_id,
+        skill_slug,
+        is_enabled,
+        human_approval_required,
+        threshold_override,
+        enabled_by,
+    )
+    return TenantToolPermission(**dict(row))
+
+
+async def list_tool_permissions(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+) -> list[TenantToolPermission]:
+    """Lista todos los permisos de skills de un tenant."""
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, skill_slug, is_enabled, threshold_override,
+               human_approval_required, enabled_at, enabled_by, created_at
+          FROM tenant_tool_permissions
+         WHERE tenant_id = $1
+           AND deleted_at IS NULL
+         ORDER BY skill_slug
+        """,
+        tenant_id,
+    )
+    return [TenantToolPermission(**dict(r)) for r in rows]
+
+
+# ============================================================
+# Pending Approvals (Sprint 10)
+# ============================================================
+
+
+async def create_pending_approval(
+    conn: asyncpg.Connection,
+    *,
+    approval_id: UUID,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    skill_slug: str,
+    skill_tier: str,
+    inputs_raw: dict,
+    inputs_redacted: dict,
+    aop_slug: str,
+    aop_version: int,
+    langfuse_trace_id: str | None,
+) -> PendingApproval:
+    """Inserta una solicitud de aprobación humana para una skill L3."""
+    row = await conn.fetchrow(
+        """
+        INSERT INTO pending_approvals
+            (id, tenant_id, conversation_id, skill_slug, skill_tier,
+             inputs_raw, inputs_redacted, aop_slug, aop_version, langfuse_trace_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING id, tenant_id, conversation_id, skill_slug, skill_tier,
+                  inputs_raw, inputs_redacted, aop_slug, aop_version,
+                  langfuse_trace_id, status, reviewed_by, reviewed_at,
+                  review_comment, created_at
+        """,
+        approval_id,
+        tenant_id,
+        conversation_id,
+        skill_slug,
+        skill_tier,
+        inputs_raw,
+        inputs_redacted,
+        aop_slug,
+        aop_version,
+        langfuse_trace_id,
+    )
+    return PendingApproval(**dict(row))
+
+
+async def get_pending_approval(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    approval_id: UUID,
+) -> PendingApproval | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, conversation_id, skill_slug, skill_tier,
+               inputs_raw, inputs_redacted, aop_slug, aop_version,
+               langfuse_trace_id, status, reviewed_by, reviewed_at,
+               review_comment, created_at
+          FROM pending_approvals
+         WHERE tenant_id = $1
+           AND id = $2
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        approval_id,
+    )
+    return PendingApproval(**dict(row)) if row else None
+
+
+async def list_pending_approvals(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[PendingApproval]:
+    """Lista aprobaciones pendientes de un tenant, opcionalmente filtradas por status."""
+    if status:
+        rows = await conn.fetch(
+            """
+            SELECT id, tenant_id, conversation_id, skill_slug, skill_tier,
+                   inputs_raw, inputs_redacted, aop_slug, aop_version,
+                   langfuse_trace_id, status, reviewed_by, reviewed_at,
+                   review_comment, created_at
+              FROM pending_approvals
+             WHERE tenant_id = $1
+               AND status = $2
+               AND deleted_at IS NULL
+             ORDER BY created_at DESC
+             LIMIT $3 OFFSET $4
+            """,
+            tenant_id,
+            status,
+            limit,
+            offset,
+        )
+    else:
+        rows = await conn.fetch(
+            """
+            SELECT id, tenant_id, conversation_id, skill_slug, skill_tier,
+                   inputs_raw, inputs_redacted, aop_slug, aop_version,
+                   langfuse_trace_id, status, reviewed_by, reviewed_at,
+                   review_comment, created_at
+              FROM pending_approvals
+             WHERE tenant_id = $1
+               AND deleted_at IS NULL
+             ORDER BY created_at DESC
+             LIMIT $2 OFFSET $3
+            """,
+            tenant_id,
+            limit,
+            offset,
+        )
+    return [PendingApproval(**dict(r)) for r in rows]
+
+
+async def resolve_pending_approval(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    approval_id: UUID,
+    new_status: str,
+    reviewed_by: UUID,
+    review_comment: str | None = None,
+) -> PendingApproval | None:
+    """Aprueba o rechaza una pending_approval (CAS sobre status='pending')."""
+    row = await conn.fetchrow(
+        """
+        UPDATE pending_approvals
+           SET status         = $3,
+               reviewed_by    = $4,
+               reviewed_at    = NOW(),
+               review_comment = $5,
+               updated_at     = NOW()
+         WHERE tenant_id = $1
+           AND id = $2
+           AND status = 'pending'
+           AND deleted_at IS NULL
+        RETURNING id, tenant_id, conversation_id, skill_slug, skill_tier,
+                  inputs_raw, inputs_redacted, aop_slug, aop_version,
+                  langfuse_trace_id, status, reviewed_by, reviewed_at,
+                  review_comment, created_at
+        """,
+        tenant_id,
+        approval_id,
+        new_status,
+        reviewed_by,
+        review_comment,
+    )
+    return PendingApproval(**dict(row)) if row else None
 

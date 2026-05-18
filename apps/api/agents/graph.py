@@ -112,9 +112,17 @@ def route_after_supervise(state: AgentState) -> str:
 
 
 def route_after_execute_skill(state: AgentState) -> str:
-    """Routing tras `execute_skill`. Si excedimos el límite del loop, escalamos."""
+    """Routing tras `execute_skill`.
+
+    - pending_approval_id → skill L3 esperando aprobación humana → escalate.
+    - max_iter superado → escalate.
+    - error de sistema → handle_error.
+    - resto → volver a reason (siguiente iteración del loop ReAct).
+    """
     if state.get("error"):
         return "handle_error"
+    if state.get("pending_approval_id"):
+        return "escalate"
     max_iter = state.get("max_tool_iterations") or DEFAULT_MAX_TOOL_ITERATIONS
     if state.get("tool_iterations", 0) >= max_iter:
         return "escalate"

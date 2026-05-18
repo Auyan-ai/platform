@@ -107,6 +107,13 @@ def _base_state(**overrides: Any) -> dict[str, Any]:
         "tool_iterations": 0,
         "max_tool_iterations": 5,
         "tool_results": [],
+        # Permisos por defecto para las skills dummy de prueba
+        "tool_permissions": {
+            "test.echo": {"is_enabled": True, "human_approval_required": False, "threshold_override": None},
+            "test.boom": {"is_enabled": True, "human_approval_required": False, "threshold_override": None},
+            "test.probe": {"is_enabled": True, "human_approval_required": False, "threshold_override": None},
+            "test.l2_dummy": {"is_enabled": True, "human_approval_required": False, "threshold_override": None},
+        },
     }
     base.update(overrides)
     return base
@@ -441,7 +448,13 @@ class L3Skill(Skill):
         return EchoOutput(echoed="dangerous")
 
 
-class TestL2PermissionGate:
+def _perm(is_enabled: bool = True, human_approval_required: bool = False) -> dict:
+    return {"is_enabled": is_enabled, "human_approval_required": human_approval_required, "threshold_override": None}
+
+
+class TestPermissionGate:
+    """Gate de permisos desde tenant_tool_permissions (Sprint 10)."""
+
     @pytest.fixture(autouse=True)
     def _register_l2_l3(self) -> Generator[None, None, None]:
         SkillRegistry._reset()
@@ -451,87 +464,157 @@ class TestL2PermissionGate:
         yield
         SkillRegistry._reset()
 
-    async def test_l2_blocked_without_allow_flag(self, deps: AgentDependencies) -> None:
-        """L2 skill → error si allow_l2_skills no está en extra."""
+    async def test_skill_blocked_when_no_permission_row(self, deps: AgentDependencies) -> None:
+        """Sin row en tool_permissions la skill es rechazada (fail-safe)."""
         node = make_execute_skill_node(deps)
         state = _base_state(
             pending_tool_call=_pending(slug="test.write"),
             allowed_skills=["test.write"],
-            tenant_config={"extra": {}},  # sin allow_l2_skills
+            tool_permissions={},  # sin row
         )
         result = await node(state)
-
         entry = result["tool_results"][-1]
         assert entry["is_error"] is True
-        assert entry["error"] == "l2_skills_not_enabled_for_tenant"
+        assert "skill_not_enabled_for_tenant" in entry["error"]
 
-    async def test_l2_blocked_when_flag_is_false(self, deps: AgentDependencies) -> None:
+    async def test_skill_blocked_when_is_enabled_false(self, deps: AgentDependencies) -> None:
         node = make_execute_skill_node(deps)
         state = _base_state(
             pending_tool_call=_pending(slug="test.write"),
             allowed_skills=["test.write"],
-            tenant_config={"extra": {"allow_l2_skills": False}},
+            tool_permissions={"test.write": _perm(is_enabled=False)},
         )
         result = await node(state)
-
         entry = result["tool_results"][-1]
         assert entry["is_error"] is True
-        assert entry["error"] == "l2_skills_not_enabled_for_tenant"
+        assert "skill_not_enabled_for_tenant" in entry["error"]
 
-    async def test_l2_executes_when_flag_is_true(self, deps: AgentDependencies) -> None:
-        """Con allow_l2_skills: true, la skill L2 se ejecuta normalmente."""
+    async def test_l2_executes_when_enabled(self, deps: AgentDependencies) -> None:
+        """L2 habilitada en tool_permissions se ejecuta normalmente."""
         node = make_execute_skill_node(deps)
         state = _base_state(
             pending_tool_call=_pending(slug="test.write"),
             allowed_skills=["test.write"],
-            tenant_config={"extra": {"allow_l2_skills": True}},
+            tool_permissions={"test.write": _perm(is_enabled=True)},
         )
         result = await node(state)
-
         entry = result["tool_results"][-1]
         assert entry["is_error"] is False
         assert entry["output"]["echoed"] == "written:hola"
 
-    async def test_l3_always_blocked(self, deps: AgentDependencies) -> None:
-        """L3 está bloqueado incluso con allow_l2_skills: true — Sprint 10."""
-        node = make_execute_skill_node(deps)
-        state = _base_state(
-            pending_tool_call=_pending(slug="test.dangerous"),
-            allowed_skills=["test.dangerous"],
-            tenant_config={"extra": {"allow_l2_skills": True}},
-        )
-        result = await node(state)
-
-        entry = result["tool_results"][-1]
-        assert entry["is_error"] is True
-        assert entry["error"] == "l3_skills_not_available"
-
-    async def test_l1_unaffected_by_gate(self, deps: AgentDependencies) -> None:
-        """Skills L1 no se ven afectadas por el gate, con o sin el flag."""
+    async def test_l1_executes_when_enabled(self, deps: AgentDependencies) -> None:
+        """L1 habilitada se ejecuta sin restricciones adicionales."""
         node = make_execute_skill_node(deps)
         state = _base_state(
             pending_tool_call=_pending(slug="test.echo"),
             allowed_skills=["test.echo"],
-            tenant_config={"extra": {}},  # sin allow_l2_skills
+            tool_permissions={"test.echo": _perm(is_enabled=True)},
         )
         result = await node(state)
-
         entry = result["tool_results"][-1]
         assert entry["is_error"] is False
         assert entry["output"]["echoed"] == "echo:hola"
 
-    async def test_l2_blocked_increments_iterations(self, deps: AgentDependencies) -> None:
-        """El rechazo por tier sigue consumiendo una iteración."""
+    async def test_blocked_skill_increments_iterations(self, deps: AgentDependencies) -> None:
+        """El rechazo sigue consumiendo una iteración."""
         node = make_execute_skill_node(deps)
         state = _base_state(
             pending_tool_call=_pending(slug="test.write"),
             allowed_skills=["test.write"],
-            tenant_config={"extra": {}},
+            tool_permissions={},
             tool_iterations=2,
         )
         result = await node(state)
-
         assert result["tool_iterations"] == 3
+
+    async def test_l3_without_approval_required_executes(self, deps: AgentDependencies) -> None:
+        """L3 habilitada sin human_approval_required se ejecuta (para tenants que la apagaron)."""
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.dangerous"),
+            allowed_skills=["test.dangerous"],
+            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=False)},
+        )
+        result = await node(state)
+        entry = result["tool_results"][-1]
+        assert entry["is_error"] is False
+        assert entry["output"]["echoed"] == "dangerous"
+
+
+class TestL3HumanApprovalGate:
+    """Cuando L3 + human_approval_required=True el nodo crea pending_approval."""
+
+    @pytest.fixture(autouse=True)
+    def _register(self) -> Generator[None, None, None]:
+        SkillRegistry._reset()
+        SkillRegistry.register(L3Skill)
+        yield
+        SkillRegistry._reset()
+
+    async def test_l3_approval_required_does_not_execute_skill(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """La skill NO se ejecuta — se crea un pending_approval."""
+        import unittest.mock as mock
+
+        mock_create = mock.AsyncMock()
+        mock_scope = mock.MagicMock()
+        mock_scope.__aenter__ = mock.AsyncMock(return_value=mock.AsyncMock(
+            fetchrow=mock.AsyncMock(return_value={"pii_salt": "test_salt"}),
+        ))
+        mock_scope.__aexit__ = mock.AsyncMock(return_value=False)
+
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.tenant_scope",
+            lambda *a, **kw: mock_scope,
+        )
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.create_pending_approval",
+            mock_create,
+        )
+        # También mock get_tenant_pii_salt
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.redact_inputs",
+            lambda inputs, salt: inputs,
+        )
+
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.dangerous"),
+            allowed_skills=["test.dangerous"],
+            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+            aop_slug="test_aop",
+            aop_version=1,
+        )
+        result = await node(state)
+
+        # Resultado tiene pending_approval_id, no un tool_result de error
+        assert result.get("pending_approval_id") is not None
+        assert "awaiting_human_approval" in result.get("escalation_reason", "")
+
+    async def test_l3_approval_required_sets_escalation_reason(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import unittest.mock as mock
+
+        mock_scope = mock.MagicMock()
+        mock_scope.__aenter__ = mock.AsyncMock(return_value=mock.AsyncMock(
+            fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}),
+        ))
+        mock_scope.__aexit__ = mock.AsyncMock(return_value=False)
+        monkeypatch.setattr("apps.api.agents.nodes.execute_skill.tenant_scope", lambda *a, **kw: mock_scope)
+        monkeypatch.setattr("apps.api.agents.nodes.execute_skill.create_pending_approval", mock.AsyncMock())
+        monkeypatch.setattr("apps.api.agents.nodes.execute_skill.redact_inputs", lambda i, s: i)
+
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.dangerous"),
+            allowed_skills=["test.dangerous"],
+            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+        )
+        result = await node(state)
+        reason = result.get("escalation_reason", "")
+        assert reason.startswith("awaiting_human_approval:")
 
 
 # ----------------------------------------------------------------
@@ -593,7 +676,7 @@ class TestAuditLog:
         state = _base_state(
             pending_tool_call=_pending("test.l2_dummy"),
             allowed_skills=["test.l2_dummy"],
-            tenant_config={"extra": {}},  # allow_l2_skills ausente → bloqueado
+            tool_permissions={},  # sin row → bloqueado
         )
         await node(state)
         entries = deps.audit_logger.entries  # type: ignore[attr-defined]

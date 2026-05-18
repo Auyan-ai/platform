@@ -94,6 +94,16 @@ class AgentState(TypedDict, total=False):
     aop_completed_signal: bool
     pending_intent: str
 
+    # --- Tool Permissions (Sprint 10) ---
+    # Mapa slug → {"is_enabled": bool, "human_approval_required": bool, "threshold_override": float|None}
+    # Cargado por load_tenant_context desde tenant_tool_permissions.
+    # execute_skill lo consulta para decidir si puede ejecutar la skill.
+    tool_permissions: dict
+
+    # Seteado por execute_skill cuando una skill L3 requiere aprobación humana.
+    # El nodo escalate lo incluye en el contexto de escalación.
+    pending_approval_id: str | None
+
     # --- Supervisor pattern (Sprint 8) ---
     # El nodo `supervise` evalúa la decisión propuesta por `reason` cuando el AOP
     # tiene require_supervision=true o cuando la tool es L2/L3.
