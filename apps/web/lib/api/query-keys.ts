@@ -28,4 +28,11 @@ export const queryKeys = {
     events: (tenantId: string, conversationId: string) =>
       ['reasoning', tenantId, conversationId] as const,
   },
+  proposals: {
+    list: (tenantId: string, filters?: Record<string, unknown>) =>
+      ['proposals', tenantId, filters] as const,
+    detail: (tenantId: string, proposalId: string) =>
+      ['proposals', tenantId, proposalId] as const,
+    metrics: (tenantId: string) => ['proposals', tenantId, 'metrics'] as const,
+  },
 } as const
