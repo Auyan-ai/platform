@@ -142,3 +142,46 @@ app.include_router(reasoning_router)
 async def health() -> dict[str, str | bool]:
     settings = get_settings()
     return {"ok": True, "env": settings.app_env}
+
+
+@app.get("/health/reasoning-debug", tags=["health"])
+async def reasoning_debug() -> dict:
+    """Diagnóstico: prueba insert directo en agent_reasoning_events.
+
+    Sólo para debugging de staging — no expone datos sensibles.
+    """
+    from uuid import UUID
+
+    from apps.api.db.client import bootstrap_connection, tenant_scope
+    from apps.api.db.queries import insert_reasoning_event
+
+    TENANT_ID = UUID("11111111-1111-1111-1111-111111111111")
+
+    # Busca la última conversación del tenant para tener una FK válida.
+    async with bootstrap_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT id FROM conversations
+                WHERE tenant_id = $1 AND deleted_at IS NULL
+                ORDER BY created_at DESC LIMIT 1""",
+            TENANT_ID,
+        )
+    if row is None:
+        return {"ok": False, "error": "no conversations found for test tenant"}
+
+    conv_id = row["id"]
+
+    try:
+        async with tenant_scope(TENANT_ID) as conn:
+            event = await insert_reasoning_event(
+                conn,
+                tenant_id=TENANT_ID,
+                conversation_id=conv_id,
+                phase="supervisor",
+                event_type="check",
+                label="health-debug-insert",
+                detail={"debug": True},
+                status="done",
+            )
+        return {"ok": True, "event_id": str(event.id), "conversation_id": str(conv_id)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "conversation_id": str(conv_id)}
