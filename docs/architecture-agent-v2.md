@@ -1483,4 +1483,64 @@ Métricas comparativas: CSAT, resolution_rate, escalation_rate, cost_per_convers
 
 ---
 
-_Última actualización: 2026-05-17 (sesión 10 — code review aplicado: math honesta, supervisor verdict tactical/structural, eval harness obligatorio Sprint 7, PII policy, slow agent con sampling, conversation lifecycle, multi-intent en selector)_
+---
+
+## 19. Context Engineering — análisis de gaps (sesión 19, 2026-05-18)
+
+Referencia: artículo de Neil Rahilly (Sierra) — "Context engineering: the key to great agents".
+
+### 19.1 Qué está bien implementado
+
+| Bloque Sierra | Nuestra implementación |
+|---|---|
+| Journey | AOPs con intent classifier (select_aop) |
+| Tool | Skills L1/L2/L3 con allowed_skills por AOP |
+| Rule/Policy | guardrails en YAML frontmatter del AOP |
+| Workflow | cuerpo Markdown del AOP |
+| Knowledge | RAG con pgvector (retrieve_knowledge) |
+| Memory (parcial) | conversation_history 20 msgs + end_customer |
+
+Progressive disclosure: el grafo carga contexto en 5 etapas secuenciales, cada nodo agrega solo lo suyo. El AgentState es aditivo (TypedDict total=False). La degradación es elegante: sin AOP → fallback a tenant_prompt; sin KB → agente igual opera.
+
+### 19.2 Gaps identificados (priorizados)
+
+**Alta prioridad:**
+
+1. **Memory cross-conversación** — cargamos los últimos 20 mensajes de la conversación _actual_. Sierra define Memory como historial de conversaciones anteriores del mismo cliente + preferencias persistidas. Si un cliente ya contactó la semana pasada con el mismo problema, el agente no lo sabe. Fix: al cargar `end_customer`, buscar últimas N conversaciones resueltas del mismo `end_customer_id` e incluir un resumen.
+
+2. **Glossary block ausente** — no existe bloque dedicado para terminología de la marca (nombres de productos, tiers de plan, jergón interno). Actualmente esa info puede estar en el body del AOP o en KB, mezclada con el resto. Fix: agregar campo `glossary` al YAML frontmatter del AOP y bloque `_render_glossary()` en el compiler.
+
+**Media prioridad:**
+
+3. **Condiciones por observación mid-turno** — `select_aop` clasifica el intent una vez al inicio (o en debloqueo). No hay re-evaluación continua si el cliente cambia de tema a mitad de conversación. Sierra usa "observation-based conditions" que disparan nuevo contexto en cualquier turno. Fix: en el nodo `reason`, detectar señales críticas mid-turno (keywords de cancelación, frustración, cambio de tema) e inyectar contexto adicional sin cambiar el AOP.
+
+4. **Brand voice no es composable por AOP** — vive en `tenant_config.agent_voice` como string plano. No hay override por AOP (el AOP de reclamos debería sonar más formal que el de ventas). Fix: agregar `voice_override` en YAML frontmatter del AOP; el compiler prioriza `aop.voice_override` sobre `tenant_config.agent_voice`.
+
+**Baja prioridad:**
+
+5. **KB re-retrieval mid-ReAct loop** — los chunks se buscan una vez al entrar al nodo `retrieve_knowledge`, con el mensaje inbound. Si el agente hace preguntas y el cliente responde con info nueva que abre un sub-tema, el KB no se re-consulta con ese contexto. Fix: en `reason`, cuando `tool_iterations > 0` y hay nueva información relevante, hacer un segundo RAG pass.
+
+6. **Tool exposure completo en cada turno** — si un AOP tiene 15 skills, las 15 se pasan a Claude en cada iteración del ReAct loop aunque solo 3 sean relevantes a la pregunta. A escala (1000 usuarios × 15 tools × N iteraciones) el token bleeding es significativo. Fix futuro: selección condicional de tools basada en el sub-tema activo.
+
+7. **Context blocks no son primera clase** — los bloques de prompt son funciones en compiler.py (`_render_*`) sin metadata (condición de activación, prioridad, versión). Dificulta testing individual y extensión. Fix: clase `ContextBlock` con `condition`, `priority`, `render()`. No urgente hasta Sprint 13+.
+
+### 19.3 Anti-patrones adicionales (de este análisis)
+
+Ver también sección 18.
+
+- ❌ **No asumir que "progressive disclosure" = "nodos secuenciales"**. La verdadera progressive disclosure es condicional en runtime. Nuestros nodos corren siempre; la condicionalidad la añadimos con el AOP locking y la ausencia de degradación. Es un primer paso válido, no el destino.
+- ❌ **No mezclar glossary dentro del body del AOP**. Cuando el AOP explique el procedimiento y a la vez defina términos, Claude tiene que desambiguar qué es instrucción y qué es glosario. Van en bloques separados.
+- ❌ **No confundir Memory (cross-conversación) con historial (conversación actual)**. Son bloques distintos. El historial ya funciona. Memory es trabajo futuro.
+
+### 19.4 Detección de alucinaciones (estado actual y roadmap)
+
+Estado actual: **no hay detección automática**. Puedes detectar alucinación manualmente en Langfuse comparando los chunks recuperados con la respuesta del agente. La emisión de `retrieved_chunks` en los reasoning events ayuda.
+
+Roadmap:
+- **Inmediato (manual):** KB con datos fantasiosos específicos (números impares, nombres únicos) donde cualquier desviación es obvia. Script `seed_kb.py` implementado en sesión 19.
+- **Sprint 11 (Slow Agent):** LLM-as-judge que, para una muestra de conversaciones, verifica si la respuesta está fundamentada en los chunks recuperados. Emit un evento `hallucination_risk: high/low` en reasoning.
+- **Sprint 13+:** Gate de promotion en el AOP eval harness que incluye fixtures de "no debe alucinar sobre X".
+
+---
+
+_Última actualización: 2026-05-18 (sesión 19 — análisis context engineering Sierra + gaps priorizados + detección de alucinaciones)_
