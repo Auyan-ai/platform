@@ -21,11 +21,20 @@ from pathlib import Path
 import pytest
 
 EXPECTED_SHOPIFY_SKILLS: tuple[str, ...] = (
+    # L1 — read-only
     "shopify.get_customer_history",
     "shopify.get_order_by_email",
     "shopify.get_order_status",
     "shopify.get_product_info",
     "shopify.get_shop_policies",
+    # L2 — write bajo riesgo
+    "shopify.add_order_note",
+    "shopify.tag_order",
+    # L3 — write alto riesgo (Sprint 10)
+    "shopify.cancel_order",
+    "shopify.refund_partial",
+    "shopify.start_return",
+    "shopify.update_shipping_address",
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
