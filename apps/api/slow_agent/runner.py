@@ -212,7 +212,7 @@ async def _judge_one(
                 if aop:
                     compiled = compile_aop(aop, tenant_config)  # type: ignore[arg-type]
                     aop_prompt = compiled.system_prompt
-        except Exception:
+        except Exception:  # noqa: S110
             pass  # AOP no disponible — el judge trabajará sin él
 
         escalation_reason: str | None = None
@@ -221,7 +221,7 @@ async def _judge_one(
                 esc = await get_open_escalation_for_conversation(conn, tenant_id, conv.id)
                 if esc:
                     escalation_reason = esc.reason
-            except Exception:
+            except Exception:  # noqa: S110
                 pass
 
     transcript = build_transcript(
@@ -268,6 +268,9 @@ async def _judge_one(
             tenant_id=tenant_id,
             run_id=run_id,
             conversation_id=conv.id,
-            verdict_summary=f"should_propose={verdict.should_propose} confidence={verdict.confidence:.2f}",
+            verdict_summary=(
+                f"should_propose={verdict.should_propose} "
+                f"confidence={verdict.confidence:.2f}"
+            ),
             proposal_id=proposal_id,
         )

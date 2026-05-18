@@ -19,7 +19,8 @@ Señales claras de que hay un problema:
 
 # Tipos de propuestas
 
-- "aop_edit": modificar el AOP existente (añadir instrucciones, clarificar flujos, agregar guardrails)
+- "aop_edit": modificar el AOP existente (añadir instrucciones, clarificar flujos,
+  agregar guardrails)
 - "new_aop": crear un nuevo AOP para un intent no cubierto
 - "skill_request": el agente necesitaba una skill que no existe en el sistema
 - "guardrail_addition": agregar una restricción explícita que faltaba
@@ -33,7 +34,7 @@ Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional antes ni de
   "proposal_type": "aop_edit",
   "aop_slug": "slug_del_aop_afectado_o_null",
   "diff_markdown": "Descripción del cambio propuesto en markdown. Usa ## secciones y - bullets.",
-  "rationale": "Explicación de por qué este cambio hubiera mejorado esta conversación. Cita turnos específicos.",
+  "rationale": "Explicación del cambio y por qué hubiera mejorado la conversación. Cita turnos.",
   "confidence": 0.85,
   "flag_for_opus": false
 }
