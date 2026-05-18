@@ -1,4 +1,4 @@
-"""Tests del job de limpieza de conversaciones abandonadas (Sprint 6.4)."""
+"""Tests del job de limpieza de conversaciones abandonadas + nudges (Sprint 6.4 + 9.5)."""
 
 from __future__ import annotations
 
@@ -8,9 +8,13 @@ from uuid import UUID, uuid4
 
 import pytest
 from apps.api.services.cleanup import (
+    DEFAULT_NUDGE_BEFORE_SECONDS,
+    DEFAULT_NUDGE_MESSAGE,
     DEFAULT_TIMEOUTS,
     _build_cutoffs,
+    _build_nudge_cutoffs,
     _close_abandoned_for_tenant,
+    _nudge_for_tenant,
     run_abandoned_cleanup,
 )
 from apps.api.tests.conftest import make_tenant, make_tenant_configuration
@@ -186,6 +190,7 @@ async def test_run_abandoned_cleanup_returns_dict_with_closed() -> None:
         patch("apps.api.services.cleanup.bootstrap_connection") as mock_boot,
         patch("apps.api.services.cleanup.list_all_tenants", return_value=[tenant]),
         patch("apps.api.services.cleanup.get_tenant_configuration", return_value=config),
+        patch("apps.api.services.cleanup._nudge_for_tenant", return_value=0),
         patch(
             "apps.api.services.cleanup._close_abandoned_for_tenant",
             return_value=3,
@@ -207,6 +212,7 @@ async def test_run_abandoned_cleanup_skips_tenants_with_zero_closed() -> None:
         patch("apps.api.services.cleanup.bootstrap_connection") as mock_boot,
         patch("apps.api.services.cleanup.list_all_tenants", return_value=[tenant]),
         patch("apps.api.services.cleanup.get_tenant_configuration", return_value=None),
+        patch("apps.api.services.cleanup._nudge_for_tenant", return_value=0),
         patch("apps.api.services.cleanup._close_abandoned_for_tenant", return_value=0),
     ):
         mock_boot.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
@@ -235,6 +241,7 @@ async def test_run_abandoned_cleanup_continues_after_tenant_error() -> None:
         patch("apps.api.services.cleanup.bootstrap_connection") as mock_boot,
         patch("apps.api.services.cleanup.list_all_tenants", return_value=[tenant_a, tenant_b]),
         patch("apps.api.services.cleanup.get_tenant_configuration", return_value=None),
+        patch("apps.api.services.cleanup._nudge_for_tenant", return_value=0),
         patch("apps.api.services.cleanup._close_abandoned_for_tenant", side_effect=fake_close),
     ):
         mock_boot.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
@@ -246,3 +253,196 @@ async def test_run_abandoned_cleanup_continues_after_tenant_error() -> None:
     assert "beta" in results
     assert results["beta"] == 2
     assert "acme" not in results
+
+
+# ============================================================
+# _build_nudge_cutoffs
+# ============================================================
+
+
+def test_build_nudge_cutoffs_disabled_by_default() -> None:
+    """nudge_enabled no seteado → retorna None."""
+    result = _build_nudge_cutoffs(None, NOW)
+    assert result is None
+
+
+def test_build_nudge_cutoffs_disabled_when_false() -> None:
+    config = make_tenant_configuration(extra={"nudge_enabled": False})
+    assert _build_nudge_cutoffs(config, NOW) is None
+
+
+def test_build_nudge_cutoffs_returns_ranges_when_enabled() -> None:
+    config = make_tenant_configuration(extra={"nudge_enabled": True})
+    result = _build_nudge_cutoffs(config, NOW)
+    assert result is not None
+    channel_ranges, default_range = result
+    cutoff_min, cutoff_max = default_range
+    # cutoff_min = NOW - timeout_default; cutoff_max = NOW - (timeout - nudge_before)
+    expected_min = NOW - timedelta(seconds=DEFAULT_TIMEOUTS["default"])
+    expected_max = NOW - timedelta(seconds=DEFAULT_TIMEOUTS["default"] - DEFAULT_NUDGE_BEFORE_SECONDS)
+    assert cutoff_min == expected_min
+    assert cutoff_max == expected_max
+
+
+def test_build_nudge_cutoffs_custom_nudge_before() -> None:
+    config = make_tenant_configuration(
+        extra={"nudge_enabled": True, "nudge_before_seconds": 7200}
+    )
+    result = _build_nudge_cutoffs(config, NOW)
+    assert result is not None
+    _, default_range = result
+    _, cutoff_max = default_range
+    expected_max = NOW - timedelta(seconds=DEFAULT_TIMEOUTS["default"] - 7200)
+    assert cutoff_max == expected_max
+
+
+def test_build_nudge_cutoffs_invalid_nudge_before_returns_none() -> None:
+    """nudge_before >= timeout del canal default → None (ventana inválida)."""
+    config = make_tenant_configuration(
+        extra={
+            "nudge_enabled": True,
+            "nudge_before_seconds": DEFAULT_TIMEOUTS["default"] + 1,
+        }
+    )
+    assert _build_nudge_cutoffs(config, NOW) is None
+
+
+# ============================================================
+# _nudge_for_tenant
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_nudge_for_tenant_disabled_returns_zero() -> None:
+    config = make_tenant_configuration(extra={"nudge_enabled": False})
+    result = await _nudge_for_tenant(TENANT_ID, config)
+    assert result == 0
+
+
+@pytest.mark.asyncio
+async def test_nudge_for_tenant_no_candidates_returns_zero() -> None:
+    config = make_tenant_configuration(extra={"nudge_enabled": True})
+
+    with (
+        patch("apps.api.services.cleanup.tenant_scope") as mock_scope,
+        patch("apps.api.services.cleanup.get_nudge_candidates", return_value=[]),
+    ):
+        mock_scope.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result = await _nudge_for_tenant(TENANT_ID, config)
+
+    assert result == 0
+
+
+@pytest.mark.asyncio
+async def test_nudge_for_tenant_sends_message_and_marks_nudged() -> None:
+    """Conversación chat con 23h de inactividad (chat timeout 24h, nudge 1h antes)."""
+    config = make_tenant_configuration(extra={"nudge_enabled": True})
+
+    # 23h de inactividad → dentro de la ventana (24h - 1h = 23h < 23h < 24h)
+    activity = (NOW - timedelta(hours=23)).replace(tzinfo=None)
+    candidates = [(CONV_A, "chat", activity)]
+
+    with (
+        patch("apps.api.services.cleanup.tenant_scope") as mock_scope,
+        patch("apps.api.services.cleanup.get_nudge_candidates", return_value=candidates),
+        patch("apps.api.services.cleanup.insert_message", return_value=MagicMock()) as mock_insert,
+        patch("apps.api.services.cleanup.mark_conversations_nudged", return_value=1) as mock_mark,
+        patch("apps.api.services.cleanup.datetime") as mock_dt,
+    ):
+        mock_dt.now.return_value = NOW
+        mock_scope.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result = await _nudge_for_tenant(TENANT_ID, config)
+
+    assert result == 1
+    mock_insert.assert_called_once()
+    assert mock_insert.call_args.kwargs["conversation_id"] == CONV_A
+    assert mock_insert.call_args.kwargs["content"] == DEFAULT_NUDGE_MESSAGE
+    mock_mark.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_nudge_for_tenant_skips_out_of_window_conversation() -> None:
+    """Conversación chat con 10h de inactividad — todavía no en ventana de nudge."""
+    config = make_tenant_configuration(extra={"nudge_enabled": True})
+
+    activity = (NOW - timedelta(hours=10)).replace(tzinfo=None)
+    candidates = [(CONV_B, "chat", activity)]
+
+    with (
+        patch("apps.api.services.cleanup.tenant_scope") as mock_scope,
+        patch("apps.api.services.cleanup.get_nudge_candidates", return_value=candidates),
+        patch("apps.api.services.cleanup.insert_message") as mock_insert,
+        patch("apps.api.services.cleanup.mark_conversations_nudged") as mock_mark,
+        patch("apps.api.services.cleanup.datetime") as mock_dt,
+    ):
+        mock_dt.now.return_value = NOW
+        mock_scope.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result = await _nudge_for_tenant(TENANT_ID, config)
+
+    assert result == 0
+    mock_insert.assert_not_called()
+    mock_mark.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_nudge_for_tenant_uses_custom_message() -> None:
+    config = make_tenant_configuration(
+        extra={
+            "nudge_enabled": True,
+            "nudge_message": "Hola, ¿seguimos en contacto?",
+        }
+    )
+
+    activity = (NOW - timedelta(hours=23)).replace(tzinfo=None)
+    candidates = [(CONV_A, "chat", activity)]
+
+    with (
+        patch("apps.api.services.cleanup.tenant_scope") as mock_scope,
+        patch("apps.api.services.cleanup.get_nudge_candidates", return_value=candidates),
+        patch("apps.api.services.cleanup.insert_message", return_value=MagicMock()) as mock_insert,
+        patch("apps.api.services.cleanup.mark_conversations_nudged", return_value=1),
+        patch("apps.api.services.cleanup.datetime") as mock_dt,
+    ):
+        mock_dt.now.return_value = NOW
+        mock_scope.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        await _nudge_for_tenant(TENANT_ID, config)
+
+    assert mock_insert.call_args.kwargs["content"] == "Hola, ¿seguimos en contacto?"
+
+
+@pytest.mark.asyncio
+async def test_run_abandoned_cleanup_calls_nudge_before_close() -> None:
+    """El job llama a _nudge_for_tenant antes que _close_abandoned_for_tenant."""
+    tenant = make_tenant(id=TENANT_ID, slug="acme")
+    config = make_tenant_configuration()
+    call_order: list[str] = []
+
+    async def fake_nudge(tid: UUID, cfg: object) -> int:
+        call_order.append("nudge")
+        return 1
+
+    async def fake_close(tid: UUID, cfg: object) -> int:
+        call_order.append("close")
+        return 2
+
+    with (
+        patch("apps.api.services.cleanup.bootstrap_connection") as mock_boot,
+        patch("apps.api.services.cleanup.list_all_tenants", return_value=[tenant]),
+        patch("apps.api.services.cleanup.get_tenant_configuration", return_value=config),
+        patch("apps.api.services.cleanup._nudge_for_tenant", side_effect=fake_nudge),
+        patch("apps.api.services.cleanup._close_abandoned_for_tenant", side_effect=fake_close),
+    ):
+        mock_boot.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_boot.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        await run_abandoned_cleanup()
+
+    assert call_order == ["nudge", "close"]

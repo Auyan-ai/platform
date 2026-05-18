@@ -66,6 +66,7 @@ class Conversation(_BaseModel):
     status: ConversationStatus
     assigned_user_id: UUID | None = None
     last_message_at: datetime | None = None
+    nudged_at: datetime | None = None
     created_at: datetime | None = None
 
 
