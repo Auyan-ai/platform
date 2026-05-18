@@ -37,10 +37,12 @@ from apps.api.integrations.anthropic_client import build_anthropic_client
 from apps.api.integrations.langfuse_client import build_langfuse_client
 from apps.api.integrations.openai_embeddings import build_openai_client
 from apps.api.routers.aops import router as aops_router
+from apps.api.routers.approvals import router as approvals_router
 from apps.api.routers.conversations import router as conversations_router
 from apps.api.routers.escalations import router as escalations_router
 from apps.api.routers.reasoning import router as reasoning_router
 from apps.api.routers.tenants import router as tenants_router
+from apps.api.routers.tool_permissions import router as tool_permissions_router
 from apps.api.routers.users import router as users_router
 from apps.api.routers.webhooks import router as webhooks_router
 from apps.api.services.aop_listener import AopCacheListener
@@ -144,6 +146,8 @@ app.include_router(conversations_router)
 app.include_router(escalations_router)
 app.include_router(aops_router)
 app.include_router(reasoning_router)
+app.include_router(approvals_router)
+app.include_router(tool_permissions_router)
 
 
 @app.get("/health", tags=["health"])

@@ -1,0 +1,6 @@
+name: "shopify.update_shipping_address en allowed_skills"
+description: "El AOP debe declarar la skill de actualización de dirección"
+assertions:
+  - kind: skills_include
+    expected:
+      - shopify.update_shipping_address

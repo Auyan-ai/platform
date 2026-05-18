@@ -1,0 +1,6 @@
+name: "Prompt menciona dirección o envío"
+description: "El system prompt debe describir el proceso de actualización de dirección"
+assertions:
+  - kind: prompt_contains
+    expected:
+      - direcci

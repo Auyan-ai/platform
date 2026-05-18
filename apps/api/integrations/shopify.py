@@ -193,13 +193,119 @@ class ShopifyClient:
     # Write — L3 (Sprint 10)
     # ----------------------------------------------------------------
 
-    async def cancel_order(self, order_id: int) -> dict[str, Any]:
-        """Cancela un pedido. Acción L3 — requiere supervisor Opus."""
+    async def cancel_order(
+        self,
+        order_id: int,
+        *,
+        reason: str = "customer",
+        email: bool = True,
+        refund: bool = False,
+    ) -> dict[str, Any]:
+        """Cancela un pedido. Acción L3 — requiere supervisor Opus y aprobación humana."""
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self._base_url}/orders/{order_id}/cancel.json",
                 headers=self._headers(),
-                timeout=10,
+                json={"reason": reason, "email": email, "refund": refund},
+                timeout=15,
             )
             response.raise_for_status()
             return response.json()["order"]  # type: ignore[no-any-return]
+
+    async def update_shipping_address(
+        self,
+        order_id: int,
+        *,
+        address1: str,
+        city: str,
+        province: str,
+        country: str,
+        zip_code: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Actualiza la dirección de envío de un pedido. Acción L3."""
+        shipping_address: dict[str, Any] = {
+            "address1": address1,
+            "city": city,
+            "province": province,
+            "country": country,
+            "zip": zip_code,
+        }
+        if first_name:
+            shipping_address["first_name"] = first_name
+        if last_name:
+            shipping_address["last_name"] = last_name
+        async with httpx.AsyncClient() as client:
+            response = await client.put(
+                f"{self._base_url}/orders/{order_id}.json",
+                headers=self._headers(),
+                json={"order": {"id": order_id, "shipping_address": shipping_address}},
+                timeout=15,
+            )
+            response.raise_for_status()
+            return response.json()["order"]  # type: ignore[no-any-return]
+
+    async def refund_partial(
+        self,
+        order_id: int,
+        *,
+        amount: str,
+        currency: str,
+        note: str = "",
+    ) -> dict[str, Any]:
+        """Crea un reembolso parcial en un pedido. Acción L3."""
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self._base_url}/orders/{order_id}/refunds.json",
+                headers=self._headers(),
+                json={
+                    "refund": {
+                        "currency": currency,
+                        "note": note,
+                        "transactions": [
+                            {
+                                "parent_id": None,
+                                "amount": amount,
+                                "kind": "refund",
+                                "gateway": "manual",
+                            }
+                        ],
+                    }
+                },
+                timeout=15,
+            )
+            response.raise_for_status()
+            return response.json()["refund"]  # type: ignore[no-any-return]
+
+    async def start_return(
+        self,
+        order_id: int,
+        *,
+        line_item_id: int,
+        quantity: int,
+        reason: str = "other",
+    ) -> dict[str, Any]:
+        """Inicia el proceso de devolución de un artículo. Acción L3.
+
+        Usa la API de Returns de Shopify (REST Admin 2024-10+).
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self._base_url}/orders/{order_id}/returns.json",
+                headers=self._headers(),
+                json={
+                    "return": {
+                        "line_items": [
+                            {
+                                "line_item_id": line_item_id,
+                                "quantity": quantity,
+                                "return_reason_notes": reason,
+                            }
+                        ]
+                    }
+                },
+                timeout=15,
+            )
+            response.raise_for_status()
+            return response.json()["return"]  # type: ignore[no-any-return]

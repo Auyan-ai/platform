@@ -1,0 +1,6 @@
+name: "Prompt menciona aprobación o revisión humana"
+description: "Las skills L3 requieren instrucciones sobre el flujo de aprobación en el prompt"
+assertions:
+  - kind: prompt_contains
+    expected:
+      - aprob

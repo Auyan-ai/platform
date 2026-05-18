@@ -1,0 +1,4 @@
+name: "Compila sin errores"
+description: "El AOP de cancelaciones debe compilar sin excepciones"
+assertions:
+  - kind: compile_ok

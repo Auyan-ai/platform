@@ -1,0 +1,5 @@
+name: "shopify.refund_partial en allowed_skills"
+assertions:
+  - kind: skills_include
+    expected:
+      - shopify.refund_partial

@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-18 (sesión 20 — Sprint 9.1 idempotency + Sprint 9.2 Skills L2 + permission gate)_
+_Última actualización: 2026-05-18 (sesión 23 — Sprint 10 completo: Skills L3 + human approval mode)_
 
 ---
 
@@ -980,7 +980,85 @@ Envía un mensaje recordatorio al cliente antes de cerrar la conversación por i
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
 1. Mergear [PR #74](https://github.com/Auyan-ai/platform/pull/74) si CI pasa (aplicar migración `nudged_at` en staging)
-2. **Sprint 10** — Skills L3 + human approval mode
-   - Skill `shopify.cancel_order` (L3 — acción destructiva con confirmación)
-   - Human approval mode: antes de ejecutar L3, el agente crea una escalación con `requires_approval=True` y espera respuesta del agente humano desde el dashboard
-   - Gate en `execute_skill`: L3 → check `allow_l3_skills` + approval flow
+2. Abrir PR para `feature/sprint-10-l3-human-approval` → develop (Sprint 10 completo ✅)
+3. Aplicar manualmente en staging:
+   - `supabase/migrations/20260518000004_add_tenant_tool_permissions.sql`
+   - `supabase/migrations/20260518000005_add_pending_approvals.sql`
+4. **Sprint 11** — a definir (ver sección más abajo)
+
+---
+
+## Sesión 23 — Sprint 10 Skills L3 + Human Approval Mode (2026-05-18)
+
+### Sprint 10 — Skills L3 + Human Approval Mode ✅ en rama `feature/sprint-10-l3-human-approval`
+
+Implementa el tercer tier del sistema de skills: acciones destructivas (cancelaciones, reembolsos, cambios de dirección, devoluciones) que requieren aprobación humana antes de ejecutarse.
+
+#### Sub-PR 10.1 — Migrations + Modelos + Gate en execute_skill
+
+| Área | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260518000004_add_tenant_tool_permissions.sql` | Tabla `tenant_tool_permissions` con UNIQUE(tenant_id, skill_slug), RLS, trigger. Seed Lunaria: L1 enabled, L2/L3 disabled con `human_approval_required=TRUE` para L3 |
+| `supabase/migrations/20260518000005_add_pending_approvals.sql` | Tabla `pending_approvals` con status CHECK('pending','approved','rejected'), índices, RLS |
+| `apps/api/db/models.py` | `TenantToolPermission`, `PendingApprovalStatus`, `PendingApproval` |
+| `apps/api/db/queries.py` | `get_tool_permissions`, `upsert_tool_permission`, `list_tool_permissions`, `create_pending_approval`, `get_pending_approval`, `list_pending_approvals`, `resolve_pending_approval` |
+| `apps/api/agents/state.py` | `tool_permissions: dict`, `pending_approval_id: str \| None` |
+| `apps/api/agents/nodes/load_tenant_context.py` | Carga `tool_permissions` desde DB al arrancar cada conversación |
+| `apps/api/agents/nodes/execute_skill.py` | Reemplaza gate `extra.allow_l2_skills` con table-driven `tool_permissions`; L3+approval → crea `pending_approval` en DB, setea `pending_approval_id` en state |
+| `apps/api/agents/graph.py` | `route_after_execute_skill` detecta `pending_approval_id` → escalate |
+| Tests | `test_execute_skill_node.py` (actualizado), `test_tool_permission_queries.py` (nuevo, 17 tests) |
+
+#### Sub-PR 10.2 — 4 Skills L3 Shopify
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/integrations/shopify.py` | `cancel_order` mejorado, `update_shipping_address`, `refund_partial`, `start_return` |
+| `apps/api/skills/shopify/cancel_order.py` | `CancelOrder` L3, tier, threshold=0.95, requires_idempotency |
+| `apps/api/skills/shopify/update_shipping_address.py` | `UpdateShippingAddress` L3 |
+| `apps/api/skills/shopify/refund_partial.py` | `RefundPartial` L3 |
+| `apps/api/skills/shopify/start_return.py` | `StartReturn` L3 |
+| `apps/api/skills/shopify/__init__.py` | Side-effect imports para los 4 nuevos skills |
+| Tests | `test_shopify_l3_skills.py` (25 tests), `test_bootstrap.py` (updated: 11 skills total) |
+
+#### Sub-PR 10.3 — Router de Aprobaciones + Escalate contextual
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/routers/approvals.py` | `GET /approvals`, `GET /approvals/{id}`, `POST /approvals/{id}/approve`, `POST /approvals/{id}/reject` |
+| `apps/api/routers/tool_permissions.py` | `GET /tenants/me/tool-permissions`, `PUT /tenants/me/tool-permissions/{slug}` |
+| `apps/api/main.py` | Registra ambos routers |
+| `apps/api/agents/nodes/escalate.py` | Auto-genera mensaje de cortesía cuando `pending_approval_id` presente; añade metadata a escalación |
+| Tests | `test_approvals.py` (12 tests) |
+| Fix | `model_dump(mode="json")` para serializar datetimes en `ApprovalOut`; `code` como keyword arg en `DomainError` |
+
+#### Sub-PR 10.4 — UI Cola de Aprobaciones (apps/web)
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/web/lib/api/hooks/approvals.ts` | `useApprovals`, `useApproveMutation`, `useRejectMutation` — poll 10s, typed |
+| `apps/web/components/inbox/ApprovalQueue.tsx` | Lista con filtros por status, filas con skill/inputs/AOP, botones Aprobar/Rechazar, modal de rechazo con textarea obligatoria |
+| `apps/web/app/(dashboard)/tenants/[tenantId]/approvals/page.tsx` | Página del dashboard |
+| `apps/web/components/nav/Sidebar.tsx` | Nav item "Aprobaciones" entre Escalaciones y AOPs |
+
+#### Sub-PR 10.5 — Evals Adversariales L3
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/evals/fixtures/shopify_cancelaciones/` | 13 fixtures YAML para cancel_order L3 |
+| `apps/api/evals/fixtures/shopify_cambio_direccion/` | 13 fixtures YAML para update_shipping_address L3 |
+| `apps/api/evals/fixtures/shopify_reembolso/` | 13 fixtures YAML para refund_partial L3 |
+| `apps/api/evals/fixtures/shopify_devolucion/` | 13 fixtures YAML para start_return L3 |
+
+Por cada skill L3: compile_ok, skill_presente, confidence >= 0.90, max_iterations >= 3, tools_match, frontmatter keys (slug, allowed_skills, confidence_threshold, escalation_triggers), prompt_min_length >= 300, mención de la acción, mención de aprobación, no bypass adversarial.
+
+**Suite total: 628/628 verde. TypeScript apps/web: 0 errores.**
+
+**Arquitectura del flujo L3 completo:**
+```
+Usuario → agente → execute_skill (L3 + approval_required)
+  → crea pending_approval en DB
+  → setea pending_approval_id en state
+  → route_after_execute_skill → escalate
+  → mensaje de cortesía al usuario
+  → operador ve en /approvals → aprueba (skill ejecuta) o rechaza
+```

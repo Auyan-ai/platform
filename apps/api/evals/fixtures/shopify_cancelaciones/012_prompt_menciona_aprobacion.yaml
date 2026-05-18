@@ -1,0 +1,8 @@
+name: "Prompt menciona aprobación o revisión humana"
+description: >
+  Una skill L3 requiere supervisión humana antes de ejecutarse.
+  El prompt debe instruir al agente sobre el flujo de aprobación.
+assertions:
+  - kind: prompt_contains
+    expected:
+      - aprob

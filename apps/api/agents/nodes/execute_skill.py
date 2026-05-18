@@ -20,10 +20,14 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
+from uuid import UUID, uuid4
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.state import AgentState
+from apps.api.db.client import tenant_scope
+from apps.api.db.queries import create_pending_approval
+from apps.api.services.pii import redact_inputs
 from apps.api.skills.base import SkillContext
 from apps.api.skills.registry import SkillRegistry
 from pydantic import ValidationError
@@ -126,38 +130,116 @@ def make_execute_skill_node(
                 )
             )
 
-        # 3) Gate de permisos por tier.
-        #    L2 requiere opt-in explícito del tenant: extra.allow_l2_skills = true.
-        #    L3 está reservado para Sprint 10 (human approval).
-        if skill_cls.tier in ("L2", "L3"):
-            extra: dict[str, Any] = (state.get("tenant_config") or {}).get("extra") or {}
-            if skill_cls.tier == "L3" or not extra.get("allow_l2_skills", False):
-                tier_error = (
-                    "l3_skills_not_available"
-                    if skill_cls.tier == "L3"
-                    else "l2_skills_not_enabled_for_tenant"
+        # 3) Gate de permisos desde tenant_tool_permissions.
+        #    Si la skill no tiene row o is_enabled=False → rechazada.
+        #    Si L3 + human_approval_required → crear pending_approval y escalar.
+        tool_permissions: dict[str, Any] = state.get("tool_permissions") or {}
+        perm = tool_permissions.get(slug)
+
+        if perm is None or not perm.get("is_enabled", False):
+            tier_error = f"skill_not_enabled_for_tenant: {slug}"
+            if state.get("conversation_id") and state.get("tenant_id"):
+                auditor.log(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    aop_slug=state.get("aop_slug") or "unknown",
+                    aop_version=state.get("aop_version") or 0,
+                    skill_slug=slug,
+                    skill_tier=skill_cls.tier,
+                    inputs_raw=raw_input,
+                    status="rejected_by_permissions",
+                    error_message=tier_error,
+                    langfuse_trace_id=state.get("langfuse_trace_id"),
                 )
-                if state.get("conversation_id") and state.get("tenant_id"):
-                    auditor.log(
-                        tenant_id=state["tenant_id"],
-                        conversation_id=state["conversation_id"],
-                        aop_slug=state.get("aop_slug") or "unknown",
-                        aop_version=state.get("aop_version") or 0,
-                        skill_slug=slug,
-                        skill_tier=skill_cls.tier,
-                        inputs_raw=raw_input,
-                        status="rejected_by_permissions",
-                        error_message=tier_error,
-                        langfuse_trace_id=state.get("langfuse_trace_id"),
-                    )
-                return _append_and_finish(
-                    _error_entry(
-                        tool_use_id=tool_use_id,
-                        slug=slug,
-                        raw_input=raw_input,
-                        error=tier_error,
-                    )
+            return _append_and_finish(
+                _error_entry(
+                    tool_use_id=tool_use_id,
+                    slug=slug,
+                    raw_input=raw_input,
+                    error=tier_error,
                 )
+            )
+
+        # Skill L3 + human_approval_required → crear pending_approval y pausar.
+        if skill_cls.tier == "L3" and perm.get("human_approval_required", False):
+            if state.get("conversation_id") and state.get("tenant_id"):
+                approval_id = uuid4()
+                tenant_id_uuid = UUID(state["tenant_id"])
+                try:
+                    # Obtener salt para redactar PII — usamos tenant_scope directamente.
+                    from apps.api.db.queries import get_tenant_pii_salt
+                    async with tenant_scope(tenant_id_uuid) as conn:
+                        salt = await get_tenant_pii_salt(conn, tenant_id_uuid)
+                        inputs_redacted = redact_inputs(raw_input, salt)
+                        await create_pending_approval(
+                            conn,
+                            approval_id=approval_id,
+                            tenant_id=tenant_id_uuid,
+                            conversation_id=UUID(state["conversation_id"]),
+                            skill_slug=slug,
+                            skill_tier=skill_cls.tier,
+                            inputs_raw=raw_input,
+                            inputs_redacted=inputs_redacted,
+                            aop_slug=state.get("aop_slug") or "unknown",
+                            aop_version=state.get("aop_version") or 0,
+                            langfuse_trace_id=state.get("langfuse_trace_id"),
+                        )
+                except Exception:
+                    logger.exception("pending_approval_create_failed slug=%s", slug)
+                    # Si falla la creación del pending_approval, escalamos igual.
+
+                auditor.log(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    aop_slug=state.get("aop_slug") or "unknown",
+                    aop_version=state.get("aop_version") or 0,
+                    skill_slug=slug,
+                    skill_tier=skill_cls.tier,
+                    inputs_raw=raw_input,
+                    status="rejected_by_permissions",
+                    error_message="awaiting_human_approval",
+                    langfuse_trace_id=state.get("langfuse_trace_id"),
+                )
+                tracker.emit(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    phase="decision",
+                    event_type="tool_result",
+                    label=slug,
+                    detail={"approval_id": str(approval_id), "status": "awaiting_human_approval"},
+                    status="pending",
+                )
+
+                # Devolver señal especial al state — route_after_execute_skill
+                # detecta pending_approval_id y rutea a escalate.
+                new_iter = iter_count + 1
+                return {
+                    "tool_results": [
+                        *existing_results,
+                        {
+                            "id": tool_use_id,
+                            "slug": slug,
+                            "input": raw_input,
+                            "output": None,
+                            "is_error": False,
+                            "error": None,
+                            "awaiting_approval": True,
+                        },
+                    ],
+                    "pending_tool_call": None,
+                    "tool_iterations": new_iter,
+                    "pending_approval_id": str(approval_id),
+                    "escalation_reason": f"awaiting_human_approval:{approval_id}",
+                }
+            # Sin tenant/conversation en state (no debería pasar en prod) → error.
+            return _append_and_finish(
+                _error_entry(
+                    tool_use_id=tool_use_id,
+                    slug=slug,
+                    raw_input=raw_input,
+                    error="l3_approval_required_but_missing_context",
+                )
+            )
 
         # 4) Validar input contra el schema de la skill.
         try:

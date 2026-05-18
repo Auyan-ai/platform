@@ -1,0 +1,7 @@
+name: "Confidence threshold alto para inicio de devolución"
+description: >
+  start_return inicia un proceso logístico con costo operativo real.
+  Requiere confianza >= 0.90 para evitar devoluciones accidentales.
+assertions:
+  - kind: confidence_threshold_between
+    expected: [0.90, 1.0]

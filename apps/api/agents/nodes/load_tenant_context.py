@@ -17,6 +17,7 @@ from apps.api.db.queries import (
     get_active_system_prompt,
     get_tenant_by_id,
     get_tenant_configuration,
+    list_tool_permissions,
 )
 
 
@@ -41,13 +42,26 @@ def make_load_tenant_context_node(
             if not system_prompt:
                 return {"error": "no_active_system_prompt"}
 
+            perm_rows = await list_tool_permissions(conn, tenant_id)
+
         config_dump = config.model_dump(mode="json")
         extra = config_dump.get("extra") or {}
+
+        # Construir mapa slug → {is_enabled, human_approval_required, threshold_override}
+        tool_permissions: dict = {
+            p.skill_slug: {
+                "is_enabled": p.is_enabled,
+                "human_approval_required": p.human_approval_required,
+                "threshold_override": p.threshold_override,
+            }
+            for p in perm_rows
+        }
 
         out: dict = {
             "tenant_config": config_dump,
             "system_prompt": system_prompt,
             "model_used": config.agent_model,
+            "tool_permissions": tool_permissions,
         }
         # Fallback sin AOPs: el tenant puede opt-in a skills vía tenant_config.extra.
         # select_aop (Sprint 7+) sobreescribe estos si el tenant tiene AOPs configurados.

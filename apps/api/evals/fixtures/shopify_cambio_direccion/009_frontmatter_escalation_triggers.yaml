@@ -1,0 +1,5 @@
+name: "Frontmatter tiene escalation_triggers"
+description: "El AOP debe definir cuándo escalar a un humano"
+assertions:
+  - kind: frontmatter_has_key
+    expected: escalation_triggers

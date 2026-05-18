@@ -1,0 +1,3 @@
+name: "tool_definitions coincide con allowed_skills"
+assertions:
+  - kind: tool_count_matches_skills

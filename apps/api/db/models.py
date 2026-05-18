@@ -212,6 +212,44 @@ class IdempotencyRecord(_BaseModel):
     expires_at: datetime
 
 
+# ─── Tenant Tool Permissions (Sprint 10) ─────────────────────────────────────
+
+
+class TenantToolPermission(_BaseModel):
+    id: UUID
+    tenant_id: UUID
+    skill_slug: str
+    is_enabled: bool
+    threshold_override: float | None = None
+    human_approval_required: bool
+    enabled_at: datetime | None = None
+    enabled_by: UUID | None = None
+    created_at: datetime | None = None
+
+
+# ─── Pending Approvals (Sprint 10) ───────────────────────────────────────────
+
+PendingApprovalStatus = Literal["pending", "approved", "rejected"]
+
+
+class PendingApproval(_BaseModel):
+    id: UUID
+    tenant_id: UUID
+    conversation_id: UUID
+    skill_slug: str
+    skill_tier: str
+    inputs_raw: dict
+    inputs_redacted: dict
+    aop_slug: str
+    aop_version: int
+    langfuse_trace_id: str | None = None
+    status: PendingApprovalStatus
+    reviewed_by: UUID | None = None
+    reviewed_at: datetime | None = None
+    review_comment: str | None = None
+    created_at: datetime | None = None
+
+
 # ─── Agent Reasoning Events (Sprint 8) ───────────────────────────────────────
 
 ReasoningPhase = Literal["supervisor", "decision", "response"]

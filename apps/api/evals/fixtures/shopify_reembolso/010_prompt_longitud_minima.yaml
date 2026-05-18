@@ -1,0 +1,4 @@
+name: "System prompt detallado sobre política de reembolsos (>= 300 chars)"
+assertions:
+  - kind: prompt_min_length
+    expected: 300

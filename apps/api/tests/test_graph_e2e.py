@@ -60,6 +60,10 @@ def _patch_all_db_and_llm(
         "apps.api.agents.nodes.load_tenant_context.get_active_system_prompt",
         AsyncMock(return_value="Eres el agente de Acme." if prompt_present else None),
     )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.load_tenant_context.list_tool_permissions",
+        AsyncMock(return_value=[]),
+    )
 
     # --- load_conversation ---
     monkeypatch.setattr(
@@ -353,11 +357,28 @@ async def test_react_loop_two_iterations(fake_deps, monkeypatch) -> None:
     SkillRegistry._reset()
     SkillRegistry.register(PingSkill)
 
+    from datetime import UTC, datetime
+
+    from apps.api.db.models import TenantToolPermission
+
     config = make_tenant_configuration(extra={"allowed_skills": ["test.ping"]})
     _patch_all_db_and_llm(monkeypatch)
     monkeypatch.setattr(
         "apps.api.agents.nodes.load_tenant_context.get_tenant_configuration",
         AsyncMock(return_value=config),
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.load_tenant_context.list_tool_permissions",
+        AsyncMock(return_value=[
+            TenantToolPermission(
+                id=TENANT_ID,
+                tenant_id=TENANT_ID,
+                skill_slug="test.ping",
+                is_enabled=True,
+                human_approval_required=False,
+                created_at=datetime(2026, 1, 1, tzinfo=UTC),
+            )
+        ]),
     )
 
     responses = [
@@ -387,6 +408,9 @@ async def test_react_loop_two_iterations(fake_deps, monkeypatch) -> None:
     initial["tool_iterations"] = 0
     initial["max_tool_iterations"] = 5
     initial["allowed_skills"] = []
+    initial["tool_permissions"] = {
+        "test.ping": {"is_enabled": True, "human_approval_required": False, "threshold_override": None}
+    }
 
     final = await graph.ainvoke(initial)
     SkillRegistry._reset()
@@ -429,6 +453,10 @@ async def test_react_loop_max_iterations_escalates(fake_deps, monkeypatch) -> No
     SkillRegistry._reset()
     SkillRegistry.register(LoopSkill)
 
+    from datetime import UTC, datetime
+
+    from apps.api.db.models import TenantToolPermission
+
     config = make_tenant_configuration(
         extra={"allowed_skills": ["test.loop"], "max_tool_iterations": 2}
     )
@@ -436,6 +464,19 @@ async def test_react_loop_max_iterations_escalates(fake_deps, monkeypatch) -> No
     monkeypatch.setattr(
         "apps.api.agents.nodes.load_tenant_context.get_tenant_configuration",
         AsyncMock(return_value=config),
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.load_tenant_context.list_tool_permissions",
+        AsyncMock(return_value=[
+            TenantToolPermission(
+                id=TENANT_ID,
+                tenant_id=TENANT_ID,
+                skill_slug="test.loop",
+                is_enabled=True,
+                human_approval_required=False,
+                created_at=datetime(2026, 1, 1, tzinfo=UTC),
+            )
+        ]),
     )
 
     def _always_skill(**kwargs: object) -> FakeAnthropicResponse:
@@ -457,6 +498,9 @@ async def test_react_loop_max_iterations_escalates(fake_deps, monkeypatch) -> No
     initial["tool_results"] = []
     initial["tool_iterations"] = 0
     initial["max_tool_iterations"] = 5
+    initial["tool_permissions"] = {
+        "test.loop": {"is_enabled": True, "human_approval_required": False, "threshold_override": None}
+    }
 
     final = await graph.ainvoke(initial)
     SkillRegistry._reset()

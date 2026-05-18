@@ -1,0 +1,6 @@
+name: "Prompt menciona devolución o retorno de producto"
+description: "El system prompt debe describir el proceso de devolución"
+assertions:
+  - kind: prompt_contains
+    expected:
+      - devoluci
