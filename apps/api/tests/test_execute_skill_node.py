@@ -391,6 +391,134 @@ class TestSkillContextPropagation:
 
 
 # ----------------------------------------------------------------
+# L2 / L3 permission gate
+# ----------------------------------------------------------------
+
+
+class L2Skill(Skill):
+    """Skill L2 dummy para probar el permission gate."""
+
+    slug = "test.write"
+    description = "L2 write dummy."
+    tier: SkillTier = "L2"
+    input_schema = EchoInput
+    output_schema = EchoOutput
+    default_threshold = 0.85
+
+    async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
+        assert isinstance(inputs, EchoInput)
+        return EchoOutput(echoed=f"written:{inputs.text}")
+
+
+class L3Skill(Skill):
+    """Skill L3 dummy para probar el bloqueo permanente."""
+
+    slug = "test.dangerous"
+    description = "L3 dangerous dummy."
+    tier: SkillTier = "L3"
+    input_schema = EchoInput
+    output_schema = EchoOutput
+    default_threshold = 0.95
+
+    async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
+        assert isinstance(inputs, EchoInput)
+        return EchoOutput(echoed="dangerous")
+
+
+class TestL2PermissionGate:
+    @pytest.fixture(autouse=True)
+    def _register_l2_l3(self) -> Generator[None, None, None]:
+        SkillRegistry._reset()
+        SkillRegistry.register(EchoSkill)
+        SkillRegistry.register(L2Skill)
+        SkillRegistry.register(L3Skill)
+        yield
+        SkillRegistry._reset()
+
+    async def test_l2_blocked_without_allow_flag(self, deps: AgentDependencies) -> None:
+        """L2 skill → error si allow_l2_skills no está en extra."""
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.write"),
+            allowed_skills=["test.write"],
+            tenant_config={"extra": {}},  # sin allow_l2_skills
+        )
+        result = await node(state)
+
+        entry = result["tool_results"][-1]
+        assert entry["is_error"] is True
+        assert entry["error"] == "l2_skills_not_enabled_for_tenant"
+
+    async def test_l2_blocked_when_flag_is_false(self, deps: AgentDependencies) -> None:
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.write"),
+            allowed_skills=["test.write"],
+            tenant_config={"extra": {"allow_l2_skills": False}},
+        )
+        result = await node(state)
+
+        entry = result["tool_results"][-1]
+        assert entry["is_error"] is True
+        assert entry["error"] == "l2_skills_not_enabled_for_tenant"
+
+    async def test_l2_executes_when_flag_is_true(self, deps: AgentDependencies) -> None:
+        """Con allow_l2_skills: true, la skill L2 se ejecuta normalmente."""
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.write"),
+            allowed_skills=["test.write"],
+            tenant_config={"extra": {"allow_l2_skills": True}},
+        )
+        result = await node(state)
+
+        entry = result["tool_results"][-1]
+        assert entry["is_error"] is False
+        assert entry["output"]["echoed"] == "written:hola"
+
+    async def test_l3_always_blocked(self, deps: AgentDependencies) -> None:
+        """L3 está bloqueado incluso con allow_l2_skills: true — Sprint 10."""
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.dangerous"),
+            allowed_skills=["test.dangerous"],
+            tenant_config={"extra": {"allow_l2_skills": True}},
+        )
+        result = await node(state)
+
+        entry = result["tool_results"][-1]
+        assert entry["is_error"] is True
+        assert entry["error"] == "l3_skills_not_available"
+
+    async def test_l1_unaffected_by_gate(self, deps: AgentDependencies) -> None:
+        """Skills L1 no se ven afectadas por el gate, con o sin el flag."""
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.echo"),
+            allowed_skills=["test.echo"],
+            tenant_config={"extra": {}},  # sin allow_l2_skills
+        )
+        result = await node(state)
+
+        entry = result["tool_results"][-1]
+        assert entry["is_error"] is False
+        assert entry["output"]["echoed"] == "echo:hola"
+
+    async def test_l2_blocked_increments_iterations(self, deps: AgentDependencies) -> None:
+        """El rechazo por tier sigue consumiendo una iteración."""
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.write"),
+            allowed_skills=["test.write"],
+            tenant_config={"extra": {}},
+            tool_iterations=2,
+        )
+        result = await node(state)
+
+        assert result["tool_iterations"] == 3
+
+
+# ----------------------------------------------------------------
 # Make node sanity
 # ----------------------------------------------------------------
 

@@ -124,7 +124,27 @@ def make_execute_skill_node(
                 )
             )
 
-        # 3) Validar input contra el schema de la skill.
+        # 3) Gate de permisos por tier.
+        #    L2 requiere opt-in explícito del tenant: extra.allow_l2_skills = true.
+        #    L3 está reservado para Sprint 10 (human approval).
+        if skill_cls.tier in ("L2", "L3"):
+            extra: dict[str, Any] = (state.get("tenant_config") or {}).get("extra") or {}
+            if skill_cls.tier == "L3" or not extra.get("allow_l2_skills", False):
+                tier_error = (
+                    "l3_skills_not_available"
+                    if skill_cls.tier == "L3"
+                    else "l2_skills_not_enabled_for_tenant"
+                )
+                return _append_and_finish(
+                    _error_entry(
+                        tool_use_id=tool_use_id,
+                        slug=slug,
+                        raw_input=raw_input,
+                        error=tier_error,
+                    )
+                )
+
+        # 4) Validar input contra el schema de la skill.
         try:
             validated_input = skill_cls.input_schema.model_validate(raw_input)
         except ValidationError as exc:
@@ -137,7 +157,7 @@ def make_execute_skill_node(
                 )
             )
 
-        # 4) Ejecutar.
+        # 5) Ejecutar.
         ctx = build_skill_context(state)
         skill = skill_cls()
         try:
@@ -172,7 +192,7 @@ def make_execute_skill_node(
                 )
             )
 
-        # 5) Éxito.
+        # 6) Éxito.
         result_entry = {
             "id": tool_use_id,
             "slug": slug,
