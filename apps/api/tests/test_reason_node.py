@@ -90,6 +90,7 @@ async def test_threshold_does_not_override_explicit_escalate(
         {
             "decision": "escalate",
             "confidence": 0.95,
+            "response_text": "Te paso con un agente humano.",
             "escalation_reason": "customer_requested_human",
         }
     )

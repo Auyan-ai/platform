@@ -211,6 +211,7 @@ async def test_escalate_path_end_to_end(fake_deps, monkeypatch) -> None:
             {
                 "decision": "escalate",
                 "confidence": 0.95,
+                "response_text": "Te paso con un agente humano que te ayudará.",
                 "escalation_reason": "customer_requested_human",
             }
         ),
@@ -222,7 +223,7 @@ async def test_escalate_path_end_to_end(fake_deps, monkeypatch) -> None:
     assert final["decision"] == "escalate"
     assert final["escalation_reason"] == "customer_requested_human"
     assert final["escalation_id"] == str(ESCALATION_ID)
-    assert final.get("agent_response") is None
+    assert final.get("agent_response") == "Te paso con un agente humano que te ayudará."
     assert final.get("error") is None
 
 

@@ -39,17 +39,32 @@ class TestEscalateDecision:
             {
                 "decision": "escalate",
                 "confidence": 0.4,
+                "response_text": "Te paso con un agente humano que te ayudará.",
                 "escalation_reason": "customer_requested_human",
             }
         )
         assert tool.decision == "escalate"
         assert tool.escalation_reason == "customer_requested_human"
-        assert tool.response_text is None
+        assert tool.response_text.startswith("Te paso")
 
     def test_requires_escalation_reason(self) -> None:
         with pytest.raises(ValidationError, match="escalation_reason"):
             AgentDecisionTool.model_validate(
-                {"decision": "escalate", "confidence": 0.5}
+                {
+                    "decision": "escalate",
+                    "confidence": 0.5,
+                    "response_text": "Te paso con un agente.",
+                }
+            )
+
+    def test_requires_response_text_on_escalate(self) -> None:
+        with pytest.raises(ValidationError, match="response_text"):
+            AgentDecisionTool.model_validate(
+                {
+                    "decision": "escalate",
+                    "confidence": 0.5,
+                    "escalation_reason": "customer_requested_human",
+                }
             )
 
 

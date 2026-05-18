@@ -25,7 +25,7 @@ RESPOND_OR_ESCALATE_TOOL: dict[str, Any] = {
     ),
     "input_schema": {
         "type": "object",
-        "required": ["decision", "confidence"],
+        "required": ["decision", "confidence", "response_text"],
         "additionalProperties": False,
         "properties": {
             "decision": {
@@ -48,14 +48,18 @@ RESPOND_OR_ESCALATE_TOOL: dict[str, Any] = {
             "response_text": {
                 "type": "string",
                 "description": (
-                    "Texto de la respuesta al cliente. OBLIGATORIO cuando decision='respond'. "
-                    "Tono profesional y breve. No inventes información."
+                    "Mensaje visible para el cliente. OBLIGATORIO siempre. "
+                    "Si decision='respond' → la respuesta. "
+                    "Si decision='escalate' → mensaje de cortesía explicando que se "
+                    "pasa con un agente humano (NUNCA dejar al cliente sin respuesta). "
+                    "Tono profesional, breve, en el idioma del cliente. No inventes información."
                 ),
             },
             "escalation_reason": {
                 "type": "string",
                 "description": (
-                    "Razón concreta del escalado. OBLIGATORIO cuando decision='escalate'. "
+                    "Razón interna del escalado (NO visible para el cliente). "
+                    "OBLIGATORIO cuando decision='escalate'. "
                     "Ejemplos: 'customer_requested_human', 'out_of_scope_refund_policy', "
                     "'insufficient_context_in_knowledge_base'."
                 ),
@@ -77,17 +81,16 @@ class AgentDecisionTool(BaseModel):
 
     decision: Literal["respond", "escalate"]
     confidence: float = Field(ge=0.0, le=1.0)
-    response_text: str | None = None
+    response_text: str
     escalation_reason: str | None = None
 
     @model_validator(mode="after")
     def _coherent(self) -> AgentDecisionTool:
-        if self.decision == "respond":
-            if not self.response_text or not self.response_text.strip():
-                raise ValueError(
-                    "response_text es obligatorio y no vacío cuando decision='respond'"
-                )
-        else:  # escalate
+        if not self.response_text.strip():
+            raise ValueError(
+                "response_text es obligatorio y no vacío para cualquier decision"
+            )
+        if self.decision == "escalate":
             if not self.escalation_reason or not self.escalation_reason.strip():
                 raise ValueError(
                     "escalation_reason es obligatorio y no vacío cuando decision='escalate'"
