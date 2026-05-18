@@ -948,8 +948,39 @@ Invalida el cache de AOPs en todos los workers de Railway sin Redis.
 
 **Suite total: 549/549 verde. Ruff limpio.**
 
+---
+
+## Sesión 22 (cont.) — Sprint 9.5 Nudges de conversación (2026-05-18)
+
+### Sprint 9.5 — Nudges antes del cierre automático ([PR #74](https://github.com/Auyan-ai/platform/pull/74)) ✅ en revisión
+
+Envía un mensaje recordatorio al cliente antes de cerrar la conversación por inactividad. Opt-in por tenant, sin reiniciar el timer del cierre.
+
+| Área | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260518000003_add_nudged_at.sql` | Columna `nudged_at timestamptz` en `conversations`. **Aplicar manualmente en staging.** |
+| `apps/api/db/models.py` | `nudged_at: datetime \| None` en `Conversation` |
+| `apps/api/db/queries.py` | `get_nudge_candidates`, `mark_conversations_nudged`, `nudged_at` en todos los SELECT de conversaciones |
+| `apps/api/services/cleanup.py` | `_build_nudge_cutoffs` (ventana de nudge por canal), `_nudge_for_tenant` (inserta mensaje + marca `nudged_at`), `run_abandoned_cleanup` ejecuta nudge antes del cierre |
+| Tests | 11 tests nuevos (560 total) |
+
+**Config por tenant (en `extra`):**
+```json
+{
+  "nudge_enabled": true,
+  "nudge_before_seconds": 3600,
+  "nudge_message": "¿Pudimos ayudarte? Si necesitas algo más, estamos aquí."
+}
+```
+
+**Flujo:** Cleanup (cada 15min) → busca conversaciones en ventana `[timeout - nudge_before, timeout]` con `nudged_at IS NULL` → inserta mensaje `role=agent_ai` sin tocar `last_message_at` → setea `nudged_at` → luego corre el cierre normal.
+
+**Suite total: 560/560 verde. Ruff limpio.**
+
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. Mergear [PR #73](https://github.com/Auyan-ai/platform/pull/73) si CI pasa
-2. **Sprint 9.5 (opcional)** — Nudges de conversación (`tenant_config.conversation_lifecycle` editable + mensaje de recordatorio antes del timeout)
-3. **Sprint 10** — Skills L3 + human approval mode
+1. Mergear [PR #74](https://github.com/Auyan-ai/platform/pull/74) si CI pasa (aplicar migración `nudged_at` en staging)
+2. **Sprint 10** — Skills L3 + human approval mode
+   - Skill `shopify.cancel_order` (L3 — acción destructiva con confirmación)
+   - Human approval mode: antes de ejecutar L3, el agente crea una escalación con `requires_approval=True` y espera respuesta del agente humano desde el dashboard
+   - Gate en `execute_skill`: L3 → check `allow_l3_skills` + approval flow
