@@ -160,6 +160,40 @@ class IntentClassifierRun(_BaseModel):
     created_at: datetime
 
 
+# ─── Skill Audit Log (Sprint 9.3) ────────────────────────────────────────────
+
+SkillAuditStatus = Literal[
+    "success", "failed", "rejected_by_supervisor", "rejected_by_permissions"
+]
+
+
+class TenantSecret(_BaseModel):
+    tenant_id: UUID
+    pii_salt: str
+    created_at: datetime
+
+
+class SkillAuditLog(_BaseModel):
+    id: UUID
+    tenant_id: UUID
+    conversation_id: UUID
+    aop_slug: str
+    aop_version: int
+    skill_slug: str
+    skill_tier: str
+    idempotency_key: UUID | None = None
+    inputs_redacted: dict
+    outputs_redacted: dict | None = None
+    inputs_hash: str
+    confidence: float | None = None
+    supervisor_verdict: str | None = None
+    status: SkillAuditStatus
+    error_message: str | None = None
+    latency_ms: int | None = None
+    langfuse_trace_id: str | None = None
+    created_at: datetime
+
+
 # ─── Idempotency (Sprint 9.1) ────────────────────────────────────────────────
 
 IdempotencyStatus = Literal["pending", "done"]

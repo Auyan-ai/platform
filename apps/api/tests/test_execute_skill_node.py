@@ -63,6 +63,21 @@ class BoomSkill(Skill):
         raise RuntimeError("boom_intentional")
 
 
+class L2DummySkill(Skill):
+    """Skill L2 para probar el gate de permisos."""
+
+    slug = "test.l2_dummy"
+    description = "L2 dummy."
+    tier: SkillTier = "L2"
+    input_schema = EchoInput
+    output_schema = EchoOutput
+    default_threshold = 0.85
+
+    async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
+        assert isinstance(inputs, EchoInput)
+        return EchoOutput(echoed=f"l2:{inputs.text}")
+
+
 # ----------------------------------------------------------------
 # Fixtures
 # ----------------------------------------------------------------
@@ -73,6 +88,7 @@ def _registry() -> Generator[None, None, None]:
     SkillRegistry._reset()
     SkillRegistry.register(EchoSkill)
     SkillRegistry.register(BoomSkill)
+    SkillRegistry.register(L2DummySkill)
     yield
     SkillRegistry._reset()
 
@@ -532,3 +548,72 @@ class TestFactory:
         # Confirma que el nodo no toca deps internamente.
         node = make_execute_skill_node(AsyncMock())  # type: ignore[arg-type]
         assert callable(node)
+
+
+# ----------------------------------------------------------------
+# Audit log
+# ----------------------------------------------------------------
+
+
+class TestAuditLog:
+    async def test_success_emite_audit_log(self, deps: AgentDependencies) -> None:
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(),
+            aop_slug="consulta_envio",
+            aop_version=2,
+        )
+        await node(state)
+        entries = deps.audit_logger.entries  # type: ignore[attr-defined]
+        assert len(entries) == 1
+        e = entries[0]
+        assert e["skill_slug"] == "test.echo"
+        assert e["status"] == "success"
+        assert e["aop_slug"] == "consulta_envio"
+        assert e["aop_version"] == 2
+        assert e["outputs"] == {"echoed": "echo:hola"}
+
+    async def test_failed_skill_emite_audit_log_con_status_failed(
+        self, deps: AgentDependencies
+    ) -> None:
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending("test.boom"),
+        )
+        await node(state)
+        entries = deps.audit_logger.entries  # type: ignore[attr-defined]
+        assert len(entries) == 1
+        assert entries[0]["status"] == "failed"
+        assert "boom" in entries[0]["error_message"]
+
+    async def test_permission_rejection_emite_audit_log(
+        self, deps: AgentDependencies
+    ) -> None:
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending("test.l2_dummy"),
+            allowed_skills=["test.l2_dummy"],
+            tenant_config={"extra": {}},  # allow_l2_skills ausente → bloqueado
+        )
+        await node(state)
+        entries = deps.audit_logger.entries  # type: ignore[attr-defined]
+        assert len(entries) == 1
+        assert entries[0]["status"] == "rejected_by_permissions"
+
+    async def test_sin_tenant_id_no_emite_audit(self, deps: AgentDependencies) -> None:
+        node = make_execute_skill_node(deps)
+        state = _base_state(pending_tool_call=_pending())
+        del state["tenant_id"]
+        await node(state)
+        assert deps.audit_logger.entries == []  # type: ignore[attr-defined]
+
+    async def test_latency_ms_esta_presente_en_audit(
+        self, deps: AgentDependencies
+    ) -> None:
+        node = make_execute_skill_node(deps)
+        state = _base_state(pending_tool_call=_pending())
+        await node(state)
+        entries = deps.audit_logger.entries  # type: ignore[attr-defined]
+        assert entries[0]["latency_ms"] is not None
+        assert isinstance(entries[0]["latency_ms"], int)
+        assert entries[0]["latency_ms"] >= 0

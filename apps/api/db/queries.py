@@ -35,6 +35,7 @@ from apps.api.db.models import (
     ReasoningEventType,
     ReasoningPhase,
     ReasoningStatus,
+    SkillAuditLog,
     Tenant,
     TenantConfiguration,
     UserRole,
@@ -1239,3 +1240,131 @@ async def delete_idempotency_key(
         tenant_id,
         key,
     )
+
+
+# ─── Skill Audit Log (Sprint 9.3) ────────────────────────────────────────────
+
+
+async def get_tenant_pii_salt(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+) -> str:
+    """Devuelve el salt PII del tenant, creándolo si no existe."""
+    import secrets as _secrets
+
+    row = await conn.fetchrow(
+        "SELECT pii_salt FROM tenant_secrets WHERE tenant_id = $1",
+        tenant_id,
+    )
+    if row:
+        return str(row["pii_salt"])
+    salt = _secrets.token_hex(32)
+    await conn.execute(
+        """
+        INSERT INTO tenant_secrets (tenant_id, pii_salt)
+        VALUES ($1, $2)
+        ON CONFLICT DO NOTHING
+        """,
+        tenant_id,
+        salt,
+    )
+    # Re-fetch por si otro worker ganó el INSERT concurrente.
+    row2 = await conn.fetchrow(
+        "SELECT pii_salt FROM tenant_secrets WHERE tenant_id = $1",
+        tenant_id,
+    )
+    return str(row2["pii_salt"]) if row2 else salt
+
+
+async def insert_skill_audit_log(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    aop_slug: str,
+    aop_version: int,
+    skill_slug: str,
+    skill_tier: str,
+    inputs_redacted: dict,
+    inputs_hash: str,
+    status: str,
+    outputs_redacted: dict | None = None,
+    idempotency_key: UUID | None = None,
+    confidence: float | None = None,
+    supervisor_verdict: str | None = None,
+    error_message: str | None = None,
+    latency_ms: int | None = None,
+    langfuse_trace_id: str | None = None,
+) -> None:
+    await conn.execute(
+        """
+        INSERT INTO skill_audit_log (
+            tenant_id, conversation_id,
+            aop_slug, aop_version,
+            skill_slug, skill_tier,
+            idempotency_key,
+            inputs_redacted, outputs_redacted, inputs_hash,
+            confidence, supervisor_verdict,
+            status, error_message, latency_ms, langfuse_trace_id
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+            $11, $12, $13, $14, $15, $16
+        )
+        """,
+        tenant_id,
+        conversation_id,
+        aop_slug,
+        aop_version,
+        skill_slug,
+        skill_tier,
+        idempotency_key,
+        inputs_redacted,
+        outputs_redacted,
+        inputs_hash,
+        confidence,
+        supervisor_verdict,
+        status,
+        error_message,
+        latency_ms,
+        langfuse_trace_id,
+    )
+
+
+async def list_skill_audit_log(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    conversation_id: UUID | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[SkillAuditLog]:
+    """Lista entradas del audit log, opcionalmente filtradas por conversación."""
+    if conversation_id:
+        rows = await conn.fetch(
+            """
+            SELECT *
+              FROM skill_audit_log
+             WHERE tenant_id = $1
+               AND conversation_id = $2
+             ORDER BY created_at DESC
+             LIMIT $3 OFFSET $4
+            """,
+            tenant_id,
+            conversation_id,
+            limit,
+            offset,
+        )
+    else:
+        rows = await conn.fetch(
+            """
+            SELECT *
+              FROM skill_audit_log
+             WHERE tenant_id = $1
+             ORDER BY created_at DESC
+             LIMIT $2 OFFSET $3
+            """,
+            tenant_id,
+            limit,
+            offset,
+        )
+    return [SkillAuditLog(**dict(r)) for r in rows]

@@ -84,9 +84,24 @@ class FakeReasoningTracker:
         self.events.append(kwargs)
 
 
+class FakeAuditLogger:
+    """AuditLogger sin-op para tests — registra las llamadas pero no toca DB ni event loop."""
+
+    def __init__(self) -> None:
+        self.entries: list[dict[str, Any]] = []
+
+    def log(self, **kwargs: Any) -> None:
+        self.entries.append(kwargs)
+
+
 @pytest.fixture
 def fake_reasoning_tracker() -> FakeReasoningTracker:
     return FakeReasoningTracker()
+
+
+@pytest.fixture
+def fake_audit_logger() -> FakeAuditLogger:
+    return FakeAuditLogger()
 
 
 @pytest.fixture
@@ -95,12 +110,14 @@ def fake_deps(
     fake_openai: AsyncMock,
     fake_settings: FakeSettings,
     fake_reasoning_tracker: FakeReasoningTracker,
+    fake_audit_logger: FakeAuditLogger,
 ) -> AgentDependencies:
     return AgentDependencies(
         anthropic=fake_anthropic,  # type: ignore[arg-type]
         openai=fake_openai,  # type: ignore[arg-type]
         settings=fake_settings,  # type: ignore[arg-type]
         reasoning_tracker=fake_reasoning_tracker,  # type: ignore[arg-type]
+        audit_logger=fake_audit_logger,  # type: ignore[arg-type]
     )
 
 

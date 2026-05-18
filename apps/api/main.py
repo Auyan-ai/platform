@@ -43,6 +43,7 @@ from apps.api.routers.reasoning import router as reasoning_router
 from apps.api.routers.tenants import router as tenants_router
 from apps.api.routers.users import router as users_router
 from apps.api.routers.webhooks import router as webhooks_router
+from apps.api.services.audit import AuditLogger
 from apps.api.services.cleanup import run_abandoned_cleanup
 from apps.api.services.reasoning import ReasoningTracker
 from fastapi import FastAPI
@@ -86,11 +87,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     langfuse = build_langfuse_client(settings)
 
     reasoning_tracker = ReasoningTracker()
+    audit_logger = AuditLogger()
     deps = AgentDependencies(
         anthropic=anthropic,
         openai=openai,
         settings=settings,
         reasoning_tracker=reasoning_tracker,
+        audit_logger=audit_logger,
     )
     graph = build_graph(deps)
     service = AgentService(graph=graph, langfuse=langfuse)
