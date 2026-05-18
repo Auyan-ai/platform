@@ -88,17 +88,13 @@ class ReasoningTracker:
                     detail=detail,
                     status=status,
                 )
-            logger.info(
-                "reasoning_event_inserted phase=%s label=%s",
-                phase,
-                label,
-            )
-        except Exception as exc:
-            logger.error(
-                "reasoning_event_insert_failed: %s — tenant=%s conv=%s phase=%s label=%s",
-                exc,
-                str(tenant_id),
-                str(conversation_id),
-                phase,
-                label,
+        except Exception:
+            logger.exception(
+                "reasoning_event_insert_failed",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "conversation_id": str(conversation_id),
+                    "phase": phase,
+                    "label": label,
+                },
             )

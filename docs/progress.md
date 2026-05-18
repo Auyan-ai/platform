@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-17 (sesión 17 — Sprint 8: Agent Reasoning UI + Supervisor Pattern)_
+_Última actualización: 2026-05-18 (sesión 18 — Sprint 8 validado en staging + bugs JSONB y handoff)_
 
 ---
 
@@ -771,12 +771,38 @@ CREATE TABLE agent_reasoning_events (
 | `apps/api/agents/graph.py` | `route_after_reason` verifica `needs_supervision`; `route_after_supervise`: approve→execute/respond/escalate, reject con `escalation_reason`→escalate, sin `escalation_reason`→reason |
 | `apps/api/tests/test_supervise_node.py` | 16 tests: `needs_supervision`, approve, tactical, structural, Opus/Sonnet selection, token accumulation, event emission |
 
-**Suite total: 477/477 verde. tsc --noEmit limpio.**
+**Suite total: 478/478 verde. tsc --noEmit limpio.**
 
-**⚠️ Antes de deployar a staging:** aplicar migración `20260517000002_add_agent_reasoning_events.sql` vía `psql` o SQL Editor de Supabase.
+### Bugs encontrados al validar Sprint 8 en staging (sesión 18, 2026-05-18)
+
+Tres bugs distintos descubiertos al mandar el primer webhook real contra staging — todos detectables solo con E2E, no con tests unitarios:
+
+| Bug | Síntoma | Causa raíz | Fix |
+|---|---|---|---|
+| Migración no aplicada | `function update_updated_at_column() does not exist` | la función estándar del repo es `set_updated_at` en `public`; `update_updated_at_column` solo existe en schema `storage` | Migración corregida; aplicada manualmente en staging |
+| 0 filas en `agent_reasoning_events` | webhook 200 OK pero la tabla quedaba vacía | `json.dumps(detail)` + cast `$6::jsonb` hacían que asyncpg aplicara su encoder JSONB (`json.dumps`) sobre el string ya serializado → double encoding → al leer, decoder devolvía un string → `dict(string)` reventaba en silencio (background task fire-and-forget tragaba el error) | [PR #62](https://github.com/Auyan-ai/platform/pull/62): pasar dict/None directos sin cast, patrón que ya usaba `create_message`. Mismo bug latente en `create_aop`/`save_aop_version` (Sprint 7) — corregidos también |
+| Hilo sin mensaje del agente al escalar | escalación creada pero el cliente no veía nada del agente — solo el cambio de status | schema `RESPOND_OR_ESCALATE_TOOL` marcaba `response_text` obligatorio solo para `decision='respond'` | [PR #63](https://github.com/Auyan-ai/platform/pull/63): `response_text` obligatorio siempre — para escalate es el mensaje de cortesía/handoff |
+
+**Bug secundario diagnosticado en el camino:** `asyncio.get_event_loop()` desde una función síncrona en Python 3.12 lanza `RuntimeError` que el `except RuntimeError: pass` silenciaba. Aunque NO era el bug principal (el JSONB era el principal), también era un riesgo real porque Dockerfile usa `python:3.12-slim` y el entorno local Python 3.11. [PR #60](https://github.com/Auyan-ai/platform/pull/60): `get_running_loop()` que es el patrón correcto para Python 3.10+.
+
+**Workaround Railway auto-deploy:** el GitHub App de Railway no firea builds automáticamente — disparados manualmente con `environmentTriggersDeploy` por GraphQL (memoria `reference_railway_deploy_trigger.md`).
+
+### Validación E2E en staging (sesión 18)
+
+| Conversación | Mensaje | Decisión | Reasoning events | Verificación |
+|---|---|---|---|---|
+| `59a79302` | "¿dónde está mi pedido?" | respond | 3 (Load context → Decision: respond → Agent responded) | Respuesta del agente pidiendo email/número ✅ |
+| `e18ae88d` | "quiero hablar con un humano" | escalate | 3 (Load context → Decision: escalate → Escalated to human) | Mensaje de handoff del agente + escalation creada ✅ |
+| `f856a607` | "¿política de devoluciones?" | escalate (KB vacía) | 5 (incluye tool_call shopify.get_shop_policies pending → done) | Skill ejecutada, escalación porque KB no tiene info ✅ |
+
+**Sprint 8 completado ✅** — Agent Reasoning UI + Supervisor pattern + handoff message — validado end-to-end en staging.
+
+### Pendientes para próximas sesiones
+
+- **Probar conversación multi-turno** (≥2 mensajes seguidos del cliente en la misma conversación) — hasta ahora solo se probó con un mensaje único. Verificar que el agente mantiene contexto del historial, que los reasoning events se acumulan correctamente por seq, y que el flujo de "agente pide info → cliente responde → agente continúa" funciona.
+- **Endpoint debug `/health/reasoning-debug` removido** — usado solo para diagnosticar el bug de JSONB, ya no hace falta.
 
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. Mergear [PR #59](https://github.com/Auyan-ai/platform/pull/59) a `develop`
-2. Aplicar migración `20260517000002` en Supabase staging
-3. **Sprint 9** — Skills L2 + permissions + audit log con PII + idempotency
+1. Probar conversación multi-turno con varias preguntas seguidas
+2. **Sprint 9** — Skills L2 + permissions + audit log con PII + idempotency
