@@ -268,3 +268,56 @@ class AgentReasoningEvent(_BaseModel):
     status: ReasoningStatus
     seq: int
     created_at: datetime
+
+
+# ─── Slow Agent (Sprint 11) ───────────────────────────────────────────────────
+
+SlowAgentRunStatus = Literal["running", "completed", "failed"]
+ProposalType = Literal["aop_edit", "new_aop", "skill_request", "guardrail_addition"]
+ProposalStatus = Literal["pending", "approved", "rejected", "applied"]
+
+
+class SlowAgentRun(_BaseModel):
+    id: UUID
+    tenant_id: UUID
+    status: SlowAgentRunStatus
+    conversations_evaluated: int
+    proposals_generated: int
+    sonnet_tokens: int
+    opus_tokens: int
+    cost_usd: float | None = None
+    triggered_by: UUID | None = None
+    error: str | None = None
+    run_started_at: datetime
+    run_ended_at: datetime | None = None
+    created_at: datetime
+
+
+class ConversationJudgment(_BaseModel):
+    id: UUID
+    tenant_id: UUID
+    run_id: UUID
+    conversation_id: UUID
+    verdict_summary: str | None = None
+    proposal_id: UUID | None = None
+    created_at: datetime
+
+
+class ImprovementProposal(_BaseModel):
+    id: UUID
+    tenant_id: UUID
+    run_id: UUID
+    proposal_type: ProposalType
+    aop_slug: str | None = None
+    diff_markdown: str
+    rationale: str
+    evidence_conversations: list[UUID] = Field(default_factory=list)
+    judge_model_used: str
+    judge_confidence: float
+    requires_eval_pass: bool
+    status: ProposalStatus
+    reviewed_by: UUID | None = None
+    reviewed_at: datetime | None = None
+    review_comment: str | None = None
+    applied_version: int | None = None
+    created_at: datetime

@@ -23,11 +23,13 @@ from apps.api.db.models import (
     AopWorkspace,
     ChannelType,
     Conversation,
+    ConversationJudgment,
     ConversationStatus,
     EndCustomer,
     Escalation,
     EscalationStatus,
     IdempotencyRecord,
+    ImprovementProposal,
     IntentClassifierRun,
     KnowledgeChunk,
     Message,
@@ -38,6 +40,7 @@ from apps.api.db.models import (
     ReasoningPhase,
     ReasoningStatus,
     SkillAuditLog,
+    SlowAgentRun,
     Tenant,
     TenantConfiguration,
     TenantToolPermission,
@@ -1689,4 +1692,280 @@ async def resolve_pending_approval(
         review_comment,
     )
     return PendingApproval(**dict(row)) if row else None
+
+
+# ============================================================
+# Slow Agent — runs, judgments, proposals (Sprint 11)
+# ============================================================
+
+
+async def insert_slow_agent_run(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    triggered_by: UUID | None,
+) -> SlowAgentRun:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO slow_agent_runs (tenant_id, triggered_by, status)
+        VALUES ($1, $2, 'running')
+        RETURNING id, tenant_id, status, conversations_evaluated, proposals_generated,
+                  sonnet_tokens, opus_tokens, cost_usd, triggered_by, error,
+                  run_started_at, run_ended_at, created_at
+        """,
+        tenant_id,
+        triggered_by,
+    )
+    return SlowAgentRun(**dict(row))
+
+
+async def update_slow_agent_run(
+    conn: asyncpg.Connection,
+    run_id: UUID,
+    tenant_id: UUID,
+    *,
+    status: str,
+    conversations_evaluated: int,
+    proposals_generated: int,
+    sonnet_tokens: int,
+    opus_tokens: int,
+    cost_usd: float | None,
+    error: str | None,
+) -> None:
+    await conn.execute(
+        """
+        UPDATE slow_agent_runs
+           SET status                  = $3,
+               conversations_evaluated = $4,
+               proposals_generated     = $5,
+               sonnet_tokens           = $6,
+               opus_tokens             = $7,
+               cost_usd                = $8,
+               error                   = $9,
+               run_ended_at            = NOW(),
+               updated_at              = NOW()
+         WHERE id = $1 AND tenant_id = $2
+        """,
+        run_id,
+        tenant_id,
+        status,
+        conversations_evaluated,
+        proposals_generated,
+        sonnet_tokens,
+        opus_tokens,
+        cost_usd,
+        error,
+    )
+
+
+async def list_judged_conversation_ids(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    since_days: int = 30,
+) -> set[UUID]:
+    """IDs de conversaciones ya juzgadas en los últimos `since_days` días."""
+    rows = await conn.fetch(
+        """
+        SELECT DISTINCT conversation_id
+          FROM conversation_judgments
+         WHERE tenant_id = $1
+           AND created_at >= NOW() - ($2 || ' days')::interval
+        """,
+        tenant_id,
+        str(since_days),
+    )
+    return {r["conversation_id"] for r in rows}
+
+
+async def insert_conversation_judgment(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    run_id: UUID,
+    conversation_id: UUID,
+    verdict_summary: str | None,
+    proposal_id: UUID | None,
+) -> ConversationJudgment:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO conversation_judgments
+               (tenant_id, run_id, conversation_id, verdict_summary, proposal_id)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (run_id, conversation_id) DO UPDATE
+               SET verdict_summary = EXCLUDED.verdict_summary,
+                   proposal_id     = EXCLUDED.proposal_id
+        RETURNING id, tenant_id, run_id, conversation_id,
+                  verdict_summary, proposal_id, created_at
+        """,
+        tenant_id,
+        run_id,
+        conversation_id,
+        verdict_summary,
+        proposal_id,
+    )
+    return ConversationJudgment(**dict(row))
+
+
+async def insert_improvement_proposal(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    run_id: UUID,
+    proposal_type: str,
+    diff_markdown: str,
+    rationale: str,
+    evidence_conversations: list[UUID],
+    judge_model_used: str,
+    judge_confidence: float,
+    aop_slug: str | None = None,
+    requires_eval_pass: bool = True,
+) -> ImprovementProposal:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO improvement_proposals
+               (tenant_id, run_id, proposal_type, aop_slug, diff_markdown, rationale,
+                evidence_conversations, judge_model_used, judge_confidence, requires_eval_pass)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        RETURNING id, tenant_id, run_id, proposal_type, aop_slug, diff_markdown, rationale,
+                  evidence_conversations, judge_model_used, judge_confidence, requires_eval_pass,
+                  status, reviewed_by, reviewed_at, review_comment, applied_version, created_at
+        """,
+        tenant_id,
+        run_id,
+        proposal_type,
+        aop_slug,
+        diff_markdown,
+        rationale,
+        evidence_conversations,
+        judge_model_used,
+        judge_confidence,
+        requires_eval_pass,
+    )
+    data = dict(row)
+    data["evidence_conversations"] = list(data["evidence_conversations"] or [])
+    return ImprovementProposal(**data)
+
+
+async def list_improvement_proposals(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[ImprovementProposal]:
+    where = "tenant_id = $1"
+    params: list[Any] = [tenant_id]
+    if status:
+        params.append(status)
+        where += f" AND status = ${len(params)}"
+    rows = await conn.fetch(
+        f"""
+        SELECT id, tenant_id, run_id, proposal_type, aop_slug, diff_markdown, rationale,
+               evidence_conversations, judge_model_used, judge_confidence, requires_eval_pass,
+               status, reviewed_by, reviewed_at, review_comment, applied_version, created_at
+          FROM improvement_proposals
+         WHERE {where}
+         ORDER BY created_at DESC
+         LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
+        """,
+        *params,
+        limit,
+        offset,
+    )
+    result = []
+    for r in rows:
+        data = dict(r)
+        data["evidence_conversations"] = list(data["evidence_conversations"] or [])
+        result.append(ImprovementProposal(**data))
+    return result
+
+
+async def get_improvement_proposal(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    proposal_id: UUID,
+) -> ImprovementProposal | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, run_id, proposal_type, aop_slug, diff_markdown, rationale,
+               evidence_conversations, judge_model_used, judge_confidence, requires_eval_pass,
+               status, reviewed_by, reviewed_at, review_comment, applied_version, created_at
+          FROM improvement_proposals
+         WHERE tenant_id = $1 AND id = $2
+        """,
+        tenant_id,
+        proposal_id,
+    )
+    if row is None:
+        return None
+    data = dict(row)
+    data["evidence_conversations"] = list(data["evidence_conversations"] or [])
+    return ImprovementProposal(**data)
+
+
+async def update_proposal_status(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    proposal_id: UUID,
+    status: str,
+    reviewed_by: UUID,
+    review_comment: str | None = None,
+    applied_version: int | None = None,
+) -> ImprovementProposal | None:
+    row = await conn.fetchrow(
+        """
+        UPDATE improvement_proposals
+           SET status          = $3,
+               reviewed_by     = $4,
+               reviewed_at     = NOW(),
+               review_comment  = $5,
+               applied_version = $6,
+               updated_at      = NOW()
+         WHERE tenant_id = $1 AND id = $2
+        RETURNING id, tenant_id, run_id, proposal_type, aop_slug, diff_markdown, rationale,
+                  evidence_conversations, judge_model_used, judge_confidence, requires_eval_pass,
+                  status, reviewed_by, reviewed_at, review_comment, applied_version, created_at
+        """,
+        tenant_id,
+        proposal_id,
+        status,
+        reviewed_by,
+        review_comment,
+        applied_version,
+    )
+    if row is None:
+        return None
+    data = dict(row)
+    data["evidence_conversations"] = list(data["evidence_conversations"] or [])
+    return ImprovementProposal(**data)
+
+
+async def get_proposals_metrics(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+) -> dict[str, Any]:
+    """Métricas del slow agent: tasa de aceptación y costo."""
+    row = await conn.fetchrow(
+        """
+        SELECT
+            COUNT(*)                                                     AS total,
+            COUNT(*) FILTER (WHERE status = 'pending')                   AS pending,
+            COUNT(*) FILTER (WHERE status = 'approved')                  AS approved,
+            COUNT(*) FILTER (WHERE status = 'rejected')                  AS rejected,
+            COUNT(*) FILTER (WHERE status = 'applied')                   AS applied,
+            COALESCE(SUM(r.cost_usd), 0)                                 AS cost_usd_total,
+            COALESCE(SUM(r.sonnet_tokens), 0)                            AS sonnet_tokens_total,
+            COALESCE(SUM(r.opus_tokens), 0)                              AS opus_tokens_total
+          FROM improvement_proposals p
+          JOIN slow_agent_runs r ON r.id = p.run_id
+         WHERE p.tenant_id = $1
+        """,
+        tenant_id,
+    )
+    data = dict(row)
+    reviewed = data["approved"] + data["rejected"] + data["applied"]
+    accepted = data["approved"] + data["applied"]
+    data["acceptance_rate"] = round(accepted / reviewed, 4) if reviewed > 0 else None
+    cost = float(data["cost_usd_total"]) if data["cost_usd_total"] else 0.0
+    data["cost_per_accepted_proposal"] = (
+        round(cost / accepted, 4) if accepted > 0 else None
+    )
+    return data
 
