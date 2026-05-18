@@ -723,9 +723,7 @@ async def mark_conversations_abandoned(
 
 
 def _row_to_aop_with_content(row: asyncpg.Record) -> AopWithContent:
-    data = dict(row)
-    data["yaml_frontmatter"] = dict(data["yaml_frontmatter"])
-    return AopWithContent(**data)
+    return AopWithContent(**dict(row))
 
 
 async def get_active_aops(
@@ -803,8 +801,6 @@ async def create_aop(
     Levanta `asyncpg.UniqueViolationError` si ya existe un AOP con el mismo
     (tenant_id, slug, workspace).
     """
-    import json
-
     aop_row = await conn.fetchrow(
         """
         INSERT INTO aops (tenant_id, slug, workspace, current_version, is_active)
@@ -822,11 +818,11 @@ async def create_aop(
         """
         INSERT INTO aop_versions
                (aop_id, tenant_id, version, yaml_frontmatter, body_markdown, raw_source, created_by)
-        VALUES ($1, $2, 1, $3::jsonb, $4, $5, $6)
+        VALUES ($1, $2, 1, $3, $4, $5, $6)
         """,
         aop_id,
         tenant_id,
-        json.dumps(yaml_frontmatter),
+        yaml_frontmatter,
         body_markdown,
         raw_source,
         created_by,
@@ -852,13 +848,11 @@ async def save_aop_version(
     Usa la versión actual del AOP como base para el número de versión nuevo.
     El caller debe estar dentro de una transacción para garantizar atomicidad.
     """
-    import json
-
     version_row = await conn.fetchrow(
         """
         INSERT INTO aop_versions
                (aop_id, tenant_id, version, yaml_frontmatter, body_markdown, raw_source, created_by)
-        SELECT $1, $2, current_version + 1, $3::jsonb, $4, $5, $6
+        SELECT $1, $2, current_version + 1, $3, $4, $5, $6
           FROM aops
          WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
         RETURNING id, aop_id, tenant_id, version, yaml_frontmatter, body_markdown,
@@ -866,7 +860,7 @@ async def save_aop_version(
         """,
         aop_id,
         tenant_id,
-        json.dumps(yaml_frontmatter),
+        yaml_frontmatter,
         body_markdown,
         raw_source,
         created_by,
@@ -1053,14 +1047,12 @@ async def insert_reasoning_event(
     por conversation_id — es seguro porque los eventos son secuenciales dentro
     de una sola invocación del grafo.
     """
-    import json
-
     row = await conn.fetchrow(
         """
         INSERT INTO agent_reasoning_events
                (tenant_id, conversation_id, phase, event_type, label, detail, status, seq)
         VALUES (
-            $1, $2, $3, $4, $5, $6::jsonb, $7,
+            $1, $2, $3, $4, $5, $6, $7,
             COALESCE(
                 (SELECT MAX(seq) + 1
                    FROM agent_reasoning_events
@@ -1076,13 +1068,11 @@ async def insert_reasoning_event(
         phase,
         event_type,
         label,
-        json.dumps(detail) if detail is not None else None,
+        detail,
         status,
     )
     assert row is not None
-    data = dict(row)
-    data["detail"] = dict(data["detail"]) if data["detail"] is not None else None
-    return AgentReasoningEvent(**data)
+    return AgentReasoningEvent(**dict(row))
 
 
 async def list_reasoning_events(
