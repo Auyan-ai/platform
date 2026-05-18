@@ -17,6 +17,7 @@ Errores realmente inesperados sí se atrapan por `@guarded` y rutean a
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -69,6 +70,7 @@ def make_execute_skill_node(
     deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict[str, Any]]]:
     tracker = deps.reasoning_tracker
+    auditor = deps.audit_logger
 
     @guarded(name="execute_skill")
     async def _node(state: AgentState) -> dict[str, Any]:
@@ -135,6 +137,19 @@ def make_execute_skill_node(
                     if skill_cls.tier == "L3"
                     else "l2_skills_not_enabled_for_tenant"
                 )
+                if state.get("conversation_id") and state.get("tenant_id"):
+                    auditor.log(
+                        tenant_id=state["tenant_id"],
+                        conversation_id=state["conversation_id"],
+                        aop_slug=state.get("aop_slug") or "unknown",
+                        aop_version=state.get("aop_version") or 0,
+                        skill_slug=slug,
+                        skill_tier=skill_cls.tier,
+                        inputs_raw=raw_input,
+                        status="rejected_by_permissions",
+                        error_message=tier_error,
+                        langfuse_trace_id=state.get("langfuse_trace_id"),
+                    )
                 return _append_and_finish(
                     _error_entry(
                         tool_use_id=tool_use_id,
@@ -157,12 +172,14 @@ def make_execute_skill_node(
                 )
             )
 
-        # 5) Ejecutar.
+        # 5) Ejecutar con tracking de latencia.
         ctx = build_skill_context(state)
         skill = skill_cls()
+        t0 = time.monotonic()
         try:
             output = await skill.execute(ctx, validated_input)
         except Exception as exc:
+            latency = int((time.monotonic() - t0) * 1000)
             logger.warning(
                 "skill_execution_failed",
                 extra={
@@ -183,6 +200,19 @@ def make_execute_skill_node(
                     detail={"error": error_msg},
                     status="error",
                 )
+                auditor.log(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    aop_slug=state.get("aop_slug") or "unknown",
+                    aop_version=state.get("aop_version") or 0,
+                    skill_slug=slug,
+                    skill_tier=skill_cls.tier,
+                    inputs_raw=raw_input,
+                    status="failed",
+                    error_message=error_msg,
+                    latency_ms=latency,
+                    langfuse_trace_id=state.get("langfuse_trace_id"),
+                )
             return _append_and_finish(
                 _error_entry(
                     tool_use_id=tool_use_id,
@@ -193,6 +223,7 @@ def make_execute_skill_node(
             )
 
         # 6) Éxito.
+        latency = int((time.monotonic() - t0) * 1000)
         result_entry = {
             "id": tool_use_id,
             "slug": slug,
@@ -210,6 +241,19 @@ def make_execute_skill_node(
                 label=slug,
                 detail={"output": result_entry["output"]},
                 status="done",
+            )
+            auditor.log(
+                tenant_id=state["tenant_id"],
+                conversation_id=state["conversation_id"],
+                aop_slug=state.get("aop_slug") or "unknown",
+                aop_version=state.get("aop_version") or 0,
+                skill_slug=slug,
+                skill_tier=skill_cls.tier,
+                inputs_raw=raw_input,
+                status="success",
+                outputs=result_entry["output"],
+                latency_ms=latency,
+                langfuse_trace_id=state.get("langfuse_trace_id"),
             )
         return _append_and_finish(result_entry)
 

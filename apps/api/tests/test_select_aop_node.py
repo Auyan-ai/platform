@@ -204,7 +204,7 @@ def test_turn_number_counts_customer_messages() -> None:
 
 
 @pytest.fixture
-def fake_deps(fake_anthropic: AsyncMock, fake_openai: AsyncMock, fake_settings: Any, fake_reasoning_tracker: Any) -> Any:
+def fake_deps(fake_anthropic: AsyncMock, fake_openai: AsyncMock, fake_settings: Any, fake_reasoning_tracker: Any, fake_audit_logger: Any) -> Any:
     from apps.api.agents.dependencies import AgentDependencies
 
     return AgentDependencies(
@@ -212,6 +212,7 @@ def fake_deps(fake_anthropic: AsyncMock, fake_openai: AsyncMock, fake_settings: 
         openai=fake_openai,
         settings=fake_settings,
         reasoning_tracker=fake_reasoning_tracker,
+        audit_logger=fake_audit_logger,
     )
 
 
