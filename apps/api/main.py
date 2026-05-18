@@ -43,6 +43,7 @@ from apps.api.routers.reasoning import router as reasoning_router
 from apps.api.routers.tenants import router as tenants_router
 from apps.api.routers.users import router as users_router
 from apps.api.routers.webhooks import router as webhooks_router
+from apps.api.services.aop_listener import AopCacheListener
 from apps.api.services.audit import AuditLogger
 from apps.api.services.cleanup import run_abandoned_cleanup
 from apps.api.services.reasoning import ReasoningTracker
@@ -109,12 +110,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     logger.info("cleanup_job_started interval_seconds=%d", settings.cleanup_interval_seconds)
 
+    aop_listener = AopCacheListener()
+    await aop_listener.start(str(settings.database_url))
+
     try:
         yield
     finally:
         logger.info("shutdown_initiated")
         cleanup_task.cancel()
         await asyncio.gather(cleanup_task, return_exceptions=True)
+        await aop_listener.stop()
         await langfuse.flush()
         await close_pool()
         logger.info("shutdown_complete")

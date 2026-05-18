@@ -84,6 +84,14 @@ def compile_aop(
     )
 
 
+# ─── Cache invalidation ──────────────────────────────────────────────────────
+
+
+def invalidate_aop_cache(tenant_id: str, slug: str, workspace: str) -> None:
+    """Elimina una entrada del cache local. Llaman el listener (cross-worker) y el router."""
+    _AOP_CACHE.pop((tenant_id, slug, workspace), None)
+
+
 # ─── Cache + DB load ─────────────────────────────────────────────────────────
 
 

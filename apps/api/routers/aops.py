@@ -12,7 +12,7 @@ from typing import Annotated
 from uuid import UUID
 
 import yaml
-from apps.api.aops.compiler import compile_aop
+from apps.api.aops.compiler import compile_aop, invalidate_aop_cache
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id, require_role
 from apps.api.db.client import tenant_scope
 from apps.api.db.models import AopWithContent, AopWorkspace, TenantConfiguration
@@ -22,6 +22,7 @@ from apps.api.db.queries import (
     get_aop_by_slug,
     get_tenant_configuration,
     list_aops,
+    notify_aop_cache_invalidated,
     save_aop_version,
     soft_delete_aop,
     toggle_aop_active,
@@ -277,10 +278,9 @@ async def update_tenant_aop(
             raw_source=body.raw_source,
             created_by=auth.user_id,
         )
-        # Bypass cache para retornar la versión recién guardada
-        from apps.api.aops.compiler import _AOP_CACHE
-
-        _AOP_CACHE.pop((tenant_id, existing.slug, existing.workspace), None)
+        # Invalida cache local + notifica otros workers vía pg_notify
+        invalidate_aop_cache(str(tenant_id), existing.slug, str(existing.workspace))
+        await notify_aop_cache_invalidated(conn, tenant_id, existing.slug, str(existing.workspace))
         updated = await get_aop_by_id(conn, tenant_id, aop_id)
 
     assert updated is not None
@@ -311,6 +311,8 @@ async def toggle_tenant_aop(
                 status_code=status.HTTP_404_NOT_FOUND, detail="aop_not_found"
             )
         await toggle_aop_active(conn, tenant_id=tenant_id, aop_id=aop_id, is_active=body.is_active)
+        invalidate_aop_cache(str(tenant_id), existing.slug, str(existing.workspace))
+        await notify_aop_cache_invalidated(conn, tenant_id, existing.slug, str(existing.workspace))
         updated = await get_aop_by_id(conn, tenant_id, aop_id)
 
     assert updated is not None
@@ -335,6 +337,8 @@ async def delete_tenant_aop(
                 status_code=status.HTTP_404_NOT_FOUND, detail="aop_not_found"
             )
         await soft_delete_aop(conn, tenant_id=tenant_id, aop_id=aop_id)
+        invalidate_aop_cache(str(tenant_id), existing.slug, str(existing.workspace))
+        await notify_aop_cache_invalidated(conn, tenant_id, existing.slug, str(existing.workspace))
     logger.info("aop.deleted tenant=%s aop_id=%s", tenant_id, aop_id)
 
 
@@ -445,6 +449,9 @@ async def promote_tenant_aop(
                 raw_source=aop.raw_source,
                 created_by=None,
             )
+            # Invalida cache del AOP de producción en todos los workers
+            invalidate_aop_cache(str(tenant_id), aop.slug, "production")
+            await notify_aop_cache_invalidated(conn, tenant_id, aop.slug, "production")
             prod_aop = await get_aop_by_id(conn, tenant_id, prod_aop.id)
 
     assert prod_aop is not None
