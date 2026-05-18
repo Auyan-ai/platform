@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-18 (sesión 18 — Sprint 8 validado en staging + bugs JSONB y handoff)_
+_Última actualización: 2026-05-18 (sesión 20 — Sprint 9.1 idempotency + Sprint 9.2 Skills L2 + permission gate)_
 
 ---
 
@@ -857,6 +857,52 @@ El contenido de `seed_kb.py` usa datos deliberadamente impares e inventados:
 
 - **Conflicto Shopify snowboards vs KB joyería** — la tienda de prueba `lunaria-eleq1sc5.myshopify.com` fue auto-generada por Shopify como tienda de snowboards. El agente mezcla datos de Shopify con el KB de Lunaria joyería. Fix: actualizar el contenido de la tienda Shopify de prueba O crear una regla en el AOP que priorice el KB para preguntas de política/programa y use Shopify solo para datos de pedidos/clientes específicos.
 
+---
+
+## Sesión 20 — Sprint 9.1 + 9.2 (2026-05-18)
+
+### Sprint 9.1 — Idempotency ([PR #68](https://github.com/Auyan-ai/platform/pull/68)) ✅ mergeado
+
+Previene duplicación de mensajes/escalaciones cuando un canal reintenta un webhook por timeout o error 5xx.
+
+| Área | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260518000000_add_idempotency_keys.sql` | Tabla `idempotency_keys` con TTL 24h y `UNIQUE(tenant_id, key)`. **Aplicada en staging.** |
+| `apps/api/db/models.py` | `IdempotencyRecord` |
+| `apps/api/db/queries.py` | `try_insert_idempotency_key`, `get_idempotency_record`, `complete_idempotency_key`, `delete_idempotency_key` |
+| `apps/api/routers/webhooks.py` | Header `X-Idempotency-Key` opcional: claim → proceso → complete / delete en error |
+| `apps/api/tests/test_idempotency.py` | 10 tests — todos los escenarios cubiertos |
+
+**Flujo:** primera petición (pending → done + respuesta cacheada) · duplicado → 200 desde caché sin re-procesar · en vuelo → 409 · error de procesamiento → delete para permitir reintento.
+
+### Sprint 9.2 — Skills L2 + permission gate ([PR #69](https://github.com/Auyan-ai/platform/pull/69)) ✅ pendiente merge
+
+Dos skills L2 nuevas de Shopify + gate de permisos en el nodo `execute_skill`.
+
+| Área | Qué se hizo |
+|---|---|
+| `integrations/shopify.py` | `add_order_note` + `tag_order` (métodos write L2) |
+| `skills/shopify/add_order_note.py` | Skill L2: añade/reemplaza la nota interna de un pedido |
+| `skills/shopify/tag_order.py` | Skill L2: merge no-destructivo de tags en un pedido (ej: `return-requested`, `damaged`) |
+| `agents/nodes/execute_skill.py` | Gate: L2 requiere `allow_l2_skills: true` en `tenant_config.extra`; L3 bloqueado siempre (Sprint 10) |
+| `tests/skills/test_shopify_l2_skills.py` | 14 tests nuevos |
+| `tests/test_execute_skill_node.py` | 6 tests nuevos del permission gate |
+
+**Para activar L2 en un tenant:**
+```sql
+UPDATE tenant_configurations
+SET extra = extra || '{"allow_l2_skills": true}'::jsonb
+WHERE tenant_id = '<uuid>';
+```
+
+**Suite total: 510/510 verde. Ruff limpio.**
+
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. **Sprint 9** — Skills L2 + permissions + audit log con PII + idempotency
+1. Mergear [PR #69](https://github.com/Auyan-ai/platform/pull/69) si CI pasa
+2. **Sprint 9.3 — Audit log con PII**
+   - Tabla `audit_log` con pseudonimización (salt por tenant)
+   - Cada acción write del agente queda registrada (skills L2/L3 ejecutadas exitosamente)
+   - Campos: `tenant_id`, `conversation_id`, `action_slug`, `actor`, `payload_hash`, `created_at`
+3. **Sprint 9.4 — Cache invalidation**
+   - Postgres NOTIFY para invalidar TTL cache de AOPs en múltiples instancias de Railway (sin Redis)
