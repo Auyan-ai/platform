@@ -967,6 +967,26 @@ async def save_aop_version(
 # ============================================================
 
 
+async def get_last_intent_for_conversation(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+) -> str | None:
+    """Retorna el slug del AOP del último intent classifier run de la conversación."""
+    row = await conn.fetchrow(
+        """
+        SELECT primary_slug
+          FROM intent_classifier_runs
+         WHERE tenant_id = $1 AND conversation_id = $2
+         ORDER BY created_at DESC
+         LIMIT 1
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return row["primary_slug"] if row else None
+
+
 async def insert_intent_classifier_run(
     conn: asyncpg.Connection,
     *,
