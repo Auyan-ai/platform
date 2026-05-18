@@ -26,6 +26,7 @@ from apps.api.db.models import (
     EndCustomer,
     Escalation,
     EscalationStatus,
+    IdempotencyRecord,
     IntentClassifierRun,
     KnowledgeChunk,
     Message,
@@ -1121,3 +1122,120 @@ async def list_reasoning_events(
         data["detail"] = dict(data["detail"]) if data["detail"] is not None else None
         result.append(AgentReasoningEvent(**data))
     return result
+
+
+# ============================================================
+# Idempotency keys (Sprint 9.1)
+# Corren con bootstrap_connection (sin tenant_scope) — misma razón
+# que get_tenant_by_slug: la verificación ocurre antes de entrar al
+# scope de tenant. El tenant_id se pasa siempre explícito en WHERE.
+# ============================================================
+
+
+async def try_insert_idempotency_key(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    key: str,
+    request_path: str,
+) -> IdempotencyRecord | None:
+    """Intenta insertar una key con status 'pending'.
+
+    Devuelve el registro creado, o None si ya existe una key activa
+    (conflicto UNIQUE — el llamador decide qué hacer).
+    """
+    import asyncpg as _asyncpg  # import local para evitar ciclo en TYPE_CHECKING
+
+    try:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO idempotency_keys (tenant_id, key, request_path)
+            VALUES ($1, $2, $3)
+            RETURNING id, tenant_id, key, request_path, status,
+                      response_status, response_body, created_at, expires_at
+            """,
+            tenant_id,
+            key,
+            request_path,
+        )
+    except _asyncpg.UniqueViolationError:
+        return None
+    assert row is not None
+    data = dict(row)
+    data["response_body"] = dict(data["response_body"]) if data["response_body"] else None
+    return IdempotencyRecord(**data)
+
+
+async def get_idempotency_record(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    key: str,
+) -> IdempotencyRecord | None:
+    """Devuelve el registro activo (no expirado, no borrado) o None."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, key, request_path, status,
+               response_status, response_body, created_at, expires_at
+          FROM idempotency_keys
+         WHERE tenant_id = $1
+           AND key = $2
+           AND expires_at > now()
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        key,
+    )
+    if row is None:
+        return None
+    data = dict(row)
+    data["response_body"] = dict(data["response_body"]) if data["response_body"] else None
+    return IdempotencyRecord(**data)
+
+
+async def complete_idempotency_key(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    key: str,
+    response_status: int,
+    response_body: dict,
+) -> None:
+    """Marca la key como 'done' y persiste la respuesta para cachearla."""
+    await conn.execute(
+        """
+        UPDATE idempotency_keys
+           SET status = 'done',
+               response_status = $3,
+               response_body = $4
+         WHERE tenant_id = $1
+           AND key = $2
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        key,
+        response_status,
+        response_body,
+    )
+
+
+async def delete_idempotency_key(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    key: str,
+) -> None:
+    """Soft-delete la key para que el siguiente intento pueda procesarse de nuevo.
+
+    Se llama cuando el procesamiento falla — permite reintentos correctos.
+    """
+    await conn.execute(
+        """
+        UPDATE idempotency_keys
+           SET deleted_at = now()
+         WHERE tenant_id = $1
+           AND key = $2
+        """,
+        tenant_id,
+        key,
+    )

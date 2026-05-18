@@ -26,13 +26,17 @@ from apps.api.core.config import Settings, get_settings
 from apps.api.db.client import bootstrap_connection, tenant_scope
 from apps.api.db.models import ChannelType
 from apps.api.db.queries import (
+    complete_idempotency_key,
     create_conversation,
     create_end_customer,
+    delete_idempotency_key,
     find_conversation_by_external,
     find_conversation_by_id,
     find_end_customer_by_email,
+    get_idempotency_record,
     get_tenant_by_slug,
     insert_message,
+    try_insert_idempotency_key,
     update_conversation_last_message,
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
@@ -151,61 +155,99 @@ async def inbound(
             status.HTTP_403_FORBIDDEN, detail=f"tenant_not_active: status={tenant.status}"
         )
 
-    # 2. Dentro del tenant_scope: customer, conversación, mensaje inbound.
-    async with tenant_scope(tenant.id) as conn:
-        customer = None
-        if payload.customer_email:
-            customer = await find_end_customer_by_email(
-                conn, tenant.id, payload.customer_email
-            )
-        if customer is None:
-            customer = await create_end_customer(
+    # 2. Idempotencia — si viene X-Idempotency-Key, deduplicamos antes de tocar datos.
+    idempotency_key = request.headers.get("X-Idempotency-Key")
+    idempotency_claimed = False
+
+    if idempotency_key:
+        async with bootstrap_connection() as conn:
+            record = await try_insert_idempotency_key(
                 conn,
                 tenant_id=tenant.id,
-                email=payload.customer_email,
-                external_id=payload.external_customer_id,
-                full_name=payload.customer_name,
+                key=idempotency_key,
+                request_path="/webhooks/inbound",
             )
+            if record is None:
+                # Ya existe — buscar el registro actual
+                existing = await get_idempotency_record(
+                    conn, tenant_id=tenant.id, key=idempotency_key
+                )
+                if existing is not None and existing.status == "done" and existing.response_body:
+                    # Devolver respuesta cacheada sin re-procesar
+                    logger.info(
+                        "idempotency_cache_hit",
+                        extra={"tenant_id": str(tenant.id), "key": idempotency_key},
+                    )
+                    return InboundResponse.model_validate(existing.response_body)
+                # Pending (en vuelo) o expirado sin respuesta → conflicto
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT, detail="idempotency_key_in_flight"
+                )
+            idempotency_claimed = True
 
-        conversation = None
-        if payload.conversation_id:
-            conversation = await find_conversation_by_id(
-                conn, tenant.id, payload.conversation_id
-            )
-        if conversation is None and payload.external_conversation_id:
-            conversation = await find_conversation_by_external(
-                conn, tenant.id, payload.channel, payload.external_conversation_id
-            )
-        if conversation is None:
-            conversation = await create_conversation(
+    # 3. Dentro del tenant_scope: customer, conversación, mensaje inbound.
+    try:
+        async with tenant_scope(tenant.id) as conn:
+            customer = None
+            if payload.customer_email:
+                customer = await find_end_customer_by_email(
+                    conn, tenant.id, payload.customer_email
+                )
+            if customer is None:
+                customer = await create_end_customer(
+                    conn,
+                    tenant_id=tenant.id,
+                    email=payload.customer_email,
+                    external_id=payload.external_customer_id,
+                    full_name=payload.customer_name,
+                )
+
+            conversation = None
+            if payload.conversation_id:
+                conversation = await find_conversation_by_id(
+                    conn, tenant.id, payload.conversation_id
+                )
+            if conversation is None and payload.external_conversation_id:
+                conversation = await find_conversation_by_external(
+                    conn, tenant.id, payload.channel, payload.external_conversation_id
+                )
+            if conversation is None:
+                conversation = await create_conversation(
+                    conn,
+                    tenant_id=tenant.id,
+                    end_customer_id=customer.id,
+                    channel=payload.channel,
+                    external_id=payload.external_conversation_id,
+                    subject=payload.subject,
+                )
+
+            inbound_msg = await insert_message(
                 conn,
                 tenant_id=tenant.id,
-                end_customer_id=customer.id,
-                channel=payload.channel,
-                external_id=payload.external_conversation_id,
-                subject=payload.subject,
+                conversation_id=conversation.id,
+                role="customer",
+                direction="inbound",
+                content=payload.content,
+                metadata={"channel": payload.channel},
             )
+            await update_conversation_last_message(conn, tenant.id, conversation.id)
 
-        inbound_msg = await insert_message(
-            conn,
+        # 4. Disparar el grafo.
+        outcome = await agent_service.process_inbound(
             tenant_id=tenant.id,
             conversation_id=conversation.id,
-            role="customer",
-            direction="inbound",
-            content=payload.content,
-            metadata={"channel": payload.channel},
+            inbound_message_id=inbound_msg.id,
+            inbound_message_content=payload.content,
+            channel=payload.channel,
+            end_customer_id=customer.id,
         )
-        await update_conversation_last_message(conn, tenant.id, conversation.id)
 
-    # 3. Disparar el grafo.
-    outcome = await agent_service.process_inbound(
-        tenant_id=tenant.id,
-        conversation_id=conversation.id,
-        inbound_message_id=inbound_msg.id,
-        inbound_message_content=payload.content,
-        channel=payload.channel,
-        end_customer_id=customer.id,
-    )
+    except Exception:
+        # Si el procesamiento falla, liberar la key para que el reintento sea válido.
+        if idempotency_key and idempotency_claimed:
+            async with bootstrap_connection() as conn:
+                await delete_idempotency_key(conn, tenant_id=tenant.id, key=idempotency_key)
+        raise
 
     logger.info(
         "inbound_processed",
@@ -217,7 +259,7 @@ async def inbound(
         },
     )
 
-    return InboundResponse(
+    response = InboundResponse(
         ok=True,
         decision=outcome.decision,
         conversation_id=str(conversation.id),
@@ -229,6 +271,19 @@ async def inbound(
         trace_id=outcome.trace_id,
         error=outcome.error,
     )
+
+    # 5. Marcar la key como done y cachear la respuesta.
+    if idempotency_key and idempotency_claimed:
+        async with bootstrap_connection() as conn:
+            await complete_idempotency_key(
+                conn,
+                tenant_id=tenant.id,
+                key=idempotency_key,
+                response_status=200,
+                response_body=response.model_dump(mode="json"),
+            )
+
+    return response
 
 
 # ----------------------------------------------------------------

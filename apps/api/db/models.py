@@ -160,6 +160,23 @@ class IntentClassifierRun(_BaseModel):
     created_at: datetime
 
 
+# ─── Idempotency (Sprint 9.1) ────────────────────────────────────────────────
+
+IdempotencyStatus = Literal["pending", "done"]
+
+
+class IdempotencyRecord(_BaseModel):
+    id: UUID
+    tenant_id: UUID
+    key: str
+    request_path: str
+    status: IdempotencyStatus
+    response_status: int | None = None
+    response_body: dict | None = None
+    created_at: datetime
+    expires_at: datetime
+
+
 # ─── Agent Reasoning Events (Sprint 8) ───────────────────────────────────────
 
 ReasoningPhase = Literal["supervisor", "decision", "response"]
