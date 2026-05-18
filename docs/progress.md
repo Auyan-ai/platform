@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-18 (sesión 23 — Sprint 10 completo: Skills L3 + human approval mode)_
+_Última actualización: 2026-05-19 (sesión 25 — Sprint 11 Slow Agent completado, PR #76 abierto)_
 
 ---
 
@@ -977,88 +977,131 @@ Envía un mensaje recordatorio al cliente antes de cerrar la conversación por i
 
 **Suite total: 560/560 verde. Ruff limpio.**
 
-### Empezar aquí en la próxima sesión — usar **Sonnet**
+---
 
-1. Mergear [PR #74](https://github.com/Auyan-ai/platform/pull/74) si CI pasa (aplicar migración `nudged_at` en staging)
-2. Abrir PR para `feature/sprint-10-l3-human-approval` → develop (Sprint 10 completo ✅)
-3. Aplicar manualmente en staging:
-   - `supabase/migrations/20260518000004_add_tenant_tool_permissions.sql`
-   - `supabase/migrations/20260518000005_add_pending_approvals.sql`
-4. **Sprint 11** — a definir (ver sección más abajo)
+## Sprint 10 — Skills L3 + Human Approval Mode ([PR #75](https://github.com/Auyan-ai/platform/pull/75)) ✅ mergeado
+
+**Objetivo:** Skills L3 de Shopify (acciones destructivas) con gate de aprobación humana — el agente crea una solicitud pendiente antes de ejecutar cualquier acción irreversible.
+
+### Sub-PR 10.1 — tenant_tool_permissions + pending_approvals + gate (commit `46adce9`)
+
+| Área | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260518000004_add_tenant_tool_permissions.sql` | Tabla `tenant_tool_permissions`: feature flags por skill por tenant, con `human_approval_required`. **Aplicar manualmente en staging.** |
+| `supabase/migrations/20260518000005_add_pending_approvals.sql` | Tabla `pending_approvals`: solicitudes que el agente deja cuando L3 requiere aprobación humana. **Aplicar manualmente en staging.** |
+| `apps/api/db/models.py` | `TenantToolPermission`, `PendingApproval` |
+| `apps/api/db/queries.py` | `get/upsert/list_tool_permissions`, `create/get/list/resolve_pending_approvals` |
+| `apps/api/agents/nodes/load_tenant_context.py` | Carga `tool_permissions` en state |
+| `apps/api/agents/nodes/execute_skill.py` | Gate granular por tabla reemplaza `extra.allow_l2_skills`; L3 + `human_approval_required` → crea `pending_approval` y rutea a `escalate` |
+| `apps/api/agents/graph.py` | `route_after_execute_skill` detecta `pending_approval_id` → escalate |
+| Tests | 20 nuevos (queries + gate L3) |
+
+### Sub-PR 10.2 — 4 skills L3 Shopify (commit `b128a48`)
+
+| Skill | Descripción |
+|---|---|
+| `shopify.cancel_order` | Cancela pedido con reason/email/refund. `requires_idempotency=True`, `default_threshold=0.95` |
+| `shopify.update_shipping_address` | Actualiza dirección de envío antes de despacho |
+| `shopify.refund_partial` | Reembolso parcial por monto o por línea de pedido |
+| `shopify.start_return` | Inicia proceso de devolución |
+
+- `integrations/shopify.py`: 4 métodos write L3 nuevos
+- `skills/shopify/__init__.py`: side-effect imports de las 4 skills L3
+- `tests/skills/test_shopify_l3_skills.py`: 25 tests (6-7 por skill)
+- `test_bootstrap.py`: EXPECTED_SHOPIFY_SKILLS incluye las 7 slugs L2+L3
+
+### Sub-PR 10.3 — Router aprobaciones + tool-permissions + escalate contextual (commit `a15cc2c`)
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/routers/approvals.py` | `GET /approvals`, `GET /approvals/{id}`, `POST /approvals/{id}/approve` (ejecuta skill L3 con creds del tenant + persiste resultado), `POST /approvals/{id}/reject` (inserta mensaje + cierra aprobación) |
+| `apps/api/routers/tool_permissions.py` | `GET/PUT /tenants/me/tool-permissions` — CRUD de permisos por skill (gated a `tenant_admin+`) |
+| `apps/api/agents/nodes/escalate.py` | Auto-genera mensaje de cortesía cuando `pending_approval_id` está en state |
+| Tests | 12 tests en `test_approvals.py` |
+
+### Sub-PR 10.4 — UI cola de aprobaciones (commit `5d7aa52`)
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/web/components/inbox/ApprovalQueue.tsx` | Cola con filtros por status, filas con `skill_slug` + inputs redactados, botón Aprobar (verde) + modal Rechazar (textarea obligatoria), poll cada 10s |
+| `apps/web/lib/api/hooks/approvals.ts` | `useApprovals`, `useApproveMutation`, `useRejectMutation` |
+| `apps/web/app/(dashboard)/tenants/[tenantId]/approvals/page.tsx` | Página conectada |
+| `apps/web/components/nav/Sidebar.tsx` | Ítem "Aprobaciones" entre Escalaciones y AOPs |
+
+### Sub-PR 10.5 — 52 fixtures adversariales (commit `86a176d`)
+
+4 skills L3 × 13 fixtures = 52 YAML en `evals/fixtures/shopify_{cancelaciones,cambio_direccion,reembolso,devolucion}/`
+
+Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations ≥ 3, tools match skills, frontmatter keys, prompt min_length 300, prompt menciona la acción específica, prompt menciona flujo de aprobación, prompt **no** contiene frases de bypass adversariales.
+
+**Suite total: 628/628 verde. TypeScript limpio. Ruff limpio.**
+
+### Pendiente antes de Sprint 11 — ✅ resuelto en sesión 25
+
+- [x] Migraciones `20260518000004` y `20260518000005` aplicadas en staging (sesión 25)
+- [x] Bug CORS/500 en `/conversations` — causa: columna `nudged_at` faltaba en staging → migración `20260518000003` aplicada manualmente
 
 ---
 
-## Sesión 23 — Sprint 10 Skills L3 + Human Approval Mode (2026-05-18)
+## Sprint 11 — Slow Agent end-to-end ([PR #76](https://github.com/Auyan-ai/platform/pull/76)) 🔁 en review
 
-### Sprint 10 — Skills L3 + Human Approval Mode ✅ en rama `feature/sprint-10-l3-human-approval`
+**Objetivo:** LLM-as-judge post-mortem que analiza conversaciones, detecta oportunidades de mejora y propone cambios a AOPs con review humana antes de aplicar.
 
-Implementa el tercer tier del sistema de skills: acciones destructivas (cancelaciones, reembolsos, cambios de dirección, devoluciones) que requieren aprobación humana antes de ejecutarse.
+**Suite total: 628 tests. Ruff limpio. tsc sin errores.**
 
-#### Sub-PR 10.1 — Migrations + Modelos + Gate en execute_skill
-
-| Área | Qué se hizo |
-|---|---|
-| `supabase/migrations/20260518000004_add_tenant_tool_permissions.sql` | Tabla `tenant_tool_permissions` con UNIQUE(tenant_id, skill_slug), RLS, trigger. Seed Lunaria: L1 enabled, L2/L3 disabled con `human_approval_required=TRUE` para L3 |
-| `supabase/migrations/20260518000005_add_pending_approvals.sql` | Tabla `pending_approvals` con status CHECK('pending','approved','rejected'), índices, RLS |
-| `apps/api/db/models.py` | `TenantToolPermission`, `PendingApprovalStatus`, `PendingApproval` |
-| `apps/api/db/queries.py` | `get_tool_permissions`, `upsert_tool_permission`, `list_tool_permissions`, `create_pending_approval`, `get_pending_approval`, `list_pending_approvals`, `resolve_pending_approval` |
-| `apps/api/agents/state.py` | `tool_permissions: dict`, `pending_approval_id: str \| None` |
-| `apps/api/agents/nodes/load_tenant_context.py` | Carga `tool_permissions` desde DB al arrancar cada conversación |
-| `apps/api/agents/nodes/execute_skill.py` | Reemplaza gate `extra.allow_l2_skills` con table-driven `tool_permissions`; L3+approval → crea `pending_approval` en DB, setea `pending_approval_id` en state |
-| `apps/api/agents/graph.py` | `route_after_execute_skill` detecta `pending_approval_id` → escalate |
-| Tests | `test_execute_skill_node.py` (actualizado), `test_tool_permission_queries.py` (nuevo, 17 tests) |
-
-#### Sub-PR 10.2 — 4 Skills L3 Shopify
+### Sub-PR 11.1 — Migraciones + modelos + queries
 
 | Área | Qué se hizo |
 |---|---|
-| `apps/api/integrations/shopify.py` | `cancel_order` mejorado, `update_shipping_address`, `refund_partial`, `start_return` |
-| `apps/api/skills/shopify/cancel_order.py` | `CancelOrder` L3, tier, threshold=0.95, requires_idempotency |
-| `apps/api/skills/shopify/update_shipping_address.py` | `UpdateShippingAddress` L3 |
-| `apps/api/skills/shopify/refund_partial.py` | `RefundPartial` L3 |
-| `apps/api/skills/shopify/start_return.py` | `StartReturn` L3 |
-| `apps/api/skills/shopify/__init__.py` | Side-effect imports para los 4 nuevos skills |
-| Tests | `test_shopify_l3_skills.py` (25 tests), `test_bootstrap.py` (updated: 11 skills total) |
+| `supabase/migrations/20260519000000_add_slow_agent.sql` | 3 tablas nuevas: `slow_agent_runs`, `conversation_judgments`, `improvement_proposals` |
+| `db/models.py` | `SlowAgentRun`, `ConversationJudgment`, `ImprovementProposal` con Literals de status |
+| `db/queries.py` | 10 queries nuevas: insert/update runs, list judgments, CRUD proposals, metrics |
 
-#### Sub-PR 10.3 — Router de Aprobaciones + Escalate contextual
+### Sub-PR 11.2 — transcript + prompts + judge two-step
 
 | Área | Qué se hizo |
 |---|---|
-| `apps/api/routers/approvals.py` | `GET /approvals`, `GET /approvals/{id}`, `POST /approvals/{id}/approve`, `POST /approvals/{id}/reject` |
-| `apps/api/routers/tool_permissions.py` | `GET /tenants/me/tool-permissions`, `PUT /tenants/me/tool-permissions/{slug}` |
-| `apps/api/main.py` | Registra ambos routers |
-| `apps/api/agents/nodes/escalate.py` | Auto-genera mensaje de cortesía cuando `pending_approval_id` presente; añade metadata a escalación |
-| Tests | `test_approvals.py` (12 tests) |
-| Fix | `model_dump(mode="json")` para serializar datetimes en `ApprovalOut`; `code` como keyword arg en `DomainError` |
+| `slow_agent/transcript.py` | `ConversationTranscript` dataclass, `build_transcript()`, `format_for_judge()`, detección de skills L2/L3 |
+| `slow_agent/prompts.py` | Rubric del juez: cuándo proponer, tipos de propuesta, formato JSON estricto |
+| `slow_agent/judge.py` | `judge_conversation()` two-step: Sonnet primero → Opus si confidence < 0.7 o `flag_for_opus=True` |
 
-#### Sub-PR 10.4 — UI Cola de Aprobaciones (apps/web)
+### Sub-PR 11.3 — sampling + runner + CLI
 
 | Área | Qué se hizo |
 |---|---|
-| `apps/web/lib/api/hooks/approvals.ts` | `useApprovals`, `useApproveMutation`, `useRejectMutation` — poll 10s, typed |
-| `apps/web/components/inbox/ApprovalQueue.tsx` | Lista con filtros por status, filas con skill/inputs/AOP, botones Aprobar/Rechazar, modal de rechazo con textarea obligatoria |
-| `apps/web/app/(dashboard)/tenants/[tenantId]/approvals/page.tsx` | Página del dashboard |
-| `apps/web/components/nav/Sidebar.tsx` | Nav item "Aprobaciones" entre Escalaciones y AOPs |
+| `slow_agent/sampling.py` | `filter_candidates()`: escaladas siempre + ~10% resueltas via SHA-256 determinístico |
+| `slow_agent/runner.py` | `run_slow_agent_for_tenant()` async, caps duros (max 50 convs/run), tracking de tokens y costo |
+| `scripts/run_slow_agent.py` | CLI: `python -m scripts.run_slow_agent --tenant <uuid> [--since-days N] [--max-conversations N]` |
 
-#### Sub-PR 10.5 — Evals Adversariales L3
+### Sub-PR 11.4 — Router /proposals
 
 | Área | Qué se hizo |
 |---|---|
-| `apps/api/evals/fixtures/shopify_cancelaciones/` | 13 fixtures YAML para cancel_order L3 |
-| `apps/api/evals/fixtures/shopify_cambio_direccion/` | 13 fixtures YAML para update_shipping_address L3 |
-| `apps/api/evals/fixtures/shopify_reembolso/` | 13 fixtures YAML para refund_partial L3 |
-| `apps/api/evals/fixtures/shopify_devolucion/` | 13 fixtures YAML para start_return L3 |
+| `routers/proposals.py` | `GET /proposals`, `GET /proposals/{id}`, `GET /proposals/metrics` |
+| | `POST /proposals/{id}/approve` — pre-fill editor: appends diff al AOP existente como nueva versión |
+| | `POST /proposals/{id}/reject` — rechaza con comentario opcional |
+| `main.py` | `app.include_router(proposals_router)` |
 
-Por cada skill L3: compile_ok, skill_presente, confidence >= 0.90, max_iterations >= 3, tools_match, frontmatter keys (slug, allowed_skills, confidence_threshold, escalation_triggers), prompt_min_length >= 300, mención de la acción, mención de aprobación, no bypass adversarial.
+### Sub-PR 11.5+11.6 — UI + métricas
 
-**Suite total: 628/628 verde. TypeScript apps/web: 0 errores.**
+| Área | Qué se hizo |
+|---|---|
+| `components/proposals/ProposalQueue.tsx` | Lista con tabs por status, badge de confianza, link a detalle |
+| `components/proposals/ProposalDetail.tsx` | Rationale + diff, aprobar (redirige al editor AOP), rechazar con comentario |
+| `components/proposals/ProposalMetrics.tsx` | 4 stat cards: pendientes, tasa aceptación, costo total, costo/aprobada |
+| `lib/api/hooks/proposals.ts` | Hooks TanStack Query: `useProposals`, `useProposal`, `useProposalMetrics`, `useApproveProposal`, `useRejectProposal` |
+| `components/nav/Sidebar.tsx` | Enlace "Mejoras propuestas ✨" |
+| Pages | `/tenants/[tenantId]/proposals` + `/tenants/[tenantId]/proposals/[proposalId]` |
 
-**Arquitectura del flujo L3 completo:**
-```
-Usuario → agente → execute_skill (L3 + approval_required)
-  → crea pending_approval en DB
-  → setea pending_approval_id en state
-  → route_after_execute_skill → escalate
-  → mensaje de cortesía al usuario
-  → operador ve en /approvals → aprueba (skill ejecuta) o rechaza
-```
+### Pendiente antes de merge
+
+- [ ] **Aplicar en staging:** `20260519000000_add_slow_agent.sql`
+- [ ] Correr CLI con tenant real: `poetry run python -m scripts.run_slow_agent --tenant <uuid> --max-conversations 5`
+- [ ] Merge PR #76 → develop y deploy staging
+
+### Empezar aquí en la próxima sesión — usar **Sonnet**
+
+1. Aplicar migración slow_agent en staging (psql)
+2. Testear CLI contra staging (5 conversaciones)
+3. Verificar dashboard en staging: queue + metrics carguen
+4. Merge PR #76 → develop
