@@ -95,7 +95,7 @@ class AgentState(TypedDict, total=False):
     pending_intent: str
 
     # --- Tool Permissions (Sprint 10) ---
-    # Mapa slug → {"is_enabled": bool, "human_approval_required": bool, "threshold_override": float|None}
+    # Mapa slug → {is_enabled: bool, human_approval_required: bool, threshold_override: float|None}
     # Cargado por load_tenant_context desde tenant_tool_permissions.
     # execute_skill lo consulta para decidir si puede ejecutar la skill.
     tool_permissions: dict

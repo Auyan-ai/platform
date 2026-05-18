@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
-import pytest
 from apps.api.db.models import PendingApproval, TenantToolPermission
 from apps.api.db.queries import (
     create_pending_approval,

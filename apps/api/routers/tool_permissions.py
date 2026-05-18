@@ -13,7 +13,6 @@ from apps.api.core.errors import ForbiddenError, NotFoundError
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import (
-    get_tool_permissions,
     list_tool_permissions,
     upsert_tool_permission,
 )

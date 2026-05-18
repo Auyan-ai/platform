@@ -357,8 +357,9 @@ async def test_react_loop_two_iterations(fake_deps, monkeypatch) -> None:
     SkillRegistry._reset()
     SkillRegistry.register(PingSkill)
 
-    from apps.api.db.models import TenantToolPermission
     from datetime import UTC, datetime
+
+    from apps.api.db.models import TenantToolPermission
 
     config = make_tenant_configuration(extra={"allowed_skills": ["test.ping"]})
     _patch_all_db_and_llm(monkeypatch)
@@ -452,8 +453,9 @@ async def test_react_loop_max_iterations_escalates(fake_deps, monkeypatch) -> No
     SkillRegistry._reset()
     SkillRegistry.register(LoopSkill)
 
-    from apps.api.db.models import TenantToolPermission
     from datetime import UTC, datetime
+
+    from apps.api.db.models import TenantToolPermission
 
     config = make_tenant_configuration(
         extra={"allowed_skills": ["test.loop"], "max_tool_iterations": 2}

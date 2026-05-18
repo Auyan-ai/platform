@@ -12,7 +12,7 @@ from uuid import UUID
 
 import jwt
 import pytest
-from apps.api.core.errors import NotFoundError, register_exception_handlers
+from apps.api.core.errors import register_exception_handlers
 from apps.api.core.security import UserRecord, reset_user_cache
 from apps.api.db.models import PendingApproval, TenantToolPermission
 from apps.api.routers.approvals import router as approvals_router

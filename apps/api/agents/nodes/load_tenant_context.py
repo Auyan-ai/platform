@@ -47,7 +47,7 @@ def make_load_tenant_context_node(
         config_dump = config.model_dump(mode="json")
         extra = config_dump.get("extra") or {}
 
-        # Construir mapa de permisos slug → {is_enabled, human_approval_required, threshold_override}
+        # Construir mapa slug → {is_enabled, human_approval_required, threshold_override}
         tool_permissions: dict = {
             p.skill_slug: {
                 "is_enabled": p.is_enabled,

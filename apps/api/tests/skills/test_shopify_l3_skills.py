@@ -10,9 +10,21 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from apps.api.skills.base import SkillContext
-from apps.api.skills.shopify.cancel_order import CancelOrder, CancelOrderInput, CancelOrderOutput
-from apps.api.skills.shopify.refund_partial import RefundPartial, RefundPartialInput, RefundPartialOutput
-from apps.api.skills.shopify.start_return import StartReturn, StartReturnInput, StartReturnOutput
+from apps.api.skills.shopify.cancel_order import (
+    CancelOrder,
+    CancelOrderInput,
+    CancelOrderOutput,
+)
+from apps.api.skills.shopify.refund_partial import (
+    RefundPartial,
+    RefundPartialInput,
+    RefundPartialOutput,
+)
+from apps.api.skills.shopify.start_return import (
+    StartReturn,
+    StartReturnInput,
+    StartReturnOutput,
+)
 from apps.api.skills.shopify.update_shipping_address import (
     UpdateShippingAddress,
     UpdateShippingAddressInput,

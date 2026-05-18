@@ -26,7 +26,6 @@ from apps.api.db.queries import (
     resolve_pending_approval,
     update_conversation_last_message,
 )
-from apps.api.services.pii import redact_inputs
 from apps.api.skills.base import SkillContext
 from apps.api.skills.registry import SkillRegistry
 from fastapi import APIRouter, Depends, Query
@@ -149,7 +148,9 @@ async def approve_action(
     try:
         skill_cls = SkillRegistry.get(approval.skill_slug)
     except ValueError as exc:
-        raise NotFoundError(f"skill not found: {approval.skill_slug}", code="skill_not_found") from exc
+        raise NotFoundError(
+            f"skill not found: {approval.skill_slug}", code="skill_not_found"
+        ) from exc
 
     try:
         validated_input = skill_cls.input_schema.model_validate(approval.inputs_raw)
@@ -161,7 +162,11 @@ async def approve_action(
     except Exception as exc:
         logger.warning(
             "approved_skill_execution_failed",
-            extra={"approval_id": str(approval_id), "skill": approval.skill_slug, "error": str(exc)},
+            extra={
+                "approval_id": str(approval_id),
+                "skill": approval.skill_slug,
+                "error": str(exc),
+            },
         )
         output_data = {"error": str(exc)}
         execution_status = "failed"

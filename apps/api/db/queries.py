@@ -1499,8 +1499,14 @@ async def upsert_tool_permission(
             is_enabled              = EXCLUDED.is_enabled,
             human_approval_required = EXCLUDED.human_approval_required,
             threshold_override      = EXCLUDED.threshold_override,
-            enabled_at              = CASE WHEN EXCLUDED.is_enabled THEN NOW() ELSE tenant_tool_permissions.enabled_at END,
-            enabled_by              = COALESCE(EXCLUDED.enabled_by, tenant_tool_permissions.enabled_by),
+            enabled_at              = CASE WHEN EXCLUDED.is_enabled
+                                        THEN NOW()
+                                        ELSE tenant_tool_permissions.enabled_at
+                                      END,
+            enabled_by              = COALESCE(
+                                        EXCLUDED.enabled_by,
+                                        tenant_tool_permissions.enabled_by
+                                      ),
             updated_at              = NOW()
         RETURNING id, tenant_id, skill_slug, is_enabled, threshold_override,
                   human_approval_required, enabled_at, enabled_by, created_at

@@ -167,7 +167,7 @@ def make_execute_skill_node(
                 tenant_id_uuid = UUID(state["tenant_id"])
                 try:
                     # Obtener salt para redactar PII — usamos tenant_scope directamente.
-                    from apps.api.db.queries import get_tenant_pii_salt  # noqa: PLC0415
+                    from apps.api.db.queries import get_tenant_pii_salt
                     async with tenant_scope(tenant_id_uuid) as conn:
                         salt = await get_tenant_pii_salt(conn, tenant_id_uuid)
                         inputs_redacted = redact_inputs(raw_input, salt)
