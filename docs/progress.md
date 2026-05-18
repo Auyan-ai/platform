@@ -809,19 +809,19 @@ Tres bugs distintos descubiertos al mandar el primer webhook real contra staging
 
 ### Pendientes para próximas sesiones
 
-- **Probar conversación multi-turno** (≥2 mensajes seguidos del cliente en la misma conversación) — hasta ahora solo se probó con un mensaje único. Verificar que el agente mantiene contexto del historial, que los reasoning events se acumulan correctamente por seq, y que el flujo de "agente pide info → cliente responde → agente continúa" funciona.
+- ~~**Probar conversación multi-turno**~~ → validado en sesión 19. Ver tabla abajo.
 - **Endpoint debug `/health/reasoning-debug` removido** — usado solo para diagnosticar el bug de JSONB, ya no hace falta.
 
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. Probar conversación multi-turno con varias preguntas seguidas
+1. ~~Probar conversación multi-turno~~ ✅
 2. **Sprint 9** — Skills L2 + permissions + audit log con PII + idempotency
 
 ---
 
-## Sesión 19 — Context engineering analysis + KB seeding (2026-05-18)
+## Sesión 19 — Context engineering analysis + KB seeding + multi-turno validado (2026-05-18)
 
-**Sin cambios al grafo** — sesión de análisis + infraestructura de pruebas.
+**Sin cambios al grafo** — sesión de análisis + infraestructura de pruebas + validación multi-turno.
 
 ### Lo que se hizo
 
@@ -842,8 +842,21 @@ El contenido de `seed_kb.py` usa datos deliberadamente impares e inventados:
 - Membresía **Guardianas de la Luna** a **€89/año** con 3 niveles
 - Si el agente dice "30 días" o "envío gratis sin mínimo" → **alucinación confirmada**
 
+### Multi-turno validado en staging (sesión 19)
+
+| Turno | Mensaje | Decisión | Resultado |
+|---|---|---|---|
+| 1 | "¿Cómo funciona el programa Guardianas de la Luna?" | respond | Respuesta completa: €89/año, 15%, 72h, Colección Guardianas ✅ |
+| 2 | "¿Y cuánto cuesta la membresía anual?" | respond | "Ya te lo comenté justo antes 😊 ...€89/año" — contexto del turno anterior usado correctamente ✅ |
+
+**`feat(webhook): conversation_id` para multi-turno** — PR #66 mergeado. El script `send_test_webhook.py` acepta `--conversation-id` y muestra hint tras cada llamada.
+
+**Alucinación detectada y documentada:** el agente mezcla "rider habitual" + 🏂 del Shopify de snowboards con el KB de joyería de Lunaria. Causa: conflicto entre la tienda Shopify de prueba (auto-generada como "Lunaria Boards" snowboards) y el KB de joyería. Pendiente en deuda técnica.
+
+### Deuda técnica añadida en sesión 19
+
+- **Conflicto Shopify snowboards vs KB joyería** — la tienda de prueba `lunaria-eleq1sc5.myshopify.com` fue auto-generada por Shopify como tienda de snowboards. El agente mezcla datos de Shopify con el KB de Lunaria joyería. Fix: actualizar el contenido de la tienda Shopify de prueba O crear una regla en el AOP que priorice el KB para preguntas de política/programa y use Shopify solo para datos de pedidos/clientes específicos.
+
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. Correr `seed_kb.py` contra staging y verificar que chunks quedan en DB
-2. Probar conversación multi-turno con preguntas sobre políticas de Lunaria
-3. **Sprint 9** — Skills L2 + permissions + audit log con PII + idempotency
+1. **Sprint 9** — Skills L2 + permissions + audit log con PII + idempotency
