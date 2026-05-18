@@ -14,10 +14,11 @@ Uso:
         --email "cliente@example.com" \\
         --content "¿Dónde está mi pedido?"
 
-    # Pedido por número
+    # Multi-turno: usar el conversation_id del primer mensaje
     poetry run python -m scripts.send_test_webhook \\
         --email "cliente@example.com" \\
-        --content "Necesito cancelar el pedido #1234"
+        --conversation-id "uuid-del-primer-mensaje" \\
+        --content "segundo mensaje en la misma conversación"
 """
 
 from __future__ import annotations
@@ -50,6 +51,7 @@ def run(
     name: str | None,
     channel: str,
     url: str,
+    conversation_id: str | None,
 ) -> None:
     secret = os.environ.get("WEBHOOK_SECRET", "").strip()
     if not secret:
@@ -64,6 +66,8 @@ def run(
         payload["customer_email"] = email
     if name:
         payload["customer_name"] = name
+    if conversation_id:
+        payload["conversation_id"] = conversation_id
 
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     signature = _sign(body, secret)
@@ -85,6 +89,9 @@ def run(
     try:
         data = r.json()
         print(json.dumps(data, ensure_ascii=False, indent=2))
+        if data.get("conversation_id"):
+            print(f"\n→ conversation_id: {data['conversation_id']}")
+            print(f"  (usa --conversation-id {data['conversation_id']} para continuar este hilo)")
     except Exception:
         print(r.text)
 
@@ -97,6 +104,7 @@ def main() -> None:
     parser.add_argument("--name", default="Cliente Test", help="Nombre del cliente")
     parser.add_argument("--channel", default="chat", choices=["email", "chat", "widget", "whatsapp"])
     parser.add_argument("--url", default=STAGING_URL, help="URL base del API")
+    parser.add_argument("--conversation-id", default=None, help="UUID de conversación existente para multi-turno")
     args = parser.parse_args()
     run(
         tenant=args.tenant,
@@ -105,6 +113,7 @@ def main() -> None:
         name=args.name,
         channel=args.channel,
         url=args.url,
+        conversation_id=args.conversation_id,
     )
 
 

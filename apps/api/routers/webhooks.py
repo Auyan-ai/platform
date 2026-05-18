@@ -29,6 +29,7 @@ from apps.api.db.queries import (
     create_conversation,
     create_end_customer,
     find_conversation_by_external,
+    find_conversation_by_id,
     find_end_customer_by_email,
     get_tenant_by_slug,
     insert_message,
@@ -54,6 +55,7 @@ class InboundPayload(BaseModel):
     channel: ChannelType
     content: str = Field(min_length=1, max_length=20_000)
 
+    conversation_id: str | None = None
     external_conversation_id: str | None = None
     external_customer_id: str | None = None
     customer_email: str | None = None
@@ -166,7 +168,11 @@ async def inbound(
             )
 
         conversation = None
-        if payload.external_conversation_id:
+        if payload.conversation_id:
+            conversation = await find_conversation_by_id(
+                conn, tenant.id, payload.conversation_id
+            )
+        if conversation is None and payload.external_conversation_id:
             conversation = await find_conversation_by_external(
                 conn, tenant.id, payload.channel, payload.external_conversation_id
             )
