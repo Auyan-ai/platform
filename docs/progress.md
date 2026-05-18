@@ -897,12 +897,39 @@ WHERE tenant_id = '<uuid>';
 
 **Suite total: 510/510 verde. Ruff limpio.**
 
+---
+
+## Sesión 21 — Sprint 9.3 Audit log con PII (2026-05-18)
+
+### Sprint 9.3 — Audit log de skills con pseudonimización PII ([PR #71](https://github.com/Auyan-ai/platform/pull/71)) ✅ mergeado
+
+Registra toda ejecución de skill (L1/L2/L3) con PII pseudonimizado. Decisión confirmada: hashing en app Python, no en pgcrypto, para que el salt nunca aparezca en logs de Postgres.
+
+| Área | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260518000001_add_skill_audit_log.sql` | Tabla `tenant_secrets` (salt PII por tenant, seeded para tenants existentes) + `skill_audit_log` con RLS e índices. **Aplicada manualmente en staging.** |
+| `apps/api/services/pii.py` | `redact_inputs` (email→`<email:hash16>`, phone→`***-1234`, name→`J. P.`) + `hash_inputs` sha256 canónico para forense |
+| `apps/api/services/audit.py` | `AuditLogger` fire-and-forget — mismo patrón que `ReasoningTracker`. Stateless, instanciar una vez en startup |
+| `apps/api/db/models.py` | `TenantSecret`, `SkillAuditLog`, `SkillAuditStatus` |
+| `apps/api/db/queries.py` | `get_tenant_pii_salt` (upsert lazy), `insert_skill_audit_log`, `list_skill_audit_log` |
+| `apps/api/agents/dependencies.py` | Campo `audit_logger: AuditLogger` en `AgentDependencies` |
+| `apps/api/agents/nodes/execute_skill.py` | Emite al audit log con `latency_ms` en tres puntos: permission gate (→`rejected_by_permissions`), skill failure (→`failed`), éxito (→`success`) |
+| `apps/api/main.py` | `AuditLogger()` instanciado en lifespan junto a `ReasoningTracker` |
+| Tests | 27 nuevos: 17 PII unit, 5 AuditLogger (fire-and-forget + redacción real), 5 execute_skill audit |
+
+**Política PII aplicada:**
+- Email: `sha256(valor + salt_tenant)[:16]` → `<email:a3f1b2c4d5e6f7a8>`
+- Teléfono: últimos 4 dígitos → `***-5678`
+- Nombre: iniciales → `A. G. L.`
+- IDs, order numbers, textos libres: sin cambio
+
+**Suite total: 537/537 verde. Ruff limpio.**
+
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. Mergear [PR #69](https://github.com/Auyan-ai/platform/pull/69) si CI pasa
-2. **Sprint 9.3 — Audit log con PII**
-   - Tabla `audit_log` con pseudonimización (salt por tenant)
-   - Cada acción write del agente queda registrada (skills L2/L3 ejecutadas exitosamente)
-   - Campos: `tenant_id`, `conversation_id`, `action_slug`, `actor`, `payload_hash`, `created_at`
-3. **Sprint 9.4 — Cache invalidation**
-   - Postgres NOTIFY para invalidar TTL cache de AOPs en múltiples instancias de Railway (sin Redis)
+1. **Sprint 9.4 — Cache invalidation AOPs**
+   - Postgres NOTIFY (`pg_notify`) cuando se guarda nueva versión de AOP
+   - Cada worker escucha en background con `LISTEN` y hace `del _AOP_CACHE[key]`
+   - Sin Redis — usar `asyncpg` connection dedicada por worker para el listener
+   - Referencia: `architecture-agent-v2.md` § 6.5 opción (3)
+2. **Sprint 9.5 (opcional este sprint)** — Nudges de conversación (`tenant_config.conversation_lifecycle` editable + mensaje de recordatorio antes del timeout)
