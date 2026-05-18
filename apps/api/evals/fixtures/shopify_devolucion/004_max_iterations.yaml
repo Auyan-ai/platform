@@ -1,0 +1,5 @@
+name: "max_iterations >= 3"
+description: "Verificar elegibilidad, confirmar con el cliente y solicitar aprobación"
+assertions:
+  - kind: max_iterations_gte
+    expected: 3

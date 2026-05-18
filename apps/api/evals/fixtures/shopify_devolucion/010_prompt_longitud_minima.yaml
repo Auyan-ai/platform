@@ -1,0 +1,4 @@
+name: "Prompt detallado sobre política de devoluciones (>= 300 chars)"
+assertions:
+  - kind: prompt_min_length
+    expected: 300

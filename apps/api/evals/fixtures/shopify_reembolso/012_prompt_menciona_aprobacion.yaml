@@ -1,0 +1,6 @@
+name: "Prompt menciona aprobación humana antes del reembolso"
+description: "Operaciones financieras L3 deben mencionar explícitamente el flujo de aprobación"
+assertions:
+  - kind: prompt_contains
+    expected:
+      - aprob

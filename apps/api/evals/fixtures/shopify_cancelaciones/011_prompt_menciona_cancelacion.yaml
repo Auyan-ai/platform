@@ -1,0 +1,6 @@
+name: "Prompt menciona cancelar o cancelación"
+description: "El system prompt debe describir el proceso de cancelación para el agente"
+assertions:
+  - kind: prompt_contains
+    expected:
+      - cancel

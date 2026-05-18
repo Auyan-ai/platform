@@ -1,0 +1,6 @@
+name: "shopify.cancel_order en allowed_skills"
+description: "El AOP debe tener explícitamente la skill de cancelación en su lista"
+assertions:
+  - kind: skills_include
+    expected:
+      - shopify.cancel_order

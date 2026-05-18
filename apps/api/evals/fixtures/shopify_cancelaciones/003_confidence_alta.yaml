@@ -1,0 +1,7 @@
+name: "Confidence threshold alto para acción destructiva"
+description: >
+  cancel_order es L3 — destructiva e irreversible. El AOP debe requerir
+  confianza >= 0.90 para no ejecutarse por ambigüedad del cliente.
+assertions:
+  - kind: confidence_threshold_between
+    expected: [0.90, 1.0]

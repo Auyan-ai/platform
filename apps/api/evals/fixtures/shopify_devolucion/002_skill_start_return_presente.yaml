@@ -1,0 +1,5 @@
+name: "shopify.start_return en allowed_skills"
+assertions:
+  - kind: skills_include
+    expected:
+      - shopify.start_return

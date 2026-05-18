@@ -1,0 +1,6 @@
+name: "Prompt menciona revisión o aprobación humana"
+description: "El flujo de devolución L3 requiere supervisión humana explícita en el prompt"
+assertions:
+  - kind: prompt_contains
+    expected:
+      - aprob

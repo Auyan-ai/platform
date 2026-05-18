@@ -1,0 +1,4 @@
+name: "Frontmatter tiene escalation_triggers"
+assertions:
+  - kind: frontmatter_has_key
+    expected: escalation_triggers

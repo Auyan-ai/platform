@@ -1,0 +1,4 @@
+name: "Frontmatter tiene clave slug"
+assertions:
+  - kind: frontmatter_has_key
+    expected: slug

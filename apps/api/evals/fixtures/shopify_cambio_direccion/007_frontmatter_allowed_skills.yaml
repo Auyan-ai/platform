@@ -1,0 +1,4 @@
+name: "Frontmatter tiene clave allowed_skills"
+assertions:
+  - kind: frontmatter_has_key
+    expected: allowed_skills

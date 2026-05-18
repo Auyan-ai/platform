@@ -1,0 +1,6 @@
+name: "Prompt menciona reembolso o devolución de dinero"
+description: "El system prompt debe describir el proceso de reembolso"
+assertions:
+  - kind: prompt_contains
+    expected:
+      - reembolso

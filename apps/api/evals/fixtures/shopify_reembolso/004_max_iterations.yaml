@@ -1,0 +1,5 @@
+name: "max_iterations >= 3"
+description: "El agente debe poder verificar monto, validar el pedido y esperar aprobación"
+assertions:
+  - kind: max_iterations_gte
+    expected: 3

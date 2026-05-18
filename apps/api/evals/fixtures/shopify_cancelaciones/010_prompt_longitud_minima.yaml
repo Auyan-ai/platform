@@ -1,0 +1,7 @@
+name: "System prompt suficientemente detallado"
+description: >
+  Un procedimiento de cancelación L3 requiere instrucciones explícitas.
+  Prompts muy cortos indican configuración incompleta.
+assertions:
+  - kind: prompt_min_length
+    expected: 300
