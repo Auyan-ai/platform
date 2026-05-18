@@ -222,6 +222,26 @@ async def get_conversation(
     return None if row is None else Conversation(**dict(row))
 
 
+async def find_conversation_by_id(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: str,
+) -> Conversation | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, end_customer_id, channel, external_id,
+               subject, status, assigned_user_id, last_message_at, created_at
+          FROM conversations
+         WHERE tenant_id = $1 AND id = $2::uuid
+           AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return None if row is None else Conversation(**dict(row))
+
+
 async def find_conversation_by_external(
     conn: asyncpg.Connection,
     tenant_id: UUID,

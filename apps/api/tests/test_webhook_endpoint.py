@@ -19,6 +19,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tests.conftest import (
+    CONVERSATION_ID,
     ESCALATION_ID,
     INBOUND_MSG_ID,
     OUTBOUND_MSG_ID,
@@ -136,6 +137,10 @@ def _patch_db(
     monkeypatch.setattr(
         f"{ROUTER_MODULE}.create_end_customer",
         AsyncMock(return_value=customer if customer else make_end_customer()),
+    )
+    monkeypatch.setattr(
+        f"{ROUTER_MODULE}.find_conversation_by_id",
+        AsyncMock(return_value=conversation),
     )
     monkeypatch.setattr(
         f"{ROUTER_MODULE}.find_conversation_by_external",
@@ -331,3 +336,85 @@ class TestInboundEndpoint:
             )
 
         assert r.status_code == 400
+
+
+class TestMultiTurn:
+    def test_conversation_id_reuses_existing_conversation(self, monkeypatch) -> None:
+        """Pasar conversation_id reutiliza la conversación existente sin crear una nueva."""
+        existing_conv = make_conversation()
+        service = AsyncMock()
+        service.process_inbound = AsyncMock(return_value=_outcome_respond())
+
+        find_by_id_mock = AsyncMock(return_value=existing_conv)
+        find_by_external_mock = AsyncMock(return_value=None)
+        create_conv_mock = AsyncMock()
+
+        monkeypatch.setattr(f"{ROUTER_MODULE}.bootstrap_connection", make_fake_bootstrap_connection())
+        monkeypatch.setattr(f"{ROUTER_MODULE}.tenant_scope", make_fake_tenant_scope())
+        monkeypatch.setattr(f"{ROUTER_MODULE}.get_tenant_by_slug", AsyncMock(return_value=make_tenant()))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.find_end_customer_by_email", AsyncMock(return_value=make_end_customer()))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.create_end_customer", AsyncMock(return_value=make_end_customer()))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.find_conversation_by_id", find_by_id_mock)
+        monkeypatch.setattr(f"{ROUTER_MODULE}.find_conversation_by_external", find_by_external_mock)
+        monkeypatch.setattr(f"{ROUTER_MODULE}.create_conversation", create_conv_mock)
+        monkeypatch.setattr(f"{ROUTER_MODULE}.insert_message", AsyncMock(return_value=make_message(id=INBOUND_MSG_ID)))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.update_conversation_last_message", AsyncMock())
+
+        payload = {
+            "tenant_slug": "acme",
+            "channel": "chat",
+            "content": "segundo mensaje del cliente",
+            "customer_email": "maria@test.es",
+            "conversation_id": str(CONVERSATION_ID),
+        }
+        body = json.dumps(payload).encode()
+        app = _make_app(agent_service=service)
+
+        with TestClient(app) as client:
+            r = client.post(
+                "/webhooks/inbound",
+                content=body,
+                headers={"X-Auyan-Signature": _sign(body), "Content-Type": "application/json"},
+            )
+
+        assert r.status_code == 200
+        find_by_id_mock.assert_called_once()
+        find_by_external_mock.assert_not_called()
+        create_conv_mock.assert_not_called()
+        assert r.json()["conversation_id"] == str(CONVERSATION_ID)
+
+    def test_without_conversation_id_creates_new(self, monkeypatch) -> None:
+        """Sin conversation_id se crea conversación nueva (comportamiento original)."""
+        service = AsyncMock()
+        service.process_inbound = AsyncMock(return_value=_outcome_respond())
+        create_conv_mock = AsyncMock(return_value=make_conversation())
+
+        monkeypatch.setattr(f"{ROUTER_MODULE}.bootstrap_connection", make_fake_bootstrap_connection())
+        monkeypatch.setattr(f"{ROUTER_MODULE}.tenant_scope", make_fake_tenant_scope())
+        monkeypatch.setattr(f"{ROUTER_MODULE}.get_tenant_by_slug", AsyncMock(return_value=make_tenant()))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.find_end_customer_by_email", AsyncMock(return_value=None))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.create_end_customer", AsyncMock(return_value=make_end_customer()))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.find_conversation_by_id", AsyncMock(return_value=None))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.find_conversation_by_external", AsyncMock(return_value=None))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.create_conversation", create_conv_mock)
+        monkeypatch.setattr(f"{ROUTER_MODULE}.insert_message", AsyncMock(return_value=make_message(id=INBOUND_MSG_ID)))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.update_conversation_last_message", AsyncMock())
+
+        payload = {
+            "tenant_slug": "acme",
+            "channel": "chat",
+            "content": "primer mensaje del cliente",
+            "customer_email": "nuevo@test.es",
+        }
+        body = json.dumps(payload).encode()
+        app = _make_app(agent_service=service)
+
+        with TestClient(app) as client:
+            r = client.post(
+                "/webhooks/inbound",
+                content=body,
+                headers={"X-Auyan-Signature": _sign(body), "Content-Type": "application/json"},
+            )
+
+        assert r.status_code == 200
+        create_conv_mock.assert_called_once()
