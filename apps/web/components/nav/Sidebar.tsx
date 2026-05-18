@@ -9,6 +9,7 @@ import { LogoutButton } from './LogoutButton'
 const NAV_ITEMS = [
   { label: 'Conversaciones', icon: '💬', section: 'conversations' },
   { label: 'Escalaciones', icon: '🚨', section: 'escalations' },
+  { label: 'Aprobaciones', icon: '✅', section: 'approvals' },
   { label: 'AOPs', icon: '📋', section: 'aops' },
 ]
 
