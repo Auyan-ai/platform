@@ -925,11 +925,31 @@ Registra toda ejecución de skill (L1/L2/L3) con PII pseudonimizado. Decisión c
 
 **Suite total: 537/537 verde. Ruff limpio.**
 
+---
+
+## Sesión 22 — Sprint 9.4 Cache invalidation AOPs (2026-05-18)
+
+### Sprint 9.4 — AOP cache invalidation vía Postgres NOTIFY ([PR #73](https://github.com/Auyan-ai/platform/pull/73)) ✅ en revisión
+
+Invalida el cache de AOPs en todos los workers de Railway sin Redis.
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/aops/compiler.py` | `invalidate_aop_cache(tenant_id, slug, workspace)` — elimina entrada del `_AOP_CACHE` local |
+| `apps/api/db/queries.py` | `notify_aop_cache_invalidated(conn, tenant_id, slug, workspace)` — emite `pg_notify` con JSON payload dentro de la transacción activa |
+| `apps/api/services/aop_listener.py` | `AopCacheListener` — conexión asyncpg dedicada (fuera del pool), `LISTEN aop_cache_invalidated`, keep-alive SELECT 1 cada 30s, callback `_on_notify` → `invalidate_aop_cache` |
+| `apps/api/routers/aops.py` | PUT/toggle/delete/promote: invalidan cache local + emiten `pg_notify` dentro del `tenant_scope` |
+| `apps/api/main.py` | `AopCacheListener` instanciado en lifespan; `await aop_listener.stop()` en shutdown |
+| Tests | 12 tests nuevos (549 total) |
+
+**Flujo:** Worker A edita AOP → `pg_notify` en transacción → commit → Postgres entrega notificación a todos los workers con LISTEN → `_on_notify` → `invalidate_aop_cache`. Delay: latencia de red Postgres, sin TTL de espera.
+
+**Nota:** conexión LISTEN es separada del pool (asyncpg no puede hacer queries normales mientras escucha en una misma conexión).
+
+**Suite total: 549/549 verde. Ruff limpio.**
+
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. **Sprint 9.4 — Cache invalidation AOPs**
-   - Postgres NOTIFY (`pg_notify`) cuando se guarda nueva versión de AOP
-   - Cada worker escucha en background con `LISTEN` y hace `del _AOP_CACHE[key]`
-   - Sin Redis — usar `asyncpg` connection dedicada por worker para el listener
-   - Referencia: `architecture-agent-v2.md` § 6.5 opción (3)
-2. **Sprint 9.5 (opcional este sprint)** — Nudges de conversación (`tenant_config.conversation_lifecycle` editable + mensaje de recordatorio antes del timeout)
+1. Mergear [PR #73](https://github.com/Auyan-ai/platform/pull/73) si CI pasa
+2. **Sprint 9.5 (opcional)** — Nudges de conversación (`tenant_config.conversation_lifecycle` editable + mensaje de recordatorio antes del timeout)
+3. **Sprint 10** — Skills L3 + human approval mode

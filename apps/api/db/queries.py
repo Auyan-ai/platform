@@ -11,8 +11,9 @@ Reglas:
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from apps.api.db.models import (
@@ -1368,3 +1369,25 @@ async def list_skill_audit_log(
             offset,
         )
     return [SkillAuditLog(**dict(r)) for r in rows]
+
+
+# ============================================================
+# AOP cache invalidation — Postgres NOTIFY
+# ============================================================
+
+
+async def notify_aop_cache_invalidated(
+    conn: asyncpg.Connection,
+    tenant_id: Any,
+    slug: str,
+    workspace: str,
+) -> None:
+    """Emite pg_notify dentro de la transacción activa.
+
+    Se dispara solo cuando la transacción hace commit — nunca en rollback.
+    Todos los workers con LISTEN activo recibirán la notificación y descartarán
+    su entrada local del cache para (tenant_id, slug, workspace).
+    """
+    payload = json.dumps({"tenant_id": str(tenant_id), "slug": slug, "workspace": workspace})
+    await conn.execute("SELECT pg_notify('aop_cache_invalidated', $1)", payload)
+
