@@ -11,13 +11,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 from unittest.mock import AsyncMock
-from uuid import UUID
 
 import pytest
 from apps.api.core.config import get_settings
 from apps.api.core.errors import RateLimitError
 from apps.api.db.models import TenantConfiguration
 from apps.api.services.rate_limit import enforce_rate_limit
+from fastapi import FastAPI
 
 from tests.conftest import (
     CUSTOMER_ID,
@@ -272,7 +272,6 @@ class TestDeleteExpiredBuckets:
 def _make_webhook_app(*, agent_service: AsyncMock) -> FastAPI:
     from apps.api.core.errors import register_exception_handlers
     from apps.api.routers.webhooks import router as webhooks_router
-    from fastapi import FastAPI
 
     app = FastAPI()
     register_exception_handlers(app)
