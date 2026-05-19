@@ -1,6 +1,10 @@
 # Auyan — Estado del proyecto
 
+<<<<<<< Updated upstream
 _Última actualización: 2026-05-18 (sesión 26 — Sprint 11 mergeado ✅, arrancando deuda técnica)_
+=======
+_Última actualización: 2026-05-19 (sesión 26 — Sprint 11 mergeado, arrancando Sprint 12)_
+>>>>>>> Stashed changes
 
 ---
 
@@ -1095,7 +1099,30 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 
 **Sprint 11 completado ✅** — Migración aplicada en staging, CLI validado, dashboard verificado, PR #76 mergeado → develop.
 
-### Empezar aquí en la próxima sesión — usar **Sonnet**
+---
 
-1. Mergear PR #77 (rate limiting A.1) → develop
-2. Continuar deuda técnica: A.2 (token budget diario), A.3 (message cap por conversación)
+## Rate limiting y cost controls (bloqueadores de producción)
+
+| Sub-PR | Qué incluye | Estado |
+|--------|-------------|--------|
+| A.1 | `rate_limit_buckets` + `check_and_increment_rate_limit` + `enforce_rate_limit` + gate en `webhooks/inbound` + cleanup | ✅ [PR #77](https://github.com/Auyan-ai/platform/pull/77) mergeado |
+| A.2 | `tenant_usage_daily` + `record_tenant_usage` + gate pre-grafo `check_tenant_budget` | en curso |
+| A.3 | `max_inbound_messages_per_conversation` check + escalación automática | pendiente |
+| A.4 | `GET /tenants/me/usage` + UI card de consumo | pendiente (opcional) |
+
+### A.1 — Rate limiting por tenant y end_customer ([PR #77](https://github.com/Auyan-ai/platform/pull/77)) ✅
+
+| Área | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260519000001_add_rate_limit_buckets.sql` | Tabla `rate_limit_buckets` (ventana fija 60 s, upsert atómico) |
+| `apps/api/db/queries.py` | `check_and_increment_rate_limit`, `delete_expired_rate_limit_buckets` |
+| `apps/api/services/rate_limit.py` | `enforce_rate_limit` — dos buckets: tenant/min + customer/min; override per-tenant via `extra.rate_limits` |
+| `apps/api/core/errors.py` | `RateLimitError` → HTTP 429 con `Retry-After` header |
+| `apps/api/core/config.py` | `rate_limit_tenant_per_minute` (default 300), `rate_limit_customer_per_minute` (default 30) |
+| `apps/api/routers/webhooks.py` | Gate: `enforce_rate_limit` antes de procesar, devuelve 429 si supera límite |
+| `apps/api/services/cleanup.py` | `delete_expired_rate_limit_buckets` en el cleanup loop |
+| Tests | 15 nuevos en `test_rate_limit.py` |
+
+### Empezar aquí — usar **Sonnet**
+
+1. **A.2** — `tenant_usage_daily` + tracking de tokens/costo por día + gate pre-grafo si excede budget

@@ -44,6 +44,7 @@ from apps.api.db.models import (
     Tenant,
     TenantConfiguration,
     TenantToolPermission,
+    TenantUsageDaily,
     UserRole,
 )
 
@@ -2031,3 +2032,63 @@ async def delete_expired_rate_limit_buckets(conn: asyncpg.Connection) -> int:
     )
     # asyncpg retorna 'DELETE N' como string
     return int(result.split()[-1])
+
+
+# ---------------------------------------------------------------------------
+# tenant_usage_daily
+# ---------------------------------------------------------------------------
+
+
+async def upsert_tenant_usage_daily(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    tokens_in: int,
+    tokens_out: int,
+    cost_usd: float,
+) -> None:
+    """Incrementa atómicamente el uso del día para un tenant.
+
+    INSERT ... ON CONFLICT DO UPDATE garantiza que no se pierdan
+    incrementos concurrentes de múltiples workers.
+    """
+    await conn.execute(
+        """
+        INSERT INTO tenant_usage_daily
+            (tenant_id, date, tokens_in, tokens_out, cost_usd, request_count)
+        VALUES ($1, CURRENT_DATE, $2, $3, $4, 1)
+        ON CONFLICT (tenant_id, date)
+        DO UPDATE SET
+            tokens_in     = tenant_usage_daily.tokens_in     + EXCLUDED.tokens_in,
+            tokens_out    = tenant_usage_daily.tokens_out    + EXCLUDED.tokens_out,
+            cost_usd      = tenant_usage_daily.cost_usd      + EXCLUDED.cost_usd,
+            request_count = tenant_usage_daily.request_count + 1,
+            updated_at    = now()
+        """,
+        tenant_id,
+        tokens_in,
+        tokens_out,
+        cost_usd,
+    )
+
+
+async def get_tenant_usage_today(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+) -> TenantUsageDaily | None:
+    """Retorna el registro de uso de hoy para el tenant, o None si no hay actividad."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, date::text, tokens_in, tokens_out, cost_usd,
+               request_count, created_at, updated_at
+        FROM tenant_usage_daily
+        WHERE tenant_id = $1
+          AND date = CURRENT_DATE
+          AND deleted_at IS NULL
+        """,
+        tenant_id,
+    )
+    if row is None:
+        return None
+    return TenantUsageDaily(**dict(row))

@@ -41,12 +41,14 @@ from apps.api.db.queries import (
     update_conversation_last_message,
 )
 from apps.api.services.rate_limit import enforce_rate_limit
+from apps.api.services.usage import UsageRecorder, check_tenant_budget
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+_usage_recorder = UsageRecorder()
 
 
 # ----------------------------------------------------------------
@@ -157,7 +159,7 @@ async def inbound(
             status.HTTP_403_FORBIDDEN, detail=f"tenant_not_active: status={tenant.status}"
         )
 
-    # 2. Rate limiting — antes de idempotency y de tocar datos de conversación.
+    # 2. Rate limiting + budget check — antes de idempotency y de tocar datos.
     async with bootstrap_connection() as conn:
         tenant_config = await get_tenant_configuration(conn, tenant.id)
         await enforce_rate_limit(
@@ -165,6 +167,12 @@ async def inbound(
             tenant_id=tenant.id,
             tenant_config=tenant_config,
             customer_id=None,  # todavía no conocemos el customer_id
+            settings=settings,
+        )
+        await check_tenant_budget(
+            conn,
+            tenant_id=tenant.id,
+            tenant_config=tenant_config,
             settings=settings,
         )
 
@@ -270,6 +278,14 @@ async def inbound(
             "decision": outcome.decision,
             "trace_id": outcome.trace_id,
         },
+    )
+
+    # 6. Registrar uso (fire-and-forget, no bloquea la respuesta).
+    _usage_recorder.record(
+        tenant_id=tenant.id,
+        tokens_in=outcome.tokens_in,
+        tokens_out=outcome.tokens_out,
+        cost_usd=outcome.cost_usd,
     )
 
     response = InboundResponse(

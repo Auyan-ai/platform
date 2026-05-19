@@ -86,6 +86,17 @@ class RateLimitError(DomainError):
         self.retry_after = retry_after
 
 
+class BudgetExceededError(DomainError):
+    """El tenant agotó su presupuesto diario de tokens/costo."""
+
+    code = "budget_exceeded"
+    status_code = 429
+
+    def __init__(self, detail: str, *, retry_after: int) -> None:
+        super().__init__(detail)
+        self.retry_after = retry_after
+
+
 # ----------------------------------------------------------------
 # Handler registration
 # ----------------------------------------------------------------
@@ -100,7 +111,7 @@ async def _domain_exception_handler(request: Request, exc: Exception) -> JSONRes
     else:
         logger.warning("domain_error %s: %s", err.code, err.detail, extra=log_extra)
     headers: dict[str, str] = {}
-    if isinstance(err, RateLimitError):
+    if isinstance(err, RateLimitError | BudgetExceededError):
         headers["Retry-After"] = str(err.retry_after)
     return JSONResponse(
         status_code=err.status_code,
