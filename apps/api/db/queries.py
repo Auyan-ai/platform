@@ -2094,6 +2094,32 @@ async def upsert_tenant_usage_daily(
     )
 
 
+async def get_tenant_usage_range(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    days: int = 7,
+) -> list[TenantUsageDaily]:
+    """Retorna los últimos `days` días de uso para el tenant (más reciente primero).
+
+    Incluye solo días con actividad registrada (no rellena días vacíos).
+    """
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, date::text, tokens_in, tokens_out, cost_usd,
+               request_count, created_at, updated_at
+          FROM tenant_usage_daily
+         WHERE tenant_id = $1
+           AND date >= CURRENT_DATE - ($2 - 1) * INTERVAL '1 day'
+           AND deleted_at IS NULL
+         ORDER BY date DESC
+        """,
+        tenant_id,
+        days,
+    )
+    return [TenantUsageDaily(**dict(row)) for row in rows]
+
+
 async def get_tenant_usage_today(
     conn: asyncpg.Connection,
     *,
