@@ -314,6 +314,28 @@ async def update_conversation_last_message(
     )
 
 
+async def count_inbound_messages(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    conversation_id: UUID,
+) -> int:
+    """Retorna el número de mensajes inbound (role='customer') en la conversación."""
+    row = await conn.fetchrow(
+        """
+        SELECT COUNT(*) AS cnt
+          FROM messages
+         WHERE tenant_id = $1
+           AND conversation_id = $2
+           AND role = 'customer'
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return int(row["cnt"]) if row else 0
+
+
 async def update_conversation_status(
     conn: asyncpg.Connection,
     tenant_id: UUID,

@@ -40,6 +40,7 @@ from apps.api.db.queries import (
     try_insert_idempotency_key,
     update_conversation_last_message,
 )
+from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
 from apps.api.services.usage import UsageRecorder, check_tenant_budget
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
@@ -207,6 +208,7 @@ async def inbound(
             idempotency_claimed = True
 
     # 4. Dentro del tenant_scope: customer, conversación, mensaje inbound.
+    cap_outcome = None
     try:
         async with tenant_scope(tenant.id) as conn:
             customer = None
@@ -253,15 +255,28 @@ async def inbound(
             )
             await update_conversation_last_message(conn, tenant.id, conversation.id)
 
-        # 5. Disparar el grafo.
-        outcome = await agent_service.process_inbound(
-            tenant_id=tenant.id,
-            conversation_id=conversation.id,
-            inbound_message_id=inbound_msg.id,
-            inbound_message_content=payload.content,
-            channel=payload.channel,
-            end_customer_id=customer.id,
-        )
+            # 4b. Message cap — escala automáticamente si la conversación excedió el límite.
+            cap_outcome = await enforce_message_cap(
+                conn,
+                tenant_id=tenant.id,
+                conversation_id=conversation.id,
+                inbound_message_id=inbound_msg.id,
+                tenant_config=tenant_config,
+                settings=settings,
+            )
+
+        # 5. Disparar el grafo (o usar el outcome del cap si aplica).
+        if cap_outcome is not None:
+            outcome = cap_outcome
+        else:
+            outcome = await agent_service.process_inbound(
+                tenant_id=tenant.id,
+                conversation_id=conversation.id,
+                inbound_message_id=inbound_msg.id,
+                inbound_message_content=payload.content,
+                channel=payload.channel,
+                end_customer_id=customer.id,
+            )
 
     except Exception:
         # Si el procesamiento falla, liberar la key para que el reintento sea válido.

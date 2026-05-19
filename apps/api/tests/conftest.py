@@ -60,6 +60,7 @@ class FakeSettings:
     rate_limit_tenant_per_minute: int = 300
     rate_limit_customer_per_minute: int = 30
     budget_usd_daily: float = 10.0
+    max_inbound_messages_per_conversation: int = 50
 
 
 @pytest.fixture
