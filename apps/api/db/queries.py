@@ -451,6 +451,28 @@ async def insert_message(
     return Message(**dict(row))
 
 
+async def count_customer_messages_in_conversation(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+) -> int:
+    """Cuenta mensajes inbound del customer en la conversación (excluye soft-deleted)."""
+    count = await conn.fetchval(
+        """
+        SELECT COUNT(*)
+          FROM messages
+         WHERE tenant_id = $1
+           AND conversation_id = $2
+           AND role = 'customer'
+           AND direction = 'inbound'
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return int(count or 0)
+
+
 # ============================================================
 # Escalations
 # ============================================================
