@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-19 (sesión 27 — Rate limiting + cost controls A.1–A.4 completos, PR #78 listo)_
+_Última actualización: 2026-05-19 (sesión 27 — Rate limiting + cost controls A.1–A.4 completos, CI verde, PR #78 listo para merge)_
 
 ---
 
@@ -1160,9 +1160,13 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 
 **Suite total: 711/711 verde. Ruff limpio. TypeScript limpio.**
 
+#### Fix CI post-merge
+
+`get_settings()` se llamaba directo dentro del endpoint, bypassando `dependency_overrides` en los tests → Pydantic-Settings intentaba leer env vars reales en CI → crash. Fix: `SettingsDep = Annotated[object, Depends(get_settings)]` + parámetro en la firma del endpoint.
+
 ---
 
 ### Siguiente paso — usar **Sonnet**
 
-1. Merge PR #78 → develop (aplica migración `20260519000002_add_tenant_usage_daily.sql` en staging antes)
+1. Merge [PR #78](https://github.com/Auyan-ai/platform/pull/78) → develop (aplica migración `20260519000002_add_tenant_usage_daily.sql` en staging antes)
 2. Sprint 12 — Zendesk bidireccional, reapertura de conversaciones, Unified KB
