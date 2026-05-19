@@ -1097,4 +1097,5 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. Deuda técnica prioritaria (ver sección abajo)
+1. Mergear PR #77 (rate limiting A.1) → develop
+2. Continuar deuda técnica: A.2 (token budget diario), A.3 (message cap por conversación)
