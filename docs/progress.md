@@ -1,10 +1,6 @@
 # Auyan — Estado del proyecto
 
-<<<<<<< Updated upstream
-_Última actualización: 2026-05-18 (sesión 26 — Sprint 11 mergeado ✅, arrancando deuda técnica)_
-=======
-_Última actualización: 2026-05-19 (sesión 26 — Sprint 11 mergeado, arrancando Sprint 12)_
->>>>>>> Stashed changes
+_Última actualización: 2026-05-19 (sesión 27 — Rate limiting + cost controls A.1–A.4 completos, PR #78 listo)_
 
 ---
 
@@ -1108,7 +1104,7 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 | A.1 | `rate_limit_buckets` + `check_and_increment_rate_limit` + `enforce_rate_limit` + gate en `webhooks/inbound` + cleanup | ✅ [PR #77](https://github.com/Auyan-ai/platform/pull/77) mergeado |
 | A.2 | `tenant_usage_daily` + `record_tenant_usage` + gate pre-grafo `check_tenant_budget` | ✅ [PR #78](https://github.com/Auyan-ai/platform/pull/78) |
 | A.3 | `max_inbound_messages_per_conversation` check + escalación automática | ✅ en PR #78 |
-| A.4 | `GET /tenants/me/usage` + UI card de consumo | pendiente (opcional) |
+| A.4 | `GET /tenants/me/usage` + UI card de consumo | ✅ en PR #78 |
 
 ### A.1 — Rate limiting por tenant y end_customer ([PR #77](https://github.com/Auyan-ai/platform/pull/77)) ✅
 
@@ -1150,7 +1146,23 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 
 **Suite total: 706/706 verde. Ruff limpio.**
 
-### Empezar aquí — usar **Sonnet**
+### A.4 — Endpoint de uso + UI card (en PR #78) ✅
 
-1. **A.4** (opcional) — `GET /tenants/me/usage` + UI card de consumo
-2. Merge PR #78 → develop una vez validado en staging
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/db/queries.py` | `get_tenant_usage_range` — últimos N días, orden DESC |
+| `apps/api/routers/tenants.py` | `GET /tenants/me/usage?days=7` → `TenantUsageResponse` (today, budget_used_pct, history) |
+| `apps/web/lib/api/query-keys.ts` | `queryKeys.tenants.usage(tenantId, days)` |
+| `apps/web/lib/api/hooks/usage.ts` | `useUsage(tenantId, days)` — staleTime 60 s, refetch 120 s |
+| `apps/web/components/clients/UsageCard.tsx` | Barra de progreso colorizada (verde/ámbar/rojo), tokens in/out, requests |
+| `apps/web/app/clients/[tenantId]/overview/page.tsx` | `UsageCard` integrado en grid 3 columnas |
+| Tests | 5 nuevos en `TestGetMyTenantUsage` |
+
+**Suite total: 711/711 verde. Ruff limpio. TypeScript limpio.**
+
+---
+
+### Siguiente paso — usar **Sonnet**
+
+1. Merge PR #78 → develop (aplica migración `20260519000002_add_tenant_usage_daily.sql` en staging antes)
+2. Sprint 12 — Zendesk bidireccional, reapertura de conversaciones, Unified KB
