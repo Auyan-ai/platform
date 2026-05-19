@@ -35,10 +35,12 @@ from apps.api.db.queries import (
     find_end_customer_by_email,
     get_idempotency_record,
     get_tenant_by_slug,
+    get_tenant_configuration,
     insert_message,
     try_insert_idempotency_key,
     update_conversation_last_message,
 )
+from apps.api.services.rate_limit import enforce_rate_limit
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -155,7 +157,18 @@ async def inbound(
             status.HTTP_403_FORBIDDEN, detail=f"tenant_not_active: status={tenant.status}"
         )
 
-    # 2. Idempotencia — si viene X-Idempotency-Key, deduplicamos antes de tocar datos.
+    # 2. Rate limiting — antes de idempotency y de tocar datos de conversación.
+    async with bootstrap_connection() as conn:
+        tenant_config = await get_tenant_configuration(conn, tenant.id)
+        await enforce_rate_limit(
+            conn,
+            tenant_id=tenant.id,
+            tenant_config=tenant_config,
+            customer_id=None,  # todavía no conocemos el customer_id
+            settings=settings,
+        )
+
+    # 3. Idempotencia — si viene X-Idempotency-Key, deduplicamos antes de tocar datos.
     idempotency_key = request.headers.get("X-Idempotency-Key")
     idempotency_claimed = False
 
@@ -185,7 +198,7 @@ async def inbound(
                 )
             idempotency_claimed = True
 
-    # 3. Dentro del tenant_scope: customer, conversación, mensaje inbound.
+    # 4. Dentro del tenant_scope: customer, conversación, mensaje inbound.
     try:
         async with tenant_scope(tenant.id) as conn:
             customer = None
@@ -232,7 +245,7 @@ async def inbound(
             )
             await update_conversation_last_message(conn, tenant.id, conversation.id)
 
-        # 4. Disparar el grafo.
+        # 5. Disparar el grafo.
         outcome = await agent_service.process_inbound(
             tenant_id=tenant.id,
             conversation_id=conversation.id,

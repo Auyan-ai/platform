@@ -191,10 +191,8 @@ async def test_run_abandoned_cleanup_returns_dict_with_closed() -> None:
         patch("apps.api.services.cleanup.list_all_tenants", return_value=[tenant]),
         patch("apps.api.services.cleanup.get_tenant_configuration", return_value=config),
         patch("apps.api.services.cleanup._nudge_for_tenant", return_value=0),
-        patch(
-            "apps.api.services.cleanup._close_abandoned_for_tenant",
-            return_value=3,
-        ),
+        patch("apps.api.services.cleanup._close_abandoned_for_tenant", return_value=3),
+        patch("apps.api.services.cleanup.delete_expired_rate_limit_buckets", return_value=0),
     ):
         mock_boot.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
         mock_boot.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -214,6 +212,7 @@ async def test_run_abandoned_cleanup_skips_tenants_with_zero_closed() -> None:
         patch("apps.api.services.cleanup.get_tenant_configuration", return_value=None),
         patch("apps.api.services.cleanup._nudge_for_tenant", return_value=0),
         patch("apps.api.services.cleanup._close_abandoned_for_tenant", return_value=0),
+        patch("apps.api.services.cleanup.delete_expired_rate_limit_buckets", return_value=0),
     ):
         mock_boot.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
         mock_boot.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -243,6 +242,7 @@ async def test_run_abandoned_cleanup_continues_after_tenant_error() -> None:
         patch("apps.api.services.cleanup.get_tenant_configuration", return_value=None),
         patch("apps.api.services.cleanup._nudge_for_tenant", return_value=0),
         patch("apps.api.services.cleanup._close_abandoned_for_tenant", side_effect=fake_close),
+        patch("apps.api.services.cleanup.delete_expired_rate_limit_buckets", return_value=0),
     ):
         mock_boot.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
         mock_boot.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -439,6 +439,7 @@ async def test_run_abandoned_cleanup_calls_nudge_before_close() -> None:
         patch("apps.api.services.cleanup.get_tenant_configuration", return_value=config),
         patch("apps.api.services.cleanup._nudge_for_tenant", side_effect=fake_nudge),
         patch("apps.api.services.cleanup._close_abandoned_for_tenant", side_effect=fake_close),
+        patch("apps.api.services.cleanup.delete_expired_rate_limit_buckets", return_value=0),
     ):
         mock_boot.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
         mock_boot.return_value.__aexit__ = AsyncMock(return_value=False)

@@ -75,6 +75,17 @@ class ValidationFailed(DomainError):
     status_code = 422
 
 
+class RateLimitError(DomainError):
+    """Demasiadas requests en la ventana de tiempo. Incluye retry_after en segundos."""
+
+    code = "rate_limit_exceeded"
+    status_code = 429
+
+    def __init__(self, detail: str, *, retry_after: int = 60) -> None:
+        super().__init__(detail)
+        self.retry_after = retry_after
+
+
 # ----------------------------------------------------------------
 # Handler registration
 # ----------------------------------------------------------------
@@ -88,9 +99,13 @@ async def _domain_exception_handler(request: Request, exc: Exception) -> JSONRes
         logger.error("domain_error %s: %s", err.code, err.detail, extra=log_extra)
     else:
         logger.warning("domain_error %s: %s", err.code, err.detail, extra=log_extra)
+    headers: dict[str, str] = {}
+    if isinstance(err, RateLimitError):
+        headers["Retry-After"] = str(err.retry_after)
     return JSONResponse(
         status_code=err.status_code,
         content={"error": err.code, "detail": err.detail},
+        headers=headers or None,
     )
 
 

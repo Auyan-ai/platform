@@ -104,6 +104,14 @@ class Settings(BaseSettings):
     # Modelo para el clasificador de intent. Haiku: rápido y barato para clasificación.
     intent_classifier_model: str = "claude-haiku-4-5-20251001"
 
+    # --- Rate limiting (webhooks inbound) ---
+    # Requests por minuto por tenant. Cubre ~50K tickets/día con headroom para bursts.
+    # Override per-tenant: tenant_configurations.extra.rate_limits.tenant_per_minute
+    rate_limit_tenant_per_minute: int = 300
+    # Requests por minuto por end_customer. Frena spam sostenido sin bloquear reintentos.
+    # Override per-tenant: tenant_configurations.extra.rate_limits.customer_per_minute
+    rate_limit_customer_per_minute: int = 30
+
     @field_validator("rag_min_similarity")
     @classmethod
     def _validate_similarity(cls, v: float) -> float:
