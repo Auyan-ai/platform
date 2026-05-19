@@ -1,7 +1,7 @@
 """Tests para A.3 — límite de mensajes inbound por conversación.
 
 Cubre:
-- count_customer_messages_in_conversation: unit tests de la query
+- count_inbound_messages: unit tests de la query
 - Webhook endpoint: escalación automática cuando se supera el límite
 - Override per-tenant del límite
 - Límite 0 desactiva el check
@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from apps.api.core.config import get_settings
-from apps.api.db.queries import count_customer_messages_in_conversation
+from apps.api.db.queries import count_inbound_messages
 from fastapi import FastAPI
 
 from tests.conftest import (
@@ -147,7 +147,7 @@ def _patch_tenant_and_boot(
 
 
 # ============================================================
-# count_customer_messages_in_conversation — unit tests
+# count_inbound_messages — unit tests
 # ============================================================
 
 
@@ -155,51 +155,60 @@ class TestCountCustomerMessages:
     @pytest.mark.asyncio
     async def test_returns_count_from_db(self) -> None:
         conn = AsyncMock()
-        conn.fetchval.return_value = 23
-        result = await count_customer_messages_in_conversation(conn, TENANT_ID, CONVERSATION_ID)
+        conn.fetchrow.return_value = {"cnt": 23}
+        result = await count_inbound_messages(
+            conn, tenant_id=TENANT_ID, conversation_id=CONVERSATION_ID
+        )
         assert result == 23
 
     @pytest.mark.asyncio
     async def test_returns_zero_when_null(self) -> None:
         conn = AsyncMock()
-        conn.fetchval.return_value = None
-        result = await count_customer_messages_in_conversation(conn, TENANT_ID, CONVERSATION_ID)
+        conn.fetchrow.return_value = None
+        result = await count_inbound_messages(
+            conn, tenant_id=TENANT_ID, conversation_id=CONVERSATION_ID
+        )
         assert result == 0
 
     @pytest.mark.asyncio
     async def test_passes_correct_params(self) -> None:
         conn = AsyncMock()
-        conn.fetchval.return_value = 5
-        await count_customer_messages_in_conversation(conn, TENANT_ID, CONVERSATION_ID)
-        args = conn.fetchval.call_args.args
+        conn.fetchrow.return_value = {"cnt": 5}
+        await count_inbound_messages(
+            conn, tenant_id=TENANT_ID, conversation_id=CONVERSATION_ID
+        )
+        args = conn.fetchrow.call_args.args
         assert args[1] == TENANT_ID
         assert args[2] == CONVERSATION_ID
 
     @pytest.mark.asyncio
-    async def test_query_filters_by_role_direction_and_soft_delete(self) -> None:
+    async def test_query_filters_by_role_and_soft_delete(self) -> None:
         conn = AsyncMock()
-        conn.fetchval.return_value = 0
-        await count_customer_messages_in_conversation(conn, TENANT_ID, CONVERSATION_ID)
-        sql = conn.fetchval.call_args.args[0]
+        conn.fetchrow.return_value = {"cnt": 0}
+        await count_inbound_messages(
+            conn, tenant_id=TENANT_ID, conversation_id=CONVERSATION_ID
+        )
+        sql = conn.fetchrow.call_args.args[0]
         assert "role = 'customer'" in sql
-        assert "direction = 'inbound'" in sql
         assert "deleted_at IS NULL" in sql
 
 
 # ============================================================
 # Webhook endpoint — tests de integración
 #
-# Patrón: scope_conn con fetchrow.side_effect y fetchval.return_value.
+# Patrón: scope_conn con fetchrow.side_effect.
 # El payload no lleva conversation_id ni external_conversation_id, así que
 # la secuencia en el tenant_scope es:
 #   fetchrow[0] → find_end_customer_by_email
 #   fetchrow[1] → create_conversation (customer ya existe, skip create_end_customer)
-#   fetchval[0] → count_customer_messages_in_conversation
 #   fetchrow[2] → insert_message
 #   execute[0]  → update_conversation_last_message
+#   fetchrow[3] → count_inbound_messages (via enforce_message_cap)
 #   [si limit exceeded]
-#   fetchrow[3] → get_open_escalation_for_conversation
-#   fetchrow[4] → insert_escalation (si no hay escalación activa)
+#   fetchrow[4] → get_open_escalation_for_conversation
+#   fetchrow[5] → insert_message (cortesía, si no hay escalación activa)
+#   fetchrow[6] → insert_escalation (si no hay escalación activa)
+#   execute[1]  → update_conversation_status
 # ============================================================
 
 
@@ -236,26 +245,27 @@ class TestWebhookMessageLimit:
     def _scope_conn_under_limit(self, msg_count: int = 10) -> AsyncMock:
         conn = AsyncMock()
         conn.fetchrow.side_effect = [
-            _customer_row(),     # find_end_customer_by_email → existe
-            _conversation_row(), # create_conversation
-            _message_row(),      # insert_message
+            _customer_row(),      # find_end_customer_by_email → existe
+            _conversation_row(),  # create_conversation
+            _message_row(),       # insert_message
+            {"cnt": msg_count},   # count_inbound_messages
         ]
-        conn.fetchval.return_value = msg_count
         conn.execute.return_value = "UPDATE 1"
         return conn
 
     def _scope_conn_over_limit(self, *, open_escalation: dict | None = None) -> AsyncMock:
         conn = AsyncMock()
-        fetchrow_effects = [
+        fetchrow_effects: list[dict | None] = [
             _customer_row(),     # find_end_customer_by_email
             _conversation_row(), # create_conversation
             _message_row(),      # insert_message
+            {"cnt": 51},         # count_inbound_messages (> default cap 50)
             open_escalation,     # get_open_escalation_for_conversation
         ]
         if open_escalation is None:
+            fetchrow_effects.append(_message_row())     # insert_message (cortesía)
             fetchrow_effects.append(_escalation_row())  # insert_escalation
         conn.fetchrow.side_effect = fetchrow_effects
-        conn.fetchval.return_value = 50  # == default limit
         conn.execute.return_value = "UPDATE 1"
         return conn
 
@@ -285,8 +295,8 @@ class TestWebhookMessageLimit:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["decision"] == "escalated"
-        assert data["escalation_reason"] == "conversation_message_limit_reached"
+        assert data["decision"] == "escalate"
+        assert data["escalation_reason"] == "message_cap_exceeded"
         assert data["escalation_id"] == str(ESCALATION_ID)
         svc.process_inbound.assert_not_called()
 
@@ -301,17 +311,14 @@ class TestWebhookMessageLimit:
             agent_service=svc,
         )
         assert resp.status_code == 200
-        assert resp.json()["decision"] == "escalated"
+        assert resp.json()["decision"] == "escalate"
         assert resp.json()["escalation_id"] == str(ESCALATION_ID)
-        # fetchrow[4] (insert_escalation) no debe haberse llamado
-        scope_conn = self._scope_conn_over_limit(open_escalation=_escalation_row())
-        assert scope_conn.fetchrow.side_effect is not None  # sanity: solo 4 calls previstas
 
     def test_per_tenant_override_raises_limit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Con limit=100 en tenant_config, count=50 no debe escalar."""
-        config = make_tenant_configuration(extra={"max_inbound_messages_per_conversation": 100})
+        config = make_tenant_configuration(extra={"max_inbound_messages": 100})
         svc = AsyncMock()
         svc.process_inbound = AsyncMock(return_value=_fake_agent_outcome())
         # count=50 < 100 → flujo normal
@@ -349,8 +356,8 @@ class TestWebhookMessageLimit:
             settings_callable=lambda: zero_settings,
         )
         assert resp.status_code == 200
-        # fetchval no se llama cuando limit=0
-        conn.fetchval.assert_not_called()
+        # count_inbound_messages no se llama cuando limit=0 (early return)
+        assert conn.fetchrow.call_count == 3  # customer + conversation + message only
         svc.process_inbound.assert_called_once()
 
     def test_message_is_persisted_when_limit_exceeded(
@@ -361,6 +368,6 @@ class TestWebhookMessageLimit:
         svc = AsyncMock()
         resp = self._run(monkeypatch, scope_conn=conn, agent_service=svc)
         assert resp.status_code == 200
-        assert resp.json()["decision"] == "escalated"
-        # fetchrow[2] = insert_message fue llamado
+        assert resp.json()["decision"] == "escalate"
+        # insert_message (inbound) was called before the cap check
         assert conn.fetchrow.call_count >= 3

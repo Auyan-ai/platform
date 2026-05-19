@@ -66,6 +66,9 @@ async def enforce_message_cap(
         if isinstance(override, int) and override > 0:
             cap = override
 
+    if cap <= 0:
+        return None
+
     count = await count_inbound_messages(
         conn, tenant_id=tenant_id, conversation_id=conversation_id
     )

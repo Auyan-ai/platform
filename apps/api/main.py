@@ -156,3 +156,32 @@ app.include_router(tool_permissions_router)
 async def health() -> dict[str, str | bool]:
     settings = get_settings()
     return {"ok": True, "env": settings.app_env}
+
+
+@app.get("/health/ready", tags=["health"])
+async def readiness() -> dict[str, str | bool]:
+    """Readiness probe — verifies DB pool is reachable.
+
+    Returns 200 if the database responds to a simple query.
+    Returns 503 if the pool is not initialized or the query fails.
+    """
+    from apps.api.db.client import get_pool
+
+    settings = get_settings()
+    checks: dict[str, str | bool] = {"env": settings.app_env}
+
+    try:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            result = await conn.fetchval("SELECT 1")
+            checks["db"] = result == 1
+    except Exception as exc:
+        logger.warning("readiness_check_failed component=db error=%s", exc)
+        checks["db"] = False
+
+    checks["ok"] = all(v is True for k, v in checks.items() if k != "env")
+    if not checks["ok"]:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=503, content=checks)  # type: ignore[return-value]
+    return checks
