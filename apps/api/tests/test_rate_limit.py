@@ -385,6 +385,7 @@ class TestWebhookRateLimit:
             f"{ROUTER_MODULE}.tenant_scope", make_fake_tenant_scope(fake_scope_conn)
         )
         monkeypatch.setattr(f"{ROUTER_MODULE}.check_tenant_budget", AsyncMock())
+        monkeypatch.setattr(f"{ROUTER_MODULE}.enforce_message_cap", AsyncMock(return_value=None))
 
         with TestClient(app, raise_server_exceptions=False) as client:
             resp = client.post(

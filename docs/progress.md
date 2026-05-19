@@ -1,10 +1,6 @@
 # Auyan — Estado del proyecto
 
-<<<<<<< Updated upstream
-_Última actualización: 2026-05-18 (sesión 26 — Sprint 11 mergeado ✅, arrancando deuda técnica)_
-=======
-_Última actualización: 2026-05-19 (sesión 26 — Sprint 11 mergeado, arrancando Sprint 12)_
->>>>>>> Stashed changes
+_Última actualización: 2026-05-19 (sesión 27 — Rate limiting + cost controls A.1–A.4 completos, CI verde, PR #78 listo para merge)_
 
 ---
 
@@ -1106,9 +1102,9 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 | Sub-PR | Qué incluye | Estado |
 |--------|-------------|--------|
 | A.1 | `rate_limit_buckets` + `check_and_increment_rate_limit` + `enforce_rate_limit` + gate en `webhooks/inbound` + cleanup | ✅ [PR #77](https://github.com/Auyan-ai/platform/pull/77) mergeado |
-| A.2 | `tenant_usage_daily` + `record_tenant_usage` + gate pre-grafo `check_tenant_budget` | en curso |
-| A.3 | `max_inbound_messages_per_conversation` check + escalación automática | pendiente |
-| A.4 | `GET /tenants/me/usage` + UI card de consumo | pendiente (opcional) |
+| A.2 | `tenant_usage_daily` + `record_tenant_usage` + gate pre-grafo `check_tenant_budget` | ✅ [PR #78](https://github.com/Auyan-ai/platform/pull/78) |
+| A.3 | `max_inbound_messages_per_conversation` check + escalación automática | ✅ en PR #78 |
+| A.4 | `GET /tenants/me/usage` + UI card de consumo | ✅ en PR #78 |
 
 ### A.1 — Rate limiting por tenant y end_customer ([PR #77](https://github.com/Auyan-ai/platform/pull/77)) ✅
 
@@ -1123,6 +1119,54 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 | `apps/api/services/cleanup.py` | `delete_expired_rate_limit_buckets` en el cleanup loop |
 | Tests | 15 nuevos en `test_rate_limit.py` |
 
-### Empezar aquí — usar **Sonnet**
+### A.2 — Budget diario por tenant ([PR #78](https://github.com/Auyan-ai/platform/pull/78)) ✅
 
-1. **A.2** — `tenant_usage_daily` + tracking de tokens/costo por día + gate pre-grafo si excede budget
+| Área | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260519000002_add_tenant_usage_daily.sql` | Tabla `tenant_usage_daily` (UPSERT atómico por día) |
+| `apps/api/db/models.py` | `TenantUsageDaily` |
+| `apps/api/db/queries.py` | `upsert_tenant_usage_daily`, `get_tenant_usage_today` |
+| `apps/api/core/errors.py` | `BudgetExceededError` → HTTP 429 con `Retry-After` hasta medianoche UTC |
+| `apps/api/core/config.py` | `budget_usd_daily` (default $10/día; override per-tenant en `extra.budget_usd_daily`) |
+| `apps/api/services/usage.py` | `check_tenant_budget` (gate pre-grafo) + `UsageRecorder` (fire-and-forget post-outcome) |
+| `apps/api/routers/webhooks.py` | Gate cableado tras rate limit; `UsageRecorder.record` tras `outcome` |
+| Tests | 12 nuevos (`test_usage.py`); `FakeSettings.budget_usd_daily`; mocks en tests existentes del webhook |
+
+**Suite total: 699/699 verde. Ruff limpio.**
+
+### A.3 — Message cap por conversación (en PR #78) ✅
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/core/config.py` | `max_inbound_messages_per_conversation` (default 50; override per-tenant en `extra.max_inbound_messages`) |
+| `apps/api/db/queries.py` | `count_inbound_messages` — COUNT `role='customer'` |
+| `apps/api/services/message_cap.py` | `enforce_message_cap`: si count > cap → insertar cortesía + escalación + status `escalated`; idempotente si ya hay escalación activa; devuelve `AgentOutcome` sin tocar el grafo |
+| `apps/api/routers/webhooks.py` | Cap check tras `insert_message`; `cap_outcome` cortocircuita `process_inbound` |
+| Tests | 7 nuevos (`test_message_cap.py`) |
+
+**Suite total: 706/706 verde. Ruff limpio.**
+
+### A.4 — Endpoint de uso + UI card (en PR #78) ✅
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/db/queries.py` | `get_tenant_usage_range` — últimos N días, orden DESC |
+| `apps/api/routers/tenants.py` | `GET /tenants/me/usage?days=7` → `TenantUsageResponse` (today, budget_used_pct, history) |
+| `apps/web/lib/api/query-keys.ts` | `queryKeys.tenants.usage(tenantId, days)` |
+| `apps/web/lib/api/hooks/usage.ts` | `useUsage(tenantId, days)` — staleTime 60 s, refetch 120 s |
+| `apps/web/components/clients/UsageCard.tsx` | Barra de progreso colorizada (verde/ámbar/rojo), tokens in/out, requests |
+| `apps/web/app/clients/[tenantId]/overview/page.tsx` | `UsageCard` integrado en grid 3 columnas |
+| Tests | 5 nuevos en `TestGetMyTenantUsage` |
+
+**Suite total: 711/711 verde. Ruff limpio. TypeScript limpio.**
+
+#### Fix CI post-merge
+
+`get_settings()` se llamaba directo dentro del endpoint, bypassando `dependency_overrides` en los tests → Pydantic-Settings intentaba leer env vars reales en CI → crash. Fix: `SettingsDep = Annotated[object, Depends(get_settings)]` + parámetro en la firma del endpoint.
+
+---
+
+### Siguiente paso — usar **Sonnet**
+
+1. Merge [PR #78](https://github.com/Auyan-ai/platform/pull/78) → develop (aplica migración `20260519000002_add_tenant_usage_daily.sql` en staging antes)
+2. Sprint 12 — Zendesk bidireccional, reapertura de conversaciones, Unified KB

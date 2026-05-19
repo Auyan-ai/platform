@@ -27,7 +27,6 @@ from apps.api.db.client import bootstrap_connection, tenant_scope
 from apps.api.db.models import ChannelType
 from apps.api.db.queries import (
     complete_idempotency_key,
-    count_customer_messages_in_conversation,
     create_conversation,
     create_end_customer,
     delete_idempotency_key,
@@ -35,14 +34,13 @@ from apps.api.db.queries import (
     find_conversation_by_id,
     find_end_customer_by_email,
     get_idempotency_record,
-    get_open_escalation_for_conversation,
     get_tenant_by_slug,
     get_tenant_configuration,
-    insert_escalation,
     insert_message,
     try_insert_idempotency_key,
     update_conversation_last_message,
 )
+from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
 from apps.api.services.usage import UsageRecorder, check_tenant_budget
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
@@ -210,8 +208,7 @@ async def inbound(
             idempotency_claimed = True
 
     # 4. Dentro del tenant_scope: customer, conversación, mensaje inbound.
-    message_limit_exceeded = False
-    limit_escalation_id: str | None = None
+    cap_outcome = None
     try:
         async with tenant_scope(tenant.id) as conn:
             customer = None
@@ -247,30 +244,6 @@ async def inbound(
                     subject=payload.subject,
                 )
 
-            # Verificar límite de mensajes por conversación antes de insertar.
-            _msg_limit = settings.max_inbound_messages_per_conversation
-            if tenant_config and isinstance(
-                tenant_config.extra.get("max_inbound_messages_per_conversation"), int
-            ):
-                _msg_limit = tenant_config.extra["max_inbound_messages_per_conversation"]
-
-            customer_msg_count = 0
-            if _msg_limit > 0:
-                customer_msg_count = await count_customer_messages_in_conversation(
-                    conn, tenant.id, conversation.id
-                )
-                if customer_msg_count >= _msg_limit:
-                    message_limit_exceeded = True
-                    logger.warning(
-                        "conversation_message_limit_reached",
-                        extra={
-                            "tenant_id": str(tenant.id),
-                            "conversation_id": str(conversation.id),
-                            "count": customer_msg_count,
-                            "limit": _msg_limit,
-                        },
-                    )
-
             inbound_msg = await insert_message(
                 conn,
                 tenant_id=tenant.id,
@@ -282,60 +255,28 @@ async def inbound(
             )
             await update_conversation_last_message(conn, tenant.id, conversation.id)
 
-            if message_limit_exceeded:
-                existing_esc = await get_open_escalation_for_conversation(
-                    conn, tenant.id, conversation.id
-                )
-                if existing_esc is None:
-                    esc = await insert_escalation(
-                        conn,
-                        tenant_id=tenant.id,
-                        conversation_id=conversation.id,
-                        reason="conversation_message_limit_reached",
-                        triggered_by_message_id=inbound_msg.id,
-                        metadata={"message_count": customer_msg_count, "limit": _msg_limit},
-                    )
-                    limit_escalation_id = str(esc.id)
-                else:
-                    limit_escalation_id = str(existing_esc.id)
-
-        if message_limit_exceeded:
-            logger.info(
-                "inbound_blocked_message_limit",
-                extra={
-                    "tenant_id": str(tenant.id),
-                    "conversation_id": str(conversation.id),
-                    "escalation_id": limit_escalation_id,
-                },
+            # 4b. Message cap — escala automáticamente si la conversación excedió el límite.
+            cap_outcome = await enforce_message_cap(
+                conn,
+                tenant_id=tenant.id,
+                conversation_id=conversation.id,
+                inbound_message_id=inbound_msg.id,
+                tenant_config=tenant_config,
+                settings=settings,
             )
-            response = InboundResponse(
-                ok=True,
-                decision="escalated",
-                conversation_id=str(conversation.id),
-                inbound_message_id=str(inbound_msg.id),
-                escalation_id=limit_escalation_id,
-                escalation_reason="conversation_message_limit_reached",
-            )
-            if idempotency_key and idempotency_claimed:
-                async with bootstrap_connection() as conn:
-                    await complete_idempotency_key(
-                        conn,
-                        tenant_id=tenant.id,
-                        key=idempotency_key,
-                        response_status=200,
-                        response_body=response.model_dump(mode="json"),
-                    )
-            return response
 
-        # 5. Disparar el grafo.
-        outcome = await agent_service.process_inbound(
-            tenant_id=tenant.id,
-            conversation_id=conversation.id,
-            inbound_message_id=inbound_msg.id,
-            inbound_message_content=payload.content,
-            channel=payload.channel,
-            end_customer_id=customer.id,
-        )
+        # 5. Disparar el grafo (o usar el outcome del cap si aplica).
+        if cap_outcome is not None:
+            outcome = cap_outcome
+        else:
+            outcome = await agent_service.process_inbound(
+                tenant_id=tenant.id,
+                conversation_id=conversation.id,
+                inbound_message_id=inbound_msg.id,
+                inbound_message_content=payload.content,
+                channel=payload.channel,
+                end_customer_id=customer.id,
+            )
 
     except Exception:
         # Si el procesamiento falla, liberar la key para que el reintento sea válido.

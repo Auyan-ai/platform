@@ -117,9 +117,9 @@ class Settings(BaseSettings):
     # Override per-tenant: tenant_configurations.extra.budget_usd_daily
     budget_usd_daily: float = 10.0
 
-    # --- Límite de mensajes por conversación ---
-    # Máximo de mensajes inbound del cliente antes de escalar automáticamente.
-    # 0 = sin límite. Override per-tenant via tenant_configurations.extra.
+    # --- Message cap por conversación ---
+    # Mensajes inbound máximos por conversación antes de escalar automáticamente.
+    # Override per-tenant: tenant_configurations.extra.max_inbound_messages
     max_inbound_messages_per_conversation: int = 50
 
     @field_validator("rag_min_similarity")
