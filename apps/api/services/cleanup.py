@@ -32,6 +32,7 @@ from uuid import UUID
 from apps.api.db.client import bootstrap_connection, tenant_scope
 from apps.api.db.models import TenantConfiguration
 from apps.api.db.queries import (
+    delete_expired_rate_limit_buckets,
     get_nudge_candidates,
     get_stale_conversations,
     get_tenant_configuration,
@@ -223,6 +224,9 @@ async def run_abandoned_cleanup() -> dict[str, int]:
     """
     async with bootstrap_connection() as conn:
         tenants = await list_all_tenants(conn)
+        expired_buckets = await delete_expired_rate_limit_buckets(conn)
+        if expired_buckets > 0:
+            logger.debug("rate_limit_buckets_cleaned count=%d", expired_buckets)
 
     results: dict[str, int] = {}
     for tenant in tenants:

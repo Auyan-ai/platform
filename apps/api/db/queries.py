@@ -1989,3 +1989,45 @@ async def get_proposals_metrics(
     )
     return data
 
+
+
+# ============================================================
+# Rate limiting
+# ============================================================
+
+
+async def check_and_increment_rate_limit(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    bucket_key: str,
+) -> int:
+    """Incrementa el contador del bucket de la ventana actual y retorna el total.
+
+    Ventana fija de 60s (date_trunc('minute', now())).
+    La operación es atómica — INSERT ... ON CONFLICT DO UPDATE.
+    """
+    row = await conn.fetchrow(
+        """
+        INSERT INTO rate_limit_buckets (tenant_id, bucket_key, window_start, count)
+        VALUES ($1, $2, date_trunc('minute', now()), 1)
+        ON CONFLICT (tenant_id, bucket_key, window_start)
+        DO UPDATE SET count = rate_limit_buckets.count + 1
+        RETURNING count
+        """,
+        tenant_id,
+        bucket_key,
+    )
+    return int(row["count"])
+
+
+async def delete_expired_rate_limit_buckets(conn: asyncpg.Connection) -> int:
+    """Elimina buckets con window_start anterior a hace 1 hora. Retorna filas eliminadas."""
+    result = await conn.execute(
+        """
+        DELETE FROM rate_limit_buckets
+        WHERE window_start < now() - INTERVAL '1 hour'
+        """
+    )
+    # asyncpg retorna 'DELETE N' como string
+    return int(result.split()[-1])

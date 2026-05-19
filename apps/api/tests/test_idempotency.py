@@ -36,6 +36,7 @@ from tests.conftest import (
     make_fake_tenant_scope,
     make_message,
     make_tenant,
+    make_tenant_configuration,
 )
 
 WEBHOOK_SECRET = "test-webhook-secret"
@@ -146,6 +147,11 @@ def _patch_db_with_idem(
     monkeypatch.setattr(
         f"{ROUTER_MODULE}.get_tenant_by_slug", AsyncMock(return_value=make_tenant())
     )
+    monkeypatch.setattr(
+        f"{ROUTER_MODULE}.get_tenant_configuration",
+        AsyncMock(return_value=make_tenant_configuration()),
+    )
+    monkeypatch.setattr(f"{ROUTER_MODULE}.enforce_rate_limit", AsyncMock())
     monkeypatch.setattr(
         f"{ROUTER_MODULE}.find_end_customer_by_email",
         AsyncMock(return_value=make_end_customer()),

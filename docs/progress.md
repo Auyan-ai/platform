@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-19 (sesión 25 — Sprint 11 Slow Agent completado, PR #76 abierto)_
+_Última actualización: 2026-05-18 (sesión 26 — Sprint 11 mergeado ✅, arrancando deuda técnica)_
 
 ---
 
@@ -1093,15 +1093,9 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 | `components/nav/Sidebar.tsx` | Enlace "Mejoras propuestas ✨" |
 | Pages | `/tenants/[tenantId]/proposals` + `/tenants/[tenantId]/proposals/[proposalId]` |
 
-### Pendiente antes de merge
-
-- [ ] **Aplicar en staging:** `20260519000000_add_slow_agent.sql`
-- [ ] Correr CLI con tenant real: `poetry run python -m scripts.run_slow_agent --tenant <uuid> --max-conversations 5`
-- [ ] Merge PR #76 → develop y deploy staging
+**Sprint 11 completado ✅** — Migración aplicada en staging, CLI validado, dashboard verificado, PR #76 mergeado → develop.
 
 ### Empezar aquí en la próxima sesión — usar **Sonnet**
 
-1. Aplicar migración slow_agent en staging (psql)
-2. Testear CLI contra staging (5 conversaciones)
-3. Verificar dashboard en staging: queue + metrics carguen
-4. Merge PR #76 → develop
+1. Mergear PR #77 (rate limiting A.1) → develop
+2. Continuar deuda técnica: A.2 (token budget diario), A.3 (message cap por conversación)

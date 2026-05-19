@@ -30,6 +30,7 @@ from tests.conftest import (
     make_fake_tenant_scope,
     make_message,
     make_tenant,
+    make_tenant_configuration,
 )
 
 WEBHOOK_SECRET = "test-webhook-secret"
@@ -126,6 +127,11 @@ def _patch_db(
         f"{ROUTER_MODULE}.bootstrap_connection", make_fake_bootstrap_connection()
     )
     monkeypatch.setattr(f"{ROUTER_MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{ROUTER_MODULE}.get_tenant_configuration",
+        AsyncMock(return_value=make_tenant_configuration()),
+    )
+    monkeypatch.setattr(f"{ROUTER_MODULE}.enforce_rate_limit", AsyncMock())
     monkeypatch.setattr(
         f"{ROUTER_MODULE}.get_tenant_by_slug",
         AsyncMock(return_value=tenant if tenant is not None else make_tenant()),
@@ -352,6 +358,8 @@ class TestMultiTurn:
         monkeypatch.setattr(f"{ROUTER_MODULE}.bootstrap_connection", make_fake_bootstrap_connection())
         monkeypatch.setattr(f"{ROUTER_MODULE}.tenant_scope", make_fake_tenant_scope())
         monkeypatch.setattr(f"{ROUTER_MODULE}.get_tenant_by_slug", AsyncMock(return_value=make_tenant()))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.get_tenant_configuration", AsyncMock(return_value=make_tenant_configuration()))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.enforce_rate_limit", AsyncMock())
         monkeypatch.setattr(f"{ROUTER_MODULE}.find_end_customer_by_email", AsyncMock(return_value=make_end_customer()))
         monkeypatch.setattr(f"{ROUTER_MODULE}.create_end_customer", AsyncMock(return_value=make_end_customer()))
         monkeypatch.setattr(f"{ROUTER_MODULE}.find_conversation_by_id", find_by_id_mock)
@@ -392,6 +400,8 @@ class TestMultiTurn:
         monkeypatch.setattr(f"{ROUTER_MODULE}.bootstrap_connection", make_fake_bootstrap_connection())
         monkeypatch.setattr(f"{ROUTER_MODULE}.tenant_scope", make_fake_tenant_scope())
         monkeypatch.setattr(f"{ROUTER_MODULE}.get_tenant_by_slug", AsyncMock(return_value=make_tenant()))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.get_tenant_configuration", AsyncMock(return_value=make_tenant_configuration()))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.enforce_rate_limit", AsyncMock())
         monkeypatch.setattr(f"{ROUTER_MODULE}.find_end_customer_by_email", AsyncMock(return_value=None))
         monkeypatch.setattr(f"{ROUTER_MODULE}.create_end_customer", AsyncMock(return_value=make_end_customer()))
         monkeypatch.setattr(f"{ROUTER_MODULE}.find_conversation_by_id", AsyncMock(return_value=None))
