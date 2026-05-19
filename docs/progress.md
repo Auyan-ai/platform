@@ -1107,7 +1107,7 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 |--------|-------------|--------|
 | A.1 | `rate_limit_buckets` + `check_and_increment_rate_limit` + `enforce_rate_limit` + gate en `webhooks/inbound` + cleanup | ✅ [PR #77](https://github.com/Auyan-ai/platform/pull/77) mergeado |
 | A.2 | `tenant_usage_daily` + `record_tenant_usage` + gate pre-grafo `check_tenant_budget` | ✅ [PR #78](https://github.com/Auyan-ai/platform/pull/78) |
-| A.3 | `max_inbound_messages_per_conversation` check + escalación automática | pendiente |
+| A.3 | `max_inbound_messages_per_conversation` check + escalación automática | ✅ en PR #78 |
 | A.4 | `GET /tenants/me/usage` + UI card de consumo | pendiente (opcional) |
 
 ### A.1 — Rate limiting por tenant y end_customer ([PR #77](https://github.com/Auyan-ai/platform/pull/77)) ✅
@@ -1138,6 +1138,19 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 
 **Suite total: 699/699 verde. Ruff limpio.**
 
+### A.3 — Message cap por conversación (en PR #78) ✅
+
+| Área | Qué se hizo |
+|---|---|
+| `apps/api/core/config.py` | `max_inbound_messages_per_conversation` (default 50; override per-tenant en `extra.max_inbound_messages`) |
+| `apps/api/db/queries.py` | `count_inbound_messages` — COUNT `role='customer'` |
+| `apps/api/services/message_cap.py` | `enforce_message_cap`: si count > cap → insertar cortesía + escalación + status `escalated`; idempotente si ya hay escalación activa; devuelve `AgentOutcome` sin tocar el grafo |
+| `apps/api/routers/webhooks.py` | Cap check tras `insert_message`; `cap_outcome` cortocircuita `process_inbound` |
+| Tests | 7 nuevos (`test_message_cap.py`) |
+
+**Suite total: 706/706 verde. Ruff limpio.**
+
 ### Empezar aquí — usar **Sonnet**
 
-1. **A.3** — `max_inbound_messages_per_conversation` check + escalación automática
+1. **A.4** (opcional) — `GET /tenants/me/usage` + UI card de consumo
+2. Merge PR #78 → develop una vez validado en staging
