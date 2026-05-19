@@ -1106,7 +1106,7 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 | Sub-PR | Qué incluye | Estado |
 |--------|-------------|--------|
 | A.1 | `rate_limit_buckets` + `check_and_increment_rate_limit` + `enforce_rate_limit` + gate en `webhooks/inbound` + cleanup | ✅ [PR #77](https://github.com/Auyan-ai/platform/pull/77) mergeado |
-| A.2 | `tenant_usage_daily` + `record_tenant_usage` + gate pre-grafo `check_tenant_budget` | en curso |
+| A.2 | `tenant_usage_daily` + `record_tenant_usage` + gate pre-grafo `check_tenant_budget` | ✅ [PR #78](https://github.com/Auyan-ai/platform/pull/78) |
 | A.3 | `max_inbound_messages_per_conversation` check + escalación automática | pendiente |
 | A.4 | `GET /tenants/me/usage` + UI card de consumo | pendiente (opcional) |
 
@@ -1123,6 +1123,21 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 | `apps/api/services/cleanup.py` | `delete_expired_rate_limit_buckets` en el cleanup loop |
 | Tests | 15 nuevos en `test_rate_limit.py` |
 
+### A.2 — Budget diario por tenant ([PR #78](https://github.com/Auyan-ai/platform/pull/78)) ✅
+
+| Área | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260519000002_add_tenant_usage_daily.sql` | Tabla `tenant_usage_daily` (UPSERT atómico por día) |
+| `apps/api/db/models.py` | `TenantUsageDaily` |
+| `apps/api/db/queries.py` | `upsert_tenant_usage_daily`, `get_tenant_usage_today` |
+| `apps/api/core/errors.py` | `BudgetExceededError` → HTTP 429 con `Retry-After` hasta medianoche UTC |
+| `apps/api/core/config.py` | `budget_usd_daily` (default $10/día; override per-tenant en `extra.budget_usd_daily`) |
+| `apps/api/services/usage.py` | `check_tenant_budget` (gate pre-grafo) + `UsageRecorder` (fire-and-forget post-outcome) |
+| `apps/api/routers/webhooks.py` | Gate cableado tras rate limit; `UsageRecorder.record` tras `outcome` |
+| Tests | 12 nuevos (`test_usage.py`); `FakeSettings.budget_usd_daily`; mocks en tests existentes del webhook |
+
+**Suite total: 699/699 verde. Ruff limpio.**
+
 ### Empezar aquí — usar **Sonnet**
 
-1. **A.2** — `tenant_usage_daily` + tracking de tokens/costo por día + gate pre-grafo si excede budget
+1. **A.3** — `max_inbound_messages_per_conversation` check + escalación automática
