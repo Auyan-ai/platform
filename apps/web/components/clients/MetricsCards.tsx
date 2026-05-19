@@ -1,7 +1,6 @@
 'use client'
 
 import { useMetrics, type TenantMetrics } from '@/lib/api/hooks/metrics'
-import { useUsage } from '@/lib/api/hooks/usage'
 
 interface MetricsCardsProps {
   tenantId: string
@@ -26,7 +25,6 @@ function StatCard({ label, value, sub, accent = 'text-neutral-900' }: StatCardPr
 
 export function MetricsCards({ tenantId }: MetricsCardsProps) {
   const { data, isLoading, isError } = useMetrics(tenantId)
-  const { data: usage } = useUsage(tenantId)
 
   if (isLoading) {
     return (
@@ -98,39 +96,6 @@ export function MetricsCards({ tenantId }: MetricsCardsProps) {
           </div>
         </div>
       </div>
-
-      {usage && <UsageCard usage={usage} />}
-    </div>
-  )
-}
-
-function UsageCard({ usage }: { usage: NonNullable<ReturnType<typeof useUsage>['data']> }) {
-  const costStr = `$${usage.cost_usd.toFixed(4)}`
-  const budgetStr = `$${usage.budget_usd.toFixed(2)}`
-  const pct = usage.budget_used_pct
-  const barColor = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-400' : 'bg-green-500'
-
-  return (
-    <div className="rounded-xl border border-neutral-200 bg-white px-5 py-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-wider text-neutral-400">
-          Consumo hoy
-        </p>
-        <span className="text-xs text-neutral-400">{usage.request_count} requests</span>
-      </div>
-
-      <div className="mt-3 flex items-end justify-between">
-        <p className="text-2xl font-semibold text-neutral-900">{costStr}</p>
-        <p className="text-sm text-neutral-400">de {budgetStr}</p>
-      </div>
-
-      <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-neutral-100">
-        <div
-          className={`h-full rounded-full transition-all ${barColor}`}
-          style={{ width: `${Math.min(100, pct)}%` }}
-        />
-      </div>
-      <p className="mt-1 text-right text-xs text-neutral-400">{pct.toFixed(1)}% del presupuesto</p>
     </div>
   )
 }

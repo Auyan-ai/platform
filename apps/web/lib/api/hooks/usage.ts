@@ -4,30 +4,38 @@ import { useQuery } from '@tanstack/react-query'
 import { getToken } from '@/lib/api/get-token'
 import { queryKeys } from '@/lib/api/query-keys'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
-
-export interface TenantUsage {
+export interface DailyUsage {
   date: string
   tokens_in: number
   tokens_out: number
   cost_usd: number
   request_count: number
-  budget_usd: number
-  budget_used_pct: number
 }
 
-export function useUsage(tenantId: string) {
+export interface TenantUsage {
+  today: DailyUsage | null
+  budget_usd_daily: number
+  budget_used_pct: number
+  days: number
+  history: DailyUsage[]
+}
+
+export function useUsage(tenantId: string, days = 7) {
   return useQuery({
-    queryKey: queryKeys.tenants.usage(tenantId),
+    queryKey: queryKeys.tenants.usage(tenantId, days),
     queryFn: async (): Promise<TenantUsage> => {
       const token = await getToken()
-      const res = await fetch(`${API_URL}/tenants/me/usage`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'X-Tenant-Id': tenantId,
-        },
-      })
-      if (!res.ok) throw new Error('No se pudo cargar el consumo')
+      const apiBase = process.env.NEXT_PUBLIC_API_URL ?? ''
+      const res = await fetch(
+        `${apiBase}/tenants/me/usage?days=${days}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'X-Tenant-Id': tenantId,
+          },
+        }
+      )
+      if (!res.ok) throw new Error(`usage fetch failed: ${res.status}`)
       return res.json()
     },
     staleTime: 60_000,

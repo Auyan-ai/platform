@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
+import datetime
 from typing import Annotated
 from uuid import UUID
 
-from apps.api.core.config import Settings, get_settings
+from apps.api.core.config import get_settings
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id, require_role
 from apps.api.db.client import bootstrap_connection, tenant_scope
 from apps.api.db.models import ChannelType
-from apps.api.db.queries import get_tenant_usage_today, list_all_tenants
+from apps.api.db.queries import get_tenant_configuration, get_tenant_usage_range, list_all_tenants
 from apps.api.services.tenants import get_tenant, get_tenant_config, get_tenant_metrics
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
 AuthDep = Annotated[AuthContext, Depends(get_auth_context)]
 TenantIdDep = Annotated[UUID, Depends(get_tenant_id)]
+SettingsDep = Annotated[object, Depends(get_settings)]
 
 
 # ----------------------------------------------------------------
@@ -58,6 +60,22 @@ class TenantMetricsResponse(BaseModel):
     by_status: ConversationStatusCounts
     resolution_rate: float
     escalation_rate: float
+
+
+class DailyUsage(BaseModel):
+    date: str
+    tokens_in: int
+    tokens_out: int
+    cost_usd: float
+    request_count: int
+
+
+class TenantUsageResponse(BaseModel):
+    today: DailyUsage | None
+    budget_usd_daily: float
+    budget_used_pct: float
+    days: int
+    history: list[DailyUsage]
 
 
 # ----------------------------------------------------------------
@@ -116,48 +134,48 @@ async def get_my_tenant_metrics(tenant_id: TenantIdDep) -> TenantMetricsResponse
     )
 
 
-class TenantUsageResponse(BaseModel):
-    date: str
-    tokens_in: int
-    tokens_out: int
-    cost_usd: float
-    request_count: int
-    budget_usd: float
-    budget_used_pct: float
-
-
 @router.get(
     "/me/usage",
     response_model=TenantUsageResponse,
-    summary="Consumo de hoy del tenant — tokens, costo y % del presupuesto",
+    summary="Consumo de tokens y costo LLM del tenant — hoy y últimos N días",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
 )
 async def get_my_tenant_usage(
     tenant_id: TenantIdDep,
-    settings: Annotated[Settings, Depends(get_settings)],
+    settings: SettingsDep,
+    days: int = Query(default=7, ge=1, le=90, description="Días de historial a retornar"),
 ) -> TenantUsageResponse:
+    async with bootstrap_connection() as conn:
+        tenant_config = await get_tenant_configuration(conn, tenant_id)
+
     async with tenant_scope(tenant_id) as conn:
-        config = await get_tenant_config(conn, tenant_id)
-        usage = await get_tenant_usage_today(conn, tenant_id=tenant_id)
+        rows = await get_tenant_usage_range(conn, tenant_id=tenant_id, days=days)
 
-    budget = float(config.extra.get("budget_usd_daily", settings.budget_usd_daily))
-    if usage is None:
-        return TenantUsageResponse(
-            date="",
-            tokens_in=0,
-            tokens_out=0,
-            cost_usd=0.0,
-            request_count=0,
-            budget_usd=budget,
-            budget_used_pct=0.0,
+    budget: float = settings.budget_usd_daily
+    if tenant_config is not None:
+        override = tenant_config.extra.get("budget_usd_daily")
+        if isinstance(override, int | float) and override > 0:
+            budget = float(override)
+
+    history = [
+        DailyUsage(
+            date=row.date,
+            tokens_in=row.tokens_in,
+            tokens_out=row.tokens_out,
+            cost_usd=float(row.cost_usd),
+            request_count=row.request_count,
         )
+        for row in rows
+    ]
 
-    pct = min(100.0, round(usage.cost_usd / budget * 100, 1)) if budget > 0 else 0.0
+    today_str = datetime.date.today().isoformat()
+    today = next((h for h in history if h.date == today_str), None)
+    budget_used_pct = round(today.cost_usd / budget * 100, 1) if today and budget > 0 else 0.0
+
     return TenantUsageResponse(
-        date=usage.date,
-        tokens_in=usage.tokens_in,
-        tokens_out=usage.tokens_out,
-        cost_usd=round(usage.cost_usd, 4),
-        request_count=usage.request_count,
-        budget_usd=budget,
-        budget_used_pct=pct,
+        today=today,
+        budget_usd_daily=budget,
+        budget_used_pct=budget_used_pct,
+        days=days,
+        history=history,
     )

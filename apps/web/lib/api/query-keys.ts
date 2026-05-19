@@ -8,7 +8,7 @@ export const queryKeys = {
     config: () => ['tenants', 'me', 'config'] as const,
     adminList: () => ['tenants', 'admin', 'list'] as const,
     metrics: (tenantId: string) => ['tenants', tenantId, 'metrics'] as const,
-    usage: (tenantId: string) => ['tenants', tenantId, 'usage'] as const,
+    usage: (tenantId: string, days?: number) => ['tenants', tenantId, 'usage', days ?? 7] as const,
   },
   conversations: {
     list: (tenantId: string, filters?: Record<string, unknown>) =>
