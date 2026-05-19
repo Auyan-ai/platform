@@ -19,6 +19,7 @@ router = APIRouter(prefix="/tenants", tags=["tenants"])
 
 AuthDep = Annotated[AuthContext, Depends(get_auth_context)]
 TenantIdDep = Annotated[UUID, Depends(get_tenant_id)]
+SettingsDep = Annotated[object, Depends(get_settings)]
 
 
 # ----------------------------------------------------------------
@@ -141,9 +142,9 @@ async def get_my_tenant_metrics(tenant_id: TenantIdDep) -> TenantMetricsResponse
 )
 async def get_my_tenant_usage(
     tenant_id: TenantIdDep,
+    settings: SettingsDep,
     days: int = Query(default=7, ge=1, le=90, description="Días de historial a retornar"),
 ) -> TenantUsageResponse:
-    settings = get_settings()
     async with bootstrap_connection() as conn:
         tenant_config = await get_tenant_configuration(conn, tenant_id)
 
