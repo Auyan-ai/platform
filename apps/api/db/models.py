@@ -321,3 +321,15 @@ class ImprovementProposal(_BaseModel):
     review_comment: str | None = None
     applied_version: int | None = None
     created_at: datetime
+
+
+class TenantUsageDaily(_BaseModel):
+    id: UUID
+    tenant_id: UUID
+    date: str  # ISO date string (date no tiene soporte nativo en Pydantic v2 con asyncpg)
+    tokens_in: int
+    tokens_out: int
+    cost_usd: float
+    request_count: int
+    created_at: datetime
+    updated_at: datetime

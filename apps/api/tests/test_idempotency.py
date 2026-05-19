@@ -152,6 +152,7 @@ def _patch_db_with_idem(
         AsyncMock(return_value=make_tenant_configuration()),
     )
     monkeypatch.setattr(f"{ROUTER_MODULE}.enforce_rate_limit", AsyncMock())
+    monkeypatch.setattr(f"{ROUTER_MODULE}.check_tenant_budget", AsyncMock())
     monkeypatch.setattr(
         f"{ROUTER_MODULE}.find_end_customer_by_email",
         AsyncMock(return_value=make_end_customer()),

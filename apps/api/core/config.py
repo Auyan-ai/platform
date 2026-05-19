@@ -112,6 +112,16 @@ class Settings(BaseSettings):
     # Override per-tenant: tenant_configurations.extra.rate_limits.customer_per_minute
     rate_limit_customer_per_minute: int = 30
 
+    # --- Budget diario por tenant ---
+    # Presupuesto máximo de gasto LLM por día (USD). Bloquea el grafo si se supera.
+    # Override per-tenant: tenant_configurations.extra.budget_usd_daily
+    budget_usd_daily: float = 10.0
+
+    # --- Message cap por conversación ---
+    # Mensajes inbound máximos por conversación antes de escalar automáticamente.
+    # Override per-tenant: tenant_configurations.extra.max_inbound_messages
+    max_inbound_messages_per_conversation: int = 50
+
     @field_validator("rag_min_similarity")
     @classmethod
     def _validate_similarity(cls, v: float) -> float:
