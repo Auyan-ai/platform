@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-19 (sesión 27 — Rate limiting + cost controls A.1–A.4 completos, CI verde, PR #78 listo para merge)_
+_Última actualización: 2026-05-23 (sesión 28 — **PIVOT BPO → Managed AI Service**, grill-me cerrado, arranca Bloque 0)_
 
 ---
 
@@ -1097,26 +1097,24 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 
 ---
 
-## Rate limiting y cost controls (bloqueadores de producción)
+## Rate limiting y cost controls (bloqueadores de producción) ✅ TODO MERGEADO
 
 | Sub-PR | Qué incluye | Estado |
 |--------|-------------|--------|
-| A.1 | `rate_limit_buckets` + `check_and_increment_rate_limit` + `enforce_rate_limit` + gate en `webhooks/inbound` + cleanup | ✅ [PR #77](https://github.com/Auyan-ai/platform/pull/77) mergeado |
+| A.1 | `rate_limit_buckets` + `enforce_rate_limit` + gate en `webhooks/inbound` + cleanup | ✅ [PR #77](https://github.com/Auyan-ai/platform/pull/77) |
 | A.2 | `tenant_usage_daily` + `record_tenant_usage` + gate pre-grafo `check_tenant_budget` | ✅ [PR #78](https://github.com/Auyan-ai/platform/pull/78) |
-| A.3 | `max_inbound_messages_per_conversation` check + escalación automática | ✅ en PR #78 |
-| A.4 | `GET /tenants/me/usage` + UI card de consumo | ✅ en PR #78 |
+| A.3 | `max_inbound_messages_per_conversation` check + escalación automática | ✅ [PR #79](https://github.com/Auyan-ai/platform/pull/79) |
+| A.4 | `GET /tenants/me/usage` + UI card de consumo | ✅ [PR #80](https://github.com/Auyan-ai/platform/pull/80) |
+| Fixes | README + readiness probe + broken tests + `message_cap` zero guard | ✅ [PR #81](https://github.com/Auyan-ai/platform/pull/81) |
 
 ### A.1 — Rate limiting por tenant y end_customer ([PR #77](https://github.com/Auyan-ai/platform/pull/77)) ✅
 
 | Área | Qué se hizo |
 |---|---|
 | `supabase/migrations/20260519000001_add_rate_limit_buckets.sql` | Tabla `rate_limit_buckets` (ventana fija 60 s, upsert atómico) |
-| `apps/api/db/queries.py` | `check_and_increment_rate_limit`, `delete_expired_rate_limit_buckets` |
 | `apps/api/services/rate_limit.py` | `enforce_rate_limit` — dos buckets: tenant/min + customer/min; override per-tenant via `extra.rate_limits` |
 | `apps/api/core/errors.py` | `RateLimitError` → HTTP 429 con `Retry-After` header |
-| `apps/api/core/config.py` | `rate_limit_tenant_per_minute` (default 300), `rate_limit_customer_per_minute` (default 30) |
-| `apps/api/routers/webhooks.py` | Gate: `enforce_rate_limit` antes de procesar, devuelve 429 si supera límite |
-| `apps/api/services/cleanup.py` | `delete_expired_rate_limit_buckets` en el cleanup loop |
+| `apps/api/routers/webhooks.py` | Gate antes de procesar, devuelve 429 si supera límite |
 | Tests | 15 nuevos en `test_rate_limit.py` |
 
 ### A.2 — Budget diario por tenant ([PR #78](https://github.com/Auyan-ai/platform/pull/78)) ✅
@@ -1134,7 +1132,7 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 
 **Suite total: 699/699 verde. Ruff limpio.**
 
-### A.3 — Message cap por conversación (en PR #78) ✅
+### A.3 — Message cap por conversación ([PR #79](https://github.com/Auyan-ai/platform/pull/79)) ✅
 
 | Área | Qué se hizo |
 |---|---|
@@ -1146,7 +1144,7 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 
 **Suite total: 706/706 verde. Ruff limpio.**
 
-### A.4 — Endpoint de uso + UI card (en PR #78) ✅
+### A.4 — Endpoint de uso + UI card ([PR #80](https://github.com/Auyan-ai/platform/pull/80)) ✅
 
 | Área | Qué se hizo |
 |---|---|
@@ -1160,13 +1158,166 @@ Cada set cubre: compile_ok, skill presente, confidence ≥ 0.90, max_iterations 
 
 **Suite total: 711/711 verde. Ruff limpio. TypeScript limpio.**
 
+### PR #81 — Fixes post-rate-limiting ✅
+
+README + readiness probe + broken `test_message_limit` + `message_cap` zero guard.
+
 #### Fix CI post-merge
 
 `get_settings()` se llamaba directo dentro del endpoint, bypassando `dependency_overrides` en los tests → Pydantic-Settings intentaba leer env vars reales en CI → crash. Fix: `SettingsDep = Annotated[object, Depends(get_settings)]` + parámetro en la firma del endpoint.
 
 ---
 
-### Siguiente paso — usar **Sonnet**
+## 🚨 PIVOT 2026-05-22 — BPO → Managed AI Service
 
-1. Merge [PR #78](https://github.com/Auyan-ai/platform/pull/78) → develop (aplica migración `20260519000002_add_tenant_usage_daily.sql` en staging antes)
-2. Sprint 12 — Zendesk bidireccional, reapertura de conversaciones, Unified KB
+Ver `docs/auyan-master-context.md` para contexto completo del pivot.
+
+### El cambio en una frase
+
+**ANTES:** Auyan operaba como BPO — tenía agentes humanos internos que atendían tickets escalados de clientes.
+
+**AHORA:** Auyan opera como **Managed AI Service** estilo Crescendo — el cliente mantiene SU equipo CX para escalados; Auyan es el equipo externo de **Agent Engineers** que configura, mantiene y optimiza el agente IA del cliente.
+
+### Implicaciones operativas
+
+| Antes | Ahora |
+|---|---|
+| Esposa atendía tickets BPO 8h/día | Esposa = **QA + Knowledge Management + Customer Success** |
+| Chatwoot interno como inbox core para nuestros agentes | **Chatwoot opcional** — recomendamos Chatwoot Paid (Cloud) al cliente, cliente paga directo |
+| Rol `tenant_agent` (empleados del cliente trabajando desde nuestro dashboard) | **`tenant_agent` deprecado** — hard removal en Bloque 0 |
+| Dashboard interno = inbox Chatwoot-style para atender tickets | Dashboard interno = **panel operativo cross-tenant** (Home/Review Queue) |
+| Escalación → agente humano interno de Auyan | Escalación → **equipo CX del cliente** (vía push al helpdesk del cliente o email fallback) |
+| Sprint 12 planeado: Unified KB + Zendesk bidireccional + reapertura | **Descartado/reformulado** en Bloques 0-3 nuevos |
+
+### Posicionamiento técnico cerrado en el grill
+
+**Producto Decagon/Sierra (uso interno) + entrega Crescendo (cliente).**
+
+- Internamente Auyan opera con power tools tipo Duet/Agent Studio: editor pleno de AOPs, simulator con user profiles, auto-generación de AOPs desde transcripts, auto-tests, diagnostic tools, watchtower-style QA.
+- El cliente experimenta el modelo Crescendo: dashboard read-only + reportes proactivos + AIDE asignado humano + cero configuración técnica.
+
+### 25 decisiones cerradas del grill
+
+| # | Área | Decisión |
+|---|---|---|
+| 1 | Modelo de negocio | Producto Decagon/Sierra interno + entrega Crescendo cliente |
+| 2 | KB | 3 niveles: nunca/aporta/edita factual |
+| 3 | Helpdesks | 4 adapters bidireccionales: Gorgias + Chatwoot + Zendesk + (Intercom reactivo) |
+| 4 | Canales WhatsApp/IG/Widget | Heredados via helpdesk, NO construidos directamente |
+| 5 | Chatwoot Cloud Paid | Recomendado al cliente sin helpdesk; cliente paga directo a Chatwoot |
+| 6 | Shadow mode | Internal notes en helpdesk del cliente |
+| 7 | Activación gradual | Por categoría, decisión Auyan no cliente |
+| 8 | Escalación | Mix por tenant: push helpdesk default, email fallback |
+| 9 | Onboarding | 9 pasos self-serve + call con AIDE opcional |
+| 10 | "Biblia" del cliente | `tenant_playbook` DB en repo, NO Notion |
+| 11 | Reporte semanal | Email = resumen, dashboard = fuente completa, Kenny aprueba lunes 8am al inicio |
+| 12 | Dashboard cliente | 7 secciones MVP, "Conversaciones" → "Insights" estilo Decagon Explorer |
+| 13 | AI Data Assistant cliente | Bloque 2, NO MVP |
+| 14 | Dashboard super_admin | Nav 2 niveles + Home Review Queue filtrado por rol |
+| 15 | Roles internos | Estructura DB desde día 1, ambos super_admin hasta mes 9-10 |
+| 16 | Simulator | Bloque 0 MVP (manual + judge 4 dims), Bloque 2 auto-gen, Bloque 3 canary |
+| 17 | 4 dimensiones judge | Reasoning / Knowledge / Tools / Brand voice |
+| 18 | Tipos de test | Unit / Integration / Simulation |
+| 19 | AOPs steps[] | Preparación Bloque 0 (datos para Bloque 2 Flow Analysis) |
+| 20 | tenant_agent | Hard removal en Bloque 0 |
+| 21 | Pricing/billing | Stripe Bloque 2 (no MVP), primer 1-2 clientes manual |
+| 22 | Landing | `apps/landing` + Aceternity UI (no Tailwind UI) |
+| 23 | Design Sprint | 1-2 semanas al inicio de Bloque 1 |
+| 24 | Iteración rápida | DB editable lo que itera con cliente, code-side lo demás |
+| 25 | Fase 0 legal | En paralelo con Bloque 0 técnico, arrancar YA |
+
+---
+
+## Plan de construcción post-pivot
+
+### EN PARALELO desde YA (externa al código)
+**Fase 0 LEGAL** — 1-2 semanas: Constitución Auyan SL · Pacto socios · Asesor fiscal · Cuenta bancaria · DPA/T&C/Privacy plantillas · Decisión paro esposa.
+
+### Bloque 0 — Sanity check + fundación arquitectónica (3-4 semanas)
+
+Detalle completo en `docs/bloque-0-plan.md` (a crear como task #4).
+
+Sub-PRs propuestos:
+
+| # | Foco | Modelo |
+|---|---|---|
+| 0.1 | Hard removal `tenant_agent` (migration + cleanup código + tests) | Sonnet |
+| 0.2 | Framework adapters base (`MessageProvider`, `HelpdeskProvider`, `IntegrationRegistry`, `tenant_integrations` table) | Sonnet |
+| 0.3 | Refactor `ShopifyAdapter` (commerce) | Sonnet |
+| 0.4 | Refactor `ChatwootAdapter` (helpdesk, completar bidirec) | Sonnet |
+| 0.5 | Refactor `ZendeskAdapter` (helpdesk, completar bidirec + OAuth) | Sonnet |
+| 0.6 | Nuevo `GorgiasAdapter` (helpdesk, OAuth, desde cero) | Sonnet |
+| 0.7 | `PostmarkEmailAdapter` (outbound Auyan→cliente) | Sonnet |
+| 0.8 | Roles internos estructura DB (`internal_users`, `role_permissions`, `tenant_assignments`) | Sonnet |
+| 0.9 | AOPs `steps[]` opcional preparación + events | Sonnet |
+| 0.10 | Simulator MVP: tablas, multi-turn runner, LLM-as-judge 4 dims, UI super_admin | **Opus** (arquitectura crítica) |
+| 0.11 | Validación E2E del sistema actual con simulator + fix bugs descubiertos | Sonnet |
+
+### Bloque 1 — Sprint A: habilita vender (5-7 semanas)
+
+Detalle en `docs/auyan-master-context.md` sección 18.
+
+Sub-PRs:
+- 1.0 Design Sprint (DESIGN.md + refactor componentes)
+- 1.1 `tenant_playbook` table + queries + UI super_admin
+- 1.2 `tenant_facts` table + form cliente + lectura del agente
+- 1.3 Onboarding wizard 9 pasos + `agent_lifecycle_state` + comunicaciones email
+- 1.4 KB drop-zone + cola pending review + UI super_admin procesamiento
+- 1.5 Reporte semanal: tabla + cron + UI aprobación + envío Postmark
+- 1.6 Dashboard cliente 7 secciones MVP (con tremor)
+- 1.7 Dashboard super_admin Home/Review Queue + filtros por rol
+- 1.8 `apps/landing` + Aceternity UI + páginas básicas + Plausible
+- 1.9 Email outbound general (templates editables + queue)
+
+### Bloque 2 — Sprint Duet + Billing + UI pulida (6-8 semanas)
+
+- 2.1 Stripe Subscriptions + Tax + cupón FP + webhooks
+- 2.2 Dashboard cliente: sección Facturación
+- 2.3 Simulator auto-gen (personas + scenarios)
+- 2.4 Bulk runner + scheduled nightly + templates
+- 2.5 Diagnostic Tools (Escalation Drivers + AOP Flow Analysis)
+- 2.6 Watchtower (rubrics custom + always-on QA)
+- 2.7 AI Data Assistant cliente (Duet for customers)
+- 2.8 Promotion gate robusto
+
+### Bloque 3 — Producción A/B + canary (6-8 semanas)
+
+- 3.1 `agent_traffic_splits` + lógica routing grafo
+- 3.2 Production A/B con métricas comparativas
+- 3.3 Canary ramp 5%→25%→50%→100% + rollback automático
+- 3.4 Overage automation (Stripe metered)
+- 3.5 Outcome guarantee auto-cálculo + crédito Stripe
+- 3.6 Self-service upgrade/downgrade
+
+### Bloque 4 — Backlog futuro
+Memory cross-conversación · Detección automática alucinaciones · Reapertura conversaciones · Voz · Intercom adapter · WhatsApp directo (edge case) · Modo proactivo · MCP server.
+
+---
+
+## Empezar aquí — siguiente sesión
+
+**Modelo recomendado:** Sonnet para la mayoría de sub-PRs Bloque 0; **Opus para 0.10 (Simulator)** porque define arquitectura crítica que afecta Bloques 2/3.
+
+**Acciones inmediatas:**
+
+1. **Fase 0 LEGAL arrancada en paralelo** (Kenny acciona externamente):
+   - Contactar gestor para constitución SL
+   - Asesor laboral para decisión paro esposa
+   - Plantillas DPA/T&C/Privacy (€400-800 abogado)
+
+2. **Bloque 0 técnico — orden recomendado:**
+   - 0.1 Hard removal `tenant_agent` (primero, descarga código antes de refactor)
+   - 0.2 Framework adapters base (fundacional, todo lo demás depende)
+   - 0.3-0.7 en paralelo si posible (4 adapters refactor/nuevos + Postmark)
+   - 0.8 Roles internos estructura DB
+   - 0.9 AOPs `steps[]` (medio día)
+   - 0.10 Simulator MVP (la pieza grande de Bloque 0)
+   - 0.11 Validación E2E con simulator + fix bugs descubiertos
+
+3. **Crear `docs/bloque-0-plan.md`** con plan detallado (task #4 pendiente).
+
+### Referencias clave
+
+- `docs/auyan-master-context.md` — fuente única de verdad de negocio + producto
+- `docs/architecture-agent-v2.md` sección 20 — arquitectura técnica post-pivot detallada
+- `CLAUDE.md` (raíz) — reglas operativas del proyecto
