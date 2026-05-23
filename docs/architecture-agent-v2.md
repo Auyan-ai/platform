@@ -1428,39 +1428,89 @@ Métricas comparativas: CSAT, resolution_rate, escalation_rate, cost_per_convers
 
 ---
 
-## 16. Plan por sprints
+## 16. Plan por sprints (actualizado post pivot 2026-05-22)
+
+### Sprints completados ✅
 
 | Sprint | Foco | Entrega |
 |---|---|---|
-| **6** | Skills framework + Shopify read tools + ReAct loop **+ lifecycle básico** | 5 skills L1, grafo refactorizado, credenciales Shopify por tenant, estado `closed_abandoned` + job de cierre con defaults globales |
-| **7** | AOPs en DB + selector de intent + workspaces + UI básica **+ eval harness obligatorio** | Tablas, compiler, `select_aop` node con top-2 + métricas, editor en dashboard, harness con 13 fixtures mínimo para `consulta_envio` y `default` |
-| **8** | Supervisor pattern (Sonnet+Opus por tier) con `reject_kind` tactical/structural | Nodo `supervise`, schema con tactical/structural, métricas en Langfuse incluyendo write_error_rate con/sin supervisor |
-| **9** | Skills L2 + permissions + audit log con PII policy + idempotency + nudges + cache invalidation | 3 skills L2, tabla permisos, audit log con pseudonimización, UI de gestión de permisos, `tenant_config.conversation_lifecycle` editable, Redis pub/sub invalidation de AOPs |
-| **10** | Skills L3 + human approval mode + UI de aprobación | 4 skills L3, flujo de aprobación, idempotency estricta, evals adversarial obligatorios |
-| **11** | Slow agent **skeleton** (sampling + Sonnet judge) | Job semanal manual primero, sampling (escaladas + L2/L3 + 10% resueltas), Sonnet por default, tabla proposals, UI de cola. **No nightly hasta validar ROI.** |
-| **12** | Unified KB + Zendesk bidireccional + reapertura de conversaciones | Pipeline humano→KB, webhook Zendesk inbound, dispatch outbound, `previous_conversation_id` para reopens |
-| **13** | Versionado activo + A/B testing + slow agent a nightly si ROI lo justifica | `aop_traffic_split`, métricas comparativas, escalación de slow agent a Opus solo en `uncertain` |
-| **14+** | MCP server | Skills as MCP, soporte para MCP servers externos del cliente |
+| **6** ✅ | Skills framework + Shopify read tools + ReAct loop **+ lifecycle básico** | 5 skills L1, grafo refactorizado, credenciales Shopify por tenant, estado `closed_abandoned` |
+| **7** ✅ | AOPs en DB + selector de intent + workspaces + UI básica **+ eval harness obligatorio** | Tablas, compiler, `select_aop` node, editor dashboard, harness con 13 fixtures |
+| **8** ✅ | Supervisor pattern + Agent Reasoning UI | Nodo `supervise`, schema tactical/structural, métricas Langfuse, UI reasoning panel |
+| **9** ✅ | Skills L2 + permissions + audit log PII + idempotency + nudges + cache invalidation | 2 skills L2, audit log pseudonimizado, AOP cache invalidation NOTIFY |
+| **10** ✅ | Skills L3 + human approval mode + UI de aprobación | 4 skills L3, flujo aprobación, idempotency, 52 fixtures adversarial |
+| **11** ✅ | Slow agent skeleton (sampling + Sonnet judge) | Job semanal manual, sampling, tabla proposals, UI cola, two-step judge |
+| **A.1-A.4** ✅ | Rate limiting + budget gate + message limit + usage UI | Bloqueadores de producción resueltos |
 
-### Backlog futuro (no sprint asignado)
-- Modo proactivo / concierge (carritos abandonados, upsell, recuperación pasivos)
-- WhatsApp (Twilio o 360dialog)
-- Instagram (Meta API)
-- Postmark email canal completo
+### PIVOT 2026-05-22 — del modelo BPO al Managed AI Service
+
+El "Sprint 12 — Unified KB + Zendesk bidireccional + reapertura" fue **descartado/reformulado** en el grill-me del 2026-05-22. Razón:
+
+- **Zendesk bidireccional** sigue siendo necesario PERO ahora como parte de **patrón Adapter por tenant** (no integración hardcoded). Va en Bloque 0.
+- **Unified KB** (pipeline humano→KB) se reformula como **drop-zone del cliente con curación Auyan** + tabla `tenant_playbook` (NO Notion). Va en Bloque 1.
+- **Reapertura de conversaciones** (`previous_conversation_id`) se mantiene como deuda técnica pequeña, queda en Bloque 4 backlog.
+
+El plan post-pivot se organiza en **Bloques 0-3** que reflejan el nuevo modelo Managed AI Service. Detalle completo en `docs/auyan-master-context.md` sección 18.
+
+### Bloques post-pivot
+
+| Bloque | Foco | Entrega clave |
+|---|---|---|
+| **0** | Sanity check + fundación arquitectónica (3-4 sem) | Hard removal `tenant_agent`, framework adapters (`MessageProvider` + `HelpdeskProvider`), 4 adapters (Shopify + Chatwoot + Zendesk + Gorgias + Postmark outbound), roles internos estructura DB, AOPs `steps[]` opcional, **Simulator MVP con judge 4-dim**, validación E2E |
+| **1** | Sprint A — habilita vender (5-7 sem) | **Design Sprint** (DESIGN.md), onboarding self-serve 9 pasos, `tenant_playbook` + `tenant_facts`, reporte semanal automatizado, lifecycle phases + comunicaciones, KB drop-zone, dashboard cliente 7 secciones MVP, dashboard super_admin con Home/Review Queue, landing (`apps/landing` + Aceternity UI), email outbound |
+| **2** | Sprint Duet + Billing + UI pulida (6-8 sem) | Stripe Subscriptions + Tax + cupón FP, simulator auto-gen (personas + scenarios), bulk runner + scheduled nightly, **Diagnostic Tools** (Escalation Drivers + AOP Flow Analysis), **Watchtower** (rubrics custom), **AI Data Assistant cliente**, promotion gate robusto |
+| **3** | Producción A/B + canary + escala (6-8 sem) | `agent_traffic_splits` por (tenant, AOP_version), production A/B con métricas comparativas, **canary deployment 5%→25%→50%→100%**, rollback automático, overage automation, outcome guarantee auto, self-service upgrade/downgrade |
+
+### Backlog futuro (Bloque 4, no asignado)
+
+- Memory cross-conversación (deuda técnica, ver sección 19.2)
+- Detección automática alucinaciones (refuerzo slow agent, ver sección 19.4)
+- Reapertura conversaciones (`previous_conversation_id`)
+- Voz/llamadas
+- Intercom adapter (reactivo)
+- WhatsApp directo via Twilio (solo si cliente sin helpdesk lo pide expresamente — caso edge)
+- Modo proactivo / concierge (carritos abandonados, upsell)
 - Embedding router pre-filtro al `select_aop`
+- MCP server (skills as MCP)
 
 ---
 
-## 17. Decisiones pendientes / TBD
+## 17. Decisiones pendientes / TBD (todas resueltas al cierre del grill 2026-05-22)
 
-- **Authoring UX del AOP editor**: ¿Monaco editor con YAML+Markdown split-view? ¿Form-based para no técnicos? Decidir en Sprint 7.
+- ~~**Authoring UX del AOP editor**~~ → resuelto Sprint 7: Markdown + YAML frontmatter en editor custom con preview. Sigue siendo el patrón.
 - ~~**Política de retención de audit log**~~ → resuelto: 90 días hot, S3 cold después, hash original 180 días. Ver sección 11.3.
-- **Naming convention de skills**: `vendor.action` (`shopify.cancel_order`) vs `action_vendor` (`cancel_order_shopify`). Propongo `vendor.action`. Confirmar en Sprint 6.
-- **`require_supervision` overrideable por tenant?**: para clientes que prefieren más seguridad, ¿pueden forzar supervisor en todos los AOPs? Decidir en Sprint 8.
-- ~~**Evals**~~ → resuelto: obligatorio Sprint 7. Ver sección 9.
-- **PII hashing en app vs `pgcrypto`**: ver sección 11.3. Voto provisional: en app. Confirmar antes de Sprint 9.
-- **Esquema de roles en `intent_classifier_runs.human_correction`**: ¿quién puede corregir el AOP elegido — solo super_admin de Auyan o también tenant_admin? Decidir en Sprint 7.
-- **Cache invalidation tech**: Redis pub/sub vs Postgres LISTEN/NOTIFY. Voto: Redis si ya lo tenemos para otra cosa, sino Postgres NOTIFY. Decidir en Sprint 9.
+- ~~**Naming convention de skills**~~ → resuelto Sprint 6: `vendor.action` (`shopify.cancel_order`). Sigue siendo el patrón.
+- ~~**`require_supervision` overrideable por tenant?**~~ → resuelto Sprint 8: sí, vía `tenant_configurations.extra` con bandera explícita.
+- ~~**Evals**~~ → resuelto Sprint 7: obligatorio. Ver sección 9.
+- ~~**PII hashing en app vs `pgcrypto`**~~ → resuelto Sprint 9.3: en app, salt por tenant en `tenant_secrets`.
+- ~~**Esquema de roles en `intent_classifier_runs.human_correction`**~~ → resuelto: solo `super_admin` (Auyan). Cliente no toca esto en el modelo Managed.
+- ~~**Cache invalidation tech**~~ → resuelto Sprint 9.4: Postgres LISTEN/NOTIFY (sin Redis).
+
+### Decisiones NUEVAS del grill 2026-05-22 (todas resueltas)
+
+Ver detalle en sección 20 abajo. Resumen:
+
+- ~~**Modelo de entrega**~~ → producto Decagon/Sierra interno + entrega Crescendo cliente.
+- ~~**KB del cliente**~~ → tres niveles (nunca/aporta/edita factual).
+- ~~**Adapters por tenant**~~ → `MessageProvider` (base) + `HelpdeskProvider` (extends). Una abstracción unificada.
+- ~~**Helpdesks en Bloque 0**~~ → 3 adapters: Gorgias + Chatwoot + Zendesk. Intercom reactivo (Bloque 4).
+- ~~**Canales WhatsApp/Instagram/Widget**~~ → heredados via helpdesk, NO construidos directamente.
+- ~~**Chatwoot self-hosted**~~ → descartado. Recomendamos Chatwoot Paid (cliente paga directo).
+- ~~**Shadow mode**~~ → internal notes en helpdesk del cliente (modelo Sierra/Decagon).
+- ~~**Activación gradual**~~ → por categoría, decisión Auyan no cliente.
+- ~~**Onboarding**~~ → 9 pasos self-serve + call AIDE opcional.
+- ~~**"Biblia" del cliente**~~ → tabla `tenant_playbook` en DB, NO Notion.
+- ~~**Reporte semanal**~~ → email = resumen, dashboard = fuente completa, Kenny aprueba lunes 8am al inicio.
+- ~~**Dashboard cliente**~~ → 7 secciones MVP, "Insights" reemplaza "Conversaciones", AI Data Assistant a Bloque 2.
+- ~~**Dashboard super_admin**~~ → nav 2 niveles + Home Review Queue filtrado por rol.
+- ~~**Roles internos**~~ → estructura DB desde día 1, ambos `super_admin` hasta mes 9-10.
+- ~~**Simulator dimensiones del judge**~~ → 4 dims: Reasoning / Knowledge / Tools / Brand voice.
+- ~~**Tipos de test**~~ → Unit / Integration / Simulation.
+- ~~**AOPs steps[]**~~ → opcional preparado en Bloque 0 (data para Bloque 2 Flow Analysis).
+- ~~**`tenant_agent`**~~ → hard removal en Bloque 0.
+- ~~**Pricing/billing**~~ → Stripe Bloque 2; primer 1-2 clientes manual.
+- ~~**Landing**~~ → `apps/landing` + Aceternity UI (no Tailwind UI).
+- ~~**Design Sprint**~~ → 1-2 semanas al inicio de Bloque 1.
 
 ---
 
@@ -1544,3 +1594,401 @@ Roadmap:
 ---
 
 _Última actualización: 2026-05-18 (sesión 19 — análisis context engineering Sierra + gaps priorizados + detección de alucinaciones)_
+
+---
+
+## 20. Arquitectura post-pivot — decisiones técnicas del grill 2026-05-22
+
+Esta sección documenta los cambios arquitectónicos que entran con el pivot a Managed AI Service. Sobrescribe partes anteriores donde aplique. Para contexto de negocio ver `docs/auyan-master-context.md`.
+
+### 20.1 Patrón Adapter por tenant — refactor crítico Bloque 0
+
+**Problema actual** (deuda silenciosa detectada en grill):
+
+```python
+# integrations/zendesk.py — patrón actual
+class ZendeskClient:
+    def __init__(self) -> None:
+        self.subdomain = settings.zendesk_subdomain   # ← global
+        self.token = settings.zendesk_api_token       # ← global
+
+zendesk = ZendeskClient()  # ← singleton compartido entre tenants
+```
+
+Esto **rompe multi-tenancy real**: dos clientes con Zendesk distintos no pueden coexistir. Mismo problema en `shopify.py` y `chatwoot.py`. Violación de la regla de oro del CLAUDE.md.
+
+**Solución — protocolos unificados:**
+
+```python
+# integrations/base.py (nuevo)
+class IntegrationContext(BaseModel):
+    tenant_id: UUID
+    credentials: dict  # cargadas de tenant_integrations descifradas
+
+class MessageProvider(Protocol):
+    """Base: cualquier source de mensajes (helpdesk o canal directo)."""
+    async def parse_inbound_webhook(payload) -> InboundMessage: ...
+    async def send_outbound(ctx, conversation_ref, content, attachments) -> None: ...
+
+class HelpdeskProvider(MessageProvider, Protocol):
+    """Extends: helpdesks con tickets, internal notes, status."""
+    async def add_internal_note(ctx, ticket_ref, content) -> None: ...
+    async def assign_to_human(ctx, ticket_ref, reason) -> None: ...
+    async def update_status(ctx, ticket_ref, status) -> None: ...
+    async def push_escalation(ctx, conversation, reason, agent_context) -> ExternalTicketRef: ...
+```
+
+**Implementaciones MVP (Bloque 0):**
+- `ZendeskAdapter(HelpdeskProvider)` — refactor del actual
+- `ChatwootAdapter(HelpdeskProvider)` — refactor del actual
+- `GorgiasAdapter(HelpdeskProvider)` — nuevo (prioridad alta: 40% top Shopify)
+- `PostmarkEmailAdapter(MessageProvider)` — outbound Auyan→cliente (no customer-facing)
+- `ShopifyAdapter(CommerceProvider)` — refactor del actual (otro protocolo aparte)
+
+**Tabla nueva** `tenant_integrations`:
+
+```sql
+CREATE TABLE tenant_integrations (
+    id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id             UUID NOT NULL REFERENCES tenants(id),
+    kind                  TEXT NOT NULL,        -- 'helpdesk' | 'commerce' | 'channel' | 'llm'
+    provider              TEXT NOT NULL,        -- 'zendesk' | 'gorgias' | 'shopify' | ...
+    credentials_encrypted BYTEA NOT NULL,       -- cifrado app-level con salt por tenant
+    config                JSONB NOT NULL DEFAULT '{}',  -- subdomain, base_url, scopes, etc
+    is_active             BOOLEAN NOT NULL DEFAULT TRUE,
+    is_primary_for_kind   BOOLEAN NOT NULL DEFAULT FALSE,  -- para escalation routing
+    enabled_at            TIMESTAMPTZ,
+    enabled_by            UUID,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at            TIMESTAMPTZ,
+    UNIQUE (tenant_id, kind, provider) WHERE deleted_at IS NULL
+);
+```
+
+**IntegrationRegistry** (paralelo al `SkillRegistry` existente): decorator-based registry de implementaciones por `(kind, provider)`.
+
+**OAuth obligatorio para helpdesks (verificado en grill):**
+- Shopify: OAuth Partner App (1 botón cliente)
+- Gorgias: OAuth2 obligatorio para Apps Store
+- Zendesk: OAuth Authorization Code (mandatorio desde abril 2026)
+- Chatwoot: API key (no OAuth standard, aceptable)
+
+### 20.2 Shadow mode via internal notes — modelo Sierra/Decagon
+
+**Decisión:** durante onboarding semana 3, el agente NO responde al cliente final automáticamente. Genera drafts que se postean como **internal notes** en el helpdesk del cliente.
+
+**Flujo:**
+
+```
+1. Ticket entra al helpdesk del cliente (Gorgias/Zendesk/Chatwoot)
+2. Webhook → Auyan
+3. Auyan corre el grafo completo, genera draft de respuesta
+4. ¿En shadow mode para esta categoría?
+   a. SÍ → adapter.add_internal_note(ticket_ref, "🤖 Auyan sugiere: [draft]\nConfidence: X%\nAOP: Y")
+   b. NO (categoría activada) → adapter.send_outbound(ticket_ref, draft)
+5. Equipo del cliente ve el ticket en su helpdesk:
+   - Si internal note → responde manualmente (puede usar el draft tal cual, editarlo, o ignorar)
+   - Si auto-response → ya está enviado
+6. Auyan registra diff entre draft y respuesta final del equipo cliente
+7. Slow agent detecta patrones de concordancia/discordancia → propone updates
+8. Cuando una categoría supera threshold de concordancia → Auyan activa esa categoría (auto-response)
+```
+
+**Importante:** el cliente NO tiene botón "activar". Auyan decide activación gradual por categoría según métricas. Esto preserva el modelo Crescendo (cliente ve resultados, Auyan opera).
+
+**Bloque 3** evoluciona a **canary deployment**: en lugar de "shadow puro → 100%", se hace ramp 5%→25%→50%→100% por categoría con métricas tiempo real.
+
+### 20.3 Escalación al equipo del cliente
+
+**Refactor de `escalations` table:** ya no es "asignación a agente humano interno de Auyan" (modelo BPO viejo). Ahora es "referencia externa al helpdesk del cliente".
+
+```sql
+ALTER TABLE escalations
+  DROP COLUMN assigned_user_id,
+  ADD COLUMN external_provider TEXT,           -- 'zendesk' | 'gorgias' | 'chatwoot' | 'email'
+  ADD COLUMN external_ticket_ref TEXT,         -- ID del ticket en el helpdesk del cliente
+  ADD COLUMN notified_at TIMESTAMPTZ,          -- cuándo se push-eó al helpdesk/email
+  ADD COLUMN acknowledged_at TIMESTAMPTZ;      -- cuándo el equipo del cliente lo vio
+```
+
+**Estrategia mix por tenant** configurada en onboarding:
+- **Default cuando hay helpdesk integrado**: `helpdesk_adapter.push_escalation()` crea/actualiza ticket con contexto completo + razón en internal note
+- **Fallback sin helpdesk**: email a casilla `notif_email` del tenant vía `PostmarkEmailAdapter`
+- **Opcionales**: Slack webhook, custom webhook (Bloque 2+)
+
+### 20.4 KB del cliente — tres niveles
+
+**Decisión clave para preservar "fully managed" sin romper velocidad:**
+
+| Nivel | Quién | Qué | Storage |
+|---|---|---|---|
+| 🔴 Nunca toca | Solo Auyan (super_admin/qa_km) | Prompts, AOPs, contenido RAG, retrieval config | Tablas `aops`, `kb_chunks` con embeddings |
+| 🟡 Aporta no edita | Cliente sube → Auyan cura | Documentos, PDFs, URLs, políticas, descripciones | `kb_uploads` (cola pending review) → procesado a `kb_chunks` |
+| 🟢 Edita directo | Cliente form plano | `tenant_facts`: horarios, teléfono, dirección, links | Tabla nueva `tenant_facts` (NO entra al RAG) |
+
+**`tenant_facts` se lee como contexto estructurado del agente** (no como retrieval). Update inmediato sin curación. Schema editable por vertical (`tenant_fact_schema` table).
+
+**`tenant_playbook` (NUEVO)** — reemplaza la idea original de "Biblia en Notion":
+
+```sql
+CREATE TABLE tenant_playbook (
+    id            UUID PRIMARY KEY,
+    tenant_id     UUID NOT NULL,
+    section       TEXT NOT NULL,  -- 'brand_voice' | 'categories' | 'escalation_rules' | 'operating_context' | 'glossary' | 'edge_cases' | 'kb_references'
+    content       JSONB NOT NULL,
+    version       INT NOT NULL DEFAULT 1,
+    created_at    TIMESTAMPTZ,
+    updated_at    TIMESTAMPTZ,
+    deleted_at    TIMESTAMPTZ
+);
+CREATE TABLE tenant_playbook_versions (
+    -- append-only history para auditoría y diff
+    id          UUID PRIMARY KEY,
+    playbook_id UUID,
+    section     TEXT,
+    content     JSONB,
+    version     INT,
+    changed_by  UUID,
+    changed_at  TIMESTAMPTZ
+);
+```
+
+Visible solo en dashboard super_admin. Versionado, diffeable, RLS por tenant.
+
+### 20.5 Simulator — 4 dimensiones del LLM-as-judge
+
+Alineado con Sierra (Reasoning / Knowledge / Tools / Brand voice):
+
+```python
+class SimulationJudgment(BaseModel):
+    reasoning_score: float       # 0-10: ¿siguió el AOP correctamente?
+    knowledge_score: float       # 0-10: ¿info factualmente correcta sin alucinar?
+    tools_score: float           # 0-10: ¿llamó skills correctas con inputs correctos?
+    brand_voice_score: float     # 0-10: ¿mantuvo tono y guardrails?
+    passed: bool                 # umbral configurable por tenant
+    rationale: dict[str, str]    # razón por dimensión
+```
+
+**Tablas nuevas Bloque 0:**
+
+```sql
+CREATE TABLE user_profiles (
+    id              UUID PRIMARY KEY,
+    tenant_id       UUID,  -- NULL = template global
+    name            TEXT,
+    persona         JSONB,  -- {language, tone, tech_comfort, age_range, role}
+    goal            TEXT,
+    initial_message TEXT,
+    follow_up_strategy TEXT,  -- "se frustra si toma >3 turnos"
+    metadata        JSONB
+);
+
+CREATE TABLE simulation_scenarios (
+    id              UUID PRIMARY KEY,
+    tenant_id       UUID,
+    aop_slug        TEXT,
+    user_profile_id UUID,
+    expected_outcome TEXT,  -- 'respond' | 'escalate' | 'ask_clarification'
+    expected_skills JSONB,
+    assertions      JSONB,
+    is_active       BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE simulation_runs (
+    id              UUID PRIMARY KEY,
+    tenant_id       UUID,
+    scenario_id     UUID,
+    aop_version     INT,
+    status          TEXT,  -- 'running' | 'passed' | 'failed' | 'errored'
+    transcript      JSONB,
+    reasoning_events JSONB,
+    judge_eval      JSONB,  -- SimulationJudgment serializado
+    tokens_used     INT,
+    cost_cents      NUMERIC,
+    started_at      TIMESTAMPTZ,
+    completed_at    TIMESTAMPTZ
+);
+```
+
+**Bloque 0 — MVP del simulator:**
+- `simulator/user_simulator.py` — LLM bot-cliente que responde turno por turno actuando como persona
+- `simulator/runner.py` — multi-turn loop user_simulator ↔ agente real
+- `simulator/judge.py` — LLM-as-judge con 4 dimensiones (reusa infra del slow agent Sprint 11)
+- `routers/simulations.py` — API CRUD scenarios + run + bulk run
+- UI super_admin: seleccionar scenarios, ejecutar, ver transcript + reasoning + judge feedback
+
+**Bloque 2 — Simulator completo:**
+- Auto-gen de personas desde AOP (LLM lee AOP → propone 10 personas variables)
+- Auto-gen de scenarios desde AOPs + KB + transcripts históricos del cliente
+- Bulk runner masivo (paralelo, 100s sims/run)
+- Scheduled nightly regressions
+- Templates de scenarios pre-construidos
+- Diagnostic Tools (Escalation Drivers + AOP Flow Analysis)
+- Watchtower (custom rubrics per tenant + scoring continuo conversaciones reales)
+- Promotion gate: AOP no se promueve hasta pasar unit + integration + sims + rubrics threshold
+
+**Bloque 3 — Production canary:**
+
+```sql
+CREATE TABLE agent_traffic_splits (
+    id                   UUID PRIMARY KEY,
+    tenant_id            UUID,
+    aop_slug             TEXT,
+    auto_respond_percentage INT,  -- 0-100, qué % va a auto-respond vs shadow
+    rollback_thresholds  JSONB,   -- {min_csat: 4.0, max_error_rate: 0.05}
+    set_at               TIMESTAMPTZ,
+    set_by               UUID
+);
+```
+
+El nodo `respond` lee `traffic_splits` por (tenant, aop) y decide aleatoriamente bucket: auto-respond → `send_outbound`; shadow → `add_internal_note`.
+
+### 20.6 AOPs con `steps[]` opcional — preparación Bloque 0
+
+Para habilitar **AOP Flow Analysis** estilo Decagon en Bloque 2 (drop-off por step), agregar campo opcional al schema YAML del AOP:
+
+```yaml
+---
+slug: consulta_envio
+allowed_skills: [shopify.get_order_by_email, shopify.get_order_by_number]
+steps:
+  - id: gather_identity
+    name: "Solicitar identificación"
+    decision_point: true
+  - id: lookup_order
+    name: "Buscar pedido en Shopify"
+    decision_point: true
+  - id: deliver_status
+    name: "Comunicar estado al cliente"
+    decision_point: false
+---
+
+## Procedimiento
+[body markdown referencia los step IDs]
+```
+
+**Eventos a emitir** desde el grafo (extiende `agent_reasoning_events` Sprint 8):
+- `step_entered(step_id, aop_version)`
+- `step_completed(step_id, outcome)` — `outcome ∈ {progressed, looped, abandoned}`
+
+Costo Bloque 0: medio día (campo opcional + emisión de eventos). Bloque 2 construye el dashboard de Flow Analysis sobre datos acumulados.
+
+### 20.7 Roles internos — estructura DB desde día 1
+
+```sql
+CREATE TABLE internal_users (
+    id            UUID PRIMARY KEY,
+    auth_user_id  UUID UNIQUE,  -- referencia a Supabase Auth (separado de users tabla cliente-facing)
+    name          TEXT,
+    email         TEXT UNIQUE,
+    role          internal_role NOT NULL,  -- enum: super_admin, aide, qa_km, ops_manager, cs_manager
+    is_active     BOOLEAN DEFAULT TRUE,
+    created_at    TIMESTAMPTZ,
+    deleted_at    TIMESTAMPTZ
+);
+
+CREATE TYPE internal_role AS ENUM (
+    'super_admin',  -- Kenny + esposa hasta mes 9-10
+    'aide',
+    'qa_km',
+    'ops_manager',
+    'cs_manager'
+);
+
+CREATE TABLE tenant_assignments (
+    id                UUID PRIMARY KEY,
+    tenant_id         UUID NOT NULL,
+    internal_user_id  UUID NOT NULL,
+    role_in_tenant    TEXT NOT NULL,  -- 'aide_primary' | 'aide_backup' | 'qa_assigned' | etc
+    assigned_at       TIMESTAMPTZ,
+    assigned_by       UUID,
+    unassigned_at     TIMESTAMPTZ,
+    UNIQUE (tenant_id, internal_user_id, role_in_tenant) WHERE unassigned_at IS NULL
+);
+
+CREATE TABLE role_permissions (
+    role        internal_role,
+    permission  TEXT,  -- 'aop.edit', 'integration.connect', 'approval.l3', etc
+    PRIMARY KEY (role, permission)
+);
+```
+
+Al inicio: solo Kenny + esposa con role `super_admin`. **Estructura lista para formalizar roles cuando contraten en mes 10-12** sin refactor de auth.
+
+**Home/Review Queue del dashboard super_admin** se filtra por rol del usuario logueado vía joins con `tenant_assignments`. Mismo componente React, distinto resultset.
+
+### 20.8 Hard removal de `tenant_agent` — Bloque 0
+
+```sql
+-- Migration atómica
+UPDATE users SET role = 'tenant_admin' WHERE role = 'tenant_agent';
+
+CREATE TYPE user_role_new AS ENUM ('super_admin', 'tenant_admin');
+ALTER TABLE users ALTER COLUMN role DROP DEFAULT;
+ALTER TABLE users ALTER COLUMN role TYPE user_role_new USING role::text::user_role_new;
+DROP TYPE user_role;
+ALTER TYPE user_role_new RENAME TO user_role;
+ALTER TABLE users ALTER COLUMN role SET DEFAULT 'tenant_admin';
+```
+
+Código a actualizar:
+- `apps/api/db/models.py`: `UserRole = Literal["super_admin", "tenant_admin"]`
+- `apps/api/core/security.py`: actualizar docs + verificar lógica
+- `apps/api/tests/test_security.py` + `test_metrics.py` + `test_escalations.py`: ~30 referencias, **revisar intent de cada test** (no search-and-replace)
+- `apps/web/app/(dashboard)/page.tsx`: comentario
+- `CLAUDE.md`: si menciona `tenant_agent`
+
+### 20.9 Dashboard cliente — 7 secciones MVP
+
+| Sección | Contenido | Bloque |
+|---|---|---|
+| **Home** | KPIs + lifecycle phase + heatmap + headline reporte semana + alertas | 1 |
+| **Insights** (reemplaza "Conversaciones") | Heatmap timeline, donut intents, filtros, drill-down con reasoning panel | 1 |
+| **Reportes** | Historial + reporte actual con sección narrativa LLM | 1 |
+| **Knowledge Base** | Drop-zone + tenant_facts + estado procesamiento | 1 |
+| **Aprobaciones** | Cola L3 pending (ya existe Sprint 10) | ✅ |
+| **Onboarding** | Visible solo durante fase initial, auto-hide después | 1 |
+| **Configuración** | Integraciones conectadas (status, no edit credentials) + branding + perfil AIDE | 1 |
+| **AI Data Assistant cliente** | Chat conversacional NL sobre métricas (Duet for customers) | 2 |
+| **Facturación** | Plan + tickets usados + factura próxima + historial PDFs | 2 |
+
+**Stack:** shadcn + tremor (charts) + sidebar ChatGPT/Claude-style.
+
+### 20.10 Iteración rápida — qué va a DB editable
+
+Principio transversal cerrado en grill:
+
+| Pieza | Decisión |
+|---|---|
+| Pasos del wizard onboarding | Hardcoded (PR + redeploy aceptable) |
+| **Preguntas cuestionario brand voice** | **DB editable** (`brand_voice_questions`) |
+| **`tenant_facts` schema por vertical** | **DB editable** (`tenant_fact_schema`) |
+| AOPs | ✅ DB con workspaces (Sprint 7) |
+| Tool permissions | ✅ DB granular (Sprint 10) |
+| **Notification templates (emails)** | **DB editable** (`notification_templates`) |
+| **Report templates (Jinja)** | **DB editable** (`report_templates`) |
+| Prompts del agente | ✅ Compilados desde AOPs |
+| Adapter registry | Code-side |
+| Feature flags por tenant | **DB editable** (`tenant_features`) |
+| **Watchtower rubrics custom** | **DB editable** (Bloque 2) |
+| Lifecycle phases (qué fases existen) | Hardcoded |
+
+**Regla de oro:** lo que itera con cliente → DB editable. Lo que itera con código → code-side.
+
+### 20.11 Privacidad y seguridad — refuerzos
+
+| Área | Medida | Estado |
+|---|---|---|
+| Credentials integraciones | `credentials_encrypted` BYTEA con salt por tenant (NO env var global) | Bloque 0 |
+| Uploads cliente (KB drop-zone) | Supabase Storage cifrado + bucket por tenant + RLS + retention 180d | Bloque 1 |
+| PII pseudonimización | ✅ Sprint 9.3 | OK |
+| Cross-tenant access | Solo `super_admin` con MFA obligatorio + audit log de accesos cross-tenant | Refuerzo Bloque 0 |
+| Langfuse traces | Redacción PII pre-log | ✅ Sprint 9.3 |
+| GDPR DPA | Firma digital en onboarding paso 7 | Bloque 1 |
+| Right to erasure | Endpoint `DELETE /tenants/me/data` + cron purga real 30d | Bloque 1 |
+| Servidores | EU (Supabase EU, Railway EU, Postmark EU) | ✅ ya configurado |
+
+---
+
+_Última actualización: 2026-05-22 (grill-me — pivot BPO → Managed AI service + arquitectura Bloques 0-3)_

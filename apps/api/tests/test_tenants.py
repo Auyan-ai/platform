@@ -43,6 +43,7 @@ class FakeAuthSettings:
     auth_user_cache_ttl_seconds: int = 60
     supabase_jwt_algorithm: str = JWT_ALG
     supabase_jwt_audience: str = JWT_AUD
+    budget_usd_daily: float = 10.0
 
     @property
     def supabase_jwt_secret(self) -> _SecretWrap:
@@ -154,3 +155,142 @@ class TestGetMyTenantConfig:
         resp = client.get("/tenants/me/config", headers={"Authorization": f"Bearer {_make_jwt()}"})
         assert resp.status_code == 404
         assert resp.json()["error"] == "tenant_config_not_found"
+
+
+# ----------------------------------------------------------------
+# GET /tenants/me/usage
+# ----------------------------------------------------------------
+
+
+def _make_app_with_bootstrap(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    """App con tenant_scope Y bootstrap_connection mockeados (para endpoints que usan ambos)."""
+    from contextlib import asynccontextmanager
+
+    async def _fake_lookup(user_id: UUID, settings: Any) -> UserRecord:
+        return UserRecord(tenant_id=TENANT_ID, role="tenant_admin", email="admin@acme.io")
+
+    monkeypatch.setattr("apps.api.core.security._lookup_user", _fake_lookup)
+
+    @asynccontextmanager
+    async def _fake_tenant_scope(tid: UUID) -> AsyncIterator[Any]:
+        yield AsyncMock()
+
+    @asynccontextmanager
+    async def _fake_bootstrap() -> AsyncIterator[Any]:
+        yield AsyncMock()
+
+    monkeypatch.setattr("apps.api.routers.tenants.tenant_scope", _fake_tenant_scope)
+    monkeypatch.setattr("apps.api.routers.tenants.bootstrap_connection", _fake_bootstrap)
+
+    from apps.api.core.config import get_settings
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.dependency_overrides[get_settings] = lambda: FakeAuthSettings()
+    app.include_router(tenants_router)
+    return app
+
+
+def _make_usage_row(date: str = "2026-05-19", cost: float = 2.5) -> Any:
+    from apps.api.db.models import TenantUsageDaily
+    return TenantUsageDaily(
+        id=UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+        tenant_id=TENANT_ID,
+        date=date,
+        tokens_in=1000,
+        tokens_out=500,
+        cost_usd=cost,
+        request_count=10,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+
+class TestGetMyTenantUsage:
+    def test_happy_path_with_activity(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        app = _make_app_with_bootstrap(monkeypatch)
+        import datetime as dt
+        today = dt.date.today().isoformat()
+        row = _make_usage_row(date=today, cost=2.5)
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant_configuration",
+            AsyncMock(return_value=make_tenant_configuration()),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant_usage_range",
+            AsyncMock(return_value=[row]),
+        )
+        token = _make_jwt()
+        with TestClient(app) as client:
+            resp = client.get(
+                "/tenants/me/usage",
+                headers={"Authorization": f"Bearer {token}", "X-Tenant-Id": str(TENANT_ID)},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["today"] is not None
+        assert data["today"]["cost_usd"] == 2.5
+        assert data["budget_usd_daily"] == 10.0
+        assert data["budget_used_pct"] == 25.0
+        assert data["days"] == 7
+        assert len(data["history"]) == 1
+
+    def test_no_activity_returns_null_today(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        app = _make_app_with_bootstrap(monkeypatch)
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant_configuration",
+            AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant_usage_range",
+            AsyncMock(return_value=[]),
+        )
+        token = _make_jwt()
+        with TestClient(app) as client:
+            resp = client.get(
+                "/tenants/me/usage",
+                headers={"Authorization": f"Bearer {token}", "X-Tenant-Id": str(TENANT_ID)},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["today"] is None
+        assert data["budget_used_pct"] == 0.0
+        assert data["history"] == []
+
+    def test_custom_days_param(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        app = _make_app_with_bootstrap(monkeypatch)
+        mock_range = AsyncMock(return_value=[])
+        monkeypatch.setattr("apps.api.routers.tenants.get_tenant_configuration", AsyncMock(return_value=None))
+        monkeypatch.setattr("apps.api.routers.tenants.get_tenant_usage_range", mock_range)
+        token = _make_jwt()
+        with TestClient(app) as client:
+            client.get(
+                "/tenants/me/usage?days=30",
+                headers={"Authorization": f"Bearer {token}", "X-Tenant-Id": str(TENANT_ID)},
+            )
+        _, kwargs = mock_range.call_args
+        assert kwargs["days"] == 30
+
+    def test_tenant_budget_override_reflected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        app = _make_app_with_bootstrap(monkeypatch)
+        import datetime as dt
+        today = dt.date.today().isoformat()
+        row = _make_usage_row(date=today, cost=3.0)
+        # Override budget a $5/día
+        cfg = make_tenant_configuration(extra={"budget_usd_daily": 5.0})
+        monkeypatch.setattr("apps.api.routers.tenants.get_tenant_configuration", AsyncMock(return_value=cfg))
+        monkeypatch.setattr("apps.api.routers.tenants.get_tenant_usage_range", AsyncMock(return_value=[row]))
+        token = _make_jwt()
+        with TestClient(app) as client:
+            resp = client.get(
+                "/tenants/me/usage",
+                headers={"Authorization": f"Bearer {token}", "X-Tenant-Id": str(TENANT_ID)},
+            )
+        data = resp.json()
+        assert data["budget_usd_daily"] == 5.0
+        assert data["budget_used_pct"] == 60.0  # 3.0 / 5.0 * 100
+
+    def test_unauthenticated_returns_401(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        app = _make_app_with_bootstrap(monkeypatch)
+        with TestClient(app) as client:
+            resp = client.get("/tenants/me/usage")
+        assert resp.status_code == 401

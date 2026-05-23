@@ -1,5 +1,6 @@
 import { MetricsCards } from '@/components/clients/MetricsCards'
 import { RecentConversations } from '@/components/clients/RecentConversations'
+import { UsageCard } from '@/components/clients/UsageCard'
 
 interface Props {
   params: Promise<{ tenantId: string }>
@@ -18,6 +19,12 @@ export default async function ClientOverviewPage({ params }: Props) {
       </div>
 
       <MetricsCards tenantId={tenantId} />
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-1">
+          <UsageCard tenantId={tenantId} />
+        </div>
+      </div>
 
       <div>
         <h2 className="mb-3 text-sm font-semibold text-neutral-700">Conversaciones recientes</h2>
