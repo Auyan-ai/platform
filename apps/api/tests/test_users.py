@@ -94,7 +94,7 @@ class TestGetCurrentUser:
         assert body["tenant_id"] is None
 
     def test_unauthenticated_returns_401(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        record = UserRecord(tenant_id=TENANT_ID, role="tenant_agent", email="agent@lunaria.io")
+        record = UserRecord(tenant_id=TENANT_ID, role="tenant_admin", email="agent@lunaria.io")
         app = _make_app(monkeypatch, record)
         client = TestClient(app)
         resp = client.get("/users/me")

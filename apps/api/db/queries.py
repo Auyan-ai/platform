@@ -2120,6 +2120,7 @@ async def get_tenant_usage_range(
     return [TenantUsageDaily(**dict(row)) for row in rows]
 
 
+
 async def get_tenant_usage_today(
     conn: asyncpg.Connection,
     *,

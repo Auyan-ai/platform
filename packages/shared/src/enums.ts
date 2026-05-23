@@ -14,4 +14,4 @@ export type ChannelType =
   | 'zendesk'
   | 'intercom'
   | 'chatwoot'
-export type UserRole = 'super_admin' | 'tenant_admin' | 'tenant_agent'
+export type UserRole = 'super_admin' | 'tenant_admin'

@@ -112,16 +112,6 @@ class TestGetMyTenantMetrics:
         assert body["resolution_rate"] == 0.65
         assert body["escalation_rate"] == 0.05
 
-    def test_tenant_agent_gets_403(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        app = _make_app(monkeypatch, role="tenant_agent")
-        client = TestClient(app)
-        resp = client.get(
-            "/tenants/me/metrics",
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
-        assert resp.status_code == 403
-        assert resp.json()["error"] == "insufficient_role"
-
     def test_unauthenticated_returns_401(self, monkeypatch: pytest.MonkeyPatch) -> None:
         app = _make_app(monkeypatch)
         client = TestClient(app)

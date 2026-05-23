@@ -20,7 +20,7 @@ export default async function DashboardPage() {
     redirect(`/clients/${currentUser.tenant_id}/overview`)
   }
 
-  // Smoke test: GET /tenants/me funciona para tenant_admin/tenant_agent.
+  // Smoke test: GET /tenants/me funciona para tenant_admin.
   // super_admin sin X-Tenant-Id → 403 del API.
   // openapi-fetch lanza excepción en errores de red (ECONNREFUSED, timeout) — catch obligatorio.
   let tenant: TenantResponse | null = null

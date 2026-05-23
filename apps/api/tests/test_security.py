@@ -135,34 +135,34 @@ def _make_app(
 
 
 class TestGetAuthContext:
-    def _tenant_agent_record(self) -> UserRecord:
-        return UserRecord(tenant_id=TENANT_ID, role="tenant_agent", email="agent@acme.io")
+    def _tenant_admin_record(self) -> UserRecord:
+        return UserRecord(tenant_id=TENANT_ID, role="tenant_admin", email="agent@acme.io")
 
     def test_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        app = _make_app(monkeypatch, self._tenant_agent_record())
+        app = _make_app(monkeypatch, self._tenant_admin_record())
         client = TestClient(app)
         resp = client.get("/me", headers={"Authorization": f"Bearer {_make_jwt()}"})
         assert resp.status_code == 200
         body = resp.json()
         assert body["user_id"] == str(USER_ID)
         assert body["tenant_id"] == str(TENANT_ID)
-        assert body["role"] == "tenant_agent"
+        assert body["role"] == "tenant_admin"
 
     def test_missing_bearer(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        app = _make_app(monkeypatch, self._tenant_agent_record())
+        app = _make_app(monkeypatch, self._tenant_admin_record())
         client = TestClient(app)
         resp = client.get("/me")
         assert resp.status_code == 401
         assert resp.json()["error"] == "missing_bearer_token"
 
     def test_wrong_scheme(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        app = _make_app(monkeypatch, self._tenant_agent_record())
+        app = _make_app(monkeypatch, self._tenant_admin_record())
         client = TestClient(app)
         resp = client.get("/me", headers={"Authorization": "Basic something"})
         assert resp.status_code == 401
 
     def test_expired_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        app = _make_app(monkeypatch, self._tenant_agent_record())
+        app = _make_app(monkeypatch, self._tenant_admin_record())
         client = TestClient(app)
         token = _make_jwt(exp_delta_seconds=-60)
         resp = client.get("/me", headers={"Authorization": f"Bearer {token}"})
@@ -170,7 +170,7 @@ class TestGetAuthContext:
         assert resp.json()["error"] == "token_expired"
 
     def test_invalid_audience(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        app = _make_app(monkeypatch, self._tenant_agent_record())
+        app = _make_app(monkeypatch, self._tenant_admin_record())
         client = TestClient(app)
         token = _make_jwt(aud="wrong-aud")
         resp = client.get("/me", headers={"Authorization": f"Bearer {token}"})
@@ -178,7 +178,7 @@ class TestGetAuthContext:
         assert resp.json()["error"] == "invalid_audience"
 
     def test_invalid_signature(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        app = _make_app(monkeypatch, self._tenant_agent_record())
+        app = _make_app(monkeypatch, self._tenant_admin_record())
         client = TestClient(app)
         token = _make_jwt(secret="otro-secret-distinto-de-32-bytes-min!")
         resp = client.get("/me", headers={"Authorization": f"Bearer {token}"})
@@ -186,7 +186,7 @@ class TestGetAuthContext:
         assert resp.json()["error"] == "invalid_token"
 
     def test_missing_sub(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        app = _make_app(monkeypatch, self._tenant_agent_record())
+        app = _make_app(monkeypatch, self._tenant_admin_record())
         client = TestClient(app)
         token = _make_jwt(sub=None)
         resp = client.get("/me", headers={"Authorization": f"Bearer {token}"})
@@ -194,7 +194,7 @@ class TestGetAuthContext:
         assert resp.json()["error"] == "token_missing_sub"
 
     def test_sub_not_uuid(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        app = _make_app(monkeypatch, self._tenant_agent_record())
+        app = _make_app(monkeypatch, self._tenant_admin_record())
         client = TestClient(app)
         token = _make_jwt(sub="not-a-uuid")
         resp = client.get("/me", headers={"Authorization": f"Bearer {token}"})
@@ -209,8 +209,8 @@ class TestGetAuthContext:
         assert resp.json()["error"] == "user_not_provisioned"
 
     def test_user_has_no_tenant(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # tenant_agent SIN tenant — la DB no debería permitirlo, pero validamos defensa
-        broken = UserRecord(tenant_id=None, role="tenant_agent", email="x@x.com")
+        # tenant_admin SIN tenant — la DB no debería permitirlo, pero validamos defensa
+        broken = UserRecord(tenant_id=None, role="tenant_admin", email="x@x.com")
         app = _make_app(monkeypatch, broken)
         client = TestClient(app)
         resp = client.get("/me", headers={"Authorization": f"Bearer {_make_jwt()}"})
@@ -232,16 +232,16 @@ class TestGetAuthContext:
 
 
 class TestGetTenantId:
-    def test_tenant_agent_no_header(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = UserRecord(tenant_id=TENANT_ID, role="tenant_agent", email="a@a.io")
+    def test_tenant_admin_no_header(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = UserRecord(tenant_id=TENANT_ID, role="tenant_admin", email="a@a.io")
         app = _make_app(monkeypatch, rec)
         client = TestClient(app)
         resp = client.get("/scoped", headers={"Authorization": f"Bearer {_make_jwt()}"})
         assert resp.status_code == 200
         assert resp.json()["tenant_id"] == str(TENANT_ID)
 
-    def test_tenant_agent_matching_header(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = UserRecord(tenant_id=TENANT_ID, role="tenant_agent", email="a@a.io")
+    def test_tenant_admin_matching_header(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = UserRecord(tenant_id=TENANT_ID, role="tenant_admin", email="a@a.io")
         app = _make_app(monkeypatch, rec)
         client = TestClient(app)
         resp = client.get(
@@ -253,10 +253,10 @@ class TestGetTenantId:
         )
         assert resp.status_code == 200
 
-    def test_tenant_agent_cross_tenant_blocked(
+    def test_tenant_admin_cross_tenant_blocked(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        rec = UserRecord(tenant_id=TENANT_ID, role="tenant_agent", email="a@a.io")
+        rec = UserRecord(tenant_id=TENANT_ID, role="tenant_admin", email="a@a.io")
         app = _make_app(monkeypatch, rec)
         client = TestClient(app)
         resp = client.get(
@@ -324,7 +324,7 @@ class TestRequireRole:
         assert resp.status_code == 200
 
     def test_disallowed_role_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = UserRecord(tenant_id=TENANT_ID, role="tenant_agent", email="a@a.io")
+        rec = UserRecord(tenant_id=None, role="super_admin", email="root@auyan.ai")
         app = _make_app(monkeypatch, rec)
         client = TestClient(app)
         resp = client.get("/admin", headers={"Authorization": f"Bearer {_make_jwt()}"})
@@ -343,7 +343,7 @@ class TestUserCache:
     @pytest.mark.asyncio
     async def test_cache_hit_skips_db(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fake_query = AsyncMock(
-            return_value=(TENANT_ID, "tenant_agent", "x@x.io")
+            return_value=(TENANT_ID, "tenant_admin", "x@x.io")
         )
         monkeypatch.setattr("apps.api.core.security.get_user_for_auth", fake_query)
 
