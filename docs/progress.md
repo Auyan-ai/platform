@@ -1294,30 +1294,83 @@ Memory cross-conversación · Detección automática alucinaciones · Reapertura
 
 ---
 
+## Bloque 0 — Sub-PR 0.1 (sesión 2026-05-23) ✅
+
+### Hard removal de `tenant_agent` ([PR #83](https://github.com/Auyan-ai/platform/pull/83) + [PR #84](https://github.com/Auyan-ai/platform/pull/84))
+
+Primer sub-PR del Bloque 0 post-pivot. Elimina el rol `tenant_agent` que era de la era BPO (empleados del cliente trabajando desde nuestro dashboard).
+
+| Área | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260522000001_remove_tenant_agent_role.sql` | Migra usuarios existentes a `tenant_admin`, dropea CHECK constraint, recrea enum `user_role` sin `tenant_agent`, restaura constraint + default |
+| `apps/api/db/models.py` + `packages/shared/src/enums.ts` | `UserRole = Literal["super_admin", "tenant_admin"]` |
+| `apps/api/core/security.py` | Comentarios/docstrings actualizados |
+| `supabase/seed.sql` | Usuario de prueba pasa a `tenant_admin` |
+| `apps/web/(dashboard)/page.tsx` | Comentario actualizado |
+| `CLAUDE.md` (raíz) | Reescrito post-pivot — modelo Managed AI Service, helpdesks del cliente como prioridad, organización de carpetas real (skills/, aops/, evals/, slow_agent/, scripts/) |
+| Tests | Adaptados test por test (no search-and-replace ciego). 3 tests eliminados (`test_tenant_agent_gets_403`, `test_promote_requires_admin`, `test_requires_admin_role`) porque validaban exclusión de un rol que ya no existe y los 2 roles restantes ambos tienen acceso a esos endpoints. `test_disallowed_role_blocked` migrado a usar `super_admin` (único rol que `require_role("tenant_admin")` bloquea válidamente). |
+
+**Suite total: 718/718 verde. Ruff limpio.**
+
+### Lección guardada — Postgres CHECK constraints con enum
+
+La migración falló 3 veces antes de funcionar. Causa raíz: el CHECK constraint `users_tenant_required` almacena la expresión como `role = 'super_admin'::user_role` con el cast EXPLÍCITO al tipo enum. Al hacer `ALTER COLUMN role TYPE text` durante el rebuild del enum, Postgres re-evalúa la constraint: el lado izquierdo (`role`) ya es text pero el lado derecho (`'super_admin'::user_role`) sigue bindeado al enum viejo → `operator does not exist: text = user_role`.
+
+**Patrón correcto para rebuild de enum con CHECK constraint asociada:**
+1. UPDATE filas existentes (cast a text en el WHERE)
+2. **DROP CONSTRAINT** que depende del enum
+3. ALTER COLUMN role TYPE text + DROP DEFAULT
+4. DROP TYPE + CREATE TYPE (sin el valor descartado)
+5. ALTER COLUMN role TYPE user_role USING role::user_role + SET DEFAULT
+6. **ADD CONSTRAINT** recreada con el enum nuevo
+
+**Bug operativo descubierto:** la primera versión del archivo migración pasó al Supabase SQL Editor parecía cachearse — Kenny mergeaba el PR de fix y al re-correr la migración seguía dando el mismo error. La solución fue copiar el SQL completo manualmente y pegarlo. Si esto vuelve a pasar, sospechar de cache del editor antes de seguir buscando bugs en el SQL.
+
+---
+
 ## Empezar aquí — siguiente sesión
 
-**Modelo recomendado:** Sonnet para la mayoría de sub-PRs Bloque 0; **Opus para 0.10 (Simulator)** porque define arquitectura crítica que afecta Bloques 2/3.
+**Modelo recomendado:** Sonnet para 0.2 (patrón claro, baja ambigüedad pero fundacional).
 
-**Acciones inmediatas:**
+**Próximo: Sub-PR 0.2 — Framework adapters base**
 
-1. **Fase 0 LEGAL arrancada en paralelo** (Kenny acciona externamente):
+Crear el patrón `MessageProvider` (base) + `HelpdeskProvider` (extends) con tabla `tenant_integrations` que guarda credentials cifradas + config por proveedor por tenant. Todo lo demás del Bloque 0 (0.3-0.7) depende de este.
+
+Archivos a tocar (resumen — detalle completo en `docs/bloque-0-plan.md` sub-PR 0.2):
+
+- `supabase/migrations/20260522000002_add_tenant_integrations.sql` (tabla nueva)
+- `apps/api/integrations/base.py` (Protocols `MessageProvider`, `HelpdeskProvider`)
+- `apps/api/integrations/registry.py` (`IntegrationRegistry`)
+- `apps/api/services/secrets.py` (encrypt/decrypt con salt per-tenant)
+- `apps/api/db/models.py` + `db/queries.py` (modelo `TenantIntegration` + CRUD)
+- Tests unitarios del registry + encryption
+
+**Acciones externas en paralelo (Kenny acciona):**
+
+1. **Fase 0 LEGAL:**
    - Contactar gestor para constitución SL
    - Asesor laboral para decisión paro esposa
    - Plantillas DPA/T&C/Privacy (€400-800 abogado)
 
-2. **Bloque 0 técnico — orden recomendado:**
-   - 0.1 Hard removal `tenant_agent` (primero, descarga código antes de refactor)
-   - 0.2 Framework adapters base (fundacional, todo lo demás depende)
-   - 0.3-0.7 en paralelo si posible (4 adapters refactor/nuevos + Postmark)
-   - 0.8 Roles internos estructura DB
-   - 0.9 AOPs `steps[]` (medio día)
-   - 0.10 Simulator MVP (la pieza grande de Bloque 0)
-   - 0.11 Validación E2E con simulator + fix bugs descubiertos
+2. **OAuth Partner registrations** (necesarios para 0.5/0.6):
+   - Shopify Partner Program (gratis, ~2h)
+   - Gorgias Developer Account + crear app draft (~4h)
+   - Zendesk OAuth client + redirect URI (~4h)
 
-3. **Crear `docs/bloque-0-plan.md`** con plan detallado (task #4 pendiente).
+Estos NO bloquean código de 0.2 pero sí bloquean tests E2E con OAuth real en 0.5/0.6.
+
+### Orden completo Bloque 0 restante
+
+- 0.2 Framework adapters base (fundacional, todo lo demás depende)
+- 0.3-0.7 en paralelo si posible (4 adapters refactor/nuevos + Postmark)
+- 0.8 Roles internos estructura DB
+- 0.9 AOPs `steps[]` (medio día)
+- 0.10 Simulator MVP (la pieza grande de Bloque 0) — **Opus**
+- 0.11 Validación E2E con simulator + fix bugs descubiertos
 
 ### Referencias clave
 
 - `docs/auyan-master-context.md` — fuente única de verdad de negocio + producto
 - `docs/architecture-agent-v2.md` sección 20 — arquitectura técnica post-pivot detallada
-- `CLAUDE.md` (raíz) — reglas operativas del proyecto
+- `docs/bloque-0-plan.md` — plan detallado sub-PR por sub-PR de Bloque 0
+- `CLAUDE.md` (raíz) — reglas operativas del proyecto (actualizado post-pivot en sesión 2026-05-23)
