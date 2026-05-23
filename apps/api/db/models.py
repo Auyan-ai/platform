@@ -23,7 +23,7 @@ EscalationStatus = Literal["pending", "claimed", "resolved"]
 ChannelType = Literal[
     "email", "chat", "widget", "whatsapp", "instagram", "zendesk", "intercom", "chatwoot"
 ]
-UserRole = Literal["super_admin", "tenant_admin", "tenant_agent"]
+UserRole = Literal["super_admin", "tenant_admin"]
 
 
 class _BaseModel(BaseModel):

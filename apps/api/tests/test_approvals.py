@@ -295,36 +295,6 @@ class TestListToolPermissions:
 
 
 class TestUpdateToolPermission:
-    def test_requires_admin_role(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """tenant_agent no puede modificar permisos."""
-
-        async def _agent_lookup(user_id: UUID, settings: Any) -> UserRecord:
-            return UserRecord(tenant_id=TENANT_ID, role="tenant_agent", email="agent@b.com")
-
-        monkeypatch.setattr("apps.api.core.security._lookup_user", _agent_lookup)
-
-        @asynccontextmanager
-        async def _fake_scope(*args: Any, **kwargs: Any) -> AsyncIterator[AsyncMock]:
-            yield AsyncMock()
-
-        monkeypatch.setattr("apps.api.routers.tool_permissions.tenant_scope", _fake_scope)
-
-        from apps.api.core.config import get_settings
-
-        app = FastAPI()
-        register_exception_handlers(app)
-        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings()
-        app.include_router(tool_permissions_router)
-        client = TestClient(app, raise_server_exceptions=False)
-
-        resp = client.put(
-            "/tenants/me/tool-permissions/shopify.cancel_order",
-            json={"is_enabled": True, "human_approval_required": False},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
-
-        assert resp.status_code == 403
-
     def test_skill_not_found_returns_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
         app, client = _make_app(monkeypatch, tool_permissions_router)
         resp = client.put(

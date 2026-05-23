@@ -1,38 +1,40 @@
 # Auyan — Reglas del proyecto
 
 ## Contexto
-Auyan es un BPO AI-native para CX support, verticalizando primero en ecommerce.
-Modelo: AI + agentes humanos como servicio fully managed.
-Evolución futura: SaaS estilo Crescendo.ai donde el cliente gestiona su propio agente.
+Auyan es un **Managed AI Service** para CX support, verticalizando primero en e-commerce español.
+Modelo: configuramos, mantenemos y optimizamos el agente IA del cliente. El cliente conserva su propio equipo de soporte para escalados. Auyan es su equipo externo de Agent Engineers.
+No es BPO. No hay agentes humanos de Auyan atendiendo tickets.
 No vocees, habla acento caraqueño venezolano, tuteame.
 
 ## Stack
-- Backend: FastAPI (Python)
-- Frontend: Next.js con TypeScript
-- Base de datos: Supabase (Postgres + pgvector)
-- Agente: LangGraph + Claude API (claude-sonnet-4-6)
+- Backend: FastAPI (Python 3.12)
+- Frontend: Next.js 15 + TypeScript + Tailwind v4 + shadcn
+- Base de datos: Supabase (Postgres + pgvector + Auth + RLS)
+- Agente: LangGraph + Claude API (Sonnet 4.6 default, Opus 4.7 para L3/supervisor/judge, Haiku 4.5 para intent classifier)
+- Embeddings: OpenAI text-embedding-3-small
 - Observabilidad: Langfuse
-- Inbox operativo: Chatwoot
-- Email inbound: Postmark
+- Helpdesks del cliente: Gorgias (prioridad #1) / Zendesk / Chatwoot Cloud / Intercom (reactivo)
+- Email saliente (Auyan→cliente): Postmark
 - Deploy: Railway
 
 ## Estructura del monorepo
 - apps/api → FastAPI, agentes LangGraph, webhooks
-- apps/web → Dashboard interno + dashboard cliente (Next.js)
-- apps/widget → Chat embebible JS para clientes sin herramienta propia
+- apps/web → Dashboard super_admin + dashboard cliente (Next.js)
+- apps/widget → Chat embebible JS (backlog futuro)
 - packages/shared → Tipos y utilidades compartidas entre apps
 - docs → Documentación técnica
 
 ## Arquitectura crítica — multi-tenant
 - TODAS las tablas de Supabase tienen tenant_id como columna obligatoria
 - Nunca mezclar datos entre tenants bajo ninguna circunstancia
-- Cada tenant tiene su propia knowledge base, configuración y prompts
+- Cada tenant tiene su propia knowledge base (RAG), AOPs, configuración y credentials de integración
 - Row Level Security (RLS) activado en Supabase para todas las tablas
 
 ## Reglas de base de datos
 - Soft delete siempre: columna deleted_at, nunca DELETE real
 - Timestamps en todas las tablas: created_at y updated_at
-- Migraciones versionadas, nunca modificar tablas directamente en producción
+- Migraciones versionadas en supabase/migrations/, nunca modificar tablas directamente en producción
+- Railway deploya código pero NO aplica SQL. Las migraciones se corren manualmente vía psql o Supabase SQL Editor
 
 ## Reglas de código
 - Nunca hardcodear API keys ni secrets en el código
@@ -57,25 +59,29 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - Tracking de tokens y costo por conversación y por tenant
 
 ## Flujo del agente
-1. Ticket entra por cualquier canal
+1. Ticket entra al helpdesk del cliente (Gorgias/Zendesk/Chatwoot) → webhook a Auyan
 2. Se identifica el tenant
 3. El agente recupera contexto (historial + knowledge base del tenant)
-4. El agente decide: resolver o escalar
-5. Si resuelve: responde vía API del canal correspondiente
-6. Si escala: asigna a agente humano con contexto completo y razón del escalado
-7. Todo queda registrado en Langfuse y en Supabase
+4. El nodo select_aop clasifica el intent y activa el AOP correspondiente
+5. El agente ejecuta el loop ReAct: reason → (execute_skill si aplica) → respond o escalate
+6. Si resuelve: responde vía el adapter del helpdesk del cliente
+7. Si escala: push al helpdesk del cliente con contexto completo y razón del escalado (el equipo CX del cliente atiende)
+8. Todo queda registrado en Langfuse y en Supabase
 
-## Integraciones previstas
-- Chatwoot: inbox operativo interno para agentes humanos
-- Zendesk: webhook receiver + API bidireccional
-- Intercom: webhook receiver + API bidireccional
-- Shopify: ver pedidos, cancelaciones, devoluciones
-- WhatsApp: vía Twilio o 360dialog
-- Instagram: vía Meta API
-- Postmark: email inbound
+## Roles del sistema
+- `super_admin` — acceso total cross-tenant (Kenny + esposa)
+- `tenant_admin` — acceso scoped al tenant del cliente
+- NO existe `tenant_agent` (removido en Bloque 0, sub-PR 0.1)
+
+## Integraciones
+- Gorgias: helpdesk principal, OAuth, bidireccional (adapter Bloque 0.6)
+- Chatwoot Cloud: helpdesk alternativo, API key, bidireccional (adapter Bloque 0.4)
+- Zendesk: helpdesk alternativo, OAuth, bidireccional (adapter Bloque 0.5)
+- Intercom: reactivo (si cliente lo pide)
+- Shopify: 11 skills implementadas — 5 L1 (lectura), 2 L2 (escritura reversible), 4 L3 (destructivas con approval)
+- Postmark: email saliente Auyan→cliente (reports, notificaciones)
 
 ## Selección de modelo
-
 - Al inicio de cada sesión, recomendar qué modelo usar según la tarea descrita antes de arrancar.
 - Si el usuario no especifica la tarea al inicio, preguntar qué va a hacer antes de arrancar.
 - **Sonnet** (`claude-sonnet-4-6`): tareas rutinarias de código, scaffolding, fixes, boilerplate y preguntas de contexto.
@@ -83,61 +89,55 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 
 ## Lo que nunca hay que hacer
 - Modificar datos de un tenant desde el contexto de otro
-- Responder al cliente final sin pasar por el grafo de LangGraph
+- Responder al cliente final sin pasar por el grafo de LangGraph + AOP selector
 - Deployar directo a producción sin pasar por staging
 - Commitear .env, API keys o datos de clientes reales
+- Suponer que un rol `tenant_agent` existe (fue removido)
 
 ## Organización de archivos por carpeta
 
 ### apps/api
 - main.py → entrada de la aplicación FastAPI
-- routers/ → endpoints organizados por dominio (tickets, tenants, webhooks)
-- agents/ → grafos de LangGraph y lógica del agente
-- agents/graph.py → grafo principal
-- agents/nodes/ → cada nodo del grafo en su propio archivo
-- agents/prompts/ → prompts versionados por tenant
-- integrations/ → conectores externos (Zendesk, Chatwoot, Shopify, etc.)
-- integrations/zendesk.py
-- integrations/chatwoot.py
-- integrations/shopify.py
-- services/ → lógica de negocio reutilizable
-- services/tickets.py
-- services/tenants.py
-- services/escalation.py
-- db/ → modelos y queries de Supabase
-- db/models.py
-- db/queries.py
-- core/ → configuración, constantes, utilidades
-- core/config.py → variables de entorno
-- core/security.py
+- routers/ → endpoints organizados por dominio (webhooks, tenants, conversations, escalations, aops, approvals, proposals, reasoning, tool_permissions)
+- agents/ → grafo LangGraph y lógica del agente
+  - agents/graph.py → grafo principal (11 nodos + loop ReAct)
+  - agents/nodes/ → cada nodo en su propio archivo
+  - agents/state.py → AgentState completo
+  - agents/dependencies.py → AgentDependencies (ReasoningTracker, AuditLogger)
+- aops/ → AOP compiler + TTL cache + Postgres NOTIFY listener
+- skills/ → Skills framework (base, registry) + skills por proveedor
+  - skills/shopify/ → 11 skills (5 L1 + 2 L2 + 4 L3)
+- slow_agent/ → LLM-as-judge batch (transcript, judge, runner, sampling)
+- evals/ → harness de eval + fixtures YAML por AOP
+- integrations/ → clientes HTTP externos (shopify.py, langfuse_client.py, anthropic_client.py, etc.)
+- services/ → lógica de negocio reutilizable (tenants, conversations, escalations, cleanup, reasoning, audit, pii, rate_limit)
+- db/ → modelos Pydantic + queries asyncpg
+- core/ → config (pydantic-settings), security (JWT ES256), errors (DomainError)
+- scripts/ → utilidades operativas (seed_kb, send_test_webhook, activate_shopify, run_slow_agent)
 - tests/ → tests organizados igual que el código
 
 ### apps/web
 - app/ → páginas Next.js (App Router)
-- app/dashboard/ → vista interna para agentes humanos
-- app/clients/ → dashboard por tenant (vista del cliente)
-- app/auth/ → login y autenticación
-- components/ → componentes reutilizables
-- lib/ → utilidades y llamadas a API
-
-### apps/widget
-- src/widget.ts → el chat embebible
-- src/api.ts → conexión con apps/api
-- dist/ → build final que se embebe en la web del cliente
+  - app/(dashboard)/ → dashboard operativo super_admin
+  - app/clients/ → dashboard read/write para tenant_admin
+  - app/(auth)/ → login y autenticación
+- components/ → componentes reutilizables (inbox, reasoning, aops, proposals, approvals)
+- lib/ → utilidades, hooks TanStack Query, cliente openapi-fetch tipado
 
 ### packages/shared
 - types/ → interfaces y tipos compartidos entre apps
 - utils/ → funciones utilitarias comunes
 
 ### docs
-- architecture.md → decisiones de arquitectura
-- onboarding.md → cómo incorporar un cliente nuevo
-- runbooks/ → cómo resolver problemas comunes en producción
+- auyan-master-context.md → fuente única de verdad del negocio + arquitectura post-pivot
+- architecture-agent-v2.md → detalle técnico del agente v2 (Skills, AOPs, Supervisor, Slow Agent)
+- bloque-0-plan.md → plan de ejecución detallado Bloque 0
+- progress.md → bitácora de sprints terminados y próximo paso operativo
 
-### Raíz del proeyecto
+### Raíz del proyecto
 - CLAUDE.md → este archivo
 - .env.example → template de variables de entorno sin valores reales
 - .gitignore → archivos que nunca se suben a GitHub
-- docker-compose.yml → para levantar servicios localmente
+- supabase/migrations/ → todas las migraciones SQL versionadas
 
-por ultimo, estas no son normals grabadas para siempre, si tienes alguna sugerencia puedes sugerir cambios que yo tendre qeu aprobar antes de continuarlos y luego actualizar este archivo
+por último, estas no son normas grabadas para siempre, si tienes alguna sugerencia puedes sugerir cambios que yo tendrás que aprobar antes de continuarlos y luego actualizar este archivo

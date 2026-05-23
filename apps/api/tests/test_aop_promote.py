@@ -229,25 +229,3 @@ class TestPromoteAop:
 
         assert resp.status_code == 404
 
-    def test_promote_requires_admin(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """tenant_agent no tiene acceso → 403."""
-        async def _agent_lookup(user_id: UUID, settings: Any) -> UserRecord:
-            return UserRecord(tenant_id=TENANT_ID, role="tenant_agent", email="agent@acme.io")
-
-        monkeypatch.setattr("apps.api.core.security._lookup_user", _agent_lookup)
-
-        @asynccontextmanager
-        async def _fake_tenant_scope(tid: UUID) -> AsyncIterator[Any]:
-            yield AsyncMock()
-
-        monkeypatch.setattr("apps.api.routers.aops.tenant_scope", _fake_tenant_scope)
-
-        from apps.api.core.config import get_settings
-        app = FastAPI()
-        register_exception_handlers(app)
-        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings()
-        app.include_router(aops_router)
-
-        client = TestClient(app)
-        resp = client.patch(f"/aops/{AOP_ID}/promote", headers=AUTH_HDR)
-        assert resp.status_code == 403

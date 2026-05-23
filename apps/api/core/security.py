@@ -11,7 +11,7 @@ Flujo de un request autenticado:
 7. Devuelve `AuthContext`.
 
 Tenant scope:
-- `tenant_admin` / `tenant_agent` → su propio `tenant_id`. Si manda `X-Tenant-Id`
+- `tenant_admin` → su propio `tenant_id`. Si manda `X-Tenant-Id`
   distinto, 403 (cross-tenant access).
 - `super_admin` → `tenant_id` queda None en el AuthContext. Para endpoints que
   requieren scope, debe pasar el header `X-Tenant-Id` con el target.
@@ -261,7 +261,7 @@ async def get_tenant_id(
 ) -> UUID:
     """Resuelve el `tenant_id` efectivo para endpoints con scope.
 
-    - tenant_admin / tenant_agent → su propio tenant. `X-Tenant-Id` distinto = 403.
+    - tenant_admin → su propio tenant. `X-Tenant-Id` distinto = 403.
     - super_admin → REQUIERE `X-Tenant-Id` para operar en algún tenant.
     """
     if auth.role == "super_admin":
@@ -275,7 +275,7 @@ async def get_tenant_id(
         except ValueError as exc:
             raise ForbiddenError("invalid_x_tenant_id", code="invalid_x_tenant_id") from exc
 
-    # tenant_admin / tenant_agent — auth.tenant_id es UUID (validado en get_auth_context).
+    # tenant_admin — auth.tenant_id es UUID (validado en get_auth_context).
     if auth.tenant_id is None:
         raise ForbiddenError("user_has_no_tenant", code="user_has_no_tenant")
     if x_tenant_id:

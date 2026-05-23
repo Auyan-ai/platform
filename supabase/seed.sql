@@ -62,7 +62,7 @@ insert into auth.users (
   crypt('auyan-staging-2026', gen_salt('bf')),
   now(),
   jsonb_build_object(
-    'role', 'tenant_agent',
+    'role', 'tenant_admin',
     'tenant_id', '11111111-1111-1111-1111-111111111111'
   ),
   jsonb_build_object('full_name', 'María — Agente Lunaria'),
@@ -107,7 +107,7 @@ insert into users (id, tenant_id, email, full_name, role) values
   '11111111-1111-1111-1111-111111111111',
   'agente@lunaria.test',
   'María — Agente Lunaria',
-  'tenant_agent'
+  'tenant_admin'
 );
 
 -- ============================================================

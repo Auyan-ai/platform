@@ -60,7 +60,7 @@ def _make_jwt() -> str:
 
 
 def _agent_record() -> UserRecord:
-    return UserRecord(tenant_id=TENANT_ID, role="tenant_agent", email="agent@acme.io")
+    return UserRecord(tenant_id=TENANT_ID, role="tenant_admin", email="agent@acme.io")
 
 
 @pytest.fixture(autouse=True)
