@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-23 (sesión 28 — **PIVOT BPO → Managed AI Service**, grill-me cerrado, arranca Bloque 0)_
+_Última actualización: 2026-05-23 (sesión 30 — Bloque 0 sub-PRs 0.1 y 0.2 mergeados, siguiente: 0.3)_
 
 ---
 
@@ -1241,8 +1241,8 @@ Sub-PRs propuestos:
 
 | # | Foco | Modelo |
 |---|---|---|
-| 0.1 | Hard removal `tenant_agent` (migration + cleanup código + tests) | Sonnet |
-| 0.2 | Framework adapters base (`MessageProvider`, `HelpdeskProvider`, `IntegrationRegistry`, `tenant_integrations` table) | Sonnet |
+| ~~0.1~~ | ~~Hard removal `tenant_agent`~~ | ✅ [PR #83](https://github.com/Auyan-ai/platform/pull/83)+[#84](https://github.com/Auyan-ai/platform/pull/84) |
+| ~~0.2~~ | ~~Framework adapters base~~ | ✅ [PR #87](https://github.com/Auyan-ai/platform/pull/87) |
 | 0.3 | Refactor `ShopifyAdapter` (commerce) | Sonnet |
 | 0.4 | Refactor `ChatwootAdapter` (helpdesk, completar bidirec) | Sonnet |
 | 0.5 | Refactor `ZendeskAdapter` (helpdesk, completar bidirec + OAuth) | Sonnet |
@@ -1328,7 +1328,7 @@ La migración falló 3 veces antes de funcionar. Causa raíz: el CHECK constrain
 
 ---
 
-## Bloque 0 — Sub-PR 0.2 — Framework adapters base ([PR #87](https://github.com/Auyan-ai/platform/pull/87)) 🔁 en review
+## Bloque 0 — Sub-PR 0.2 — Framework adapters base ([PR #87](https://github.com/Auyan-ai/platform/pull/87)) ✅
 
 **Objetivo:** Infraestructura de adapters que habilita 0.3-0.7. Sin esto, cada adapter inventa su propia interfaz y no se pueden intercambiar por tenant.
 
@@ -1348,11 +1348,11 @@ La migración falló 3 veces antes de funcionar. Causa raíz: el CHECK constrain
 **Tests nuevos:** 36 (13 registry + 16 crypto + 7 get_integration_crypto_key).
 **Suite total: 747/747 verde. Ruff limpio.**
 
-### Pendiente antes de mergear
+### Pendiente de staging
 
-- [ ] Mergear PR #87 a develop
-- [x] Aplicar migración en staging: `supabase/migrations/20260522000002_add_tenant_integrations.sql`
-- [x] Añadir `INTEGRATIONS_SECRET_KEY` a Railway staging
+- [x] PR #87 mergeado a develop ✅
+- [x] Migración `20260522000002_add_tenant_integrations.sql` aplicada en staging ✅
+- [x] `INTEGRATIONS_SECRET_KEY` añadida a Railway staging ✅
 
 ---
 
@@ -1361,9 +1361,8 @@ La migración falló 3 veces antes de funcionar. Causa raíz: el CHECK constrain
 **Modelo recomendado:** Sonnet para 0.3-0.9; **Opus para 0.10 (Simulator)** porque define arquitectura crítica que afecta Bloques 2/3.
 
 **Próximo paso:**
-1. Merge PR #87 a develop
-2. Sub-PR 0.3: Refactor `ShopifyAdapter` → implementa `CommerceProvider`, recibe `IntegrationContext`
-3. Sub-PR 0.4: Refactor `ChatwootAdapter` → implementa `HelpdeskProvider` completo + nuevo webhook endpoint
+1. Sub-PR 0.3: Refactor `ShopifyAdapter` → implementa `CommerceProvider`, recibe `IntegrationContext`
+2. Sub-PR 0.4: Refactor `ChatwootAdapter` → implementa `HelpdeskProvider` completo + nuevo webhook endpoint
 
 **Paralelizable después de 0.3/0.4 mergeados:** 0.5 (Zendesk), 0.6 (Gorgias), 0.7 (Postmark), 0.8 (roles internos), 0.9 (AOPs steps[]).
 
