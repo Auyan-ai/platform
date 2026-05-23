@@ -52,6 +52,9 @@ class Settings(BaseSettings):
 
     # --- Integrations (opcionales según etapa del proyecto) ---
     postmark_api_token: SecretStr | None = None
+    # Clave maestra AES-256-GCM para credentials de tenant_integrations.
+    # Generar con: python -c "import secrets; print(secrets.token_hex(32))"
+    integrations_secret_key: SecretStr | None = None
 
     # --- Webhook security ---
     webhook_secret: SecretStr = Field(

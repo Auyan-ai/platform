@@ -323,6 +323,26 @@ class ImprovementProposal(_BaseModel):
     created_at: datetime
 
 
+# ─── Tenant Integrations (Bloque 0, Sub-PR 0.2) ──────────────────────────────
+
+IntegrationKind = Literal["helpdesk", "commerce", "channel", "llm"]
+
+
+class TenantIntegration(_BaseModel):
+    id: UUID
+    tenant_id: UUID
+    kind: IntegrationKind
+    provider: str
+    # credentials_encrypted no se expone en el modelo: se descifra antes de usar.
+    config: dict = Field(default_factory=dict)
+    is_active: bool
+    is_primary_for_kind: bool
+    enabled_at: datetime | None = None
+    enabled_by: UUID | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class TenantUsageDaily(_BaseModel):
     id: UUID
     tenant_id: UUID
