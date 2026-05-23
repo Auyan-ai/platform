@@ -1328,49 +1328,48 @@ La migración falló 3 veces antes de funcionar. Causa raíz: el CHECK constrain
 
 ---
 
+## Bloque 0 — Sub-PR 0.2 — Framework adapters base ([PR #87](https://github.com/Auyan-ai/platform/pull/87)) 🔁 en review
+
+**Objetivo:** Infraestructura de adapters que habilita 0.3-0.7. Sin esto, cada adapter inventa su propia interfaz y no se pueden intercambiar por tenant.
+
+### Lo que se construyó (sesión 29 — 2026-05-23)
+
+| Archivo | Qué hace |
+|---|---|
+| `apps/api/integrations/base.py` | Protocols `MessageProvider`, `HelpdeskProvider`, `CommerceProvider` + dataclasses `InboundMessage`, `ExternalTicketRef`, `IntegrationContext` |
+| `apps/api/integrations/registry.py` | `IntegrationRegistry` singleton con `@register(kind, provider)` decorator; `get`, `list_for_kind`, `all_registered`, `_reset` |
+| `apps/api/services/integrations_crypto.py` | AES-256-GCM: `encrypt_credentials`, `decrypt_credentials` (nonce 12 bytes), `get_integration_crypto_key` valida SecretStr |
+| `supabase/migrations/20260522000002_add_tenant_integrations.sql` | Tabla `tenant_integrations` con `credentials_encrypted BYTEA`, RLS, índices unique activo/primary, trigger `updated_at` |
+| `apps/api/db/models.py` | `TenantIntegration` + `IntegrationKind` Literal |
+| `apps/api/db/queries.py` | CRUD: `get_active_integration`, `get_primary_integration_for_kind`, `list_integrations_for_tenant`, `upsert_integration`, `get_integration_credentials_encrypted`, `soft_delete_integration` |
+| `apps/api/core/config.py` | `integrations_secret_key: SecretStr | None` |
+| `.env.example` | `INTEGRATIONS_SECRET_KEY` documentada |
+
+**Tests nuevos:** 36 (13 registry + 16 crypto + 7 get_integration_crypto_key).
+**Suite total: 747/747 verde. Ruff limpio.**
+
+### Pendiente antes de mergear
+
+- [ ] Mergear PR #87 a develop
+- [x] Aplicar migración en staging: `supabase/migrations/20260522000002_add_tenant_integrations.sql`
+- [x] Añadir `INTEGRATIONS_SECRET_KEY` a Railway staging
+
+---
+
 ## Empezar aquí — siguiente sesión
 
-**Modelo recomendado:** Sonnet para 0.2 (patrón claro, baja ambigüedad pero fundacional).
+**Modelo recomendado:** Sonnet para 0.3-0.9; **Opus para 0.10 (Simulator)** porque define arquitectura crítica que afecta Bloques 2/3.
 
-**Próximo: Sub-PR 0.2 — Framework adapters base**
+**Próximo paso:**
+1. Merge PR #87 a develop
+2. Sub-PR 0.3: Refactor `ShopifyAdapter` → implementa `CommerceProvider`, recibe `IntegrationContext`
+3. Sub-PR 0.4: Refactor `ChatwootAdapter` → implementa `HelpdeskProvider` completo + nuevo webhook endpoint
 
-Crear el patrón `MessageProvider` (base) + `HelpdeskProvider` (extends) con tabla `tenant_integrations` que guarda credentials cifradas + config por proveedor por tenant. Todo lo demás del Bloque 0 (0.3-0.7) depende de este.
-
-Archivos a tocar (resumen — detalle completo en `docs/bloque-0-plan.md` sub-PR 0.2):
-
-- `supabase/migrations/20260522000002_add_tenant_integrations.sql` (tabla nueva)
-- `apps/api/integrations/base.py` (Protocols `MessageProvider`, `HelpdeskProvider`)
-- `apps/api/integrations/registry.py` (`IntegrationRegistry`)
-- `apps/api/services/secrets.py` (encrypt/decrypt con salt per-tenant)
-- `apps/api/db/models.py` + `db/queries.py` (modelo `TenantIntegration` + CRUD)
-- Tests unitarios del registry + encryption
-
-**Acciones externas en paralelo (Kenny acciona):**
-
-1. **Fase 0 LEGAL:**
-   - Contactar gestor para constitución SL
-   - Asesor laboral para decisión paro esposa
-   - Plantillas DPA/T&C/Privacy (€400-800 abogado)
-
-2. **OAuth Partner registrations** (necesarios para 0.5/0.6):
-   - Shopify Partner Program (gratis, ~2h)
-   - Gorgias Developer Account + crear app draft (~4h)
-   - Zendesk OAuth client + redirect URI (~4h)
-
-Estos NO bloquean código de 0.2 pero sí bloquean tests E2E con OAuth real en 0.5/0.6.
-
-### Orden completo Bloque 0 restante
-
-- 0.2 Framework adapters base (fundacional, todo lo demás depende)
-- 0.3-0.7 en paralelo si posible (4 adapters refactor/nuevos + Postmark)
-- 0.8 Roles internos estructura DB
-- 0.9 AOPs `steps[]` (medio día)
-- 0.10 Simulator MVP (la pieza grande de Bloque 0) — **Opus**
-- 0.11 Validación E2E con simulator + fix bugs descubiertos
+**Paralelizable después de 0.3/0.4 mergeados:** 0.5 (Zendesk), 0.6 (Gorgias), 0.7 (Postmark), 0.8 (roles internos), 0.9 (AOPs steps[]).
 
 ### Referencias clave
 
 - `docs/auyan-master-context.md` — fuente única de verdad de negocio + producto
 - `docs/architecture-agent-v2.md` sección 20 — arquitectura técnica post-pivot detallada
-- `docs/bloque-0-plan.md` — plan detallado sub-PR por sub-PR de Bloque 0
-- `CLAUDE.md` (raíz) — reglas operativas del proyecto (actualizado post-pivot en sesión 2026-05-23)
+- `docs/bloque-0-plan.md` — plan detallado de todos los sub-PRs del Bloque 0
+- `CLAUDE.md` (raíz) — reglas operativas del proyecto

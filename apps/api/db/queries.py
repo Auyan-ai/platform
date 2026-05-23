@@ -30,6 +30,7 @@ from apps.api.db.models import (
     EscalationStatus,
     IdempotencyRecord,
     ImprovementProposal,
+    IntegrationKind,
     IntentClassifierRun,
     KnowledgeChunk,
     Message,
@@ -43,6 +44,7 @@ from apps.api.db.models import (
     SlowAgentRun,
     Tenant,
     TenantConfiguration,
+    TenantIntegration,
     TenantToolPermission,
     TenantUsageDaily,
     UserRole,
@@ -2141,3 +2143,200 @@ async def get_tenant_usage_today(
     if row is None:
         return None
     return TenantUsageDaily(**dict(row))
+
+
+# ============================================================
+# Tenant Integrations (Bloque 0, Sub-PR 0.2)
+# ============================================================
+
+_INTEGRATION_SELECT = (
+    "id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,"
+    " enabled_at, enabled_by, created_at, updated_at"
+)
+
+
+def _row_to_integration(row: Any) -> TenantIntegration:
+    return TenantIntegration(**{k: row[k] for k in TenantIntegration.model_fields})
+
+
+async def get_active_integration(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    kind: IntegrationKind,
+    provider: str,
+) -> TenantIntegration | None:
+    """Devuelve la integración activa para (tenant, kind, provider), o None."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
+               enabled_at, enabled_by, created_at, updated_at
+          FROM tenant_integrations
+         WHERE tenant_id = $1
+           AND kind      = $2
+           AND provider  = $3
+           AND deleted_at IS NULL
+           AND is_active = TRUE
+        """,
+        tenant_id,
+        kind,
+        provider,
+    )
+    return _row_to_integration(row) if row else None
+
+
+async def get_primary_integration_for_kind(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    kind: IntegrationKind,
+) -> TenantIntegration | None:
+    """Devuelve la integración marcada como primaria para el kind, o None."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
+               enabled_at, enabled_by, created_at, updated_at
+          FROM tenant_integrations
+         WHERE tenant_id           = $1
+           AND kind                = $2
+           AND is_primary_for_kind = TRUE
+           AND deleted_at IS NULL
+           AND is_active = TRUE
+        """,
+        tenant_id,
+        kind,
+    )
+    return _row_to_integration(row) if row else None
+
+
+async def list_integrations_for_tenant(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    kind: IntegrationKind | None = None,
+) -> list[TenantIntegration]:
+    """Lista integraciones del tenant, opcionalmente filtradas por kind."""
+    if kind:
+        rows = await conn.fetch(
+            """
+            SELECT id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
+                   enabled_at, enabled_by, created_at, updated_at
+              FROM tenant_integrations
+             WHERE tenant_id  = $1
+               AND kind       = $2
+               AND deleted_at IS NULL
+             ORDER BY kind, provider
+            """,
+            tenant_id,
+            kind,
+        )
+    else:
+        rows = await conn.fetch(
+            """
+            SELECT id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
+                   enabled_at, enabled_by, created_at, updated_at
+              FROM tenant_integrations
+             WHERE tenant_id  = $1
+               AND deleted_at IS NULL
+             ORDER BY kind, provider
+            """,
+            tenant_id,
+        )
+    return [_row_to_integration(r) for r in rows]
+
+
+async def upsert_integration(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    kind: IntegrationKind,
+    provider: str,
+    credentials_encrypted: bytes,
+    config: dict,
+    is_active: bool = True,
+    is_primary_for_kind: bool = False,
+    enabled_by: UUID | None = None,
+) -> TenantIntegration:
+    """Crea o actualiza una integración. Las credentials ya deben venir cifradas."""
+    row = await conn.fetchrow(
+        """
+        INSERT INTO tenant_integrations
+            (tenant_id, kind, provider, credentials_encrypted, config,
+             is_active, is_primary_for_kind, enabled_at, enabled_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7,
+                CASE WHEN $6 THEN NOW() ELSE NULL END, $8)
+        ON CONFLICT (tenant_id, kind, provider) WHERE deleted_at IS NULL
+        DO UPDATE SET
+            credentials_encrypted = EXCLUDED.credentials_encrypted,
+            config                = EXCLUDED.config,
+            is_active             = EXCLUDED.is_active,
+            is_primary_for_kind   = EXCLUDED.is_primary_for_kind,
+            enabled_at            = CASE WHEN EXCLUDED.is_active
+                                      THEN COALESCE(
+                                            tenant_integrations.enabled_at,
+                                            NOW()
+                                          )
+                                      ELSE tenant_integrations.enabled_at
+                                    END,
+            enabled_by            = COALESCE(
+                                        EXCLUDED.enabled_by,
+                                        tenant_integrations.enabled_by
+                                    ),
+            updated_at            = NOW()
+        RETURNING id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
+                  enabled_at, enabled_by, created_at, updated_at
+        """,
+        tenant_id,
+        kind,
+        provider,
+        credentials_encrypted,
+        config,
+        is_active,
+        is_primary_for_kind,
+        enabled_by,
+    )
+    return _row_to_integration(row)
+
+
+async def get_integration_credentials_encrypted(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    integration_id: UUID,
+) -> bytes | None:
+    """Devuelve solo el campo credentials_encrypted para descifrado en el service layer."""
+    row = await conn.fetchrow(
+        """
+        SELECT credentials_encrypted
+          FROM tenant_integrations
+         WHERE tenant_id  = $1
+           AND id         = $2
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        integration_id,
+    )
+    return bytes(row["credentials_encrypted"]) if row else None
+
+
+async def soft_delete_integration(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    integration_id: UUID,
+) -> bool:
+    """Soft-delete. Retorna True si existía y fue borrado."""
+    result = await conn.execute(
+        """
+        UPDATE tenant_integrations
+           SET deleted_at = NOW(),
+               updated_at = NOW(),
+               is_active  = FALSE
+         WHERE tenant_id  = $1
+           AND id         = $2
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        integration_id,
+    )
+    return result == "UPDATE 1"
