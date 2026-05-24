@@ -73,6 +73,7 @@ ignore = ["S101"]  # asserts permitidos en tests
 "evals/**" = ["E501"]  # strings de mensajes de aserción inevitablemente largos
 "scripts/**" = ["E501", "S603"]  # scripts de CLI y utilitarios
 "integrations/pricing.py" = ["RUF003"]  # en-dash y × en comentarios técnicos son intencionales
+"services/email_templates/**" = ["E501"]  # HTML en strings: líneas largas inevitables
 
 [tool.mypy]
 python_version = "3.11"

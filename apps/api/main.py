@@ -36,6 +36,7 @@ from apps.api.db.client import close_pool, init_pool
 from apps.api.integrations.anthropic_client import build_anthropic_client
 from apps.api.integrations.langfuse_client import build_langfuse_client
 from apps.api.integrations.openai_embeddings import build_openai_client
+from apps.api.integrations.postmark import build_postmark_adapter
 from apps.api.routers.aops import router as aops_router
 from apps.api.routers.approvals import router as approvals_router
 from apps.api.routers.conversations import router as conversations_router
@@ -54,6 +55,7 @@ from apps.api.routers.webhooks_zendesk import router as webhooks_zendesk_router
 from apps.api.services.aop_listener import AopCacheListener
 from apps.api.services.audit import AuditLogger
 from apps.api.services.cleanup import run_abandoned_cleanup
+from apps.api.services.email_sender import EmailSender
 from apps.api.services.reasoning import ReasoningTracker
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -97,6 +99,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     reasoning_tracker = ReasoningTracker()
     audit_logger = AuditLogger()
+    email_sender = EmailSender(build_postmark_adapter(settings))
+    app.state.email_sender = email_sender
     deps = AgentDependencies(
         anthropic=anthropic,
         openai=openai,
