@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-24 (sesión 33 — Bloque 0, sub-PR 0.6 GorgiasAdapter completado)_
+_Última actualización: 2026-05-24 (sesión 34 — Bloque 0, sub-PR 0.7 PostmarkEmailAdapter completado)_
 
 > Historial completo de Sprints 1-11 y Rate Limiting en [`docs/progress-archive.md`](progress-archive.md).
 
@@ -62,7 +62,7 @@ Implicaciones: `tenant_agent` removido · Chatwoot → opcional al cliente · Da
 | 0.4 | ChatwootAdapter stateless + webhook | ✅ [PR #90](https://github.com/Auyan-ai/platform/pull/90) |
 | 0.5 | ZendeskAdapter + OAuth flow + webhook | ✅ [PR #91](https://github.com/Auyan-ai/platform/pull/91) |
 | 0.6 | GorgiasAdapter + OAuth (helpdesk #1) | ✅ [PR #92](https://github.com/Auyan-ai/platform/pull/92) |
-| 0.7 | PostmarkEmailAdapter outbound | ⏳ |
+| 0.7 | PostmarkEmailAdapter outbound | ✅ (commit c80ccdd) |
 | 0.8 | Roles internos DB | ⏳ |
 | 0.9 | AOPs `steps[]` opcional + events | ⏳ |
 | 0.10 | Simulator MVP | ⏳ **Opus** |
@@ -156,6 +156,25 @@ Implicaciones: `tenant_agent` removido · Chatwoot → opcional al cliente · Da
 - [ ] Setear `GORGIAS_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI` en Railway staging
 - [ ] Test flujo OAuth end-to-end + webhook con tenant de prueba
 
+### Sub-PR 0.7 — PostmarkEmailAdapter + EmailSender ✅
+
+| Archivo | Qué se hizo |
+|---|---|
+| `integrations/postmark.py` | `PostmarkClient` HTTP con retry tenacity (5xx/429/timeouts) + `PostmarkEmailAdapter` global (no per-tenant) + `build_postmark_adapter(settings)` factory |
+| `services/email_templates/escalation_fallback.py` | `render(...)` → `(subject, text_body, html_body)` para notificar al CX del cliente cuando el agente escala sin helpdesk configurado |
+| `services/email_sender.py` | `EmailSender` fire-and-forget (mismo patrón que `AuditLogger`): no-op si `POSTMARK_API_TOKEN` no configurado, silencia errores del envío |
+| `core/config.py` | `postmark_from_email` + `postmark_from_name` (defaults: `noreply@auyan.ai` / `Auyan`) |
+| `main.py` | `EmailSender` wired en lifespan como `app.state.email_sender` |
+| `.env.example` | `POSTMARK_FROM_EMAIL` + `POSTMARK_FROM_NAME` documentadas |
+
+**Decisión de diseño:** Postmark usa credenciales globales de Auyan (no per-tenant). No va al `IntegrationRegistry` — es un servicio de notificación, no una integración bidireccional por tenant.
+
+**24 tests nuevos. Suite total: 866/866 verde. Ruff limpio.**
+
+**Pendiente de staging 0.7:**
+- [ ] Setear `POSTMARK_API_TOKEN` + `POSTMARK_FROM_EMAIL` en Railway staging
+- [ ] Verificar dominio `auyan.ai` en Postmark → sender signature
+
 ---
 
 ## Plan de construcción post-pivot
@@ -183,9 +202,8 @@ Memory cross-conversación · Detección automática alucinaciones · Reapertura
 **Modelo recomendado:** Sonnet para 0.6-0.9; **Opus para 0.10 (Simulator)**.
 
 **Próximos sub-PRs (paralelizables — todos dependen de 0.2 ya mergeado):**
-1. **0.7** `PostmarkEmailAdapter` outbound (Auyan→cliente)
-2. **0.8** Roles internos DB (`internal_users`, `role_permissions`, `tenant_assignments`)
-3. **0.9** AOPs `steps[]` opcional + events
+1. **0.8** Roles internos DB (`internal_users`, `role_permissions`, `tenant_assignments`)
+2. **0.9** AOPs `steps[]` opcional + events
 
 **Luego:** 0.10 (Simulator — **Opus**) → 0.11 (Validación E2E).
 
