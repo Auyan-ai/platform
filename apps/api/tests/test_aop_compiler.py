@@ -8,12 +8,15 @@ from uuid import UUID
 import pytest
 from apps.api.aops.compiler import (
     _AOP_CACHE,
+    AopStep,
     CompiledAOP,
+    _parse_steps,
     _render_aop_procedure,
     _render_global_rules,
     _render_guardrails,
     _render_kb_chunks,
     _render_required_data,
+    _render_steps,
     _render_tenant_identity,
     compile_aop,
     load_aop,
@@ -338,6 +341,135 @@ def test_compile_aop_blocks_separated_by_divider() -> None:
     with patch.object(SkillRegistry, "get", side_effect=ValueError("unknown_skill")):
         result = compile_aop(aop, config)
     assert "---" in result.system_prompt
+
+
+# ─── _parse_steps ─────────────────────────────────────────────────────────────
+
+
+def test_parse_steps_empty_list() -> None:
+    assert _parse_steps([]) == []
+
+
+def test_parse_steps_parses_full_step() -> None:
+    raw = [{"id": "gather_info", "name": "Recopilar datos", "decision_point": "¿Tenemos email?"}]
+    steps = _parse_steps(raw)
+    assert len(steps) == 1
+    assert steps[0].id == "gather_info"
+    assert steps[0].name == "Recopilar datos"
+    assert steps[0].decision_point == "¿Tenemos email?"
+
+
+def test_parse_steps_decision_point_optional() -> None:
+    raw = [{"id": "resolve", "name": "Resolver"}]
+    steps = _parse_steps(raw)
+    assert steps[0].decision_point == ""
+
+
+def test_parse_steps_skips_items_without_id_or_name() -> None:
+    raw = [
+        {"id": "ok", "name": "Válido"},
+        {"name": "sin id"},
+        {"id": "sin_nombre"},
+        "no es dict",
+    ]
+    steps = _parse_steps(raw)
+    assert len(steps) == 1
+    assert steps[0].id == "ok"
+
+
+def test_parse_steps_multiple_steps_in_order() -> None:
+    raw = [
+        {"id": "step_1", "name": "Primero"},
+        {"id": "step_2", "name": "Segundo"},
+        {"id": "step_3", "name": "Tercero"},
+    ]
+    steps = _parse_steps(raw)
+    assert [s.id for s in steps] == ["step_1", "step_2", "step_3"]
+
+
+# ─── _render_steps ────────────────────────────────────────────────────────────
+
+
+def test_render_steps_empty_returns_empty() -> None:
+    assert _render_steps([]) == ""
+
+
+def test_render_steps_includes_step_names() -> None:
+    steps = [AopStep(id="s1", name="Verificar pedido"), AopStep(id="s2", name="Responder")]
+    result = _render_steps(steps)
+    assert "Verificar pedido" in result
+    assert "Responder" in result
+    assert "Pasos del procedimiento" in result
+
+
+def test_render_steps_includes_decision_point_when_present() -> None:
+    steps = [AopStep(id="s1", name="Verificar", decision_point="¿Tenemos el pedido?")]
+    result = _render_steps(steps)
+    assert "¿Tenemos el pedido?" in result
+
+
+def test_render_steps_no_decision_point_dash_not_shown() -> None:
+    steps = [AopStep(id="s1", name="Solo nombre")]
+    result = _render_steps(steps)
+    assert "—" not in result
+
+
+def test_render_steps_numbered() -> None:
+    steps = [AopStep(id="a", name="Uno"), AopStep(id="b", name="Dos")]
+    result = _render_steps(steps)
+    assert "1." in result
+    assert "2." in result
+
+
+# ─── compile_aop con steps ────────────────────────────────────────────────────
+
+
+def test_compile_aop_steps_empty_when_not_in_frontmatter() -> None:
+    aop = _make_aop()
+    config = make_tenant_configuration()
+    with patch.object(SkillRegistry, "get", side_effect=ValueError("unknown_skill")):
+        result = compile_aop(aop, config)
+    assert result.steps == []
+
+
+def test_compile_aop_steps_parsed_from_frontmatter() -> None:
+    fm = {
+        **SAMPLE_FRONTMATTER,
+        "steps": [
+            {"id": "gather", "name": "Recopilar info", "decision_point": "¿Email disponible?"},
+            {"id": "respond", "name": "Responder"},
+        ],
+    }
+    aop = _make_aop(yaml_frontmatter=fm)
+    config = make_tenant_configuration()
+    with patch.object(SkillRegistry, "get", side_effect=ValueError("unknown_skill")):
+        result = compile_aop(aop, config)
+    assert len(result.steps) == 2
+    assert result.steps[0].id == "gather"
+    assert result.steps[1].id == "respond"
+
+
+def test_compile_aop_steps_included_in_system_prompt() -> None:
+    fm = {
+        **SAMPLE_FRONTMATTER,
+        "steps": [{"id": "s1", "name": "Verificar pedido", "decision_point": "¿Número disponible?"}],
+    }
+    aop = _make_aop(yaml_frontmatter=fm)
+    config = make_tenant_configuration()
+    with patch.object(SkillRegistry, "get", side_effect=ValueError("unknown_skill")):
+        result = compile_aop(aop, config)
+    assert "Verificar pedido" in result.system_prompt
+    assert "¿Número disponible?" in result.system_prompt
+
+
+def test_compile_aop_legacy_aop_without_steps_unchanged() -> None:
+    """AOP sin steps[] compila igual que antes y no incluye sección de pasos."""
+    aop = _make_aop()
+    config = make_tenant_configuration()
+    with patch.object(SkillRegistry, "get", side_effect=ValueError("unknown_skill")):
+        result = compile_aop(aop, config)
+    assert result.steps == []
+    assert "Pasos del procedimiento" not in result.system_prompt
 
 
 # ─── load_aop (cache) ────────────────────────────────────────────────────────

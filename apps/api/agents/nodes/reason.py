@@ -148,6 +148,28 @@ def make_reason_node(
 
     @guarded(name="reason")
     async def _node(state: AgentState) -> dict[str, Any]:
+        conv_id = state.get("conversation_id")
+        tenant_id = state.get("tenant_id")
+
+        # Determinar el step actual del AOP (si está definido).
+        steps: list[dict[str, Any]] = state.get("aop_steps") or []
+        current_iter: int = state.get("tool_iterations", 0)
+        current_step: dict[str, Any] | None = (
+            steps[current_iter] if current_iter < len(steps) else None
+        )
+
+        # Emitir step_entered antes de llamar al LLM.
+        if current_step and conv_id and tenant_id:
+            tracker.emit(
+                tenant_id=tenant_id,
+                conversation_id=conv_id,
+                phase="decision",
+                event_type="step_entered",
+                label=current_step["id"],
+                detail={"step_name": current_step["name"], "iteration": current_iter},
+                status="done",
+            )
+
         system_prompt = build_system_prompt(
             state["system_prompt"],
             state.get("retrieved_chunks", []),
@@ -193,15 +215,24 @@ def make_reason_node(
         }
 
         tool_name: str = tool_block.name
-        conv_id = state.get("conversation_id")
-        tenant_id = state.get("tenant_id")
 
         # ¿Decide tool o skill tool?
         if tool_name == DECIDE_TOOL_NAME:
             result = _handle_decide_tool(tool_block.input, state, tokens_update)
-            # Emitir evento de decisión final (respond o escalate)
             if conv_id and tenant_id and not result.get("error"):
                 decision = result.get("decision", "unknown")
+                # Emitir step_completed antes del choice event.
+                if current_step:
+                    tracker.emit(
+                        tenant_id=tenant_id,
+                        conversation_id=conv_id,
+                        phase="decision",
+                        event_type="step_completed",
+                        label=current_step["id"],
+                        detail={"outcome": decision},
+                        status="done",
+                    )
+                # Emitir evento de decisión final (respond o escalate).
                 tracker.emit(
                     tenant_id=tenant_id,
                     conversation_id=conv_id,
@@ -225,8 +256,19 @@ def make_reason_node(
                 **tokens_update,
             }
 
-        # Emitir evento de tool_call antes de ejecutar
         if conv_id and tenant_id:
+            # Emitir step_completed (el LLM eligió llamar una tool en este step).
+            if current_step:
+                tracker.emit(
+                    tenant_id=tenant_id,
+                    conversation_id=conv_id,
+                    phase="decision",
+                    event_type="step_completed",
+                    label=current_step["id"],
+                    detail={"outcome": f"tool:{slug}"},
+                    status="done",
+                )
+            # Emitir evento de tool_call antes de ejecutar.
             tracker.emit(
                 tenant_id=tenant_id,
                 conversation_id=conv_id,

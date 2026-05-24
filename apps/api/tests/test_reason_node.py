@@ -436,3 +436,165 @@ async def test_tools_list_skips_unregistered_skills(
     tool_names = [t["name"] for t in captured["tools"]]
     assert "test_search" in tool_names
     assert "test_ghost" not in tool_names
+
+
+# ----------------------------------------------------------------
+# AOP steps[] — step_entered / step_completed events
+# ----------------------------------------------------------------
+
+SAMPLE_STEPS = [
+    {"id": "gather_info", "name": "Recopilar información", "decision_point": "¿Email disponible?"},
+    {"id": "resolve", "name": "Resolver consulta", "decision_point": "¿Podemos responder?"},
+]
+
+
+@pytest.mark.asyncio
+async def test_step_entered_emitted_on_first_iteration(
+    fake_deps, make_anthropic_response, monkeypatch
+) -> None:
+    """Cuando el AOP tiene steps[], emite step_entered para el step de la iteración actual."""
+    fake_response = make_anthropic_response(
+        {"decision": "respond", "confidence": 0.92, "response_text": "Listo."}
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        AsyncMock(return_value=fake_response),
+    )
+    node = make_reason_node(fake_deps)
+
+    state = _base_state()
+    state["aop_steps"] = SAMPLE_STEPS
+    await node(state)
+
+    tracker = fake_deps.reasoning_tracker
+    entered = [e for e in tracker.events if e["event_type"] == "step_entered"]
+    assert len(entered) == 1
+    assert entered[0]["label"] == "gather_info"
+    assert entered[0]["detail"]["step_name"] == "Recopilar información"
+    assert entered[0]["detail"]["iteration"] == 0
+
+
+@pytest.mark.asyncio
+async def test_step_entered_uses_iteration_index(
+    fake_deps, make_anthropic_response, monkeypatch
+) -> None:
+    """Segunda iteración (tool_iterations=1) usa el segundo step."""
+    fake_response = make_anthropic_response(
+        {"decision": "respond", "confidence": 0.92, "response_text": "Listo."}
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        AsyncMock(return_value=fake_response),
+    )
+    node = make_reason_node(fake_deps)
+
+    state = _base_state()
+    state["aop_steps"] = SAMPLE_STEPS
+    state["tool_iterations"] = 1  # segunda iteración del loop
+    await node(state)
+
+    tracker = fake_deps.reasoning_tracker
+    entered = [e for e in tracker.events if e["event_type"] == "step_entered"]
+    assert len(entered) == 1
+    assert entered[0]["label"] == "resolve"
+    assert entered[0]["detail"]["iteration"] == 1
+
+
+@pytest.mark.asyncio
+async def test_no_step_events_when_iteration_exceeds_steps(
+    fake_deps, make_anthropic_response, monkeypatch
+) -> None:
+    """Si tool_iterations >= len(steps), no se emiten step events (degradación elegante)."""
+    fake_response = make_anthropic_response(
+        {"decision": "respond", "confidence": 0.92, "response_text": "Listo."}
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        AsyncMock(return_value=fake_response),
+    )
+    node = make_reason_node(fake_deps)
+
+    state = _base_state()
+    state["aop_steps"] = SAMPLE_STEPS  # 2 steps
+    state["tool_iterations"] = 5  # más iteraciones que steps
+    await node(state)
+
+    tracker = fake_deps.reasoning_tracker
+    step_events = [e for e in tracker.events if e["event_type"] in ("step_entered", "step_completed")]
+    assert step_events == []
+
+
+@pytest.mark.asyncio
+async def test_step_completed_emitted_on_decide_tool(
+    fake_deps, make_anthropic_response, monkeypatch
+) -> None:
+    """Cuando el LLM llama el decide tool, se emite step_completed con el outcome."""
+    fake_response = make_anthropic_response(
+        {"decision": "respond", "confidence": 0.92, "response_text": "Listo."}
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        AsyncMock(return_value=fake_response),
+    )
+    node = make_reason_node(fake_deps)
+
+    state = _base_state()
+    state["aop_steps"] = SAMPLE_STEPS
+    await node(state)
+
+    tracker = fake_deps.reasoning_tracker
+    completed = [e for e in tracker.events if e["event_type"] == "step_completed"]
+    assert len(completed) == 1
+    assert completed[0]["label"] == "gather_info"
+    assert completed[0]["detail"]["outcome"] == "respond"
+
+
+@pytest.mark.asyncio
+async def test_step_completed_emitted_on_skill_call(
+    fake_deps, make_anthropic_response, monkeypatch, _register_search
+) -> None:
+    """Cuando el LLM elige una skill tool, step_completed emite outcome=tool:<slug>."""
+    fake_response = make_anthropic_response(
+        {"query": "pedido 123"},
+        tool_name="test_search",
+        tool_id="toolu_search_002",
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        AsyncMock(return_value=fake_response),
+    )
+    node = make_reason_node(fake_deps)
+
+    state = _base_state()
+    state["allowed_skills"] = ["test.search"]
+    state["aop_steps"] = SAMPLE_STEPS
+    await node(state)
+
+    tracker = fake_deps.reasoning_tracker
+    completed = [e for e in tracker.events if e["event_type"] == "step_completed"]
+    assert len(completed) == 1
+    assert completed[0]["label"] == "gather_info"
+    assert completed[0]["detail"]["outcome"] == "tool:test.search"
+
+
+@pytest.mark.asyncio
+async def test_no_step_events_without_aop_steps(
+    fake_deps, make_anthropic_response, monkeypatch
+) -> None:
+    """Sin aop_steps en el state, no se emiten step_entered ni step_completed."""
+    fake_response = make_anthropic_response(
+        {"decision": "respond", "confidence": 0.92, "response_text": "Listo."}
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        AsyncMock(return_value=fake_response),
+    )
+    node = make_reason_node(fake_deps)
+
+    # state sin aop_steps
+    out = await node(_base_state())
+    assert out["decision"] == "respond"
+
+    tracker = fake_deps.reasoning_tracker
+    step_events = [e for e in tracker.events if e["event_type"] in ("step_entered", "step_completed")]
+    assert step_events == []

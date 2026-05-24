@@ -287,6 +287,10 @@ def make_select_aop_node(
             "system_prompt": compiled.system_prompt,
             "allowed_skills": compiled.allowed_skills,
             "max_tool_iterations": compiled.max_iterations,
+            "aop_steps": [
+                {"id": s.id, "name": s.name, "decision_point": s.decision_point}
+                for s in compiled.steps
+            ],
         }
 
         # Señal de multi-intent: persistir el slug alternativo para el próximo turno.

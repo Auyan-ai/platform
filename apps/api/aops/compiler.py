@@ -32,6 +32,15 @@ _AOP_CACHE: TTLCache[tuple, AopWithContent] = TTLCache(maxsize=1000, ttl=60)
 
 
 @dataclass(frozen=True)
+class AopStep:
+    """Un paso del AOP. Opcional — los AOPs sin steps[] siguen funcionando igual."""
+
+    id: str
+    name: str
+    decision_point: str = ""
+
+
+@dataclass(frozen=True)
 class CompiledAOP:
     """Resultado del compiler: todo lo que el nodo reason necesita para llamar a Claude."""
 
@@ -42,6 +51,7 @@ class CompiledAOP:
     confidence_threshold: float
     require_supervision: bool
     escalation_triggers: list[str] = field(default_factory=list)
+    steps: list[AopStep] = field(default_factory=list)
 
 
 # ─── Función principal ───────────────────────────────────────────────────────
@@ -59,12 +69,14 @@ def compile_aop(
     """
     fm = aop.yaml_frontmatter
     allowed_skills: list[str] = fm.get("allowed_skills", [])
+    steps = _parse_steps(fm.get("steps", []))
 
     tool_definitions = _resolve_tool_definitions(allowed_skills)
 
     blocks = [
         _render_tenant_identity(tenant_config),
         _render_aop_procedure(aop.body_markdown, fm),
+        _render_steps(steps),
         _render_guardrails(fm.get("guardrails", [])),
         _render_required_data(fm.get("required_data", [])),
         _render_kb_chunks(kb_chunks or []),
@@ -81,6 +93,7 @@ def compile_aop(
         confidence_threshold=float(fm.get("confidence_threshold", 0.70)),
         require_supervision=bool(fm.get("require_supervision", False)),
         escalation_triggers=list(fm.get("escalation_triggers", [])),
+        steps=steps,
     )
 
 
@@ -206,6 +219,37 @@ def _render_global_rules(escalation_triggers: list[str]) -> str:
         lines.append("**Escala inmediatamente si ocurre alguno de estos:**")
         for t in escalation_triggers:
             lines.append(f"- {t}")
+    return "\n".join(lines)
+
+
+def _parse_steps(raw: list[Any]) -> list[AopStep]:
+    steps = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        step_id = item.get("id")
+        name = item.get("name")
+        if not step_id or not name:
+            continue
+        steps.append(
+            AopStep(
+                id=str(step_id),
+                name=str(name),
+                decision_point=str(item.get("decision_point", "")),
+            )
+        )
+    return steps
+
+
+def _render_steps(steps: list[AopStep]) -> str:
+    if not steps:
+        return ""
+    lines = ["## Pasos del procedimiento", ""]
+    for i, step in enumerate(steps, 1):
+        line = f"{i}. **{step.name}**"
+        if step.decision_point:
+            line += f" — {step.decision_point}"
+        lines.append(line)
     return "\n".join(lines)
 
 
