@@ -6,8 +6,10 @@ ShopifyClient mockeado con AsyncMock — sin llamadas HTTP reales.
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
+from apps.api.integrations.base import IntegrationContext
 from apps.api.skills.base import SkillContext
 from apps.api.skills.shopify.add_order_note import (
     AddOrderNote,
@@ -24,11 +26,15 @@ from apps.api.skills.shopify.tag_order import (
 # Fixtures
 # ----------------------------------------------------------------
 
+_SHOPIFY_INTEGRATION_CTX = IntegrationContext(
+    tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+    credentials={"domain": "myshop.myshopify.com", "token": "shpat_test"},
+)
+
 CTX = SkillContext(
     tenant_id="11111111-1111-1111-1111-111111111111",
     conversation_id="22222222-2222-2222-2222-222222222222",
-    shopify_domain="myshop.myshopify.com",
-    shopify_token="shpat_test",
+    integration_ctx=_SHOPIFY_INTEGRATION_CTX,
 )
 
 CTX_NO_SHOPIFY = SkillContext(
@@ -69,7 +75,7 @@ class TestAddOrderNote:
         inputs = AddOrderNoteInput(order_id=1001, note="Cliente reportó paquete dañado.")
 
         with patch(
-            "apps.api.skills.shopify.add_order_note.ShopifyClient"
+            "apps.api.integrations.shopify.ShopifyClient"
         ) as MockClient:
             instance = MockClient.return_value
             instance.add_order_note = AsyncMock(return_value=_ORDER_WITH_NOTE)
@@ -89,7 +95,7 @@ class TestAddOrderNote:
         inputs = AddOrderNoteInput(order_id=1001, note="Nota de prueba")
 
         with patch(
-            "apps.api.skills.shopify.add_order_note.ShopifyClient"
+            "apps.api.integrations.shopify.ShopifyClient"
         ) as MockClient:
             instance = MockClient.return_value
             instance.add_order_note = AsyncMock(return_value={"id": 1001})  # sin note
@@ -135,7 +141,7 @@ class TestTagOrder:
         inputs = TagOrderInput(order_id=1001, tags=["return-requested", "damaged"])
 
         with patch(
-            "apps.api.skills.shopify.tag_order.ShopifyClient"
+            "apps.api.integrations.shopify.ShopifyClient"
         ) as MockClient:
             instance = MockClient.return_value
             instance.tag_order = AsyncMock(return_value=_ORDER_WITH_TAGS)
@@ -156,7 +162,7 @@ class TestTagOrder:
         inputs = TagOrderInput(order_id=1001, tags=["priority"])
 
         with patch(
-            "apps.api.skills.shopify.tag_order.ShopifyClient"
+            "apps.api.integrations.shopify.ShopifyClient"
         ) as MockClient:
             instance = MockClient.return_value
             instance.tag_order = AsyncMock(return_value={"id": 1001, "tags": ""})

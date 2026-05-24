@@ -6,9 +6,10 @@ Cada skill es una acción tipada del agente (L1 read, L2 write bajo riesgo, L3 w
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal
 
+from apps.api.integrations.base import IntegrationContext
 from pydantic import BaseModel
 
 SkillTier = Literal["L1", "L2", "L3"]
@@ -31,9 +32,8 @@ class SkillContext:
 
     tenant_id: str
     conversation_id: str
-    # Credenciales Shopify — presentes solo si el tenant tiene integración Shopify
-    shopify_domain: str | None = None
-    shopify_token: str | None = None
+    # IntegrationContext para skills de commerce (Shopify). None si no hay integración activa.
+    integration_ctx: IntegrationContext | None = field(default=None)
 
 
 class Skill(ABC):

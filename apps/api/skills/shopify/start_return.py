@@ -5,7 +5,7 @@ Requiere aprobación humana. Solo aplica para pedidos entregados.
 
 from __future__ import annotations
 
-from apps.api.integrations.shopify import ShopifyClient
+from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 
@@ -42,10 +42,11 @@ class StartReturn(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, StartReturnInput)
-        if not ctx.shopify_domain or not ctx.shopify_token:
+        if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        shopify = ShopifyClient(ctx.shopify_domain, ctx.shopify_token)
-        ret = await shopify.start_return(
+        adapter = ShopifyAdapter()
+        ret = await adapter.start_return(
+            ctx.integration_ctx,
             inputs.order_id,
             line_item_id=inputs.line_item_id,
             quantity=inputs.quantity,

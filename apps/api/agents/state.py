@@ -30,6 +30,10 @@ class AgentState(TypedDict, total=False):
     tenant_config: dict
     system_prompt: str
     model_used: str
+    # Credenciales descifradas de la integración commerce activa del tenant.
+    # Estructura: {"tenant_id": str, "credentials": {"domain": ..., "token": ...}, "config": dict}.
+    # None si el tenant no tiene integración commerce configurada.
+    commerce_integration_ctx: dict | None
 
     # --- Producido por load_conversation ---
     conversation_history: list[dict]

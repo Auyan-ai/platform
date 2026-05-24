@@ -283,38 +283,36 @@ class TestNoPendingCall:
 
 
 class TestBuildSkillContext:
-    def test_reads_shopify_creds_from_tenant_config_extra(self) -> None:
+    def test_reads_creds_from_commerce_integration_ctx(self) -> None:
         state: dict[str, Any] = {
-            "tenant_id": "t-1",
+            "tenant_id": "11111111-1111-1111-1111-111111111111",
             "conversation_id": "c-1",
-            "tenant_config": {
-                "extra": {
-                    "shopify_domain": "myshop.myshopify.com",
-                    "shopify_token": "shpat_x",
-                }
+            "commerce_integration_ctx": {
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "credentials": {"domain": "myshop.myshopify.com", "token": "shpat_x"},
+                "config": {},
             },
         }
         ctx = build_skill_context(state)
-        assert ctx.tenant_id == "t-1"
+        assert ctx.tenant_id == "11111111-1111-1111-1111-111111111111"
         assert ctx.conversation_id == "c-1"
-        assert ctx.shopify_domain == "myshop.myshopify.com"
-        assert ctx.shopify_token == "shpat_x"
+        assert ctx.integration_ctx is not None
+        assert ctx.integration_ctx.credentials["domain"] == "myshop.myshopify.com"
+        assert ctx.integration_ctx.credentials["token"] == "shpat_x"
 
-    def test_no_creds_when_extra_missing(self) -> None:
+    def test_no_integration_when_commerce_ctx_missing(self) -> None:
         state: dict[str, Any] = {
             "tenant_id": "t-1",
             "conversation_id": "c-1",
             "tenant_config": {},
         }
         ctx = build_skill_context(state)
-        assert ctx.shopify_domain is None
-        assert ctx.shopify_token is None
+        assert ctx.integration_ctx is None
 
-    def test_no_creds_when_tenant_config_missing(self) -> None:
+    def test_no_integration_when_state_bare(self) -> None:
         state: dict[str, Any] = {"tenant_id": "t-1", "conversation_id": "c-1"}
         ctx = build_skill_context(state)
-        assert ctx.shopify_domain is None
-        assert ctx.shopify_token is None
+        assert ctx.integration_ctx is None
 
     def test_context_is_immutable(self) -> None:
         state: dict[str, Any] = {
@@ -397,18 +395,18 @@ class TestSkillContextPropagation:
         state = _base_state(
             pending_tool_call={"id": "toolu_x", "slug": "test.probe", "input": {}},
             allowed_skills=["test.probe"],
-            tenant_config={
-                "extra": {
-                    "shopify_domain": "x.myshopify.com",
-                    "shopify_token": "shpat_t",
-                }
+            commerce_integration_ctx={
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "credentials": {"domain": "x.myshopify.com", "token": "shpat_t"},
+                "config": {},
             },
         )
         await node(state)
 
         ctx: SkillContext = captured["ctx"]
-        assert ctx.shopify_domain == "x.myshopify.com"
-        assert ctx.shopify_token == "shpat_t"
+        assert ctx.integration_ctx is not None
+        assert ctx.integration_ctx.credentials["domain"] == "x.myshopify.com"
+        assert ctx.integration_ctx.credentials["token"] == "shpat_t"
         assert ctx.tenant_id == state["tenant_id"]
         assert ctx.conversation_id == state["conversation_id"]
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apps.api.integrations.shopify import ShopifyClient
+from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._models import CustomerInfo, OrderSummary, map_order_summary
@@ -31,10 +31,10 @@ class GetCustomerHistory(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, GetCustomerHistoryInput)
-        if not ctx.shopify_domain or not ctx.shopify_token:
+        if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        shopify = ShopifyClient(ctx.shopify_domain, ctx.shopify_token)
-        raw_customer = await shopify.get_customer_by_email(inputs.email)
+        adapter = ShopifyAdapter()
+        raw_customer = await adapter.get_customer_by_email(ctx.integration_ctx, inputs.email)
 
         if raw_customer is None:
             return GetCustomerHistoryOutput(customer=None, orders=[])
@@ -47,6 +47,8 @@ class GetCustomerHistory(Skill):
             orders_count=raw_customer.get("orders_count", 0),
             total_spent=raw_customer.get("total_spent", "0.00"),
         )
-        raw_orders = await shopify.get_orders_by_customer_id(raw_customer["id"])
+        raw_orders = await adapter.get_orders_by_customer_id(
+            ctx.integration_ctx, raw_customer["id"]
+        )
         orders = [map_order_summary(o) for o in raw_orders]
         return GetCustomerHistoryOutput(customer=customer, orders=orders)

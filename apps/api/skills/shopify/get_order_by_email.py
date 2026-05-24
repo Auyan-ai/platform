@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apps.api.integrations.shopify import ShopifyClient
+from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._models import OrderSummary, map_order_summary
@@ -31,9 +31,9 @@ class GetOrderByEmail(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, GetOrderByEmailInput)
-        if not ctx.shopify_domain or not ctx.shopify_token:
+        if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        shopify = ShopifyClient(ctx.shopify_domain, ctx.shopify_token)
-        raw_orders = await shopify.get_orders_by_email(inputs.email)
+        adapter = ShopifyAdapter()
+        raw_orders = await adapter.search_orders_by_email(ctx.integration_ctx, inputs.email)
         orders = [map_order_summary(o) for o in raw_orders]
         return GetOrderByEmailOutput(orders=orders, total_found=len(orders))

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apps.api.integrations.shopify import ShopifyClient
+from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 
@@ -36,10 +36,10 @@ class TagOrder(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, TagOrderInput)
-        if not ctx.shopify_domain or not ctx.shopify_token:
+        if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        shopify = ShopifyClient(ctx.shopify_domain, ctx.shopify_token)
-        order = await shopify.tag_order(inputs.order_id, inputs.tags)
+        adapter = ShopifyAdapter()
+        order = await adapter.tag_order(ctx.integration_ctx, inputs.order_id, inputs.tags)
         current_tags = [t.strip() for t in order.get("tags", "").split(",") if t.strip()]
         return TagOrderOutput(
             success=True,

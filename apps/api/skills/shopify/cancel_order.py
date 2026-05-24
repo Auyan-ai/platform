@@ -7,7 +7,7 @@ Solo se puede cancelar si el pedido no ha sido enviado aún.
 
 from __future__ import annotations
 
-from apps.api.integrations.shopify import ShopifyClient
+from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 
@@ -45,10 +45,11 @@ class CancelOrder(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, CancelOrderInput)
-        if not ctx.shopify_domain or not ctx.shopify_token:
+        if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        shopify = ShopifyClient(ctx.shopify_domain, ctx.shopify_token)
-        order = await shopify.cancel_order(
+        adapter = ShopifyAdapter()
+        order = await adapter.cancel_order(
+            ctx.integration_ctx,
             inputs.order_id,
             reason=inputs.reason,
             email=inputs.send_email,
