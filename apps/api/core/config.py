@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     zendesk_oauth_client_secret: SecretStr | None = None
     zendesk_oauth_redirect_uri: str | None = None
 
+    # --- Gorgias OAuth (sub-PR 0.6) ---
+    # Registrar en https://www.gorgias.com/integrations/developer
+    # Redirect URI: {api_base_url}/oauth/gorgias/callback
+    gorgias_oauth_client_id: str | None = None
+    gorgias_oauth_client_secret: SecretStr | None = None
+    gorgias_oauth_redirect_uri: str | None = None
+
     # --- Webhook security ---
     webhook_secret: SecretStr = Field(
         ..., description="HMAC shared secret para validar webhooks entrantes"
