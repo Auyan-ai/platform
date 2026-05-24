@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     # Generar con: python -c "import secrets; print(secrets.token_hex(32))"
     integrations_secret_key: SecretStr | None = None
 
+    # --- Zendesk OAuth (sub-PR 0.5) ---
+    # Registrar en https://www.zendesk.com/partner/programs/technology/
+    # Redirect URI: {api_base_url}/oauth/zendesk/callback
+    zendesk_oauth_client_id: str | None = None
+    zendesk_oauth_client_secret: SecretStr | None = None
+    zendesk_oauth_redirect_uri: str | None = None
+
     # --- Webhook security ---
     webhook_secret: SecretStr = Field(
         ..., description="HMAC shared secret para validar webhooks entrantes"

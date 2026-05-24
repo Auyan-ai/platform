@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-24 (sesión 31 — Bloque 0 sub-PRs 0.3 y 0.4 completados, siguiente: 0.5/0.6/0.7/0.8/0.9 en paralelo)_
+_Última actualización: 2026-05-24 (sesión 32 — Bloque 0 sub-PRs 0.1-0.4 mergeados, 0.5 en review PR #91)_
 
 ---
 
@@ -1244,8 +1244,8 @@ Sub-PRs propuestos:
 | ~~0.1~~ | ~~Hard removal `tenant_agent`~~ | ✅ [PR #83](https://github.com/Auyan-ai/platform/pull/83)+[#84](https://github.com/Auyan-ai/platform/pull/84) |
 | ~~0.2~~ | ~~Framework adapters base~~ | ✅ [PR #87](https://github.com/Auyan-ai/platform/pull/87) |
 | ~~0.3~~ | ~~Refactor `ShopifyAdapter` (commerce)~~ | ✅ [PR #89](https://github.com/Auyan-ai/platform/pull/89) |
-| 0.4 | Refactor `ChatwootAdapter` (helpdesk, completar bidirec) | Sonnet — en PR |
-| 0.5 | Refactor `ZendeskAdapter` (helpdesk, completar bidirec + OAuth) | Sonnet |
+| ~~0.4~~ | ~~Refactor `ChatwootAdapter` (helpdesk, completar bidirec)~~ | ✅ [PR #90](https://github.com/Auyan-ai/platform/pull/90) |
+| 0.5 | Refactor `ZendeskAdapter` (helpdesk, completar bidirec + OAuth) | 🔁 [PR #91](https://github.com/Auyan-ai/platform/pull/91) en review |
 | 0.6 | Nuevo `GorgiasAdapter` (helpdesk, OAuth, desde cero) | Sonnet |
 | 0.7 | `PostmarkEmailAdapter` (outbound Auyan→cliente) | Sonnet |
 | 0.8 | Roles internos estructura DB (`internal_users`, `role_permissions`, `tenant_assignments`) | Sonnet |
@@ -1370,7 +1370,7 @@ Refactor de `ShopifyClient` singleton → `ShopifyAdapter` stateless que impleme
 
 ---
 
-## Bloque 0 — Sub-PR 0.4 — ChatwootAdapter (sesión 31 — 2026-05-24)
+## Bloque 0 — Sub-PR 0.4 — ChatwootAdapter ([PR #90](https://github.com/Auyan-ai/platform/pull/90)) ✅
 
 Refactor de `ChatwootClient` singleton → `ChatwootAdapter` stateless + webhook handler real.
 
@@ -1394,23 +1394,62 @@ Refactor de `ChatwootClient` singleton → `ChatwootAdapter` stateless + webhook
 
 **Suite total: 777/777 verde. Ruff limpio.**
 
+---
+
+## Bloque 0 — Sub-PR 0.5 — ZendeskAdapter + OAuth ([PR #91](https://github.com/Auyan-ai/platform/pull/91)) 🔁 en review
+
+Refactor de `ZendeskClient` singleton → `ZendeskAdapter` stateless + OAuth Authorization Code flow completo + webhook handler bidireccional.
+
+| Archivo | Qué se hizo |
+|---|---|
+| `apps/api/integrations/zendesk.py` | Rewrite completo: `ZendeskClient` (HTTP con estado, Bearer Auth) + `ZendeskAdapter` (stateless, implementa `HelpdeskProvider`) + `verify_zendesk_signature` (HMAC-SHA256 + base64). Registrado como `helpdesk/zendesk`. |
+| `apps/api/db/queries.py` | `get_integration_by_zendesk_subdomain(conn, *, subdomain)` — lookup cross-tenant por `config->>'subdomain'`, para resolver tenant desde el webhook. |
+| `apps/api/routers/oauth_zendesk.py` | `GET /oauth/zendesk/authorize` (redirect a Zendesk, requiere auth) + `GET /oauth/zendesk/callback` (intercambia code, persiste token cifrado). State HMAC firmado con `webhook_secret` (TTL 15 min). |
+| `apps/api/routers/webhooks_zendesk.py` | `POST /webhooks/zendesk`: extrae subdomain del payload, resuelve tenant, valida firma HMAC opcional, ejecuta flujo inbound estándar + `send_outbound` si `decision=respond`. Idempotencia con key `zendesk:{ticket_id}`. |
+| `apps/api/core/config.py` | `zendesk_oauth_client_id/secret/redirect_uri` (opcionales). |
+| `apps/api/main.py` | Registra `webhooks_zendesk_router` + `oauth_zendesk_router`. |
+| `.env.example` | Documenta vars Zendesk OAuth. |
+
+**Credentials esperadas:**
+```json
+{ "oauth_token": "...", "webhook_signing_secret": "..." }
+```
+**Config esperada:**
+```json
+{ "subdomain": "miempresa", "escalation_group_id": "123" }
+```
+
+**Payload requerido en Zendesk Trigger:**
+```json
+{
+  "ticket_id": "{{ticket.id}}", "subject": "{{ticket.title}}",
+  "content": "{{ticket.latest_comment_html_stripped}}",
+  "requester_email": "{{ticket.requester.email}}",
+  "requester_name": "{{ticket.requester.name}}",
+  "subdomain": "hardcoded-subdomain"
+}
+```
+
+**Suite total: 807/807 verde. Ruff limpio.**
+
 ### Pendiente de staging
 
-- [ ] PR 0.4 → develop (crear y mergear)
-- [ ] Crear una `tenant_integration` de tipo `helpdesk/chatwoot` en staging para probar el webhook end-to-end
+- [ ] PR #91 → develop (mergear tras review)
+- [ ] Registrar OAuth app en Zendesk Developer Portal para obtener `client_id` + `client_secret` reales
+- [ ] Setear `ZENDESK_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI` en Railway staging
+- [ ] Probar flujo OAuth end-to-end + webhook con tenant de prueba
 
 ---
 
 ## Empezar aquí — siguiente sesión
 
-**Modelo recomendado:** Sonnet para 0.5-0.9; **Opus para 0.10 (Simulator)**.
+**Modelo recomendado:** Sonnet para 0.6-0.9; **Opus para 0.10 (Simulator)**.
 
 **Próximo paso (paralelizables, todos dependen de 0.2 ya mergeado):**
-1. **0.5**: `ZendeskAdapter` → implementa `HelpdeskProvider` + OAuth Authorization Code flow
-2. **0.6**: `GorgiasAdapter` → nuevo desde cero + OAuth
-3. **0.7**: `PostmarkEmailAdapter` outbound
-4. **0.8**: Roles internos DB (`internal_users`, `role_permissions`, `tenant_assignments`)
-5. **0.9**: AOPs `steps[]` opcional + events
+1. **0.6**: `GorgiasAdapter` → nuevo desde cero + OAuth (prioritario — helpdesk #1)
+2. **0.7**: `PostmarkEmailAdapter` outbound
+3. **0.8**: Roles internos DB (`internal_users`, `role_permissions`, `tenant_assignments`)
+4. **0.9**: AOPs `steps[]` opcional + events
 
 **Luego:** 0.10 (Simulator — **Opus**) → 0.11 (Validación E2E).
 

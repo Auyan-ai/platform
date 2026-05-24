@@ -2367,3 +2367,30 @@ async def get_integration_by_chatwoot_account(
         account_id,
     )
     return _row_to_integration(row) if row else None
+
+
+async def get_integration_by_zendesk_subdomain(
+    conn: asyncpg.Connection,
+    *,
+    subdomain: str,
+) -> TenantIntegration | None:
+    """Busca la integración Zendesk por subdomain (cross-tenant, para el webhook handler).
+
+    Debe llamarse con bootstrap_connection() porque no tiene tenant_scope.
+    El subdomain vive en config->>'subdomain' (no está cifrado).
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
+               enabled_at, enabled_by, created_at, updated_at
+          FROM tenant_integrations
+         WHERE provider    = 'zendesk'
+           AND kind        = 'helpdesk'
+           AND config->>'subdomain' = $1
+           AND deleted_at IS NULL
+           AND is_active = TRUE
+         LIMIT 1
+        """,
+        subdomain,
+    )
+    return _row_to_integration(row) if row else None

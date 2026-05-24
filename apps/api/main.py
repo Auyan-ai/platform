@@ -40,6 +40,7 @@ from apps.api.routers.aops import router as aops_router
 from apps.api.routers.approvals import router as approvals_router
 from apps.api.routers.conversations import router as conversations_router
 from apps.api.routers.escalations import router as escalations_router
+from apps.api.routers.oauth_zendesk import router as oauth_zendesk_router
 from apps.api.routers.proposals import router as proposals_router
 from apps.api.routers.reasoning import router as reasoning_router
 from apps.api.routers.tenants import router as tenants_router
@@ -47,6 +48,7 @@ from apps.api.routers.tool_permissions import router as tool_permissions_router
 from apps.api.routers.users import router as users_router
 from apps.api.routers.webhooks import router as webhooks_router
 from apps.api.routers.webhooks_chatwoot import router as webhooks_chatwoot_router
+from apps.api.routers.webhooks_zendesk import router as webhooks_zendesk_router
 from apps.api.services.aop_listener import AopCacheListener
 from apps.api.services.audit import AuditLogger
 from apps.api.services.cleanup import run_abandoned_cleanup
@@ -143,6 +145,8 @@ app.add_middleware(
 
 app.include_router(webhooks_router)
 app.include_router(webhooks_chatwoot_router)
+app.include_router(webhooks_zendesk_router)
+app.include_router(oauth_zendesk_router)
 app.include_router(users_router)
 app.include_router(tenants_router)
 app.include_router(conversations_router)

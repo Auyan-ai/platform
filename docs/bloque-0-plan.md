@@ -172,7 +172,7 @@ Estos NO bloquean código pero sí bloquean tests E2E con OAuth real.
 
 ---
 
-### Sub-PR 0.3 — Refactor `ShopifyAdapter`
+### Sub-PR 0.3 — Refactor `ShopifyAdapter` ✅ [PR #89](https://github.com/Auyan-ai/platform/pull/89)
 
 **Cuándo:** Después de 0.2.
 **Modelo:** Sonnet.
@@ -191,7 +191,7 @@ Estos NO bloquean código pero sí bloquean tests E2E con OAuth real.
 
 ---
 
-### Sub-PR 0.4 — Refactor `ChatwootAdapter`
+### Sub-PR 0.4 — Refactor `ChatwootAdapter` ✅ [PR #90](https://github.com/Auyan-ai/platform/pull/90)
 
 **Cuándo:** Paralelo a 0.3 (independiente).
 **Modelo:** Sonnet.
@@ -215,7 +215,7 @@ Estos NO bloquean código pero sí bloquean tests E2E con OAuth real.
 
 ---
 
-### Sub-PR 0.5 — Refactor `ZendeskAdapter` + OAuth
+### Sub-PR 0.5 — Refactor `ZendeskAdapter` + OAuth 🔁 [PR #91](https://github.com/Auyan-ai/platform/pull/91) en review
 
 **Cuándo:** Paralelo a 0.3/0.4.
 **Modelo:** Sonnet.
