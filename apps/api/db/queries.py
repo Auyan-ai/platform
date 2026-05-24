@@ -2394,3 +2394,30 @@ async def get_integration_by_zendesk_subdomain(
         subdomain,
     )
     return _row_to_integration(row) if row else None
+
+
+async def get_integration_by_gorgias_domain(
+    conn: asyncpg.Connection,
+    *,
+    domain: str,
+) -> TenantIntegration | None:
+    """Busca la integración Gorgias por domain (cross-tenant, para el webhook handler).
+
+    Debe llamarse con bootstrap_connection() porque no tiene tenant_scope.
+    El domain vive en config->>'domain' (no está cifrado).
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
+               enabled_at, enabled_by, created_at, updated_at
+          FROM tenant_integrations
+         WHERE provider    = 'gorgias'
+           AND kind        = 'helpdesk'
+           AND config->>'domain' = $1
+           AND deleted_at IS NULL
+           AND is_active = TRUE
+         LIMIT 1
+        """,
+        domain,
+    )
+    return _row_to_integration(row) if row else None
