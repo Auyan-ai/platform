@@ -253,7 +253,9 @@ class PendingApproval(_BaseModel):
 # ─── Agent Reasoning Events (Sprint 8) ───────────────────────────────────────
 
 ReasoningPhase = Literal["supervisor", "decision", "response"]
-ReasoningEventType = Literal["check", "tool_call", "tool_result", "choice"]
+ReasoningEventType = Literal[
+    "check", "tool_call", "tool_result", "choice", "step_entered", "step_completed"
+]
 ReasoningStatus = Literal["pending", "done", "error"]
 
 
@@ -321,6 +323,38 @@ class ImprovementProposal(_BaseModel):
     review_comment: str | None = None
     applied_version: int | None = None
     created_at: datetime
+
+
+# ─── Internal Users (Bloque 0, Sub-PR 0.8) ───────────────────────────────────
+
+InternalRole = Literal["super_admin", "aide", "qa_km", "ops_manager", "cs_manager"]
+
+
+class InternalUser(_BaseModel):
+    id: UUID
+    auth_user_id: UUID
+    name: str
+    email: str
+    role: InternalRole
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: datetime | None = None
+
+
+class TenantAssignment(_BaseModel):
+    id: UUID
+    tenant_id: UUID
+    internal_user_id: UUID
+    role_in_tenant: str
+    assigned_at: datetime
+    assigned_by: UUID | None = None
+    unassigned_at: datetime | None = None
+
+
+class RolePermission(_BaseModel):
+    role: InternalRole
+    permission: str
 
 
 # ─── Tenant Integrations (Bloque 0, Sub-PR 0.2) ──────────────────────────────

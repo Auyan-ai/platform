@@ -32,6 +32,8 @@ from apps.api.db.models import (
     ImprovementProposal,
     IntegrationKind,
     IntentClassifierRun,
+    InternalRole,
+    InternalUser,
     KnowledgeChunk,
     Message,
     MessageDirection,
@@ -40,9 +42,11 @@ from apps.api.db.models import (
     ReasoningEventType,
     ReasoningPhase,
     ReasoningStatus,
+    RolePermission,
     SkillAuditLog,
     SlowAgentRun,
     Tenant,
+    TenantAssignment,
     TenantConfiguration,
     TenantIntegration,
     TenantToolPermission,
@@ -2394,6 +2398,292 @@ async def get_integration_by_zendesk_subdomain(
         subdomain,
     )
     return _row_to_integration(row) if row else None
+
+
+# ============================================================
+# Internal Users (Bloque 0, Sub-PR 0.8)
+# Corren con bootstrap_connection — sin tenant_scope, igual que get_user_for_auth.
+# ============================================================
+
+
+async def get_internal_user_by_auth_id(
+    conn: asyncpg.Connection,
+    auth_user_id: UUID,
+) -> InternalUser | None:
+    """Lookup para auth: dado el sub del JWT, devuelve el perfil interno o None.
+
+    Corre sin tenant_scope — la auth ocurre antes de saber el tenant.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT id, auth_user_id, name, email, role, is_active,
+               created_at, updated_at, deleted_at
+          FROM internal_users
+         WHERE auth_user_id = $1 AND deleted_at IS NULL AND is_active = TRUE
+        """,
+        auth_user_id,
+    )
+    return None if row is None else InternalUser(**dict(row))
+
+
+async def get_internal_user_by_id(
+    conn: asyncpg.Connection,
+    internal_user_id: UUID,
+) -> InternalUser | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, auth_user_id, name, email, role, is_active,
+               created_at, updated_at, deleted_at
+          FROM internal_users
+         WHERE id = $1 AND deleted_at IS NULL
+        """,
+        internal_user_id,
+    )
+    return None if row is None else InternalUser(**dict(row))
+
+
+async def list_internal_users(conn: asyncpg.Connection) -> list[InternalUser]:
+    """Lista todos los usuarios internos activos."""
+    rows = await conn.fetch(
+        """
+        SELECT id, auth_user_id, name, email, role, is_active,
+               created_at, updated_at, deleted_at
+          FROM internal_users
+         WHERE deleted_at IS NULL
+         ORDER BY name
+        """,
+    )
+    return [InternalUser(**dict(r)) for r in rows]
+
+
+async def create_internal_user(
+    conn: asyncpg.Connection,
+    *,
+    auth_user_id: UUID,
+    name: str,
+    email: str,
+    role: InternalRole,
+) -> InternalUser:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO internal_users (auth_user_id, name, email, role)
+        VALUES ($1, $2, $3, $4::internal_role)
+        RETURNING id, auth_user_id, name, email, role, is_active,
+                  created_at, updated_at, deleted_at
+        """,
+        auth_user_id,
+        name,
+        email,
+        role,
+    )
+    assert row is not None
+    return InternalUser(**dict(row))
+
+
+async def update_internal_user_role(
+    conn: asyncpg.Connection,
+    *,
+    internal_user_id: UUID,
+    role: InternalRole,
+) -> InternalUser | None:
+    row = await conn.fetchrow(
+        """
+        UPDATE internal_users
+           SET role = $2::internal_role, updated_at = NOW()
+         WHERE id = $1 AND deleted_at IS NULL
+        RETURNING id, auth_user_id, name, email, role, is_active,
+                  created_at, updated_at, deleted_at
+        """,
+        internal_user_id,
+        role,
+    )
+    return None if row is None else InternalUser(**dict(row))
+
+
+async def soft_delete_internal_user(
+    conn: asyncpg.Connection,
+    *,
+    internal_user_id: UUID,
+) -> bool:
+    result = await conn.execute(
+        """
+        UPDATE internal_users
+           SET deleted_at = NOW(), is_active = FALSE, updated_at = NOW()
+         WHERE id = $1 AND deleted_at IS NULL
+        """,
+        internal_user_id,
+    )
+    return result == "UPDATE 1"
+
+
+async def user_has_permission(
+    conn: asyncpg.Connection,
+    *,
+    internal_user_id: UUID,
+    permission: str,
+) -> bool:
+    """Verifica si el usuario interno tiene un permiso dado según su rol.
+
+    No chequea tenant scope — el caller es responsable de filtrar por asignación
+    cuando el rol es 'aide' (scoped). Para super_admin y qa_km basta con esta query.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT 1
+          FROM internal_users u
+          JOIN role_permissions rp ON rp.role = u.role
+         WHERE u.id = $1
+           AND rp.permission = $2
+           AND u.deleted_at IS NULL
+           AND u.is_active = TRUE
+         LIMIT 1
+        """,
+        internal_user_id,
+        permission,
+    )
+    return row is not None
+
+
+async def get_permissions_for_user(
+    conn: asyncpg.Connection,
+    *,
+    internal_user_id: UUID,
+) -> list[str]:
+    """Devuelve todos los permisos del usuario según su rol."""
+    rows = await conn.fetch(
+        """
+        SELECT rp.permission
+          FROM internal_users u
+          JOIN role_permissions rp ON rp.role = u.role
+         WHERE u.id = $1
+           AND u.deleted_at IS NULL
+           AND u.is_active = TRUE
+         ORDER BY rp.permission
+        """,
+        internal_user_id,
+    )
+    return [r["permission"] for r in rows]
+
+
+async def list_role_permissions(
+    conn: asyncpg.Connection,
+    role: InternalRole,
+) -> list[RolePermission]:
+    """Lista todos los permisos de un rol."""
+    rows = await conn.fetch(
+        """
+        SELECT role, permission
+          FROM role_permissions
+         WHERE role = $1::internal_role
+         ORDER BY permission
+        """,
+        role,
+    )
+    return [RolePermission(**dict(r)) for r in rows]
+
+
+# ─── Tenant Assignments ───────────────────────────────────────────────────────
+
+
+async def assign_internal_user_to_tenant(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    internal_user_id: UUID,
+    role_in_tenant: str,
+    assigned_by: UUID | None = None,
+) -> TenantAssignment:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO tenant_assignments
+               (tenant_id, internal_user_id, role_in_tenant, assigned_by)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, tenant_id, internal_user_id, role_in_tenant,
+                  assigned_at, assigned_by, unassigned_at
+        """,
+        tenant_id,
+        internal_user_id,
+        role_in_tenant,
+        assigned_by,
+    )
+    assert row is not None
+    return TenantAssignment(**dict(row))
+
+
+async def unassign_internal_user_from_tenant(
+    conn: asyncpg.Connection,
+    *,
+    assignment_id: UUID,
+) -> bool:
+    result = await conn.execute(
+        """
+        UPDATE tenant_assignments
+           SET unassigned_at = NOW()
+         WHERE id = $1 AND unassigned_at IS NULL
+        """,
+        assignment_id,
+    )
+    return result == "UPDATE 1"
+
+
+async def list_tenant_assignments_for_user(
+    conn: asyncpg.Connection,
+    *,
+    internal_user_id: UUID,
+) -> list[TenantAssignment]:
+    """Qué tenants tiene asignados este usuario (activos)."""
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, internal_user_id, role_in_tenant,
+               assigned_at, assigned_by, unassigned_at
+          FROM tenant_assignments
+         WHERE internal_user_id = $1 AND unassigned_at IS NULL
+         ORDER BY assigned_at
+        """,
+        internal_user_id,
+    )
+    return [TenantAssignment(**dict(r)) for r in rows]
+
+
+async def list_tenant_assignments_for_tenant(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+) -> list[TenantAssignment]:
+    """Qué usuarios internos están asignados a este tenant (activos)."""
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, internal_user_id, role_in_tenant,
+               assigned_at, assigned_by, unassigned_at
+          FROM tenant_assignments
+         WHERE tenant_id = $1 AND unassigned_at IS NULL
+         ORDER BY role_in_tenant, assigned_at
+        """,
+        tenant_id,
+    )
+    return [TenantAssignment(**dict(r)) for r in rows]
+
+
+async def is_user_assigned_to_tenant(
+    conn: asyncpg.Connection,
+    *,
+    internal_user_id: UUID,
+    tenant_id: UUID,
+) -> bool:
+    """Verifica si el usuario tiene alguna asignación activa a este tenant."""
+    row = await conn.fetchrow(
+        """
+        SELECT 1
+          FROM tenant_assignments
+         WHERE internal_user_id = $1
+           AND tenant_id = $2
+           AND unassigned_at IS NULL
+         LIMIT 1
+        """,
+        internal_user_id,
+        tenant_id,
+    )
+    return row is not None
 
 
 async def get_integration_by_gorgias_domain(

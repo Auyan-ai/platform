@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-24 (sesión 34 — Bloque 0, sub-PR 0.7 PostmarkEmailAdapter completado)_
+_Última actualización: 2026-05-24 (sesión 36 — Bloque 0, sub-PR 0.8 Roles internos DB completado)_
 
 > Historial completo de Sprints 1-11 y Rate Limiting en [`docs/progress-archive.md`](progress-archive.md).
 
@@ -63,8 +63,8 @@ Implicaciones: `tenant_agent` removido · Chatwoot → opcional al cliente · Da
 | 0.5 | ZendeskAdapter + OAuth flow + webhook | ✅ [PR #91](https://github.com/Auyan-ai/platform/pull/91) |
 | 0.6 | GorgiasAdapter + OAuth (helpdesk #1) | ✅ [PR #92](https://github.com/Auyan-ai/platform/pull/92) |
 | 0.7 | PostmarkEmailAdapter outbound | ✅ (commit c80ccdd) |
-| 0.8 | Roles internos DB | ⏳ |
-| 0.9 | AOPs `steps[]` opcional + events | ⏳ |
+| 0.8 | Roles internos DB | ✅ [PR #94](https://github.com/Auyan-ai/platform/pull/94) |
+| 0.9 | AOPs `steps[]` opcional + events | ✅ (sesión 35) |
 | 0.10 | Simulator MVP | ⏳ **Opus** |
 | 0.11 | Validación E2E | ⏳ último |
 
@@ -175,6 +175,50 @@ Implicaciones: `tenant_agent` removido · Chatwoot → opcional al cliente · Da
 - [ ] Setear `POSTMARK_API_TOKEN` + `POSTMARK_FROM_EMAIL` en Railway staging
 - [ ] Verificar dominio `auyan.ai` en Postmark → sender signature
 
+### Sub-PR 0.8 — Roles internos estructura DB ✅
+
+| Archivo | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260522000003_add_internal_users.sql` | `internal_role` ENUM (5 valores) + tablas `internal_users`, `tenant_assignments`, `role_permissions` + seed 47 permisos + RLS |
+| `db/models.py` | `InternalUser`, `TenantAssignment`, `RolePermission` |
+| `db/queries.py` | 12 funciones: CRUD `internal_users` + `user_has_permission()` + `get_permissions_for_user()` + assignments CRUD |
+| `core/security.py` | `InternalAuthContext` + `get_internal_auth_context` (lookup en `internal_users`) + `require_internal_permission` dep factory |
+
+**Diseño:** `internal_users` es tabla separada de `users` (clientes). Mismo Supabase Auth, distinto perfil de negocio. El flujo de auth de clientes (`get_auth_context`) no fue tocado.
+
+**Permisos:** 5 roles (super_admin con todos, aide técnico scoped, qa_km transversal, ops_manager reportes/billing, cs_manager solo lectura comercial). Matriz ajustable vía INSERT/DELETE sin migración de schema.
+
+**28 tests nuevos. Suite total: 914/914 verde. Ruff limpio. Migración aplicada en staging ✅**
+
+---
+
+### Sub-PR 0.9 — AOPs `steps[]` opcional + events ✅
+
+| Archivo | Qué se hizo |
+|---|---|
+| `db/models.py` | `ReasoningEventType` extendido con `"step_entered"` y `"step_completed"` |
+| `aops/compiler.py` | `AopStep` dataclass + campo `steps` en `CompiledAOP` + `_parse_steps` + `_render_steps` |
+| `agents/state.py` | Campo `aop_steps: list[dict]` en `AgentState` |
+| `agents/nodes/select_aop.py` | Añade `aop_steps` al output (lista de steps serializados del AOP compilado) |
+| `agents/nodes/reason.py` | Emite `step_entered` antes del LLM call; `step_completed` al cierre de cada iteración (con outcome = decision o `tool:<slug>`) |
+
+**Backward compat total:** AOPs sin `steps[]` siguen funcionando idéntico — `aop_steps` queda vacío y ningún step event se emite.
+
+**AOP YAML con steps[] (ejemplo):**
+```yaml
+steps:
+  - id: gather_info
+    name: Recopilar información del pedido
+    decision_point: ¿Tenemos número de pedido o email?
+  - id: check_status
+    name: Verificar estado
+    decision_point: ¿El pedido está en tránsito?
+  - id: resolve
+    name: Resolver y responder
+```
+
+**48 tests nuevos. Suite total: 914/914 verde. Ruff limpio.**
+
 ---
 
 ## Plan de construcción post-pivot
@@ -199,13 +243,16 @@ Memory cross-conversación · Detección automática alucinaciones · Reapertura
 
 ## Empezar aquí — siguiente sesión
 
-**Modelo recomendado:** Sonnet para 0.6-0.9; **Opus para 0.10 (Simulator)**.
+**Modelo recomendado:** Sonnet para 0.11; **Opus para 0.10 (Simulator)**.
 
-**Próximos sub-PRs (paralelizables — todos dependen de 0.2 ya mergeado):**
-1. **0.8** Roles internos DB (`internal_users`, `role_permissions`, `tenant_assignments`)
-2. **0.9** AOPs `steps[]` opcional + events
+**Estado Bloque 0:** 0.1–0.9 completados ✅. Pendiente:
+1. **0.10** Simulator MVP — **Opus**
+2. **0.11** Validación E2E — último paso del bloque
 
-**Luego:** 0.10 (Simulator — **Opus**) → 0.11 (Validación E2E).
+**Pendiente de staging (PRs ya mergeables):**
+- [ ] PR #94 (0.8): migración aplicada ✅ — mergear a develop
+- [ ] Registrar OAuth apps en Gorgias + Zendesk Developer Portals
+- [ ] Setear `POSTMARK_API_TOKEN` + dominio `auyan.ai` en Postmark
 
 ### Referencias
 

@@ -40,8 +40,8 @@ import jwt
 from apps.api.core.config import Settings, get_settings
 from apps.api.core.errors import ForbiddenError, UnauthorizedError
 from apps.api.db.client import bootstrap_connection
-from apps.api.db.models import UserRole
-from apps.api.db.queries import get_user_for_auth
+from apps.api.db.models import InternalRole, UserRole
+from apps.api.db.queries import get_internal_user_by_auth_id, get_user_for_auth, user_has_permission
 from cachetools import TTLCache
 from fastapi import Depends, Header
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -288,6 +288,116 @@ async def get_tenant_id(
                 "cross_tenant_access_denied", code="cross_tenant_access_denied"
             )
     return auth.tenant_id
+
+
+# ----------------------------------------------------------------
+# Internal auth (dashboard operativo — tabla internal_users)
+# ----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class InternalAuthContext:
+    """Identidad del staff de Auyan. Separado de AuthContext (clientes)."""
+
+    user_id: UUID           # auth.users id (sub del JWT)
+    internal_user_id: UUID  # internal_users.id
+    role: InternalRole
+    email: str
+
+
+async def get_internal_auth_context(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> InternalAuthContext:
+    """Dependency para endpoints del dashboard interno.
+
+    Mismo decode JWT que get_auth_context, pero lookup en internal_users.
+    """
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise UnauthorizedError("missing_bearer_token", code="missing_bearer_token")
+
+    token = credentials.credentials
+
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.InvalidTokenError as exc:
+        raise UnauthorizedError("invalid_token", code="invalid_token") from exc
+
+    alg = header.get("alg", settings.supabase_jwt_algorithm)
+    kid = header.get("kid")
+
+    if alg in ("ES256", "RS256"):
+        signing_key = await _get_jwks_key(kid, settings)
+    elif alg == "HS256":
+        if settings.supabase_jwt_secret is None:
+            raise UnauthorizedError(
+                "hs256_secret_not_configured", code="hs256_secret_not_configured"
+            )
+        signing_key = settings.supabase_jwt_secret.get_secret_value()
+    else:
+        raise UnauthorizedError(f"unsupported_algorithm:{alg}", code="unsupported_algorithm")
+
+    try:
+        payload = jwt.decode(
+            token,
+            signing_key,
+            algorithms=[alg],
+            audience=settings.supabase_jwt_audience,
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise UnauthorizedError("token_expired", code="token_expired") from exc
+    except jwt.InvalidAudienceError as exc:
+        raise UnauthorizedError("invalid_audience", code="invalid_audience") from exc
+    except jwt.InvalidTokenError as exc:
+        raise UnauthorizedError("invalid_token", code="invalid_token") from exc
+
+    sub = payload.get("sub")
+    if not sub:
+        raise UnauthorizedError("token_missing_sub", code="token_missing_sub")
+    try:
+        auth_user_id = UUID(str(sub))
+    except (ValueError, TypeError) as exc:
+        raise UnauthorizedError("token_sub_not_uuid", code="token_sub_not_uuid") from exc
+
+    async with bootstrap_connection() as conn:
+        internal_user = await get_internal_user_by_auth_id(conn, auth_user_id)
+
+    if internal_user is None:
+        raise UnauthorizedError(
+            "internal_user_not_provisioned", code="internal_user_not_provisioned"
+        )
+
+    return InternalAuthContext(
+        user_id=auth_user_id,
+        internal_user_id=internal_user.id,
+        role=internal_user.role,
+        email=internal_user.email,
+    )
+
+
+def require_internal_permission(permission: str) -> Callable[..., Awaitable[None]]:
+    """Dep factory: 403 si el usuario interno no tiene el permiso dado.
+
+    Uso:
+        @router.get("/foo", dependencies=[Depends(require_internal_permission("aop.edit"))])
+        async def foo(...): ...
+    """
+
+    async def _checker(
+        auth: Annotated[InternalAuthContext, Depends(get_internal_auth_context)],
+    ) -> None:
+        async with bootstrap_connection() as conn:
+            has_it = await user_has_permission(
+                conn,
+                internal_user_id=auth.internal_user_id,
+                permission=permission,
+            )
+        if not has_it:
+            raise ForbiddenError(
+                f"requires_permission:{permission}", code="insufficient_permission"
+            )
+
+    return _checker
 
 
 def require_role(*roles: UserRole) -> Callable[[AuthContext], Awaitable[None]]:
