@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apps.api.integrations.shopify import ShopifyClient
+from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._models import FulfillmentInfo
@@ -39,10 +39,10 @@ class GetOrderStatus(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, GetOrderStatusInput)
-        if not ctx.shopify_domain or not ctx.shopify_token:
+        if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        shopify = ShopifyClient(ctx.shopify_domain, ctx.shopify_token)
-        raw = await shopify.get_order_by_name(inputs.order_identifier)
+        adapter = ShopifyAdapter()
+        raw = await adapter.get_order_by_name(ctx.integration_ctx, inputs.order_identifier)
 
         if raw is None:
             return OrderDetail(

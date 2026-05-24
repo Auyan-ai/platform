@@ -1,7 +1,9 @@
 """Cliente HTTP para la Admin REST API de Shopify.
 
-Cubre las operaciones L1 (read-only) de Sprint 6.
-Las operaciones L2/L3 (write) se agregan en Sprints 9-10.
+Expone dos capas:
+- `ShopifyClient`: cliente HTTP con estado (domain + token en __init__).
+- `ShopifyAdapter`: adapter stateless registrado en IntegrationRegistry. Recibe
+  IntegrationContext por llamada — habilita multi-tenant real (un adapter, N tiendas).
 """
 
 from __future__ import annotations
@@ -10,6 +12,8 @@ import logging
 from typing import Any
 
 import httpx
+from apps.api.integrations.base import CommerceProvider, IntegrationContext
+from apps.api.integrations.registry import IntegrationRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -309,3 +313,130 @@ class ShopifyClient:
             )
             response.raise_for_status()
             return response.json()["return"]  # type: ignore[no-any-return]
+
+
+# ─── Adapter stateless — implementa CommerceProvider ──────────────────────────
+
+
+@IntegrationRegistry.register(kind="commerce", provider="shopify")
+class ShopifyAdapter:
+    """CommerceProvider stateless para Shopify.
+
+    Crea un ShopifyClient por llamada a partir de las credenciales en IntegrationContext.
+    Credentials esperadas: {"domain": "...", "token": "shpat_..."}.
+    """
+
+    def _client(self, ctx: IntegrationContext) -> ShopifyClient:
+        return ShopifyClient(ctx.credentials["domain"], ctx.credentials["token"])
+
+    # ── CommerceProvider protocol ──────────────────────────────────────────────
+
+    async def get_order(self, ctx: IntegrationContext, order_id: str) -> dict[str, Any]:
+        return await self._client(ctx).get_order(int(order_id))
+
+    async def search_orders_by_email(
+        self, ctx: IntegrationContext, email: str, *, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        return await self._client(ctx).get_orders_by_email(email, limit=limit)
+
+    async def get_customer_by_email(
+        self, ctx: IntegrationContext, email: str
+    ) -> dict[str, Any] | None:
+        return await self._client(ctx).get_customer_by_email(email)
+
+    # ── Métodos extendidos usados por las skills ───────────────────────────────
+
+    async def get_order_by_name(
+        self, ctx: IntegrationContext, order_name: str
+    ) -> dict[str, Any] | None:
+        return await self._client(ctx).get_order_by_name(order_name)
+
+    async def get_orders_by_customer_id(
+        self, ctx: IntegrationContext, customer_id: int, *, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        return await self._client(ctx).get_orders_by_customer_id(customer_id, limit=limit)
+
+    async def search_products(
+        self, ctx: IntegrationContext, query: str, *, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        return await self._client(ctx).search_products(query, limit=limit)
+
+    async def get_policies(self, ctx: IntegrationContext) -> list[dict[str, Any]]:
+        return await self._client(ctx).get_policies()
+
+    async def add_order_note(
+        self, ctx: IntegrationContext, order_id: int, note: str
+    ) -> dict[str, Any]:
+        return await self._client(ctx).add_order_note(order_id, note)
+
+    async def tag_order(
+        self, ctx: IntegrationContext, order_id: int, tags_to_add: list[str]
+    ) -> dict[str, Any]:
+        return await self._client(ctx).tag_order(order_id, tags_to_add)
+
+    async def cancel_order(
+        self,
+        ctx: IntegrationContext,
+        order_id: int,
+        *,
+        reason: str = "customer",
+        email: bool = True,
+        refund: bool = False,
+    ) -> dict[str, Any]:
+        return await self._client(ctx).cancel_order(
+            order_id, reason=reason, email=email, refund=refund
+        )
+
+    async def update_shipping_address(
+        self,
+        ctx: IntegrationContext,
+        order_id: int,
+        *,
+        address1: str,
+        city: str,
+        province: str,
+        country: str,
+        zip_code: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._client(ctx).update_shipping_address(
+            order_id,
+            address1=address1,
+            city=city,
+            province=province,
+            country=country,
+            zip_code=zip_code,
+            first_name=first_name,
+            last_name=last_name,
+        )
+
+    async def refund_partial(
+        self,
+        ctx: IntegrationContext,
+        order_id: int,
+        *,
+        amount: str,
+        currency: str,
+        note: str = "",
+    ) -> dict[str, Any]:
+        return await self._client(ctx).refund_partial(
+            order_id, amount=amount, currency=currency, note=note
+        )
+
+    async def start_return(
+        self,
+        ctx: IntegrationContext,
+        order_id: int,
+        *,
+        line_item_id: int,
+        quantity: int,
+        reason: str = "other",
+    ) -> dict[str, Any]:
+        return await self._client(ctx).start_return(
+            order_id, line_item_id=line_item_id, quantity=quantity, reason=reason
+        )
+
+
+# Satisface el type-checker: ShopifyAdapter implementa CommerceProvider structuralmente.
+_: CommerceProvider = ShopifyAdapter()  # type: ignore[assignment]

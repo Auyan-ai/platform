@@ -1,13 +1,16 @@
 """Tests unitarios para las 5 skills L1 de Shopify.
 
-ShopifyClient mockeado con AsyncMock — sin llamadas HTTP reales.
+Como ShopifyAdapter._client() crea un ShopifyClient internamente, el patch
+de ShopifyClient sigue capturando la llamada HTTP — sin cambios al mock setup.
 """
 
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
+from apps.api.integrations.base import IntegrationContext
 from apps.api.skills.base import SkillContext
 from apps.api.skills.shopify._models import OrderSummary
 from apps.api.skills.shopify.get_customer_history import (
@@ -40,11 +43,15 @@ from apps.api.skills.shopify.get_shop_policies import (
 # Fixtures
 # ----------------------------------------------------------------
 
+_SHOPIFY_INTEGRATION_CTX = IntegrationContext(
+    tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+    credentials={"domain": "myshop.myshopify.com", "token": "shpat_test"},
+)
+
 CTX = SkillContext(
     tenant_id="11111111-1111-1111-1111-111111111111",
     conversation_id="22222222-2222-2222-2222-222222222222",
-    shopify_domain="myshop.myshopify.com",
-    shopify_token="shpat_test",
+    integration_ctx=_SHOPIFY_INTEGRATION_CTX,
 )
 
 CTX_NO_SHOPIFY = SkillContext(
@@ -116,7 +123,7 @@ class TestGetOrderByEmail:
     async def test_returns_mapped_orders(self) -> None:
         mock_client = _mock_shopify(get_orders_by_email=[_RAW_ORDER])
         with patch(
-            "apps.api.skills.shopify.get_order_by_email.ShopifyClient",
+            "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
             result = await GetOrderByEmail().execute(CTX, GetOrderByEmailInput(email="a@b.com"))
@@ -129,7 +136,7 @@ class TestGetOrderByEmail:
     async def test_empty_result(self) -> None:
         mock_client = _mock_shopify(get_orders_by_email=[])
         with patch(
-            "apps.api.skills.shopify.get_order_by_email.ShopifyClient",
+            "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
             result = await GetOrderByEmail().execute(CTX, GetOrderByEmailInput(email="new@x.com"))
@@ -144,11 +151,11 @@ class TestGetOrderByEmail:
     async def test_passes_email_to_client(self) -> None:
         mock_client = _mock_shopify(get_orders_by_email=[])
         with patch(
-            "apps.api.skills.shopify.get_order_by_email.ShopifyClient",
+            "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
             await GetOrderByEmail().execute(CTX, GetOrderByEmailInput(email="test@example.com"))
-        mock_client.get_orders_by_email.assert_awaited_once_with("test@example.com")
+        mock_client.get_orders_by_email.assert_awaited_once_with("test@example.com", limit=10)
 
 
 # ----------------------------------------------------------------
@@ -160,7 +167,7 @@ class TestGetOrderStatus:
     async def test_returns_order_detail_when_found(self) -> None:
         mock_client = _mock_shopify(get_order_by_name=_RAW_ORDER)
         with patch(
-            "apps.api.skills.shopify.get_order_status.ShopifyClient",
+            "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
             result = await GetOrderStatus().execute(
@@ -176,7 +183,7 @@ class TestGetOrderStatus:
     async def test_returns_not_found_when_order_missing(self) -> None:
         mock_client = _mock_shopify(get_order_by_name=None)
         with patch(
-            "apps.api.skills.shopify.get_order_status.ShopifyClient",
+            "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
             result = await GetOrderStatus().execute(
@@ -197,7 +204,7 @@ class TestGetOrderStatus:
         raw = {**_RAW_ORDER, "fulfillments": []}
         mock_client = _mock_shopify(get_order_by_name=raw)
         with patch(
-            "apps.api.skills.shopify.get_order_status.ShopifyClient",
+            "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
             result = await GetOrderStatus().execute(
@@ -216,7 +223,7 @@ class TestGetProductInfo:
     async def test_returns_mapped_products(self) -> None:
         mock_client = _mock_shopify(search_products=[_RAW_PRODUCT])
         with patch(
-            "apps.api.skills.shopify.get_product_info.ShopifyClient",
+            "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
             result = await GetProductInfo().execute(
@@ -236,7 +243,7 @@ class TestGetProductInfo:
     async def test_empty_result(self) -> None:
         mock_client = _mock_shopify(search_products=[])
         with patch(
-            "apps.api.skills.shopify.get_product_info.ShopifyClient",
+            "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
             result = await GetProductInfo().execute(CTX, GetProductInfoInput(query="xyz"))
@@ -260,7 +267,7 @@ class TestGetCustomerHistory:
             get_orders_by_customer_id=[_RAW_ORDER],
         )
         with patch(
-            "apps.api.skills.shopify.get_customer_history.ShopifyClient",
+            "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
             result = await GetCustomerHistory().execute(
@@ -276,7 +283,7 @@ class TestGetCustomerHistory:
     async def test_customer_not_found_returns_empty(self) -> None:
         mock_client = _mock_shopify(get_customer_by_email=None)
         with patch(
-            "apps.api.skills.shopify.get_customer_history.ShopifyClient",
+            "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
             result = await GetCustomerHistory().execute(
@@ -304,7 +311,7 @@ class TestGetShopPolicies:
     async def test_returns_all_policies(self) -> None:
         mock_client = _mock_shopify(get_policies=[_RAW_POLICY])
         with patch(
-            "apps.api.skills.shopify.get_shop_policies.ShopifyClient",
+            "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
             result = await GetShopPolicies().execute(CTX, GetShopPoliciesInput())
@@ -322,7 +329,7 @@ class TestGetShopPolicies:
         }
         mock_client = _mock_shopify(get_policies=[_RAW_POLICY, shipping_policy])
         with patch(
-            "apps.api.skills.shopify.get_shop_policies.ShopifyClient",
+            "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
             result = await GetShopPolicies().execute(
@@ -334,7 +341,7 @@ class TestGetShopPolicies:
     async def test_empty_policies(self) -> None:
         mock_client = _mock_shopify(get_policies=[])
         with patch(
-            "apps.api.skills.shopify.get_shop_policies.ShopifyClient",
+            "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
             result = await GetShopPolicies().execute(CTX, GetShopPoliciesInput())

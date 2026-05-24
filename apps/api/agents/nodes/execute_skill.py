@@ -27,6 +27,7 @@ from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import create_pending_approval
+from apps.api.integrations.base import IntegrationContext
 from apps.api.services.pii import redact_inputs
 from apps.api.skills.base import SkillContext
 from apps.api.skills.registry import SkillRegistry
@@ -38,18 +39,23 @@ logger = logging.getLogger(__name__)
 def build_skill_context(state: AgentState) -> SkillContext:
     """Construye un SkillContext a partir del state del grafo.
 
-    Las credenciales de integración (Shopify, etc.) se leen de
-    `tenant_config.extra`. Si no existen, el SkillContext queda con
-    `None` y las skills correspondientes lanzarán `shopify_not_configured`
-    al ejecutar — que cae al catch de abajo y se reporta como tool_result.
+    La integración commerce (Shopify) se carga desde `commerce_integration_ctx`
+    que load_tenant_context pre-computa — primero desde tenant_integrations DB,
+    fallback a tenant_config.extra para tenants no migrados.
     """
-    tenant_config: dict[str, Any] = state.get("tenant_config", {})
-    extra: dict[str, Any] = tenant_config.get("extra") or {}
+    commerce_data: dict[str, Any] | None = state.get("commerce_integration_ctx")
+    integration_ctx: IntegrationContext | None = None
+    if commerce_data:
+        from uuid import UUID as _UUID
+        integration_ctx = IntegrationContext(
+            tenant_id=_UUID(commerce_data["tenant_id"]),
+            credentials=commerce_data["credentials"],
+            config=commerce_data.get("config", {}),
+        )
     return SkillContext(
         tenant_id=state["tenant_id"],
         conversation_id=state["conversation_id"],
-        shopify_domain=extra.get("shopify_domain"),
-        shopify_token=extra.get("shopify_token"),
+        integration_ctx=integration_ctx,
     )
 
 

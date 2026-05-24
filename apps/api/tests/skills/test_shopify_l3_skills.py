@@ -7,8 +7,10 @@ ShopifyClient mockeado con AsyncMock — sin llamadas HTTP reales.
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
+from apps.api.integrations.base import IntegrationContext
 from apps.api.skills.base import SkillContext
 from apps.api.skills.shopify.cancel_order import (
     CancelOrder,
@@ -35,11 +37,15 @@ from apps.api.skills.shopify.update_shipping_address import (
 # Fixtures
 # ----------------------------------------------------------------
 
+_SHOPIFY_INTEGRATION_CTX = IntegrationContext(
+    tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+    credentials={"domain": "myshop.myshopify.com", "token": "shpat_test"},
+)
+
 CTX = SkillContext(
     tenant_id="11111111-1111-1111-1111-111111111111",
     conversation_id="22222222-2222-2222-2222-222222222222",
-    shopify_domain="myshop.myshopify.com",
-    shopify_token="shpat_test",
+    integration_ctx=_SHOPIFY_INTEGRATION_CTX,
 )
 
 CTX_NO_SHOPIFY = SkillContext(
@@ -101,7 +107,7 @@ class TestCancelOrder:
         skill = CancelOrder()
         inputs = CancelOrderInput(order_id=1001)
 
-        with patch("apps.api.skills.shopify.cancel_order.ShopifyClient") as MockClient:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.cancel_order = AsyncMock(return_value=_CANCELLED_ORDER)
 
@@ -121,7 +127,7 @@ class TestCancelOrder:
         skill = CancelOrder()
         inputs = CancelOrderInput(order_id=1001, reason="fraud", send_email=False, refund_payment=True)
 
-        with patch("apps.api.skills.shopify.cancel_order.ShopifyClient") as MockClient:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.cancel_order = AsyncMock(return_value=_CANCELLED_ORDER)
 
@@ -136,7 +142,7 @@ class TestCancelOrder:
         skill = CancelOrder()
         inputs = CancelOrderInput(order_id=1001)
 
-        with patch("apps.api.skills.shopify.cancel_order.ShopifyClient") as MockClient:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.cancel_order = AsyncMock(return_value={"id": 1001})
 
@@ -184,7 +190,7 @@ class TestUpdateShippingAddress:
         )
 
         with patch(
-            "apps.api.skills.shopify.update_shipping_address.ShopifyClient"
+            "apps.api.integrations.shopify.ShopifyClient"
         ) as MockClient:
             instance = MockClient.return_value
             instance.update_shipping_address = AsyncMock(return_value=_UPDATED_ORDER)
@@ -211,7 +217,7 @@ class TestUpdateShippingAddress:
         )
 
         with patch(
-            "apps.api.skills.shopify.update_shipping_address.ShopifyClient"
+            "apps.api.integrations.shopify.ShopifyClient"
         ) as MockClient:
             instance = MockClient.return_value
             instance.update_shipping_address = AsyncMock(return_value={"id": 1001})
@@ -261,7 +267,7 @@ class TestRefundPartial:
         skill = RefundPartial()
         inputs = RefundPartialInput(order_id=1001, amount="12.50", currency="EUR")
 
-        with patch("apps.api.skills.shopify.refund_partial.ShopifyClient") as MockClient:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.refund_partial = AsyncMock(return_value=_REFUND_RESPONSE)
 
@@ -280,7 +286,7 @@ class TestRefundPartial:
         skill = RefundPartial()
         inputs = RefundPartialInput(order_id=1001, amount="5.00", currency="EUR")
 
-        with patch("apps.api.skills.shopify.refund_partial.ShopifyClient") as MockClient:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.refund_partial = AsyncMock(return_value={})
 
@@ -321,7 +327,7 @@ class TestStartReturn:
         skill = StartReturn()
         inputs = StartReturnInput(order_id=1001, line_item_id=2001, quantity=1)
 
-        with patch("apps.api.skills.shopify.start_return.ShopifyClient") as MockClient:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.start_return = AsyncMock(return_value=_RETURN_RESPONSE)
 
@@ -341,7 +347,7 @@ class TestStartReturn:
         skill = StartReturn()
         inputs = StartReturnInput(order_id=1001, line_item_id=2001, quantity=2, reason="defective")
 
-        with patch("apps.api.skills.shopify.start_return.ShopifyClient") as MockClient:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.start_return = AsyncMock(return_value=_RETURN_RESPONSE)
 
@@ -356,7 +362,7 @@ class TestStartReturn:
         skill = StartReturn()
         inputs = StartReturnInput(order_id=1001, line_item_id=2001, quantity=1)
 
-        with patch("apps.api.skills.shopify.start_return.ShopifyClient") as MockClient:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.start_return = AsyncMock(return_value={})
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apps.api.integrations.shopify import ShopifyClient
+from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._models import PolicyInfo, strip_html
@@ -31,10 +31,10 @@ class GetShopPolicies(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, GetShopPoliciesInput)
-        if not ctx.shopify_domain or not ctx.shopify_token:
+        if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        shopify = ShopifyClient(ctx.shopify_domain, ctx.shopify_token)
-        raw_policies = await shopify.get_policies()
+        adapter = ShopifyAdapter()
+        raw_policies = await adapter.get_policies(ctx.integration_ctx)
 
         policies: list[PolicyInfo] = []
         for raw in raw_policies:

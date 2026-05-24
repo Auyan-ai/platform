@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apps.api.integrations.shopify import ShopifyClient
+from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._models import ProductSummary, map_product_summary
@@ -31,9 +31,9 @@ class GetProductInfo(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, GetProductInfoInput)
-        if not ctx.shopify_domain or not ctx.shopify_token:
+        if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        shopify = ShopifyClient(ctx.shopify_domain, ctx.shopify_token)
-        raw_products = await shopify.search_products(inputs.query)
+        adapter = ShopifyAdapter()
+        raw_products = await adapter.search_products(ctx.integration_ctx, inputs.query)
         products = [map_product_summary(p) for p in raw_products]
         return GetProductInfoOutput(products=products, total_found=len(products))

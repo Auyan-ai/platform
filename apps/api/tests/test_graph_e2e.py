@@ -64,6 +64,14 @@ def _patch_all_db_and_llm(
         "apps.api.agents.nodes.load_tenant_context.list_tool_permissions",
         AsyncMock(return_value=[]),
     )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.load_tenant_context.get_primary_integration_for_kind",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.load_tenant_context.get_integration_credentials_encrypted",
+        AsyncMock(return_value=None),
+    )
 
     # --- load_conversation ---
     monkeypatch.setattr(

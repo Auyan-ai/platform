@@ -6,7 +6,7 @@ Requiere aprobación humana.
 
 from __future__ import annotations
 
-from apps.api.integrations.shopify import ShopifyClient
+from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 
@@ -47,10 +47,11 @@ class UpdateShippingAddress(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, UpdateShippingAddressInput)
-        if not ctx.shopify_domain or not ctx.shopify_token:
+        if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        shopify = ShopifyClient(ctx.shopify_domain, ctx.shopify_token)
-        order = await shopify.update_shipping_address(
+        adapter = ShopifyAdapter()
+        order = await adapter.update_shipping_address(
+            ctx.integration_ctx,
             inputs.order_id,
             address1=inputs.address1,
             city=inputs.city,
