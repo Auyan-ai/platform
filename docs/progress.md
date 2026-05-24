@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-24 (sesión 32 — Bloque 0, sub-PR 0.5 ZendeskAdapter completado)_
+_Última actualización: 2026-05-24 (sesión 33 — Bloque 0, sub-PR 0.6 GorgiasAdapter completado)_
 
 > Historial completo de Sprints 1-11 y Rate Limiting en [`docs/progress-archive.md`](progress-archive.md).
 
@@ -61,7 +61,7 @@ Implicaciones: `tenant_agent` removido · Chatwoot → opcional al cliente · Da
 | 0.3 | ShopifyAdapter stateless | ✅ [PR #89](https://github.com/Auyan-ai/platform/pull/89) |
 | 0.4 | ChatwootAdapter stateless + webhook | ✅ [PR #90](https://github.com/Auyan-ai/platform/pull/90) |
 | 0.5 | ZendeskAdapter + OAuth flow + webhook | ✅ [PR #91](https://github.com/Auyan-ai/platform/pull/91) |
-| 0.6 | GorgiasAdapter + OAuth (helpdesk #1) | ⏳ siguiente |
+| 0.6 | GorgiasAdapter + OAuth (helpdesk #1) | ✅ [PR #92](https://github.com/Auyan-ai/platform/pull/92) |
 | 0.7 | PostmarkEmailAdapter outbound | ⏳ |
 | 0.8 | Roles internos DB | ⏳ |
 | 0.9 | AOPs `steps[]` opcional + events | ⏳ |
@@ -139,6 +139,23 @@ Implicaciones: `tenant_agent` removido · Chatwoot → opcional al cliente · Da
 - [ ] Setear `ZENDESK_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI` en Railway staging
 - [ ] Test flujo OAuth end-to-end + webhook con tenant de prueba
 
+### Sub-PR 0.6 — GorgiasAdapter + OAuth flow ✅
+
+| Archivo | Qué se hizo |
+|---|---|
+| `integrations/gorgias.py` | `GorgiasClient` (HTTP stateful, domain + Bearer token) + `GorgiasAdapter` (stateless, `HelpdeskProvider`) + `verify_gorgias_signature` HMAC-SHA256 base64 (`X-Gorgias-Hmac-Sha256`). Registrado como `helpdesk/gorgias`. |
+| `db/queries.py` | `get_integration_by_gorgias_domain` — lookup cross-tenant por `config->>'domain'` |
+| `routers/oauth_gorgias.py` | `GET /oauth/gorgias/authorize` (state HMAC firmado, TTL 15min) + `GET /oauth/gorgias/callback` (intercambia code, persiste token cifrado) |
+| `routers/webhooks_gorgias.py` | `POST /webhooks/gorgias`: filtra `from_agent=false`, lookup por domain, valida firma opcional, idempotencia `gorgias:{ticket_id}:{message_id}`, flujo inbound + `send_outbound` si decide responder |
+| `core/config.py` | `gorgias_oauth_client_id/secret/redirect_uri` opcionales |
+
+**35 tests nuevos** (23 adapter + 12 oauth). **Suite total: 842/842 verde. Ruff limpio.**
+
+**Pendiente de staging 0.6:**
+- [ ] Registrar app en Gorgias Developer Portal → obtener `client_id` + `client_secret`
+- [ ] Setear `GORGIAS_OAUTH_CLIENT_ID/SECRET/REDIRECT_URI` en Railway staging
+- [ ] Test flujo OAuth end-to-end + webhook con tenant de prueba
+
 ---
 
 ## Plan de construcción post-pivot
@@ -165,11 +182,10 @@ Memory cross-conversación · Detección automática alucinaciones · Reapertura
 
 **Modelo recomendado:** Sonnet para 0.6-0.9; **Opus para 0.10 (Simulator)**.
 
-**Próximos sub-PRs (paralelizables):**
-1. **0.6** `GorgiasAdapter` — nuevo desde cero + OAuth (prioritario — helpdesk #1)
-2. **0.7** `PostmarkEmailAdapter` outbound (Auyan→cliente)
-3. **0.8** Roles internos DB (`internal_users`, `role_permissions`, `tenant_assignments`)
-4. **0.9** AOPs `steps[]` opcional + events
+**Próximos sub-PRs (paralelizables — todos dependen de 0.2 ya mergeado):**
+1. **0.7** `PostmarkEmailAdapter` outbound (Auyan→cliente)
+2. **0.8** Roles internos DB (`internal_users`, `role_permissions`, `tenant_assignments`)
+3. **0.9** AOPs `steps[]` opcional + events
 
 **Luego:** 0.10 (Simulator — **Opus**) → 0.11 (Validación E2E).
 
