@@ -50,8 +50,13 @@ class Settings(BaseSettings):
     langfuse_secret_key: SecretStr = Field(...)
     langfuse_host: HttpUrl = Field(default=HttpUrl("https://cloud.langfuse.com"))
 
-    # --- Integrations (opcionales según etapa del proyecto) ---
+    # --- Postmark (email outbound Auyan→cliente) ---
+    # Obtener en https://account.postmarkapp.com/servers
     postmark_api_token: SecretStr | None = None
+    # Dirección y nombre del remitente. El dominio debe estar verificado en Postmark.
+    postmark_from_email: str = "noreply@auyan.ai"
+    postmark_from_name: str = "Auyan"
+
     # Clave maestra AES-256-GCM para credentials de tenant_integrations.
     # Generar con: python -c "import secrets; print(secrets.token_hex(32))"
     integrations_secret_key: SecretStr | None = None
