@@ -90,6 +90,11 @@ class AgentState(TypedDict, total=False):
     aop_workspace: str
     intent_confidence: float
 
+    # Pasos del AOP activo — lista de {id, name, decision_point}.
+    # Vacía si el AOP no define steps[] (backward compat total).
+    # Usada por reason para emitir step_entered/step_completed.
+    aop_steps: list[dict]
+
     # Control de persistencia del AOP entre turnos.
     # aop_locked_until_turn: nº de turno hasta el que el AOP está locked (Sprint 9+).
     # aop_completed_signal: el flujo del AOP terminó, reclasificar en el próximo turno.
