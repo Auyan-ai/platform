@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-23 (sesión 30 — Bloque 0 sub-PRs 0.1 y 0.2 mergeados, siguiente: 0.3)_
+_Última actualización: 2026-05-24 (sesión 31 — Bloque 0 sub-PRs 0.3 y 0.4 completados, siguiente: 0.5/0.6/0.7/0.8/0.9 en paralelo)_
 
 ---
 
@@ -1243,8 +1243,8 @@ Sub-PRs propuestos:
 |---|---|---|
 | ~~0.1~~ | ~~Hard removal `tenant_agent`~~ | ✅ [PR #83](https://github.com/Auyan-ai/platform/pull/83)+[#84](https://github.com/Auyan-ai/platform/pull/84) |
 | ~~0.2~~ | ~~Framework adapters base~~ | ✅ [PR #87](https://github.com/Auyan-ai/platform/pull/87) |
-| 0.3 | Refactor `ShopifyAdapter` (commerce) | Sonnet |
-| 0.4 | Refactor `ChatwootAdapter` (helpdesk, completar bidirec) | Sonnet |
+| ~~0.3~~ | ~~Refactor `ShopifyAdapter` (commerce)~~ | ✅ [PR #89](https://github.com/Auyan-ai/platform/pull/89) |
+| 0.4 | Refactor `ChatwootAdapter` (helpdesk, completar bidirec) | Sonnet — en PR |
 | 0.5 | Refactor `ZendeskAdapter` (helpdesk, completar bidirec + OAuth) | Sonnet |
 | 0.6 | Nuevo `GorgiasAdapter` (helpdesk, OAuth, desde cero) | Sonnet |
 | 0.7 | `PostmarkEmailAdapter` (outbound Auyan→cliente) | Sonnet |
@@ -1356,15 +1356,63 @@ La migración falló 3 veces antes de funcionar. Causa raíz: el CHECK constrain
 
 ---
 
+---
+
+## Bloque 0 — Sub-PR 0.3 — ShopifyAdapter stateless ([PR #89](https://github.com/Auyan-ai/platform/pull/89)) ✅
+
+Refactor de `ShopifyClient` singleton → `ShopifyAdapter` stateless que implementa `CommerceProvider` y recibe `IntegrationContext` por llamada.
+
+- `ShopifyAdapter._client(ctx)` construye un `ShopifyClient` con las credenciales del tenant por llamada
+- Registrado como `commerce/shopify` en `IntegrationRegistry`
+- Smoke test: dos tenants con tiendas distintas coexisten sin cruce de credenciales
+- Tests existentes de Shopify (11 skills) adaptados al nuevo patrón
+- Suite: 747/747 verde
+
+---
+
+## Bloque 0 — Sub-PR 0.4 — ChatwootAdapter (sesión 31 — 2026-05-24)
+
+Refactor de `ChatwootClient` singleton → `ChatwootAdapter` stateless + webhook handler real.
+
+| Archivo | Qué se hizo |
+|---|---|
+| `apps/api/integrations/chatwoot.py` | `ChatwootClient` recibe `base_url`/`api_access_token`/`account_id` en constructor (no más `settings` singleton). `ChatwootAdapter` implementa `HelpdeskProvider` completo: `parse_inbound_webhook`, `send_outbound`, `add_internal_note`, `assign_to_human`, `update_status`, `push_escalation`. Registrado como `helpdesk/chatwoot`. |
+| `apps/api/db/queries.py` | `get_integration_by_chatwoot_account(conn, *, account_id)` — lookup cross-tenant por `config->>'account_id'`, para resolver tenant desde el webhook. |
+| `apps/api/routers/webhooks_chatwoot.py` | `POST /webhooks/chatwoot`: filtra event/message_type, resuelve tenant por account_id, descifra creds, valida firma opcional (`X-Chatwoot-Signature-Token`), ejecuta flujo inbound estándar + `send_outbound` tras respuesta del agente. Idempotencia con key `chatwoot:{message_id}`. |
+| `apps/api/routers/webhooks.py` | Elimina stub `/chatwoot` (reemplazado por router dedicado). |
+| `apps/api/main.py` | Registra `webhooks_chatwoot_router`. |
+| `apps/api/tests/integrations/test_chatwoot_adapter.py` | 17 tests: registry, multi-tenant isolation, ChatwootClient, parse_inbound_webhook, todos los métodos del protocol. |
+
+**Credentials esperadas:**
+```json
+{ "api_access_token": "...", "webhook_secret_token": "..." }
+```
+**Config esperada:**
+```json
+{ "base_url": "https://app.chatwoot.com", "account_id": "1", "escalation_team_id": "5" }
+```
+
+**Suite total: 777/777 verde. Ruff limpio.**
+
+### Pendiente de staging
+
+- [ ] PR 0.4 → develop (crear y mergear)
+- [ ] Crear una `tenant_integration` de tipo `helpdesk/chatwoot` en staging para probar el webhook end-to-end
+
+---
+
 ## Empezar aquí — siguiente sesión
 
-**Modelo recomendado:** Sonnet para 0.3-0.9; **Opus para 0.10 (Simulator)** porque define arquitectura crítica que afecta Bloques 2/3.
+**Modelo recomendado:** Sonnet para 0.5-0.9; **Opus para 0.10 (Simulator)**.
 
-**Próximo paso:**
-1. Sub-PR 0.3: Refactor `ShopifyAdapter` → implementa `CommerceProvider`, recibe `IntegrationContext`
-2. Sub-PR 0.4: Refactor `ChatwootAdapter` → implementa `HelpdeskProvider` completo + nuevo webhook endpoint
+**Próximo paso (paralelizables, todos dependen de 0.2 ya mergeado):**
+1. **0.5**: `ZendeskAdapter` → implementa `HelpdeskProvider` + OAuth Authorization Code flow
+2. **0.6**: `GorgiasAdapter` → nuevo desde cero + OAuth
+3. **0.7**: `PostmarkEmailAdapter` outbound
+4. **0.8**: Roles internos DB (`internal_users`, `role_permissions`, `tenant_assignments`)
+5. **0.9**: AOPs `steps[]` opcional + events
 
-**Paralelizable después de 0.3/0.4 mergeados:** 0.5 (Zendesk), 0.6 (Gorgias), 0.7 (Postmark), 0.8 (roles internos), 0.9 (AOPs steps[]).
+**Luego:** 0.10 (Simulator — **Opus**) → 0.11 (Validación E2E).
 
 ### Referencias clave
 

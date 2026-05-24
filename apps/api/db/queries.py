@@ -2340,3 +2340,30 @@ async def soft_delete_integration(
         integration_id,
     )
     return result == "UPDATE 1"
+
+
+async def get_integration_by_chatwoot_account(
+    conn: asyncpg.Connection,
+    *,
+    account_id: str,
+) -> TenantIntegration | None:
+    """Busca la integración Chatwoot por account_id (cross-tenant, para el webhook handler).
+
+    Debe llamarse con bootstrap_connection() porque no tiene tenant_scope.
+    El account_id vive en config->>'account_id' (no está cifrado).
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
+               enabled_at, enabled_by, created_at, updated_at
+          FROM tenant_integrations
+         WHERE provider    = 'chatwoot'
+           AND kind        = 'helpdesk'
+           AND config->>'account_id' = $1
+           AND deleted_at IS NULL
+           AND is_active = TRUE
+         LIMIT 1
+        """,
+        account_id,
+    )
+    return _row_to_integration(row) if row else None

@@ -1,54 +1,218 @@
+"""Adapter HTTP para Chatwoot Cloud / self-hosted.
+
+Dos capas:
+- `ChatwootClient`: cliente HTTP con estado (base_url + token + account_id en __init__).
+- `ChatwootAdapter`: adapter stateless registrado en IntegrationRegistry. Recibe
+  IntegrationContext por llamada — habilita multi-tenant real (un adapter, N accounts).
+
+Credentials esperadas en IntegrationContext:
+    {
+        "api_access_token": "...",
+        "webhook_secret_token": "..."   # opcional — valida X-Chatwoot-Signature-Token
+    }
+
+Config esperada en IntegrationContext:
+    {
+        "base_url": "https://app.chatwoot.com",
+        "account_id": "1",              # int como string (JSON keys son strings)
+        "escalation_team_id": "5"       # opcional — team al que asignar escalaciones
+    }
+"""
+
+from __future__ import annotations
+
+import json
 import logging
 from typing import Any
 
 import httpx
-
-from core.config import settings
+from apps.api.integrations.base import (
+    ExternalTicketRef,
+    HelpdeskProvider,
+    InboundMessage,
+    IntegrationContext,
+)
+from apps.api.integrations.registry import IntegrationRegistry
 
 logger = logging.getLogger(__name__)
 
 
+# ─── Cliente HTTP con estado ───────────────────────────────────────────────────
+
+
 class ChatwootClient:
-    def __init__(self) -> None:
-        self.base_url = settings.chatwoot_base_url.rstrip("/")
-        self.token = settings.chatwoot_api_token
+    def __init__(self, base_url: str, api_access_token: str, account_id: int) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._token = api_access_token
+        self._account_id = account_id
 
-    def _headers(self) -> dict:
-        return {"api_access_token": self.token, "Content-Type": "application/json"}
+    def _headers(self) -> dict[str, str]:
+        return {"api_access_token": self._token, "Content-Type": "application/json"}
 
-    async def send_message(
-        self, account_id: int, conversation_id: int, content: str, message_type: str = "outgoing"
-    ) -> dict[str, Any]:
-        url = (
-            f"{self.base_url}/api/v1/accounts/{account_id}"
-            f"/conversations/{conversation_id}/messages"
-        )
+    def _url(self, path: str) -> str:
+        return f"{self._base_url}/api/v1/accounts/{self._account_id}{path}"
+
+    # ── Mensajes ─────────────────────────────────────────────────────────────
+
+    async def send_message(self, conversation_id: int, content: str) -> dict[str, Any]:
+        """Envía un mensaje público outbound al cliente."""
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                url,
+                self._url(f"/conversations/{conversation_id}/messages"),
                 headers=self._headers(),
-                json={"content": content, "message_type": message_type},
+                json={"content": content, "message_type": "outgoing", "private": False},
                 timeout=10,
             )
             response.raise_for_status()
-            return response.json()
+            return response.json()  # type: ignore[no-any-return]
 
-    async def assign_conversation(
-        self, account_id: int, conversation_id: int, assignee_id: int
-    ) -> dict[str, Any]:
-        url = (
-            f"{self.base_url}/api/v1/accounts/{account_id}"
-            f"/conversations/{conversation_id}/assignments"
-        )
+    async def send_internal_note(self, conversation_id: int, content: str) -> dict[str, Any]:
+        """Añade una nota interna (private) visible solo para agentes."""
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                url,
+                self._url(f"/conversations/{conversation_id}/messages"),
                 headers=self._headers(),
-                json={"assignee_id": assignee_id},
+                json={"content": content, "message_type": "outgoing", "private": True},
                 timeout=10,
             )
             response.raise_for_status()
-            return response.json()
+            return response.json()  # type: ignore[no-any-return]
+
+    # ── Gestión de conversación ───────────────────────────────────────────────
+
+    async def update_status(self, conversation_id: int, status: str) -> None:
+        """Cambia el status de la conversación (open, resolved, pending)."""
+        async with httpx.AsyncClient() as client:
+            response = await client.patch(
+                self._url(f"/conversations/{conversation_id}/update"),
+                headers=self._headers(),
+                json={"status": status},
+                timeout=10,
+            )
+            response.raise_for_status()
+
+    async def assign_to_team(self, conversation_id: int, team_id: int) -> dict[str, Any]:
+        """Asigna la conversación a un equipo."""
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                self._url(f"/conversations/{conversation_id}/assignments"),
+                headers=self._headers(),
+                json={"team_id": team_id},
+                timeout=10,
+            )
+            response.raise_for_status()
+            return response.json()  # type: ignore[no-any-return]
 
 
-chatwoot = ChatwootClient()
+# ─── Adapter stateless — implementa HelpdeskProvider ──────────────────────────
+
+
+@IntegrationRegistry.register(kind="helpdesk", provider="chatwoot")
+class ChatwootAdapter:
+    """HelpdeskProvider stateless para Chatwoot.
+
+    Crea un ChatwootClient por llamada a partir de las credenciales en IntegrationContext.
+    """
+
+    def _client(self, ctx: IntegrationContext) -> ChatwootClient:
+        return ChatwootClient(
+            base_url=ctx.config["base_url"],
+            api_access_token=ctx.credentials["api_access_token"],
+            account_id=int(ctx.config["account_id"]),
+        )
+
+    # ── MessageProvider ───────────────────────────────────────────────────────
+
+    async def parse_inbound_webhook(self, payload: dict[str, Any]) -> InboundMessage:
+        """Normaliza un webhook Chatwoot message_created en InboundMessage.
+
+        Debe llamarse solo para payloads con event=message_created y
+        message_type=incoming (verificado en el router antes de llegar aquí).
+        """
+        sender = payload.get("sender") or {}
+        return InboundMessage(
+            external_id=str(payload["id"]),
+            channel="chatwoot",
+            content=payload.get("content") or "",
+            sender_email=sender.get("email"),
+            sender_name=sender.get("name"),
+            raw_payload=payload,
+        )
+
+    async def send_outbound(
+        self,
+        ctx: IntegrationContext,
+        conversation_ref: str,
+        content: str,
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Envía un mensaje público al cliente en la conversación."""
+        await self._client(ctx).send_message(int(conversation_ref), content)
+
+    # ── HelpdeskProvider ──────────────────────────────────────────────────────
+
+    async def add_internal_note(
+        self,
+        ctx: IntegrationContext,
+        ticket_ref: str,
+        content: str,
+    ) -> None:
+        """Publica una nota interna (private: true) en la conversación."""
+        await self._client(ctx).send_internal_note(int(ticket_ref), content)
+
+    async def assign_to_human(
+        self,
+        ctx: IntegrationContext,
+        ticket_ref: str,
+        reason: str,
+    ) -> None:
+        """Asigna al equipo de escalación configurado. No-op si no hay team_id."""
+        team_id_str = ctx.config.get("escalation_team_id")
+        if team_id_str:
+            await self._client(ctx).assign_to_team(int(ticket_ref), int(team_id_str))
+
+    async def update_status(
+        self,
+        ctx: IntegrationContext,
+        ticket_ref: str,
+        status: str,
+    ) -> None:
+        """Cambia el status de la conversación en Chatwoot."""
+        await self._client(ctx).update_status(int(ticket_ref), status)
+
+    async def push_escalation(
+        self,
+        ctx: IntegrationContext,
+        conversation_ref: str,
+        reason: str,
+        agent_context: dict[str, Any],
+    ) -> ExternalTicketRef:
+        """Escala la conversación: nota interna + asignación a equipo.
+
+        1. Añade nota interna con el motivo y contexto del agente.
+        2. Asigna al equipo de escalación si está configurado.
+        """
+        client = self._client(ctx)
+        conv_id = int(conversation_ref)
+
+        summary_parts = [f"🚨 Escalado a soporte humano: {reason}"]
+        if agent_context:
+            ctx_json = json.dumps(agent_context, ensure_ascii=False, indent=2)
+            summary_parts.append(f"Contexto del agente:\n{ctx_json}")
+        await client.send_internal_note(conv_id, "\n\n".join(summary_parts))
+
+        team_id_str = ctx.config.get("escalation_team_id")
+        if team_id_str:
+            await client.assign_to_team(conv_id, int(team_id_str))
+
+        base = ctx.config["base_url"].rstrip("/")
+        account_id = ctx.config["account_id"]
+        return ExternalTicketRef(
+            provider="chatwoot",
+            ticket_id=conversation_ref,
+            url=f"{base}/app/accounts/{account_id}/conversations/{conversation_ref}",
+        )
+
+
+# Satisface el type-checker: ChatwootAdapter implementa HelpdeskProvider estructuralmente.
+_: HelpdeskProvider = ChatwootAdapter()  # type: ignore[assignment]

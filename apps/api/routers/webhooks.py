@@ -346,13 +346,6 @@ async def zendesk_webhook(request: Request, background_tasks: BackgroundTasks) -
     return {"received": True}
 
 
-@router.post("/chatwoot")
-async def chatwoot_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
-    payload = await request.json()
-    logger.info("chatwoot_webhook_received", extra={"event": payload.get("event")})
-    return {"received": True}
-
-
 @router.post("/postmark")
 async def postmark_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
     payload: dict[str, Any] = await request.json()

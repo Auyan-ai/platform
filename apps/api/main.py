@@ -46,6 +46,7 @@ from apps.api.routers.tenants import router as tenants_router
 from apps.api.routers.tool_permissions import router as tool_permissions_router
 from apps.api.routers.users import router as users_router
 from apps.api.routers.webhooks import router as webhooks_router
+from apps.api.routers.webhooks_chatwoot import router as webhooks_chatwoot_router
 from apps.api.services.aop_listener import AopCacheListener
 from apps.api.services.audit import AuditLogger
 from apps.api.services.cleanup import run_abandoned_cleanup
@@ -141,6 +142,7 @@ app.add_middleware(
 )
 
 app.include_router(webhooks_router)
+app.include_router(webhooks_chatwoot_router)
 app.include_router(users_router)
 app.include_router(tenants_router)
 app.include_router(conversations_router)
