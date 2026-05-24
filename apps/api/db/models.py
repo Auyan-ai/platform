@@ -253,7 +253,9 @@ class PendingApproval(_BaseModel):
 # ─── Agent Reasoning Events (Sprint 8) ───────────────────────────────────────
 
 ReasoningPhase = Literal["supervisor", "decision", "response"]
-ReasoningEventType = Literal["check", "tool_call", "tool_result", "choice", "step_entered", "step_completed"]
+ReasoningEventType = Literal[
+    "check", "tool_call", "tool_result", "choice", "step_entered", "step_completed"
+]
 ReasoningStatus = Literal["pending", "done", "error"]
 
 
