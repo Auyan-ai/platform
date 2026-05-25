@@ -44,7 +44,7 @@ class StartReturn(Skill):
         assert isinstance(inputs, StartReturnInput)
         if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        adapter = ShopifyAdapter()
+        adapter = ctx.commerce_mock or ShopifyAdapter()
         ret = await adapter.start_return(
             ctx.integration_ctx,
             inputs.order_id,

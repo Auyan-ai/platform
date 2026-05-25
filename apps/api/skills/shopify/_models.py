@@ -15,6 +15,15 @@ class FulfillmentInfo(BaseModel):
     tracking_company: str | None
 
 
+class LineItemInfo(BaseModel):
+    """Artículo de un pedido. El `line_item_id` es el que requiere start_return."""
+
+    line_item_id: int
+    title: str
+    quantity: int
+    price: str | None = None
+
+
 class OrderSummary(BaseModel):
     order_id: int
     order_number: str  # ej. "#1001"

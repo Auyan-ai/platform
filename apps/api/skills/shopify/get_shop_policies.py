@@ -33,7 +33,7 @@ class GetShopPolicies(Skill):
         assert isinstance(inputs, GetShopPoliciesInput)
         if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        adapter = ShopifyAdapter()
+        adapter = ctx.commerce_mock or ShopifyAdapter()
         raw_policies = await adapter.get_policies(ctx.integration_ctx)
 
         policies: list[PolicyInfo] = []

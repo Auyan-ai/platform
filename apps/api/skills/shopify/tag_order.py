@@ -38,7 +38,7 @@ class TagOrder(Skill):
         assert isinstance(inputs, TagOrderInput)
         if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        adapter = ShopifyAdapter()
+        adapter = ctx.commerce_mock or ShopifyAdapter()
         order = await adapter.tag_order(ctx.integration_ctx, inputs.order_id, inputs.tags)
         current_tags = [t.strip() for t in order.get("tags", "").split(",") if t.strip()]
         return TagOrderOutput(

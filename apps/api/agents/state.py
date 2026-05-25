@@ -113,6 +113,15 @@ class AgentState(TypedDict, total=False):
     # El nodo escalate lo incluye en el contexto de escalación.
     pending_approval_id: str | None
 
+    # --- Simulator (Bloque 0, Sub-PR 0.10) ---
+    # simulation_mode: cuando es True, execute_skill inyecta un mock de commerce
+    # (MockShopifyAdapter) en vez del adapter real. El grafo no hace I/O externo
+    # (helpdesk y Langfuse los maneja el caller), así que no hace falta tocar más nodos.
+    # simulation_fixtures: respuestas predefinidas por método del adapter, p.ej.
+    # {"shopify": {"get_order_by_name": {...}, "search_orders_by_email": [...]}}.
+    simulation_mode: bool
+    simulation_fixtures: dict
+
     # --- Supervisor pattern (Sprint 8) ---
     # El nodo `supervise` evalúa la decisión propuesta por `reason` cuando el AOP
     # tiene require_supervision=true o cuando la tool es L2/L3.

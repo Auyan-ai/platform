@@ -1,0 +1,608 @@
+"""Máquina de estados multi-turn del simulador.
+
+Flujo por run:
+  1. Crear end_customer sintético + conversation (is_simulation=TRUE).
+  2. Insertar run en DB con status='running'.
+  3. Turno 0: primer mensaje de la persona (sin llamar al LLM).
+  4. Loop: invocar el grafo real con simulation_mode=True → respuesta del agente.
+  5. Pasar respuesta al user_simulator (Haiku) → siguiente turno del cliente.
+  6. Repetir hasta criterio de parada.
+  7. Correr assertions + judge (en paralelo).
+  8. Finalizar run en DB + soft-delete la conversación sintética.
+
+El grafo se invoca DIRECTAMENTE (no por AgentService) para evitar:
+  - Trace de Langfuse automático (usamos langfuse_trace_id manual).
+  - Envío al helpdesk (respond/escalate no tocan canal externo, ya validado).
+
+Semáforo PROCESS-wide: 10 simulaciones concurrentes máximo.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+from uuid import UUID, uuid4
+
+from apps.api.agents.state import AgentState
+from apps.api.db.client import tenant_scope
+from apps.api.db.models import SimulationScenario, UserProfile
+from apps.api.db.queries import (
+    create_conversation,
+    create_end_customer,
+    finalize_simulation_run,
+    get_simulation_scenario,
+    get_user_profile,
+    insert_message,
+    insert_simulation_run,
+    list_skill_audit_log,
+    soft_delete_conversation,
+    update_conversation_last_message,
+)
+from apps.api.simulator.assertions import check_assertions, summarize
+from apps.api.simulator.judge import (
+    JUDGE_TIMEOUT_SECONDS,
+    SimulatorJudgeVerdict,
+    judge_simulation,
+    verdict_to_dict,
+)
+from apps.api.simulator.transcript import (
+    SimulatorTranscript,
+    TranscriptTurn,
+    transcript_to_list,
+)
+from apps.api.simulator.user_simulator import UserSimulator
+
+if TYPE_CHECKING:
+    from anthropic import AsyncAnthropic
+    from langgraph.graph.state import CompiledStateGraph
+
+logger = logging.getLogger(__name__)
+
+# 10 simulaciones concurrentes como máximo en todo el proceso.
+_GLOBAL_SIM_SEMAPHORE = asyncio.Semaphore(10)
+
+# Costo estimado en centavos por token (aproximaciones de Haiku+Sonnet+Opus).
+# Se usa para estimar cost_cents del run. No afecta lógica de negocio.
+_HAIKU_IN_CENTS_PER_1K = 0.025
+_HAIKU_OUT_CENTS_PER_1K = 0.125
+_SONNET_IN_CENTS_PER_1K = 0.3
+_SONNET_OUT_CENTS_PER_1K = 1.5
+_OPUS_IN_CENTS_PER_1K = 1.5
+_OPUS_OUT_CENTS_PER_1K = 7.5
+
+LOOP_DETECTION_WINDOW = 200  # primeros chars del mensaje del agente para detectar loops
+
+# Tope duro del run completo (multi-turn). Red de seguridad contra cuelgues de
+# LLM o loops largos: aunque cada llamada tiene su propio timeout, este garantiza
+# que un run nunca corre indefinidamente.
+SIMULATION_TIMEOUT_SECONDS = 180
+
+
+@dataclass
+class _RunAccumulator:
+    """Estado interno del runner durante la ejecución de un run."""
+
+    run_id: UUID
+    conversation_id: UUID
+    end_customer_id: UUID
+    transcript: SimulatorTranscript
+    tokens_simulator_in: int = 0
+    tokens_simulator_out: int = 0
+    tokens_agent_in: int = 0
+    tokens_agent_out: int = 0
+    tokens_judge_in: int = 0
+    tokens_judge_out: int = 0
+    last_agent_messages: list[str] = field(default_factory=list)
+
+
+async def run_simulation(
+    scenario_id: UUID,
+    tenant_id: UUID,
+    *,
+    anthropic: AsyncAnthropic,
+    graph: CompiledStateGraph,
+    triggered_by: UUID | None = None,
+    batch_id: UUID | None = None,
+) -> UUID:
+    """Corre un scenario completo. Retorna el run_id."""
+    async with _GLOBAL_SIM_SEMAPHORE:
+        return await _run_simulation_inner(
+            scenario_id=scenario_id,
+            tenant_id=tenant_id,
+            anthropic=anthropic,
+            graph=graph,
+            triggered_by=triggered_by,
+            batch_id=batch_id,
+        )
+
+
+async def run_batch(
+    scenario_ids: list[UUID],
+    tenant_id: UUID,
+    *,
+    anthropic: AsyncAnthropic,
+    graph: CompiledStateGraph,
+    triggered_by: UUID | None = None,
+) -> UUID:
+    """Corre múltiples scenarios en paralelo (limitado por el semáforo global).
+    Retorna un batch_id compartido por todos los runs del batch.
+    """
+    batch_id = uuid4()
+    tasks = [
+        asyncio.create_task(
+            run_simulation(
+                sid,
+                tenant_id,
+                anthropic=anthropic,
+                graph=graph,
+                triggered_by=triggered_by,
+                batch_id=batch_id,
+            )
+        )
+        for sid in scenario_ids
+    ]
+    await asyncio.gather(*tasks, return_exceptions=True)
+    return batch_id
+
+
+# ─── Inner implementation ──────────────────────────────────────────────────────
+
+
+async def _run_simulation_inner(
+    scenario_id: UUID,
+    tenant_id: UUID,
+    *,
+    anthropic: AsyncAnthropic,
+    graph: CompiledStateGraph,
+    triggered_by: UUID | None,
+    batch_id: UUID | None,
+) -> UUID:
+    async with tenant_scope(tenant_id) as conn:
+        scenario = await get_simulation_scenario(conn, tenant_id, scenario_id)
+        if scenario is None:
+            raise ValueError(f"Scenario {scenario_id} not found for tenant {tenant_id}")
+        profile = await get_user_profile(conn, tenant_id, scenario.user_profile_id)
+        if profile is None:
+            raise ValueError(
+                f"UserProfile {scenario.user_profile_id} not found for tenant {tenant_id}"
+            )
+
+    run_id = uuid4()
+
+    try:
+        conversation_id, run_db_id, end_customer_id = await _setup_run(
+            tenant_id=tenant_id,
+            scenario=scenario,
+            profile=profile,
+            run_id=run_id,
+            triggered_by=triggered_by,
+            batch_id=batch_id,
+        )
+    except Exception:
+        logger.exception("sim_setup_failed run_id=%s scenario_id=%s", run_id, scenario_id)
+        raise
+
+    acc = _RunAccumulator(
+        run_id=run_id,
+        conversation_id=conversation_id,
+        end_customer_id=end_customer_id,
+        transcript=SimulatorTranscript(
+            scenario=scenario,
+            profile_name=profile.name,
+        ),
+    )
+
+    termination_reason = "error"
+    judge_verdict: SimulatorJudgeVerdict | None = None
+
+    try:
+        termination_reason = await asyncio.wait_for(
+            _execute_loop(
+                acc=acc,
+                scenario=scenario,
+                profile=profile,
+                tenant_id=tenant_id,
+                anthropic=anthropic,
+                graph=graph,
+            ),
+            timeout=SIMULATION_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        logger.warning(
+            "sim_loop_timeout run_id=%s scenario_id=%s timeout=%ds",
+            run_id,
+            scenario_id,
+            SIMULATION_TIMEOUT_SECONDS,
+        )
+        termination_reason = "error"
+    except Exception:
+        logger.exception(
+            "sim_loop_failed run_id=%s scenario_id=%s", run_id, scenario_id
+        )
+        termination_reason = "error"
+
+    acc.transcript.termination_reason = termination_reason
+
+    # Obtener skill_log y correr assertions + judge en paralelo
+    skill_log = await _get_skill_log(tenant_id, conversation_id)
+    acc.transcript.skill_log = skill_log
+
+    last_agent_msg = _last_agent_message(acc.transcript)
+    pending_approval = _pending_approval_present(acc.transcript)
+
+    assertion_results = check_assertions(
+        assertions=scenario.assertions,
+        skill_log=skill_log,
+        last_agent_message=last_agent_msg,
+        termination_reason=termination_reason,
+        turns_count=len(acc.transcript.turns),
+        pending_approval_present=pending_approval,
+    )
+
+    try:
+        judge_verdict = await asyncio.wait_for(
+            judge_simulation(
+                anthropic=anthropic,
+                transcript=acc.transcript,
+                scenario=scenario,
+            ),
+            timeout=JUDGE_TIMEOUT_SECONDS + 30,
+        )
+        acc.tokens_judge_in = judge_verdict.input_tokens
+        acc.tokens_judge_out = judge_verdict.output_tokens
+    except TimeoutError:
+        logger.warning("sim_judge_timeout run_id=%s", run_id)
+    except Exception:
+        logger.exception("sim_judge_failed run_id=%s", run_id)
+
+    passed, total, all_critical_passed = summarize(assertion_results)
+    status = _compute_status(
+        all_critical_passed=all_critical_passed,
+        passed=passed,
+        total=total,
+        judge_verdict=judge_verdict,
+    )
+
+    cost_cents = _estimate_cost_cents(acc)
+
+    await _finalize(
+        tenant_id=tenant_id,
+        run_id=run_db_id,
+        conversation_id=conversation_id,
+        acc=acc,
+        status=status,
+        termination_reason=termination_reason,
+        assertion_results=assertion_results,
+        passed=passed,
+        total=total,
+        judge_verdict=judge_verdict,
+        cost_cents=cost_cents,
+    )
+
+    logger.info(
+        "sim_run_complete run_id=%s scenario=%s status=%s turns=%d",
+        run_id,
+        scenario.name,
+        status,
+        len(acc.transcript.turns),
+    )
+    return run_db_id
+
+
+async def _setup_run(
+    tenant_id: UUID,
+    scenario: SimulationScenario,
+    profile: UserProfile,
+    run_id: UUID,
+    triggered_by: UUID | None,
+    batch_id: UUID | None,
+) -> tuple[UUID, UUID, UUID]:
+    """Crea end_customer + conversation + simulation_run.
+
+    Retorna (conversation_id, run_id_db, end_customer_id).
+    """
+    async with tenant_scope(tenant_id) as conn:
+        # Cliente sintético — email único para que no colisione con reales
+        end_customer = await create_end_customer(
+            conn,
+            tenant_id=tenant_id,
+            email=f"sim-{run_id}@simulator.auyan.internal",
+            full_name=f"[SIM] {profile.name}",
+            metadata={"simulation": True, "profile_name": profile.name},
+        )
+
+        conversation = await create_conversation(
+            conn,
+            tenant_id=tenant_id,
+            end_customer_id=end_customer.id,
+            channel="chat",
+            subject=f"[SIM] {scenario.name}",
+            is_simulation=True,
+        )
+
+        # AOP version actual (se llena después si el grafo lo setea)
+        run = await insert_simulation_run(
+            conn,
+            tenant_id=tenant_id,
+            scenario_id=scenario.id,
+            aop_slug=scenario.aop_slug,
+            aop_version=None,
+            conversation_id=conversation.id,
+            batch_id=batch_id,
+            triggered_by=triggered_by,
+        )
+
+    return conversation.id, run.id, end_customer.id
+
+
+async def _execute_loop(
+    acc: _RunAccumulator,
+    scenario: SimulationScenario,
+    profile: UserProfile,
+    tenant_id: UUID,
+    anthropic: AsyncAnthropic,
+    graph: CompiledStateGraph,
+) -> str:
+    """Loop principal de la simulación. Retorna el termination_reason."""
+    sim = UserSimulator(profile=profile, anthropic=anthropic)
+    fixtures = scenario.mock_fixtures
+
+    # Turno 0: primer mensaje del cliente (sin LLM)
+    first = sim.first_message()
+    await _persist_customer_message(tenant_id, acc.conversation_id, first.message)
+    acc.transcript.turns.append(
+        TranscriptTurn(
+            role="customer",
+            content=first.message,
+            turn_number=0,
+            goal_achieved=first.goal_achieved,
+            give_up=first.give_up,
+            internal_reasoning=first.internal_reasoning,
+        )
+    )
+
+    max_turns = scenario.max_turns
+
+    for turn_number in range(1, max_turns + 1):
+        # ── Invocar el grafo ──────────────────────────────────────────────────
+        last_customer_msg = acc.transcript.turns[-1].content
+        initial_state: AgentState = {
+            "tenant_id": str(tenant_id),
+            "conversation_id": str(acc.conversation_id),
+            "end_customer_id": str(acc.end_customer_id),
+            "inbound_message_content": last_customer_msg,
+            "channel": "chat",
+            "simulation_mode": True,
+            "simulation_fixtures": fixtures,
+            "langfuse_trace_id": f"sim-{acc.run_id}-t{turn_number}",
+            "tool_results": [],
+            "tool_iterations": 0,
+            "max_tool_iterations": 5,
+            "allowed_skills": [],
+        }
+
+        try:
+            final_state: AgentState = await graph.ainvoke(initial_state)
+        except Exception:
+            logger.exception(
+                "sim_graph_invoke_failed run_id=%s turn=%d", acc.run_id, turn_number
+            )
+            return "error"
+
+        agent_response = final_state.get("agent_response") or ""
+        decision = final_state.get("decision", "respond")
+
+        acc.tokens_agent_in += final_state.get("tokens_in", 0)
+        acc.tokens_agent_out += final_state.get("tokens_out", 0)
+
+        await _persist_agent_message(tenant_id, acc.conversation_id, agent_response)
+        acc.transcript.turns.append(
+            TranscriptTurn(
+                role="agent",
+                content=agent_response,
+                turn_number=turn_number,
+            )
+        )
+
+        # Capturar aop_version si el grafo la setea
+        if final_state.get("aop_version") and not hasattr(acc, "_aop_version"):
+            acc.transcript.aop_compiled_prompt = final_state.get("aop_workspace")
+
+        if decision == "escalate":
+            return "escalated_by_agent"
+
+        # Loop detection: dos respuestas del agente con el mismo inicio
+        acc.last_agent_messages.append(agent_response[:LOOP_DETECTION_WINDOW])
+        if (
+            len(acc.last_agent_messages) >= 2
+            and acc.last_agent_messages[-1] == acc.last_agent_messages[-2]
+        ):
+            logger.warning("sim_agent_loop_detected run_id=%s", acc.run_id)
+            return "agent_loop_detected"
+
+        # ── Siguiente turno del simulador ──────────────────────────────────────
+        history = [{"role": t.role, "content": t.content} for t in acc.transcript.turns]
+        sim_turn = await sim.next_turn(
+            conversation_history=history,
+            turn_number=turn_number,
+        )
+        acc.tokens_simulator_in += sim_turn.input_tokens
+        acc.tokens_simulator_out += sim_turn.output_tokens
+
+        # El modelo a veces devuelve mensaje vacío de forma transitoria (sin flag de
+        # cierre). Reintentamos una vez antes de tratarlo como fin de conversación.
+        if not sim_turn.message.strip() and not sim_turn.goal_achieved and not sim_turn.give_up:
+            sim_turn = await sim.next_turn(
+                conversation_history=history,
+                turn_number=turn_number,
+            )
+            acc.tokens_simulator_in += sim_turn.input_tokens
+            acc.tokens_simulator_out += sim_turn.output_tokens
+
+        # Mensaje vacío persistente = el cliente dejó de responder. No lo persistimos
+        # (rompería el embed del grafo y la API de Anthropic con content vacío) y
+        # terminamos. Si marcó goal_achieved, lo respetamos; si no, el cliente
+        # se desenganchó sin resolver (give_up).
+        if not sim_turn.message.strip():
+            if sim_turn.goal_achieved:
+                return "goal_achieved"
+            return "give_up"
+
+        await _persist_customer_message(tenant_id, acc.conversation_id, sim_turn.message)
+        acc.transcript.turns.append(
+            TranscriptTurn(
+                role="customer",
+                content=sim_turn.message,
+                turn_number=turn_number,
+                goal_achieved=sim_turn.goal_achieved,
+                give_up=sim_turn.give_up,
+                internal_reasoning=sim_turn.internal_reasoning,
+                tokens_in=sim_turn.input_tokens,
+                tokens_out=sim_turn.output_tokens,
+            )
+        )
+
+        if sim_turn.goal_achieved:
+            return "goal_achieved"
+        if sim_turn.give_up:
+            return "give_up"
+
+    return "max_turns"
+
+
+async def _persist_customer_message(
+    tenant_id: UUID, conversation_id: UUID, content: str
+) -> None:
+    async with tenant_scope(tenant_id) as conn:
+        await insert_message(
+            conn,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            role="customer",
+            direction="inbound",
+            content=content,
+        )
+        await update_conversation_last_message(conn, tenant_id, conversation_id)
+
+
+async def _persist_agent_message(
+    tenant_id: UUID, conversation_id: UUID, content: str
+) -> None:
+    async with tenant_scope(tenant_id) as conn:
+        await insert_message(
+            conn,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            role="agent_ai",
+            direction="outbound",
+            content=content,
+        )
+        await update_conversation_last_message(conn, tenant_id, conversation_id)
+
+
+async def _get_skill_log(tenant_id: UUID, conversation_id: UUID) -> list:
+    async with tenant_scope(tenant_id) as conn:
+        return await list_skill_audit_log(
+            conn,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            limit=100,
+        )
+
+
+async def _finalize(
+    tenant_id: UUID,
+    run_id: UUID,
+    conversation_id: UUID,
+    acc: _RunAccumulator,
+    status: str,
+    termination_reason: str,
+    assertion_results: list,
+    passed: int,
+    total: int,
+    judge_verdict: SimulatorJudgeVerdict | None,
+    cost_cents: float,
+) -> None:
+    judge_dict = verdict_to_dict(judge_verdict) if judge_verdict else None
+    assertions_dicts = [
+        {
+            "key": r.key,
+            "passed": r.passed,
+            "evidence": r.evidence,
+            "is_critical": r.is_critical,
+        }
+        for r in assertion_results
+    ]
+
+    async with tenant_scope(tenant_id) as conn:
+        await finalize_simulation_run(
+            conn,
+            run_id,
+            tenant_id,
+            status=status,
+            termination_reason=termination_reason,
+            turns_count=len(acc.transcript.turns),
+            transcript=transcript_to_list(acc.transcript),
+            judge_eval=judge_dict,
+            assertions_results=assertions_dicts,
+            assertions_passed=passed,
+            assertions_total=total,
+            tokens_simulator=acc.tokens_simulator_in + acc.tokens_simulator_out,
+            tokens_agent=acc.tokens_agent_in + acc.tokens_agent_out,
+            tokens_judge=acc.tokens_judge_in + acc.tokens_judge_out,
+            cost_cents=cost_cents,
+        )
+        # Soft-delete la conversación sintética
+        await soft_delete_conversation(conn, tenant_id, conversation_id)
+
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _last_agent_message(transcript: SimulatorTranscript) -> str:
+    for turn in reversed(transcript.turns):
+        if turn.role == "agent":
+            return turn.content
+    return ""
+
+
+def _pending_approval_present(transcript: SimulatorTranscript) -> bool:
+    # El runner no tiene acceso al final_state completo al terminar,
+    # pero el skill_audit_log refleja si hubo un rejected_by_permissions.
+    # Por ahora: False — el judge y las assertions lo detectan por skill_log.
+    return False
+
+
+def _compute_status(
+    all_critical_passed: bool,
+    passed: int,
+    total: int,
+    judge_verdict: SimulatorJudgeVerdict | None,
+) -> str:
+    if judge_verdict is None:
+        return "errored"
+    overall = judge_verdict.overall_score
+    goal = judge_verdict.judge_goal_achieved
+    if all_critical_passed and overall >= 7.5 and goal:
+        return "passed"
+    if (passed / total >= 0.5 if total > 0 else False) and overall >= 6.0:
+        return "partial"
+    return "failed"
+
+
+def _estimate_cost_cents(acc: _RunAccumulator) -> float:
+    sim_cost = (
+        acc.tokens_simulator_in / 1000 * _HAIKU_IN_CENTS_PER_1K
+        + acc.tokens_simulator_out / 1000 * _HAIKU_OUT_CENTS_PER_1K
+    )
+    agent_cost = (
+        acc.tokens_agent_in / 1000 * _SONNET_IN_CENTS_PER_1K
+        + acc.tokens_agent_out / 1000 * _SONNET_OUT_CENTS_PER_1K
+    )
+    judge_cost = (
+        acc.tokens_judge_in / 1000 * _OPUS_IN_CENTS_PER_1K
+        + acc.tokens_judge_out / 1000 * _OPUS_OUT_CENTS_PER_1K
+    )
+    return round(sim_cost + agent_cost + judge_cost, 4)

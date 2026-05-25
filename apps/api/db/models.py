@@ -67,6 +67,7 @@ class Conversation(_BaseModel):
     assigned_user_id: UUID | None = None
     last_message_at: datetime | None = None
     nudged_at: datetime | None = None
+    is_simulation: bool = False
     created_at: datetime | None = None
 
 
@@ -387,3 +388,77 @@ class TenantUsageDaily(_BaseModel):
     request_count: int
     created_at: datetime
     updated_at: datetime
+
+
+# ─── Simulator (Bloque 0, Sub-PR 0.10) ───────────────────────────────────────
+
+SimulationRunStatus = Literal["running", "passed", "partial", "failed", "errored"]
+TerminationReason = Literal[
+    "goal_achieved",
+    "max_turns",
+    "give_up",
+    "escalated_by_agent",
+    "agent_loop_detected",
+    "error",
+]
+
+
+class UserProfile(_BaseModel):
+    """Persona del cliente sintético. Reusable entre scenarios."""
+
+    id: UUID
+    tenant_id: UUID
+    name: str
+    persona: dict = Field(default_factory=dict)  # tone, behavior, give_up_after
+    goal: str
+    initial_message: str
+    language: str = "es"
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    deleted_at: datetime | None = None
+
+
+class SimulationScenario(_BaseModel):
+    """AOP slug + perfil + expected_outcome + mocks + assertions."""
+
+    id: UUID
+    tenant_id: UUID
+    name: str
+    description: str | None = None
+    aop_slug: str
+    user_profile_id: UUID
+    expected_outcome: str
+    mock_fixtures: dict = Field(default_factory=dict)
+    assertions: dict = Field(default_factory=dict)
+    max_turns: int = 8
+    is_active: bool = True
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    deleted_at: datetime | None = None
+
+
+class SimulationRun(_BaseModel):
+    """Resultado de correr un scenario. Append-only."""
+
+    id: UUID
+    tenant_id: UUID
+    scenario_id: UUID | None = None
+    aop_slug: str
+    aop_version: int | None = None
+    conversation_id: UUID | None = None
+    batch_id: UUID | None = None
+    status: SimulationRunStatus
+    termination_reason: TerminationReason | None = None
+    turns_count: int | None = None
+    transcript: list[dict] | None = None
+    judge_eval: dict | None = None
+    assertions_results: list[dict] | None = None
+    assertions_passed: int | None = None
+    assertions_total: int | None = None
+    triggered_by: UUID | None = None
+    tokens_simulator: int = 0
+    tokens_agent: int = 0
+    tokens_judge: int = 0
+    cost_cents: float | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None

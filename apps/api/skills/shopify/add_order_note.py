@@ -37,7 +37,7 @@ class AddOrderNote(Skill):
         assert isinstance(inputs, AddOrderNoteInput)
         if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        adapter = ShopifyAdapter()
+        adapter = ctx.commerce_mock or ShopifyAdapter()
         order = await adapter.add_order_note(ctx.integration_ctx, inputs.order_id, inputs.note)
         return AddOrderNoteOutput(
             success=True,

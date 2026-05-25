@@ -34,6 +34,10 @@ class SkillContext:
     conversation_id: str
     # IntegrationContext para skills de commerce (Shopify). None si no hay integración activa.
     integration_ctx: IntegrationContext | None = field(default=None)
+    # Mock del adapter commerce, solo poblado en modo simulación (Sub-PR 0.10).
+    # Tipo Any porque las skills llaman métodos fuera del protocolo CommerceProvider
+    # (get_order_by_name, get_policies, etc.) y solo existe un provider commerce.
+    commerce_mock: Any = field(default=None)
 
 
 class Skill(ABC):

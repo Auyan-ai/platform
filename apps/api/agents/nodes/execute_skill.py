@@ -52,10 +52,19 @@ def build_skill_context(state: AgentState) -> SkillContext:
             credentials=commerce_data["credentials"],
             config=commerce_data.get("config", {}),
         )
+
+    # En modo simulación, inyectamos un mock de commerce con respuestas predefinidas.
+    commerce_mock: Any = None
+    if state.get("simulation_mode"):
+        from apps.api.simulator.mocks import MockShopifyAdapter
+        shopify_fixtures = (state.get("simulation_fixtures") or {}).get("shopify", {})
+        commerce_mock = MockShopifyAdapter(shopify_fixtures)
+
     return SkillContext(
         tenant_id=state["tenant_id"],
         conversation_id=state["conversation_id"],
         integration_ctx=integration_ctx,
+        commerce_mock=commerce_mock,
     )
 
 

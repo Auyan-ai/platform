@@ -45,6 +45,7 @@ from apps.api.routers.oauth_gorgias import router as oauth_gorgias_router
 from apps.api.routers.oauth_zendesk import router as oauth_zendesk_router
 from apps.api.routers.proposals import router as proposals_router
 from apps.api.routers.reasoning import router as reasoning_router
+from apps.api.routers.simulations import router as simulations_router
 from apps.api.routers.tenants import router as tenants_router
 from apps.api.routers.tool_permissions import router as tool_permissions_router
 from apps.api.routers.users import router as users_router
@@ -112,6 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     service = AgentService(graph=graph, langfuse=langfuse)
 
     app.state.agent_service = service
+    app.state.agent_deps = deps
     app.state.langfuse = langfuse
 
     logger.info("agent_service_ready langfuse_enabled=%s", langfuse.is_enabled)
@@ -164,6 +166,7 @@ app.include_router(proposals_router)
 app.include_router(reasoning_router)
 app.include_router(approvals_router)
 app.include_router(tool_permissions_router)
+app.include_router(simulations_router)
 
 
 @app.get("/health", tags=["health"])
