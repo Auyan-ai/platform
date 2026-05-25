@@ -47,6 +47,16 @@ AOPS: list[dict] = [
             "guardrails": [
                 "NUNCA inventes un número de tracking ni una fecha de entrega.",
                 "Si no encuentras el pedido, dilo claramente y pide el número o el email.",
+                "NUNCA escales únicamente porque el pedido está en preparación (unfulfilled/sin tracking). "
+                "En ese caso, informa al cliente que está siendo preparado y que recibirá el tracking "
+                "cuando se envíe. Solo escala si el cliente reporta un problema real (daño, no recibido).",
+                "La impaciencia o insistencia del cliente NO es motivo para escalar. Aunque el cliente "
+                "insista varias veces o exija una fecha exacta, mantén la calma y vuelve a explicar el "
+                "estado real del pedido. No escales solo porque el cliente esté molesto por la espera.",
+                "El cliente puede EXAGERAR el tiempo de espera ('llevo una semana'). Verifica SIEMPRE "
+                "el tiempo real transcurrido desde `created_at` del pedido. Si lleva pocos días (dentro "
+                "del rango normal de preparación), díselo con el dato concreto para tranquilizarlo, en "
+                "vez de aceptar su versión y escalar.",
             ],
             "max_tool_iterations": 4,
             "confidence_threshold": 0.65,
@@ -65,7 +75,10 @@ AOPS: list[dict] = [
             "3. Cuando tengas el pedido, comparte el estado y, si hay fulfillment, el "
             "número de tracking y el link de seguimiento.\n"
             "4. Si el pedido aún no tiene tracking, explica que está en preparación y "
-            "que recibirá el tracking cuando se envíe.\n"
+            "que recibirá el tracking cuando se envíe. Si el cliente se queja del retraso, "
+            "calcula los días transcurridos desde `created_at` y tranquilízalo con ese dato "
+            "concreto (ej: 'tu pedido fue hace 2 días, está dentro del tiempo normal de "
+            "preparación'). NO escales por impaciencia.\n"
             "5. Responde en el mismo idioma del cliente."
         ),
     },
@@ -124,8 +137,13 @@ AOPS: list[dict] = [
             "   - `quantity` = la cantidad del line_item (o la que indique el cliente).\n"
             "   - `reason` = el motivo que dio el cliente.\n"
             "   YA TIENES estos datos en el pedido — NO escales por 'falta de datos'.\n"
-            "5. Si el producto llegó roto o defectuoso, usa `shopify.refund_partial` "
-            "(requiere aprobación).\n"
+            "5. Si el producto llegó roto o defectuoso:\n"
+            "   - Llama `shopify.refund_partial` INMEDIATAMENTE. No pidas confirmación extra.\n"
+            "   - Mapea: `order_id` = campo `id` del pedido, `amount` = precio del artículo "
+            "afectado (campo `price` en `line_items`), `currency` = 'EUR'. "
+            "Si hay duda del artículo, usa el primer `line_item`.\n"
+            "   - El reembolso quedará pendiente de aprobación interna — informa al cliente "
+            "que está en proceso.\n"
             "6. Si el cliente cambia de opinión y decide no devolver, confírmalo "
             "amablemente y cierra.\n"
             "7. Escala SOLO si el pedido está fuera de plazo, el cliente es agresivo, "
@@ -150,6 +168,7 @@ AOPS: list[dict] = [
                 "shopify.get_product_info",
                 "shopify.get_order_status",
                 "shopify.update_shipping_address",
+                "shopify.cancel_order",
             ],
             "required_data": [],
             "guardrails": [
@@ -167,15 +186,28 @@ AOPS: list[dict] = [
         },
         "body": (
             "## Cómo manejas preguntas generales\n\n"
-            "1. Si preguntan por tiempos de envío o políticas, usa "
-            "`shopify.get_shop_policies`.\n"
+            "1. Si preguntan por tiempos de envío, garantías, devoluciones o políticas: "
+            "SIEMPRE llama `shopify.get_shop_policies` ANTES de responder o escalar. "
+            "Aunque no encuentres la información en la knowledge base, la skill puede tener "
+            "los datos actualizados de la tienda.\n"
             "2. Si preguntan por disponibilidad o detalles de un producto, usa "
             "`shopify.get_product_info`.\n"
-            "3. Si piden cambiar la dirección de un pedido que aún no se envió, usa "
-            "`shopify.update_shipping_address`.\n"
-            "4. Si la pregunta está fuera de tu alcance o no tienes información "
+            "3. Si piden cambiar la dirección de un pedido que aún no se envió:\n"
+            "   - Primero localiza el pedido con `shopify.get_order_status`.\n"
+            "   - Solicita TODOS los campos de la nueva dirección (address1, city, "
+            "province, country, zip_code) antes de llamar la skill.\n"
+            "   - Llama `shopify.update_shipping_address` solo cuando tengas todos los "
+            "campos. Mapea: `order_id` = id del pedido.\n"
+            "4. Si el cliente quiere cancelar un pedido y el pedido existe:\n"
+            "   - Localiza el pedido con `shopify.get_order_status`.\n"
+            "   - Si está unfulfilled (aún no enviado), llama `shopify.cancel_order` "
+            "INMEDIATAMENTE con `order_id` = campo `id` del pedido. No pidas confirmación "
+            "adicional si el cliente ya indicó que quiere cancelar.\n"
+            "   - La cancelación quedará pendiente de aprobación — informa al cliente "
+            "que está en proceso.\n"
+            "5. Si la pregunta está fuera de tu alcance o no tienes información "
             "confiable, escala al equipo humano sin inventar.\n"
-            "5. Sé claro, directo y honesto sobre lo que sabes y lo que no."
+            "6. Sé claro, directo y honesto sobre lo que sabes y lo que no."
         ),
     },
 ]
@@ -185,6 +217,9 @@ AOPS: list[dict] = [
 # aprobación humana para validar el flujo de resolución autónoma de devoluciones.
 TOOL_PERMISSIONS: list[dict] = [
     {"skill_slug": "shopify.start_return", "is_enabled": True, "human_approval_required": False},
+    {"skill_slug": "shopify.refund_partial", "is_enabled": True, "human_approval_required": True},
+    {"skill_slug": "shopify.cancel_order", "is_enabled": True, "human_approval_required": True},
+    {"skill_slug": "shopify.update_shipping_address", "is_enabled": True, "human_approval_required": False},
 ]
 
 

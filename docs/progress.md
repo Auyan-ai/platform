@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-25 (sesión 38 — Bloque 0, sub-PR 0.10 Simulator: implementación completa)_
+_Última actualización: 2026-05-25 (sesión 39 — Bloque 0, sub-PR 0.11 Validación E2E: bugs deterministas arreglados offline; corrida final con judge PENDIENTE)_
 
 > Historial completo de Sprints 1-11 y Rate Limiting en [`docs/progress-archive.md`](progress-archive.md).
 
@@ -66,7 +66,7 @@ Implicaciones: `tenant_agent` removido · Chatwoot → opcional al cliente · Da
 | 0.8 | Roles internos DB | ✅ [PR #94](https://github.com/Auyan-ai/platform/pull/94) |
 | 0.9 | AOPs `steps[]` opcional + events | ✅ (sesión 35) |
 | 0.10 | Simulator MVP | ✅ checkpoint E2E aprobado (CE-01 9.5, RE-01 7.5) |
-| 0.11 | Validación E2E | ⏳ último |
+| 0.11 | Validación E2E | 🔄 bugs deterministas arreglados offline · corrida final con judge PENDIENTE (sin crédito API) |
 
 ### Sub-PR 0.1 — Hard removal `tenant_agent` ✅
 
@@ -288,14 +288,40 @@ Memory cross-conversación · Detección automática alucinaciones · Reapertura
 
 ---
 
+## Sub-PR 0.11 — Validación E2E 🔄 (en progreso)
+
+**Meta:** correr los 25 scenarios y alcanzar ≥80% (20/25) cumpliendo checkpoint (judge ≥ 7 + assertions críticas).
+
+**Corrida completa de los 25 (sesión 39):** se agotó el saldo de la API de Anthropic a mitad del batch (error 400 `credit balance is too low`). Señal limpia solo de CE-01→CE-06 (corrieron antes del corte); CE-07→RE-07 murieron con `termination=error` (falsos negativos por crédito, no bugs). **La corrida final con judge queda PENDIENTE de recargar crédito.**
+
+**Bugs arreglados offline (verificados — suite 972/972 verde, cero llamadas a API):**
+1. **DE-04 (fixture, determinista)** — el mock de `update_shipping_address` devolvía `{"ok": True}` sin `id`, y la skill hace `order["id"]` → `KeyError`. Fixture corregido con forma realista de order. La skill se ejecuta y resuelve (verificado con crédito antes del corte: 1/1, `goal_achieved`).
+2. **CE-05 (diseño de scenario)** — la assertion exigía `get_order_status` pero el cliente "vago" no daba número de pedido y no había fixture de email → insatisfacible. Se agregó `#1234` al mensaje inicial preservando la confusión envío-vs-entrega.
+3. **Gap del harness `must_escalate: False`** — `check_assertions` solo evaluaba `must_escalate` cuando era `True`; con `False` (CE-02 espera NO escalar) se ignoraba en silencio. Ahora honra ambos valores como crítica + test nuevo.
+4. **Inyección de fecha actual (hallazgo arquitectónico)** — `build_system_prompt` nunca inyectaba "hoy", así que el agente adivinaba la fecha. Rompía **en silencio** todo cálculo de fechas: tiempo de preparación (CE-02) y la ventana de 30 días de devoluciones (`returns` / RE-01 / RE-02). Ahora se inyecta `Fecha actual: YYYY-MM-DD` en el system prompt (param opcional retrocompatible; `reason` pasa `datetime.now(UTC)`). Probablemente desbloquea varios scenarios de returns.
+5. **CE-02 (comportamiento, AOP)** — el transcript mostró que el cliente "impaciente" exageraba ("llevo una semana") con un pedido de 2 días, y el agente caía y escalaba. Reforzados los guardrails de `consulta_envio`: impaciencia ≠ motivo de escalado; usar `created_at` para aterrizar al cliente con el dato real. **A validar con API.**
+
+**Infra de costo de tests (nueva):**
+- `run_simulator.py --no-judge` — salta el judge (Opus, el grueso del costo); solo corre Sonnet (agente) + Haiku (simulador). Para cazar bugs de assertions/fixtures barato. La corrida final SIEMPRE usa judge.
+- `run_simulator.py --reseed` — actualiza `mock_fixtures`/`assertions` de los scenarios que ya existen en DB (antes se saltaban por idempotencia, por eso los edits a fixtures no aplicaban). Implementado vía `seed_scenarios(reseed=True)` + `update_simulation_scenario()` en queries.
+
+**PENDIENTE de 0.11 (necesita crédito API):**
+1. Re-seed AOPs: `seed_test_aops.py --tenant <Lunaria> --update` (cambiaron guardrails de `consulta_envio`).
+2. Mapa de assertions sin gastar en judge: `run_simulator.py --tenant <Lunaria> --reseed --no-judge --all`.
+3. Arreglar lo que quede y **corrida final con judge** para confirmar ≥20/25.
+
+Tenant de prueba (Lunaria staging): `11111111-1111-1111-1111-111111111111`.
+
+---
+
 ## Empezar aquí — siguiente sesión
 
-**Modelo recomendado:** **Sonnet** para 0.11 (validación E2E).
+**Modelo recomendado:** **Sonnet** para terminar 0.11 (re-correr simulador + pulir AOPs).
 
-**Estado Bloque 0:** 0.1–0.9 completados ✅. 0.10 completo ✅ (código + migration en staging + checkpoint E2E aprobado). Pendiente:
-1. **0.11** Validación E2E — último paso del bloque
-2. **UI simulator** (apps/web) — puede moverse a Bloque 1 si no bloquea el lanzamiento
-3. (Opcional) Correr los 25 scenarios completos (`--all`) para descubrir más gaps de AOPs antes de pulir prompts
+**Estado Bloque 0:** 0.1–0.10 completados ✅. **0.11 en progreso** 🔄 — bugs deterministas arreglados offline (suite 972/972 verde), falta la corrida final con judge (BLOQUEADA por crédito API). Pendiente:
+1. **Recargar crédito API Anthropic** — bloquea cualquier corrida del simulador.
+2. **0.11** terminar validación E2E: re-seed AOPs (`--update`) → `--reseed --no-judge --all` → arreglar lo que quede → corrida final con judge (meta ≥20/25). Detalle en la sección Sub-PR 0.11 arriba.
+3. **UI simulator** (apps/web) — puede moverse a Bloque 1 si no bloquea el lanzamiento
 
 **Pendiente de staging (PRs ya mergeables):**
 - [ ] PR #94 (0.8): migración aplicada ✅ — mergear a develop

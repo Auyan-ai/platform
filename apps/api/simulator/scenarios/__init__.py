@@ -12,9 +12,11 @@ from uuid import UUID
 
 import asyncpg
 from apps.api.db.queries import (
+    get_scenario_by_name,
     get_user_profile_by_name,
     insert_simulation_scenario,
     insert_user_profile,
+    update_simulation_scenario,
 )
 from apps.api.simulator.scenarios.consulta_envio import SCENARIOS as CE_SCENARIOS
 from apps.api.simulator.scenarios.default import SCENARIOS as DE_SCENARIOS
@@ -27,13 +29,20 @@ logger = logging.getLogger(__name__)
 ALL_SCENARIOS = CE_SCENARIOS + RE_SCENARIOS + DE_SCENARIOS + EX_SCENARIOS
 
 
-async def seed_scenarios(conn: asyncpg.Connection, tenant_id: UUID) -> dict[str, int]:
+async def seed_scenarios(
+    conn: asyncpg.Connection, tenant_id: UUID, *, reseed: bool = False
+) -> dict[str, int]:
     """Inserta profiles y scenarios base para el tenant. Idempotente por nombre.
 
-    Retorna {"profiles": N, "scenarios": N} con los counts de registros creados.
+    Con reseed=True, actualiza los campos mutables (mock_fixtures, assertions,
+    expected_outcome, description, aop_slug, max_turns) de los scenarios que ya
+    existen, en vez de saltarlos. El profile/initial_message no se toca.
+
+    Retorna {"profiles": N, "scenarios": N, "updated": N} con los counts.
     """
     profiles_created = 0
     scenarios_created = 0
+    scenarios_updated = 0
 
     # 1. Upsert profiles por nombre (idempotente)
     profile_map: dict[str, UUID] = {}
@@ -65,6 +74,22 @@ async def seed_scenarios(conn: asyncpg.Connection, tenant_id: UUID) -> dict[str,
 
     for sc in ALL_SCENARIOS:
         if sc["name"] in existing_names:
+            if reseed:
+                existing_sc = await get_scenario_by_name(conn, tenant_id, sc["name"])
+                if existing_sc is not None:
+                    await update_simulation_scenario(
+                        conn,
+                        tenant_id=tenant_id,
+                        scenario_id=existing_sc.id,
+                        aop_slug=sc["aop_slug"],
+                        expected_outcome=sc["expected_outcome"],
+                        description=sc.get("description"),
+                        mock_fixtures=sc.get("mock_fixtures", {}),
+                        assertions=sc.get("assertions", {}),
+                        max_turns=sc.get("max_turns", 8),
+                    )
+                    scenarios_updated += 1
+                    logger.info("sim_seed_scenario updated id=%s tenant=%s", sc["id"], tenant_id)
             continue
 
         profile_key = sc["profile"]
@@ -110,4 +135,8 @@ async def seed_scenarios(conn: asyncpg.Connection, tenant_id: UUID) -> dict[str,
         scenarios_created += 1
         logger.info("sim_seed_scenario created id=%s tenant=%s", sc["id"], tenant_id)
 
-    return {"profiles": profiles_created, "scenarios": scenarios_created}
+    return {
+        "profiles": profiles_created,
+        "scenarios": scenarios_created,
+        "updated": scenarios_updated,
+    }

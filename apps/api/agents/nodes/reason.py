@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from apps.api.agents.dependencies import AgentDependencies
@@ -173,6 +174,7 @@ def make_reason_node(
         system_prompt = build_system_prompt(
             state["system_prompt"],
             state.get("retrieved_chunks", []),
+            current_date=datetime.now(UTC).date().isoformat(),
         )
         messages = build_message_history(state["conversation_history"])
         messages = _append_tool_result_blocks(messages, state.get("tool_results", []))

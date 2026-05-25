@@ -121,6 +121,10 @@ class AgentState(TypedDict, total=False):
     # {"shopify": {"get_order_by_name": {...}, "search_orders_by_email": [...]}}.
     simulation_mode: bool
     simulation_fixtures: dict
+    # forced_aop_slug: si está presente en modo simulación, select_aop carga ese AOP
+    # directamente sin llamar al intent classifier. Permite que los scenarios controlen
+    # qué AOP usa el grafo, aislando el test del clasificador de intent.
+    forced_aop_slug: str
 
     # --- Supervisor pattern (Sprint 8) ---
     # El nodo `supervise` evalúa la decisión propuesta por `reason` cuando el AOP

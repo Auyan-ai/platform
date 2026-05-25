@@ -20,13 +20,32 @@ def format_knowledge_chunks(chunks: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
-def build_system_prompt(base_prompt: str, knowledge_chunks: list[dict]) -> str:
-    """Compone el system prompt: base del tenant + (opcional) contexto RAG."""
+def build_system_prompt(
+    base_prompt: str,
+    knowledge_chunks: list[dict],
+    *,
+    current_date: str | None = None,
+) -> str:
+    """Compone el system prompt: fecha actual + base del tenant + (opcional) contexto RAG.
+
+    `current_date` (ISO YYYY-MM-DD) se inyecta para que el agente pueda razonar sobre
+    fechas (días transcurridos desde un pedido, ventana de devolución de 30 días, etc.).
+    Sin él, el LLM no sabe qué día es hoy y adivina. Si es None no se inyecta nada.
+    """
+    base = base_prompt
+    if current_date:
+        base = (
+            f"Fecha actual: {current_date}. Úsala como 'hoy' para cualquier cálculo de "
+            "fechas: días transcurridos desde la fecha de un pedido (`created_at`), "
+            "ventanas de devolución, plazos. NUNCA asumas otra fecha ni confíes en la "
+            "estimación del cliente sobre cuánto tiempo ha pasado.\n\n"
+            f"{base_prompt}"
+        )
     kb_block = format_knowledge_chunks(knowledge_chunks)
     if not kb_block:
-        return base_prompt
+        return base
     return (
-        f"{base_prompt}\n\n"
+        f"{base}\n\n"
         "---\n"
         "## Contexto relevante de la base de conocimiento\n\n"
         f"{kb_block}\n\n"

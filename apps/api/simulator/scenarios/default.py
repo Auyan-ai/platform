@@ -53,7 +53,17 @@ _ORDER_PRE_ENVIO: dict[str, Any] = {
         "line_items": [{"id": 6001, "title": "Zapatillas", "quantity": 1}],
         "created_at": "2026-05-24T10:00:00Z",
     },
-    "update_shipping_address": {"ok": True, "simulated": True},
+    "update_shipping_address": {
+        "id": 4001,
+        "order_number": "#1500",
+        "shipping_address": {
+            "address1": "Calle Nueva 456",
+            "city": "Madrid",
+            "province": "Madrid",
+            "country": "ES",
+            "zip": "28001",
+        },
+    },
 }
 
 

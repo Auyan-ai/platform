@@ -162,6 +162,36 @@ def make_select_aop_node(
             return {}
 
         tenant_id = UUID(state["tenant_id"])
+
+        # Modo simulación con AOP forzado: carga el AOP directamente, sin llamar al
+        # intent classifier (Haiku). Permite que los scenarios del simulator controlen
+        # qué AOP activa el grafo, aislando el test del clasificador de intent.
+        forced_aop = state.get("forced_aop_slug")
+        if forced_aop and state.get("simulation_mode"):
+            async with tenant_scope(tenant_id) as conn:
+                selected_aop = await load_aop(conn, tenant_id, forced_aop)
+                if selected_aop is None:
+                    logger.warning(
+                        "select_aop.forced_aop_not_found tenant_id=%s slug=%s",
+                        tenant_id,
+                        forced_aop,
+                    )
+                    return {}
+                tenant_config = TenantConfiguration(**state["tenant_config"])
+                compiled = compile_aop(selected_aop, tenant_config)
+            return {
+                "aop_slug": selected_aop.slug,
+                "aop_version": selected_aop.current_version,
+                "aop_workspace": selected_aop.workspace,
+                "intent_confidence": 1.0,
+                "system_prompt": compiled.system_prompt,
+                "allowed_skills": compiled.allowed_skills,
+                "max_tool_iterations": compiled.max_iterations,
+                "aop_steps": [
+                    {"id": s.id, "name": s.name, "decision_point": s.decision_point}
+                    for s in compiled.steps
+                ],
+            }
         conversation_id = UUID(state["conversation_id"])
         inbound = state.get("inbound_message_content", "")
         history = state.get("conversation_history") or []

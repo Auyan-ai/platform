@@ -1735,6 +1735,26 @@ async def list_pending_approvals(
     return [PendingApproval(**dict(r)) for r in rows]
 
 
+async def has_pending_approval_for_conversation(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+) -> bool:
+    """Retorna True si existe al menos un pending_approval para la conversación."""
+    row = await conn.fetchrow(
+        """
+        SELECT 1 FROM pending_approvals
+         WHERE tenant_id = $1
+           AND conversation_id = $2
+           AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return row is not None
+
+
 async def resolve_pending_approval(
     conn: asyncpg.Connection,
     *,
@@ -2847,6 +2867,41 @@ async def insert_simulation_scenario(
         max_turns,
     )
     return SimulationScenario(**dict(row))
+
+
+async def update_simulation_scenario(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    scenario_id: UUID,
+    aop_slug: str,
+    expected_outcome: str,
+    description: str | None = None,
+    mock_fixtures: dict | None = None,
+    assertions: dict | None = None,
+    max_turns: int = 8,
+) -> SimulationScenario | None:
+    row = await conn.fetchrow(
+        """
+        UPDATE simulation_scenarios
+           SET description = $3, aop_slug = $4, expected_outcome = $5,
+               mock_fixtures = $6, assertions = $7, max_turns = $8,
+               updated_at = now()
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        RETURNING id, tenant_id, name, description, aop_slug, user_profile_id,
+                  expected_outcome, mock_fixtures, assertions, max_turns, is_active,
+                  created_at, updated_at, deleted_at
+        """,
+        tenant_id,
+        scenario_id,
+        description,
+        aop_slug,
+        expected_outcome,
+        mock_fixtures or {},
+        assertions or {},
+        max_turns,
+    )
+    return SimulationScenario(**dict(row)) if row else None
 
 
 async def get_simulation_scenario(

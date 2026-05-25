@@ -153,7 +153,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "aop_slug": "consulta_envio",
         "profile": "vago",
         "goal": "Saber exactamente cuándo llega mi pedido a casa",
-        "initial_message": "Me dijeron que el pedido se envió el lunes, ¿cuándo exactamente llega?",
+        "initial_message": "Me dijeron que el pedido #1234 se envió el lunes, ¿cuándo exactamente llega?",
         "expected_outcome": "El agente aclara que el tracking tiene la información de entrega estimada.",
         "mock_fixtures": {"shopify": _ORDER_1234_WITH_TRACKING},
         "assertions": {

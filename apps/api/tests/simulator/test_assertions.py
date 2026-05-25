@@ -11,6 +11,7 @@ from apps.api.simulator.assertions import check_assertions, summarize
 class _FakeAudit:
     skill_slug: str
     status: str = "success"
+    error_message: str | None = None
 
 
 def _check(assertions: dict, **kwargs):
@@ -39,6 +40,18 @@ def test_skills_called_requires_success_status() -> None:
     log = [_FakeAudit("shopify.get_order_status", status="failed")]
     res = _check({"skills_called": ["shopify.get_order_status"]}, skill_log=log)
     assert res[0].passed is False
+
+
+def test_skills_called_passes_for_l3_awaiting_approval() -> None:
+    # Skills L3 con pending_approval tienen status="rejected_by_permissions" pero
+    # error_message="awaiting_human_approval" — se consideran "invocadas" en assertions.
+    log = [_FakeAudit(
+        "shopify.cancel_order",
+        status="rejected_by_permissions",
+        error_message="awaiting_human_approval",
+    )]
+    res = _check({"skills_called": ["shopify.cancel_order"]}, skill_log=log)
+    assert res[0].passed is True
 
 
 def test_skills_not_called() -> None:
@@ -89,6 +102,19 @@ def test_must_escalate_via_agent_or_pending_approval() -> None:
     res = _check({"must_escalate": True}, pending_approval_present=True)
     assert res[0].passed is True
     res = _check({"must_escalate": True}, termination_reason="goal_achieved")
+    assert res[0].passed is False
+
+
+def test_must_not_escalate() -> None:
+    # must_escalate: False → pasa solo si el agente NO escaló.
+    res = _check({"must_escalate": False}, termination_reason="goal_achieved")
+    assert res[0].passed is True
+    assert res[0].is_critical is True
+
+    res = _check({"must_escalate": False}, termination_reason="escalated_by_agent")
+    assert res[0].passed is False
+
+    res = _check({"must_escalate": False}, pending_approval_present=True)
     assert res[0].passed is False
 
 

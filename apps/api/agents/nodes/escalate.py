@@ -81,7 +81,7 @@ def make_escalate_node(
             else:
                 esc = existing
 
-            result: dict = {"escalation_id": str(esc.id)}
+            result: dict = {"escalation_id": str(esc.id), "decision": "escalate"}
 
             if agent_response.strip():
                 msg = await insert_message(
