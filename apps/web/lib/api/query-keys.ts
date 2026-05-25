@@ -36,4 +36,13 @@ export const queryKeys = {
       ['proposals', tenantId, proposalId] as const,
     metrics: (tenantId: string) => ['proposals', tenantId, 'metrics'] as const,
   },
+  simulations: {
+    scenarios: (tenantId: string) => ['simulations', tenantId, 'scenarios'] as const,
+    scenarioRuns: (tenantId: string, scenarioId: string) =>
+      ['simulations', tenantId, 'scenarios', scenarioId, 'runs'] as const,
+    run: (tenantId: string, runId: string) =>
+      ['simulations', tenantId, 'runs', runId] as const,
+    batch: (tenantId: string, batchId: string) =>
+      ['simulations', tenantId, 'batches', batchId] as const,
+  },
 } as const
