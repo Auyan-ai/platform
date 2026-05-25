@@ -49,7 +49,7 @@ class UpdateShippingAddress(Skill):
         assert isinstance(inputs, UpdateShippingAddressInput)
         if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        adapter = ShopifyAdapter()
+        adapter = ctx.commerce_mock or ShopifyAdapter()
         order = await adapter.update_shipping_address(
             ctx.integration_ctx,
             inputs.order_id,

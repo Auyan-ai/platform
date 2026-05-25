@@ -5,7 +5,8 @@ from __future__ import annotations
 from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
-from apps.api.skills.shopify._models import FulfillmentInfo
+from apps.api.skills.shopify._models import FulfillmentInfo, LineItemInfo
+from pydantic import Field
 
 
 class GetOrderStatusInput(SkillInput):
@@ -22,6 +23,8 @@ class OrderDetail(SkillOutput):
     currency: str | None
     created_at: str | None
     fulfillments: list[FulfillmentInfo]
+    # Artículos del pedido — el agente necesita line_item_id para start_return.
+    line_items: list[LineItemInfo] = Field(default_factory=list)
 
 
 @SkillRegistry.register
@@ -41,7 +44,7 @@ class GetOrderStatus(Skill):
         assert isinstance(inputs, GetOrderStatusInput)
         if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        adapter = ShopifyAdapter()
+        adapter = ctx.commerce_mock or ShopifyAdapter()
         raw = await adapter.get_order_by_name(ctx.integration_ctx, inputs.order_identifier)
 
         if raw is None:
@@ -67,14 +70,25 @@ class GetOrderStatus(Skill):
             )
             for f in raw.get("fulfillments", [])
         ]
+        line_items = [
+            LineItemInfo(
+                line_item_id=li["id"],
+                title=li.get("title", ""),
+                quantity=li.get("quantity", 1),
+                price=li.get("price"),
+            )
+            for li in raw.get("line_items", [])
+            if "id" in li
+        ]
         return OrderDetail(
             found=True,
             order_id=raw["id"],
-            order_number=raw.get("name"),
+            order_number=raw.get("name") or raw.get("order_number"),
             financial_status=raw.get("financial_status"),
             fulfillment_status=raw.get("fulfillment_status"),
             total_price=raw.get("total_price"),
             currency=raw.get("currency"),
             created_at=raw.get("created_at"),
             fulfillments=fulfillments,
+            line_items=line_items,
         )

@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-24 (sesión 36 — Bloque 0, sub-PR 0.8 Roles internos DB completado)_
+_Última actualización: 2026-05-25 (sesión 38 — Bloque 0, sub-PR 0.10 Simulator: implementación completa)_
 
 > Historial completo de Sprints 1-11 y Rate Limiting en [`docs/progress-archive.md`](progress-archive.md).
 
@@ -65,7 +65,7 @@ Implicaciones: `tenant_agent` removido · Chatwoot → opcional al cliente · Da
 | 0.7 | PostmarkEmailAdapter outbound | ✅ (commit c80ccdd) |
 | 0.8 | Roles internos DB | ✅ [PR #94](https://github.com/Auyan-ai/platform/pull/94) |
 | 0.9 | AOPs `steps[]` opcional + events | ✅ (sesión 35) |
-| 0.10 | Simulator MVP | ⏳ **Opus** |
+| 0.10 | Simulator MVP | ✅ checkpoint E2E aprobado (CE-01 9.5, RE-01 7.5) |
 | 0.11 | Validación E2E | ⏳ último |
 
 ### Sub-PR 0.1 — Hard removal `tenant_agent` ✅
@@ -241,13 +241,61 @@ Memory cross-conversación · Detección automática alucinaciones · Reapertura
 
 ---
 
+## Sub-PR 0.10 — Simulator MVP ✅ (checkpoint E2E aprobado)
+
+**Diseño aprobado:** [`docs/simulator-design.md`](simulator-design.md). Estilo Decagon/Sierra: corre el grafo real contra conversaciones sintéticas, judge 4-dim, assertions programáticas.
+
+**Fundación implementada y validada (sesión 37):**
+- ✅ Migration `20260522000004_add_simulator_tables.sql` — `is_simulation` en conversations + 3 tablas (user_profiles, simulation_scenarios, simulation_runs) con RLS canónico. Validada contra Postgres local (10 índices, 3 RLS, 3 triggers, smoke insert OK). **Falta aplicar a staging.**
+- ✅ `db/models.py` + `db/queries.py` — 3 modelos + CRUD + filtro `is_simulation = FALSE` en list/stale/nudge (protege al slow_agent de procesar conversaciones sintéticas).
+- ✅ `simulator/mocks.py` — `MockShopifyAdapter` (fixtures por nombre de método). `simulator/assertions.py` — `check_assertions` puro. 16 tests nuevos.
+- ✅ Cambios producción mínimos: `simulation_mode`/`simulation_fixtures` en AgentState, `commerce_mock` en SkillContext, inyección en `execute_skill`, 11 skills Shopify (`ctx.commerce_mock or ShopifyAdapter()`). **Descubrimiento clave:** el grafo NO hace I/O externo (helpdesk + Langfuse los hace el caller post-grafo), así que respond/escalate/finalize_trace NO se tocan.
+- ✅ 914 tests existentes pasan (cero regresiones) + 16 nuevos. Ruff limpio.
+
+**Implementado en sesión 38 (Sonnet):**
+- ✅ `simulator/prompts.py` — SIMULATOR_PROMPT (Haiku) + SIM_JUDGE_SYSTEM_PROMPT (Opus) con prompt caching
+- ✅ `simulator/transcript.py` — `SimulatorTranscript`, `TranscriptTurn`, `format_for_sim_judge`, `transcript_to_list`
+- ✅ `simulator/user_simulator.py` — `UserSimulator` (Haiku 4.5, temperature=0.7, truncado a 5 turnos)
+- ✅ `simulator/judge.py` — `SimulatorJudgeVerdict`, `judge_simulation()` (Opus 4.7 directo), `verdict_to_dict`
+- ✅ `simulator/cost_guard.py` — `check_tenant_cost_cap` ($10/día) + `check_global_cost_cap` ($50/día) + rate limits (20 runs/h, 5 batches/h). **Sin Redis** — usa DB queries directamente.
+- ✅ `simulator/runner.py` — `run_simulation()` + `run_batch()` + `_GLOBAL_SIM_SEMAPHORE(10)`. Loop detection, cost estimator.
+- ✅ `simulator/scenarios/` — 4 personas + 25 scenarios (CE×8, RE×7, DE×6, EX×4) + `seed_scenarios()` idempotente
+- ✅ `db/queries.py` — `get_global_sim_cost_cents_today()` + `soft_delete_conversation()` nuevas
+- ✅ `routers/simulations.py` — 8 endpoints REST. Run único SYNC (timeout 60s). Batch ASYNC (batch_id pre-generado, polling).
+- ✅ `main.py` — router registrado + `app.state.agent_deps` expuesto
+- ✅ `pyproject.toml` — `simulator/scenarios/**` exento de E501
+- ✅ 37 tests nuevos (user_simulator, judge, transcript, cost_guard, scenarios). **Suite total: 967/967 verde. Ruff limpio.**
+
+**Checkpoint E2E APROBADO (sesión 38):** migration aplicada a staging ✅. CE-01 y RE-01 corridos contra el grafo real (tenant Lunaria) con `scripts/run_simulator.py`:
+- **CE-01** (tracking): judge **9.5/10**, `get_order_status` ejecutada, tracking presente, 3 turnos.
+- **RE-01** (devolución): judge **7.5/10**, `start_return` ejecutada con éxito, outcome=resolved, 2/2 assertions críticas.
+
+**Bugs reales que el E2E destapó (todos arreglados):**
+1. **Eco de roles** — `_build_messages` mapeaba customer→user/agent→assistant, pero el simulador ES el cliente, así que debe ser customer→assistant/agent→user. Con el mapeo invertido el cliente repetía las palabras del agente (bucle infinito). Además se descartan mensajes assistant iniciales (Anthropic exige empezar con user).
+2. **Sin timeouts** — ni user_simulator ni judge tenían timeout; el runner no tenía tope global. Un run se colgó 18 min. Añadidos: 30s/llamada (simulator), 90s/llamada (judge), 180s tope global del run (`asyncio.wait_for`), 120s guard del judge.
+3. **Mensaje vacío del simulador** — el modelo a veces devolvía `message=""`, rompiendo el embed del grafo y la API de Anthropic. Añadido retry-once + default a `give_up`, y skip de content vacío en `_build_messages`.
+4. **`end_customer_id` faltante** — el runner no lo pasaba al initial_state del grafo → `load_conversation` explotaba. Corregido.
+5. **`get_order_status` no exponía `line_items`** — el agente no tenía `line_item_id` para `start_return` y escalaba. Añadido `LineItemInfo` a `OrderDetail` (el dato ya venía del adapter). Hallazgo arquitectónico legítimo del simulador.
+
+**Herramientas operativas nuevas:**
+- `scripts/run_simulator.py` — CLI: seed scenarios + corre checkpoint (CE-01+RE-01) o `--scenario`/`--all`. Criterio checkpoint: judge ≥ 7 + assertions críticas.
+- `scripts/seed_test_aops.py` — siembra AOPs `consulta_envio`/`returns`/`default` + habilita `start_return` para el tenant de prueba. `--update` reescribe (nueva versión).
+
+**Decisión:** para el tenant de prueba se habilitó `shopify.start_return` sin aprobación humana (es L3 por defecto) para validar el flujo de resolución autónoma de devoluciones.
+
+**Pendiente de 0.10:**
+- UI super_admin (apps/web) — último (mover a Bloque 1 si no bloquea el lanzamiento)
+
+---
+
 ## Empezar aquí — siguiente sesión
 
-**Modelo recomendado:** Sonnet para 0.11; **Opus para 0.10 (Simulator)**.
+**Modelo recomendado:** **Sonnet** para 0.11 (validación E2E).
 
-**Estado Bloque 0:** 0.1–0.9 completados ✅. Pendiente:
-1. **0.10** Simulator MVP — **Opus**
-2. **0.11** Validación E2E — último paso del bloque
+**Estado Bloque 0:** 0.1–0.9 completados ✅. 0.10 completo ✅ (código + migration en staging + checkpoint E2E aprobado). Pendiente:
+1. **0.11** Validación E2E — último paso del bloque
+2. **UI simulator** (apps/web) — puede moverse a Bloque 1 si no bloquea el lanzamiento
+3. (Opcional) Correr los 25 scenarios completos (`--all`) para descubrir más gaps de AOPs antes de pulir prompts
 
 **Pendiente de staging (PRs ya mergeables):**
 - [ ] PR #94 (0.8): migración aplicada ✅ — mergear a develop

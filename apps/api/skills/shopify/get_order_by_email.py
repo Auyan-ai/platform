@@ -33,7 +33,7 @@ class GetOrderByEmail(Skill):
         assert isinstance(inputs, GetOrderByEmailInput)
         if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        adapter = ShopifyAdapter()
+        adapter = ctx.commerce_mock or ShopifyAdapter()
         raw_orders = await adapter.search_orders_by_email(ctx.integration_ctx, inputs.email)
         orders = [map_order_summary(o) for o in raw_orders]
         return GetOrderByEmailOutput(orders=orders, total_found=len(orders))

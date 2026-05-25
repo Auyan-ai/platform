@@ -43,6 +43,9 @@ from apps.api.db.models import (
     ReasoningPhase,
     ReasoningStatus,
     RolePermission,
+    SimulationRun,
+    SimulationRunStatus,
+    SimulationScenario,
     SkillAuditLog,
     SlowAgentRun,
     Tenant,
@@ -51,6 +54,8 @@ from apps.api.db.models import (
     TenantIntegration,
     TenantToolPermission,
     TenantUsageDaily,
+    TerminationReason,
+    UserProfile,
     UserRole,
 )
 
@@ -287,20 +292,24 @@ async def create_conversation(
     channel: ChannelType,
     external_id: str | None = None,
     subject: str | None = None,
+    is_simulation: bool = False,
 ) -> Conversation:
     row = await conn.fetchrow(
         """
         INSERT INTO conversations (
-            tenant_id, end_customer_id, channel, external_id, subject, status
-        ) VALUES ($1, $2, $3::channel_type, $4, $5, 'open'::conversation_status)
+            tenant_id, end_customer_id, channel, external_id, subject, status,
+            is_simulation
+        ) VALUES ($1, $2, $3::channel_type, $4, $5, 'open'::conversation_status, $6)
         RETURNING id, tenant_id, end_customer_id, channel, external_id,
-                  subject, status, assigned_user_id, last_message_at, nudged_at, created_at
+                  subject, status, assigned_user_id, last_message_at, nudged_at,
+                  is_simulation, created_at
         """,
         tenant_id,
         end_customer_id,
         channel,
         external_id,
         subject,
+        is_simulation,
     )
     assert row is not None
     return Conversation(**dict(row))
@@ -360,6 +369,21 @@ async def update_conversation_status(
     )
 
 
+async def soft_delete_conversation(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> None:
+    """Soft-delete de una conversación. Usado para limpiar conversaciones de simulación."""
+    await conn.execute(
+        """
+        UPDATE conversations
+           SET deleted_at = now()
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        """,
+        tenant_id,
+        conversation_id,
+    )
+
+
 async def list_conversations(
     conn: asyncpg.Connection,
     tenant_id: UUID,
@@ -371,9 +395,11 @@ async def list_conversations(
     rows = await conn.fetch(
         """
         SELECT id, tenant_id, end_customer_id, channel, external_id,
-               subject, status, assigned_user_id, last_message_at, nudged_at, created_at
+               subject, status, assigned_user_id, last_message_at, nudged_at,
+               is_simulation, created_at
           FROM conversations
          WHERE tenant_id = $1 AND deleted_at IS NULL
+           AND is_simulation = FALSE
            AND ($2::conversation_status IS NULL OR status = $2::conversation_status)
          ORDER BY created_at DESC
          LIMIT $3 OFFSET $4
@@ -738,6 +764,7 @@ async def get_stale_conversations(
           FROM conversations
          WHERE tenant_id = $1
            AND deleted_at IS NULL
+           AND is_simulation = FALSE
            AND status IN ('open', 'pending')
            AND COALESCE(last_message_at, created_at) < $2
         """,
@@ -792,6 +819,7 @@ async def get_nudge_candidates(
           FROM conversations
          WHERE tenant_id = $1
            AND deleted_at IS NULL
+           AND is_simulation = FALSE
            AND status IN ('open', 'pending')
            AND nudged_at IS NULL
            AND COALESCE(last_message_at, created_at) < $2
@@ -2711,3 +2739,359 @@ async def get_integration_by_gorgias_domain(
         domain,
     )
     return _row_to_integration(row) if row else None
+
+
+# ============================================================
+# Simulator (Bloque 0, Sub-PR 0.10)
+# ============================================================
+
+# ─── user_profiles ────────────────────────────────────────────────────────────
+
+
+async def insert_user_profile(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    name: str,
+    persona: dict,
+    goal: str,
+    initial_message: str,
+    language: str = "es",
+) -> UserProfile:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO user_profiles
+            (tenant_id, name, persona, goal, initial_message, language)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, tenant_id, name, persona, goal, initial_message, language,
+                  created_at, updated_at, deleted_at
+        """,
+        tenant_id,
+        name,
+        persona,
+        goal,
+        initial_message,
+        language,
+    )
+    return UserProfile(**dict(row))
+
+
+async def get_user_profile(
+    conn: asyncpg.Connection, tenant_id: UUID, profile_id: UUID
+) -> UserProfile | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, name, persona, goal, initial_message, language,
+               created_at, updated_at, deleted_at
+          FROM user_profiles
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        """,
+        tenant_id,
+        profile_id,
+    )
+    return UserProfile(**dict(row)) if row else None
+
+
+async def get_user_profile_by_name(
+    conn: asyncpg.Connection, tenant_id: UUID, name: str
+) -> UserProfile | None:
+    """Lookup por nombre — usado por el seed para ser idempotente."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, name, persona, goal, initial_message, language,
+               created_at, updated_at, deleted_at
+          FROM user_profiles
+         WHERE tenant_id = $1 AND name = $2 AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        tenant_id,
+        name,
+    )
+    return UserProfile(**dict(row)) if row else None
+
+
+# ─── simulation_scenarios ─────────────────────────────────────────────────────
+
+
+async def insert_simulation_scenario(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    name: str,
+    aop_slug: str,
+    user_profile_id: UUID,
+    expected_outcome: str,
+    description: str | None = None,
+    mock_fixtures: dict | None = None,
+    assertions: dict | None = None,
+    max_turns: int = 8,
+) -> SimulationScenario:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO simulation_scenarios
+            (tenant_id, name, description, aop_slug, user_profile_id, expected_outcome,
+             mock_fixtures, assertions, max_turns)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id, tenant_id, name, description, aop_slug, user_profile_id,
+                  expected_outcome, mock_fixtures, assertions, max_turns, is_active,
+                  created_at, updated_at, deleted_at
+        """,
+        tenant_id,
+        name,
+        description,
+        aop_slug,
+        user_profile_id,
+        expected_outcome,
+        mock_fixtures or {},
+        assertions or {},
+        max_turns,
+    )
+    return SimulationScenario(**dict(row))
+
+
+async def get_simulation_scenario(
+    conn: asyncpg.Connection, tenant_id: UUID, scenario_id: UUID
+) -> SimulationScenario | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, name, description, aop_slug, user_profile_id,
+               expected_outcome, mock_fixtures, assertions, max_turns, is_active,
+               created_at, updated_at, deleted_at
+          FROM simulation_scenarios
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        """,
+        tenant_id,
+        scenario_id,
+    )
+    return SimulationScenario(**dict(row)) if row else None
+
+
+async def get_scenario_by_name(
+    conn: asyncpg.Connection, tenant_id: UUID, name: str
+) -> SimulationScenario | None:
+    """Lookup por nombre — usado por el seed para ser idempotente."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, name, description, aop_slug, user_profile_id,
+               expected_outcome, mock_fixtures, assertions, max_turns, is_active,
+               created_at, updated_at, deleted_at
+          FROM simulation_scenarios
+         WHERE tenant_id = $1 AND name = $2 AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        tenant_id,
+        name,
+    )
+    return SimulationScenario(**dict(row)) if row else None
+
+
+async def list_simulation_scenarios(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    aop_slug: str | None = None,
+    active_only: bool = True,
+) -> list[SimulationScenario]:
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, name, description, aop_slug, user_profile_id,
+               expected_outcome, mock_fixtures, assertions, max_turns, is_active,
+               created_at, updated_at, deleted_at
+          FROM simulation_scenarios
+         WHERE tenant_id = $1
+           AND deleted_at IS NULL
+           AND ($2::text IS NULL OR aop_slug = $2)
+           AND ($3::boolean IS FALSE OR is_active = TRUE)
+         ORDER BY aop_slug, name
+        """,
+        tenant_id,
+        aop_slug,
+        active_only,
+    )
+    return [SimulationScenario(**dict(r)) for r in rows]
+
+
+# ─── simulation_runs ──────────────────────────────────────────────────────────
+
+
+async def insert_simulation_run(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    scenario_id: UUID,
+    aop_slug: str,
+    aop_version: int | None,
+    conversation_id: UUID | None,
+    batch_id: UUID | None,
+    triggered_by: UUID | None,
+) -> SimulationRun:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO simulation_runs
+            (tenant_id, scenario_id, aop_slug, aop_version, conversation_id,
+             batch_id, triggered_by, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'running')
+        RETURNING id, tenant_id, scenario_id, aop_slug, aop_version, conversation_id,
+                  batch_id, status, termination_reason, turns_count, transcript,
+                  judge_eval, assertions_results, assertions_passed, assertions_total,
+                  triggered_by, tokens_simulator, tokens_agent, tokens_judge,
+                  cost_cents, started_at, completed_at
+        """,
+        tenant_id,
+        scenario_id,
+        aop_slug,
+        aop_version,
+        conversation_id,
+        batch_id,
+        triggered_by,
+    )
+    return SimulationRun(**dict(row))
+
+
+async def finalize_simulation_run(
+    conn: asyncpg.Connection,
+    run_id: UUID,
+    tenant_id: UUID,
+    *,
+    status: SimulationRunStatus,
+    termination_reason: TerminationReason | None,
+    turns_count: int,
+    transcript: list[dict],
+    judge_eval: dict | None,
+    assertions_results: list[dict],
+    assertions_passed: int,
+    assertions_total: int,
+    tokens_simulator: int,
+    tokens_agent: int,
+    tokens_judge: int,
+    cost_cents: float,
+) -> None:
+    await conn.execute(
+        """
+        UPDATE simulation_runs
+           SET status             = $3,
+               termination_reason = $4,
+               turns_count        = $5,
+               transcript         = $6,
+               judge_eval         = $7,
+               assertions_results = $8,
+               assertions_passed  = $9,
+               assertions_total   = $10,
+               tokens_simulator   = $11,
+               tokens_agent       = $12,
+               tokens_judge       = $13,
+               cost_cents         = $14,
+               completed_at       = NOW(),
+               updated_at         = NOW()
+         WHERE id = $1 AND tenant_id = $2
+        """,
+        run_id,
+        tenant_id,
+        status,
+        termination_reason,
+        turns_count,
+        transcript,
+        judge_eval,
+        assertions_results,
+        assertions_passed,
+        assertions_total,
+        tokens_simulator,
+        tokens_agent,
+        tokens_judge,
+        cost_cents,
+    )
+
+
+async def get_simulation_run(
+    conn: asyncpg.Connection, tenant_id: UUID, run_id: UUID
+) -> SimulationRun | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, scenario_id, aop_slug, aop_version, conversation_id,
+               batch_id, status, termination_reason, turns_count, transcript,
+               judge_eval, assertions_results, assertions_passed, assertions_total,
+               triggered_by, tokens_simulator, tokens_agent, tokens_judge,
+               cost_cents, started_at, completed_at
+          FROM simulation_runs
+         WHERE tenant_id = $1 AND id = $2
+        """,
+        tenant_id,
+        run_id,
+    )
+    return SimulationRun(**dict(row)) if row else None
+
+
+async def list_runs_for_scenario(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    scenario_id: UUID,
+    *,
+    limit: int = 50,
+) -> list[SimulationRun]:
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, scenario_id, aop_slug, aop_version, conversation_id,
+               batch_id, status, termination_reason, turns_count, transcript,
+               judge_eval, assertions_results, assertions_passed, assertions_total,
+               triggered_by, tokens_simulator, tokens_agent, tokens_judge,
+               cost_cents, started_at, completed_at
+          FROM simulation_runs
+         WHERE tenant_id = $1 AND scenario_id = $2
+         ORDER BY started_at DESC
+         LIMIT $3
+        """,
+        tenant_id,
+        scenario_id,
+        limit,
+    )
+    return [SimulationRun(**dict(r)) for r in rows]
+
+
+async def list_runs_for_batch(
+    conn: asyncpg.Connection, tenant_id: UUID, batch_id: UUID
+) -> list[SimulationRun]:
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, scenario_id, aop_slug, aop_version, conversation_id,
+               batch_id, status, termination_reason, turns_count, transcript,
+               judge_eval, assertions_results, assertions_passed, assertions_total,
+               triggered_by, tokens_simulator, tokens_agent, tokens_judge,
+               cost_cents, started_at, completed_at
+          FROM simulation_runs
+         WHERE tenant_id = $1 AND batch_id = $2
+         ORDER BY started_at ASC
+        """,
+        tenant_id,
+        batch_id,
+    )
+    return [SimulationRun(**dict(r)) for r in rows]
+
+
+async def get_tenant_sim_cost_cents_today(
+    conn: asyncpg.Connection, tenant_id: UUID
+) -> float:
+    """Suma cost_cents de runs terminados del tenant en las últimas 24h. Para el cost cap."""
+    row = await conn.fetchrow(
+        """
+        SELECT COALESCE(SUM(cost_cents), 0) AS total
+          FROM simulation_runs
+         WHERE tenant_id = $1
+           AND started_at >= NOW() - INTERVAL '1 day'
+           AND status IN ('passed', 'partial', 'failed', 'errored')
+        """,
+        tenant_id,
+    )
+    return float(row["total"]) if row else 0.0
+
+
+async def get_global_sim_cost_cents_today(conn: asyncpg.Connection) -> float:
+    """Suma cost_cents de todos los runs terminados en las últimas 24h. Para el cap global."""
+    row = await conn.fetchrow(
+        """
+        SELECT COALESCE(SUM(cost_cents), 0) AS total
+          FROM simulation_runs
+         WHERE started_at >= NOW() - INTERVAL '1 day'
+           AND status IN ('passed', 'partial', 'failed', 'errored')
+        """
+    )
+    return float(row["total"]) if row else 0.0

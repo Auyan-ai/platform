@@ -1,0 +1,234 @@
+"""CLI para correr el simulador manualmente.
+
+Checkpoint mínimo del sub-PR 0.10: CE-01 y RE-01 pasan con judge >= 7.
+
+Uso:
+    # Seed + correr CE-01 y RE-01 (checkpoint mínimo)
+    poetry run python -m scripts.run_simulator --tenant <uuid>
+
+    # Correr un scenario específico (por nombre exacto)
+    poetry run python -m scripts.run_simulator --tenant <uuid> --scenario "CE-01: Tracking de #1234 con fulfillment"
+
+    # Correr todos los scenarios del tenant
+    poetry run python -m scripts.run_simulator --tenant <uuid> --all
+
+Requiere que la migration 20260522000004_add_simulator_tables.sql esté aplicada en la DB.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import sys
+import uuid
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("run_simulator")
+
+# Scenarios del checkpoint mínimo
+CHECKPOINT_SCENARIOS = {"CE-01", "RE-01"}
+
+# Criterio del checkpoint (design doc §16): "CE-01 y RE-01 pasan con judge ≥ 7".
+# Distinto del label de operación normal (status='passed' exige ≥ 7.5). Aquí
+# evaluamos la barra documentada del checkpoint: judge ≥ 7 + assertions críticas OK.
+CHECKPOINT_JUDGE_MIN = 7.0
+
+
+def _meets_checkpoint(run) -> bool:
+    """True si el run cumple la barra del checkpoint: judge ≥ 7 y todas las
+    assertions críticas pasan."""
+    if not run.judge_eval:
+        return False
+    if float(run.judge_eval.get("overall_score", 0)) < CHECKPOINT_JUDGE_MIN:
+        return False
+    for a in run.assertions_results or []:
+        if a.get("is_critical") and not a.get("passed"):
+            return False
+    return True
+
+
+async def main(
+    tenant_id: uuid.UUID,
+    *,
+    scenario_name: str | None,
+    run_all: bool,
+) -> int:
+    import apps.api.skills  # noqa: F401 — registra skills
+    from apps.api.agents.dependencies import AgentDependencies
+    from apps.api.agents.graph import build_graph
+    from apps.api.core.config import get_settings
+    from apps.api.db.client import close_pool, init_pool, tenant_scope
+    from apps.api.db.queries import list_simulation_scenarios
+    from apps.api.integrations.anthropic_client import build_anthropic_client
+    from apps.api.integrations.langfuse_client import build_langfuse_client
+    from apps.api.integrations.openai_embeddings import build_openai_client
+    from apps.api.services.audit import AuditLogger
+    from apps.api.services.reasoning import ReasoningTracker
+    from apps.api.simulator.runner import run_simulation
+    from apps.api.simulator.scenarios import seed_scenarios
+
+    settings = get_settings()
+    await init_pool()
+
+    try:
+        anthropic = build_anthropic_client(settings.anthropic_api_key.get_secret_value())
+        openai = build_openai_client(settings.openai_api_key.get_secret_value())
+        langfuse = build_langfuse_client(settings)
+
+        deps = AgentDependencies(
+            anthropic=anthropic,
+            openai=openai,
+            settings=settings,
+            reasoning_tracker=ReasoningTracker(),
+            audit_logger=AuditLogger(),
+        )
+        graph = build_graph(deps)
+
+        # Seed scenarios si no existen
+        logger.info("Haciendo seed de scenarios para tenant=%s ...", tenant_id)
+        async with tenant_scope(tenant_id) as conn:
+            seed_result = await seed_scenarios(conn, tenant_id)
+            logger.info("Seed: %s profiles, %s scenarios creados", seed_result["profiles"], seed_result["scenarios"])
+
+            # Obtener scenarios a correr
+            all_scenarios = await list_simulation_scenarios(conn, tenant_id)
+
+        if not all_scenarios:
+            print("No hay scenarios disponibles para este tenant.", file=sys.stderr)
+            return 1
+
+        # Filtrar según args
+        if scenario_name:
+            targets = [s for s in all_scenarios if s.name == scenario_name]
+            if not targets:
+                names = [s.name for s in all_scenarios]
+                print(f"Scenario '{scenario_name}' no encontrado. Disponibles:", file=sys.stderr)
+                for n in names:
+                    print(f"  - {n}", file=sys.stderr)
+                return 1
+        elif run_all:
+            targets = all_scenarios
+        else:
+            # Checkpoint: CE-01 y RE-01 (identifica por prefijo del nombre)
+            targets = [
+                s for s in all_scenarios
+                if any(s.name.startswith(cid) for cid in CHECKPOINT_SCENARIOS)
+            ]
+            if len(targets) < len(CHECKPOINT_SCENARIOS):
+                found = {s.name.split(":")[0].strip() for s in targets}
+                missing = CHECKPOINT_SCENARIOS - found
+                logger.warning("Scenarios de checkpoint no encontrados: %s", missing)
+
+        print(f"\nCoriendo {len(targets)} scenario(s) para tenant={tenant_id}")
+        print("=" * 70)
+
+        results = []
+        passed = 0
+        failed = 0
+
+        for scenario in targets:
+            print(f"\n▶ {scenario.name}")
+            try:
+                run_id = await run_simulation(
+                    scenario.id,
+                    tenant_id,
+                    anthropic=anthropic,
+                    graph=graph,
+                )
+                # Obtener resultado
+                from apps.api.db.queries import get_simulation_run
+                async with tenant_scope(tenant_id) as conn:
+                    run = await get_simulation_run(conn, tenant_id, run_id)
+
+                if run:
+                    results.append((scenario.name, run))
+                    status_icon = {"passed": "✅", "partial": "⚠️", "failed": "❌", "errored": "💥"}.get(run.status, "?")
+                    print(f"  Status: {status_icon} {run.status.upper()}")
+                    print(f"  Terminación: {run.termination_reason}")
+                    print(f"  Turnos: {run.turns_count}")
+                    if run.judge_eval:
+                        j = run.judge_eval
+                        print(f"  Judge overall: {j.get('overall_score', 0):.1f}/10  verdict={j.get('verdict')}")
+                        print(f"  Goal logrado: {j.get('judge_goal_achieved')}")
+                        print(f"  Sugerencias: {j.get('suggestions', '')}")
+                    if run.assertions_results:
+                        total = run.assertions_total or 0
+                        passed_a = run.assertions_passed or 0
+                        print(f"  Assertions: {passed_a}/{total}")
+                        for a in run.assertions_results:
+                            icon = "✓" if a["passed"] else "✗"
+                            crit = " [CRÍTICA]" if a["is_critical"] else ""
+                            print(f"    {icon} {a['key']}: {a['evidence']}{crit}")
+                    cost = run.cost_cents or 0
+                    print(f"  Costo: ${cost / 100:.4f}")
+
+                    if _meets_checkpoint(run):
+                        passed += 1
+                    else:
+                        failed += 1
+                else:
+                    print("  ERROR: run no encontrado en DB")
+                    failed += 1
+            except Exception as exc:
+                print(f"  EXCEPCIÓN: {exc}")
+                logger.exception("scenario_run_failed name=%s", scenario.name)
+                failed += 1
+
+        print("\n" + "=" * 70)
+        print(f"RESUMEN: {passed}/{len(targets)} cumplen checkpoint | {failed} no")
+
+        # Checkpoint mínimo (design doc §16): judge ≥ 7 + assertions críticas OK
+        if not run_all and not scenario_name:
+            checkpoint_passed = sum(
+                1 for name, run in results
+                if any(name.startswith(cid) for cid in CHECKPOINT_SCENARIOS)
+                and _meets_checkpoint(run)
+            )
+            print(
+                f"\nCheckpoint 0.10: {checkpoint_passed}/{len(CHECKPOINT_SCENARIOS)} "
+                f"scenarios cumplen (judge ≥ {CHECKPOINT_JUDGE_MIN:.0f} + assertions críticas)"
+            )
+            if checkpoint_passed == len(CHECKPOINT_SCENARIOS):
+                print("✅ Checkpoint APROBADO — Sub-PR 0.10 listo para merge")
+                return 0
+            else:
+                print("❌ Checkpoint NO aprobado — revisar resultados arriba")
+                return 1
+
+        return 0 if failed == 0 else 1
+
+    finally:
+        await langfuse.flush()
+        await close_pool()
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Corre el simulador de agente para E2E testing.")
+    parser.add_argument("--tenant", required=True, help="UUID del tenant")
+    parser.add_argument(
+        "--scenario",
+        default=None,
+        help="Nombre exacto del scenario a correr (ej: 'CE-01: Tracking de #1234 con fulfillment')",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Correr todos los scenarios del tenant",
+    )
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = _parse_args()
+    try:
+        tenant_uuid = uuid.UUID(args.tenant)
+    except ValueError:
+        print(f"Error: '{args.tenant}' no es un UUID válido.", file=sys.stderr)
+        sys.exit(1)
+
+    exit_code = asyncio.run(main(tenant_uuid, scenario_name=args.scenario, run_all=args.all))
+    sys.exit(exit_code)

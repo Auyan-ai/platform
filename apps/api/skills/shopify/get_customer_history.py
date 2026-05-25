@@ -33,7 +33,7 @@ class GetCustomerHistory(Skill):
         assert isinstance(inputs, GetCustomerHistoryInput)
         if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
-        adapter = ShopifyAdapter()
+        adapter = ctx.commerce_mock or ShopifyAdapter()
         raw_customer = await adapter.get_customer_by_email(ctx.integration_ctx, inputs.email)
 
         if raw_customer is None:
