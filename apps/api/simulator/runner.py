@@ -34,6 +34,7 @@ from apps.api.db.queries import (
     finalize_simulation_run,
     get_simulation_scenario,
     get_user_profile,
+    has_pending_approval_for_conversation,
     insert_message,
     insert_simulation_run,
     list_skill_audit_log,
@@ -105,8 +106,13 @@ async def run_simulation(
     graph: CompiledStateGraph,
     triggered_by: UUID | None = None,
     batch_id: UUID | None = None,
+    skip_judge: bool = False,
 ) -> UUID:
-    """Corre un scenario completo. Retorna el run_id."""
+    """Corre un scenario completo. Retorna el run_id.
+
+    skip_judge=True salta la evaluación del judge (Opus, caro/lento). Pensado para
+    cazar bugs de assertions/fixtures rápido; la corrida final SIEMPRE corre el judge.
+    """
     async with _GLOBAL_SIM_SEMAPHORE:
         return await _run_simulation_inner(
             scenario_id=scenario_id,
@@ -115,6 +121,7 @@ async def run_simulation(
             graph=graph,
             triggered_by=triggered_by,
             batch_id=batch_id,
+            skip_judge=skip_judge,
         )
 
 
@@ -158,6 +165,7 @@ async def _run_simulation_inner(
     graph: CompiledStateGraph,
     triggered_by: UUID | None,
     batch_id: UUID | None,
+    skip_judge: bool = False,
 ) -> UUID:
     async with tenant_scope(tenant_id) as conn:
         scenario = await get_simulation_scenario(conn, tenant_id, scenario_id)
@@ -225,12 +233,12 @@ async def _run_simulation_inner(
 
     acc.transcript.termination_reason = termination_reason
 
-    # Obtener skill_log y correr assertions + judge en paralelo
+    # Obtener skill_log y estado de pending_approval, luego correr assertions + judge
     skill_log = await _get_skill_log(tenant_id, conversation_id)
     acc.transcript.skill_log = skill_log
 
     last_agent_msg = _last_agent_message(acc.transcript)
-    pending_approval = _pending_approval_present(acc.transcript)
+    pending_approval = await _pending_approval_present(tenant_id, conversation_id)
 
     assertion_results = check_assertions(
         assertions=scenario.assertions,
@@ -241,21 +249,24 @@ async def _run_simulation_inner(
         pending_approval_present=pending_approval,
     )
 
-    try:
-        judge_verdict = await asyncio.wait_for(
-            judge_simulation(
-                anthropic=anthropic,
-                transcript=acc.transcript,
-                scenario=scenario,
-            ),
-            timeout=JUDGE_TIMEOUT_SECONDS + 30,
-        )
-        acc.tokens_judge_in = judge_verdict.input_tokens
-        acc.tokens_judge_out = judge_verdict.output_tokens
-    except TimeoutError:
-        logger.warning("sim_judge_timeout run_id=%s", run_id)
-    except Exception:
-        logger.exception("sim_judge_failed run_id=%s", run_id)
+    if skip_judge:
+        logger.info("sim_judge_skipped run_id=%s (skip_judge=True)", run_id)
+    else:
+        try:
+            judge_verdict = await asyncio.wait_for(
+                judge_simulation(
+                    anthropic=anthropic,
+                    transcript=acc.transcript,
+                    scenario=scenario,
+                ),
+                timeout=JUDGE_TIMEOUT_SECONDS + 30,
+            )
+            acc.tokens_judge_in = judge_verdict.input_tokens
+            acc.tokens_judge_out = judge_verdict.output_tokens
+        except TimeoutError:
+            logger.warning("sim_judge_timeout run_id=%s", run_id)
+        except Exception:
+            logger.exception("sim_judge_failed run_id=%s", run_id)
 
     passed, total, all_critical_passed = summarize(assertion_results)
     status = _compute_status(
@@ -376,6 +387,7 @@ async def _execute_loop(
             "channel": "chat",
             "simulation_mode": True,
             "simulation_fixtures": fixtures,
+            "forced_aop_slug": scenario.aop_slug,
             "langfuse_trace_id": f"sim-{acc.run_id}-t{turn_number}",
             "tool_results": [],
             "tool_iterations": 0,
@@ -568,11 +580,9 @@ def _last_agent_message(transcript: SimulatorTranscript) -> str:
     return ""
 
 
-def _pending_approval_present(transcript: SimulatorTranscript) -> bool:
-    # El runner no tiene acceso al final_state completo al terminar,
-    # pero el skill_audit_log refleja si hubo un rejected_by_permissions.
-    # Por ahora: False — el judge y las assertions lo detectan por skill_log.
-    return False
+async def _pending_approval_present(tenant_id: UUID, conversation_id: UUID) -> bool:
+    async with tenant_scope(tenant_id) as conn:
+        return await has_pending_approval_for_conversation(conn, tenant_id, conversation_id)
 
 
 def _compute_status(

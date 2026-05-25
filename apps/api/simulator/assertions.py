@@ -12,7 +12,7 @@ Las assertions vienen del JSONB `simulation_scenarios.assertions`. Tipos:
     response_not_contains: list[str] — substrings ausentes del msg final     (crítica)
     outcome_is:           str        — resolved|escalated|abandoned|errored   (crítica)
     max_turns:            int        — turns_count <= N                       (no crítica)
-    must_escalate:        bool       — el run terminó en escalación           (crítica)
+    must_escalate:        bool       — True: debe escalar; False: NO debe escalar (crítica)
     must_have_pending_approval: bool — quedó pending_approval (gate L3)        (crítica)
 """
 
@@ -56,7 +56,14 @@ def check_assertions(
 ) -> list[AssertionResult]:
     """Evalúa todas las assertions del scenario. Retorna un resultado por cada una."""
     results: list[AssertionResult] = []
-    successful_slugs = {e.skill_slug for e in skill_log if e.status == "success"}
+    # Para skills L3 con pending_approval, el status es "rejected_by_permissions"
+    # con error_message="awaiting_human_approval". Se considera "invocada" a efectos
+    # de testing — el gate de aprobación es el comportamiento esperado.
+    successful_slugs = {
+        e.skill_slug
+        for e in skill_log
+        if e.status == "success" or e.error_message == "awaiting_human_approval"
+    }
     all_called_slugs = {e.skill_slug for e in skill_log}
     msg_lower = last_agent_message.lower()
 
@@ -129,13 +136,21 @@ def check_assertions(
             )
         )
 
-    if assertions.get("must_escalate") is True:
-        ok = (termination_reason in _ESCALATED_REASONS) or pending_approval_present
+    if "must_escalate" in assertions:
+        escalated = (termination_reason in _ESCALATED_REASONS) or pending_approval_present
+        if assertions["must_escalate"] is True:
+            ok = escalated
+        else:
+            # must_escalate: False → el agente NO debe escalar.
+            ok = not escalated
         results.append(
             AssertionResult(
                 key="must_escalate",
                 passed=ok,
-                evidence=f"term={termination_reason} pending_approval={pending_approval_present}",
+                evidence=(
+                    f"esperado_escala={assertions['must_escalate']} "
+                    f"term={termination_reason} pending_approval={pending_approval_present}"
+                ),
                 is_critical=True,
             )
         )

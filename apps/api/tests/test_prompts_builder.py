@@ -55,6 +55,16 @@ class TestBuildSystemPrompt:
         assert "Contexto relevante de la base de conocimiento" in out
         assert "NO inventes" in out  # warning sobre no alucinar
 
+    def test_current_date_injected(self) -> None:
+        base = "Eres el agente de Acme."
+        out = build_system_prompt(base, [], current_date="2026-05-25")
+        assert "Fecha actual: 2026-05-25" in out
+        assert base in out
+
+    def test_current_date_none_no_injection(self) -> None:
+        base = "Eres el agente de Acme."
+        assert build_system_prompt(base, [], current_date=None) == base
+
 
 class TestBuildMessageHistory:
     def test_maps_customer_to_user(self) -> None:

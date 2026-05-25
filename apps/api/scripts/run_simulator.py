@@ -38,16 +38,29 @@ CHECKPOINT_SCENARIOS = {"CE-01", "RE-01"}
 CHECKPOINT_JUDGE_MIN = 7.0
 
 
-def _meets_checkpoint(run) -> bool:
+def _critical_assertions_pass(run) -> bool:
+    """True si todas las assertions críticas del run pasan."""
+    for a in run.assertions_results or []:
+        if a.get("is_critical") and not a.get("passed"):
+            return False
+    return True
+
+
+def _meets_checkpoint(run, *, require_judge: bool = True) -> bool:
     """True si el run cumple la barra del checkpoint: judge ≥ 7 y todas las
-    assertions críticas pasan."""
+    assertions críticas pasan.
+
+    Con require_judge=False (modo --no-judge para cazar bugs), solo se exige que
+    pasen las assertions críticas — el judge no corre.
+    """
+    if not _critical_assertions_pass(run):
+        return False
+    if not require_judge:
+        return True
     if not run.judge_eval:
         return False
     if float(run.judge_eval.get("overall_score", 0)) < CHECKPOINT_JUDGE_MIN:
         return False
-    for a in run.assertions_results or []:
-        if a.get("is_critical") and not a.get("passed"):
-            return False
     return True
 
 
@@ -56,6 +69,8 @@ async def main(
     *,
     scenario_name: str | None,
     run_all: bool,
+    no_judge: bool,
+    reseed: bool,
 ) -> int:
     import apps.api.skills  # noqa: F401 — registra skills
     from apps.api.agents.dependencies import AgentDependencies
@@ -91,8 +106,13 @@ async def main(
         # Seed scenarios si no existen
         logger.info("Haciendo seed de scenarios para tenant=%s ...", tenant_id)
         async with tenant_scope(tenant_id) as conn:
-            seed_result = await seed_scenarios(conn, tenant_id)
-            logger.info("Seed: %s profiles, %s scenarios creados", seed_result["profiles"], seed_result["scenarios"])
+            seed_result = await seed_scenarios(conn, tenant_id, reseed=reseed)
+            logger.info(
+                "Seed: %s profiles, %s scenarios creados, %s actualizados",
+                seed_result["profiles"],
+                seed_result["scenarios"],
+                seed_result.get("updated", 0),
+            )
 
             # Obtener scenarios a correr
             all_scenarios = await list_simulation_scenarios(conn, tenant_id)
@@ -138,6 +158,7 @@ async def main(
                     tenant_id,
                     anthropic=anthropic,
                     graph=graph,
+                    skip_judge=no_judge,
                 )
                 # Obtener resultado
                 from apps.api.db.queries import get_simulation_run
@@ -166,7 +187,7 @@ async def main(
                     cost = run.cost_cents or 0
                     print(f"  Costo: ${cost / 100:.4f}")
 
-                    if _meets_checkpoint(run):
+                    if _meets_checkpoint(run, require_judge=not no_judge):
                         passed += 1
                     else:
                         failed += 1
@@ -179,14 +200,17 @@ async def main(
                 failed += 1
 
         print("\n" + "=" * 70)
-        print(f"RESUMEN: {passed}/{len(targets)} cumplen checkpoint | {failed} no")
+        bar = "assertions críticas" if no_judge else f"judge ≥ {CHECKPOINT_JUDGE_MIN:.0f} + assertions críticas"
+        print(f"RESUMEN: {passed}/{len(targets)} cumplen ({bar}) | {failed} no")
+        if no_judge:
+            print("⚠️  Modo --no-judge: el judge NO corrió. Corrida final lo requiere.")
 
         # Checkpoint mínimo (design doc §16): judge ≥ 7 + assertions críticas OK
         if not run_all and not scenario_name:
             checkpoint_passed = sum(
                 1 for name, run in results
                 if any(name.startswith(cid) for cid in CHECKPOINT_SCENARIOS)
-                and _meets_checkpoint(run)
+                and _meets_checkpoint(run, require_judge=not no_judge)
             )
             print(
                 f"\nCheckpoint 0.10: {checkpoint_passed}/{len(CHECKPOINT_SCENARIOS)} "
@@ -219,6 +243,16 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Correr todos los scenarios del tenant",
     )
+    parser.add_argument(
+        "--no-judge",
+        action="store_true",
+        help="Salta el judge (Opus) — solo evalúa assertions. Para cazar bugs rápido.",
+    )
+    parser.add_argument(
+        "--reseed",
+        action="store_true",
+        help="Actualiza mock_fixtures/assertions de los scenarios que ya existen en DB.",
+    )
     return parser.parse_args()
 
 
@@ -230,5 +264,13 @@ if __name__ == "__main__":
         print(f"Error: '{args.tenant}' no es un UUID válido.", file=sys.stderr)
         sys.exit(1)
 
-    exit_code = asyncio.run(main(tenant_uuid, scenario_name=args.scenario, run_all=args.all))
+    exit_code = asyncio.run(
+        main(
+            tenant_uuid,
+            scenario_name=args.scenario,
+            run_all=args.all,
+            no_judge=args.no_judge,
+            reseed=args.reseed,
+        )
+    )
     sys.exit(exit_code)
