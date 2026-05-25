@@ -61,6 +61,9 @@ def compile_aop(
     aop: AopWithContent,
     tenant_config: TenantConfiguration,
     kb_chunks: list[KnowledgeChunk] | None = None,
+    *,
+    tenant_playbook: dict | None = None,
+    tenant_facts: dict | None = None,
 ) -> CompiledAOP:
     """Compila un AOP a system prompt + tool definitions para Claude.
 
@@ -75,6 +78,8 @@ def compile_aop(
 
     blocks = [
         _render_tenant_identity(tenant_config),
+        _render_tenant_facts(tenant_facts or {}),
+        _render_tenant_playbook(tenant_playbook or {}),
         _render_aop_procedure(aop.body_markdown, fm),
         _render_steps(steps),
         _render_guardrails(fm.get("guardrails", [])),
@@ -251,6 +256,49 @@ def _render_steps(steps: list[AopStep]) -> str:
             line += f" — {step.decision_point}"
         lines.append(line)
     return "\n".join(lines)
+
+
+_FACTS_LABEL_MAP: dict[str, str] = {
+    "business_hours": "Horario de atención",
+    "support_email": "Email de soporte",
+    "support_phone": "Teléfono de soporte",
+    "website_url": "Web",
+    "return_window_days": "Ventana de devoluciones (días)",
+    "return_policy_url": "Política de devoluciones",
+    "shipping_info": "Información de envíos",
+}
+
+
+def _render_tenant_facts(facts: dict[str, Any]) -> str:
+    if not facts:
+        return ""
+    lines = []
+    for key, value in facts.items():
+        if value is None or value == "":
+            continue
+        label = _FACTS_LABEL_MAP.get(key, key.replace("_", " ").capitalize())
+        lines.append(f"- **{label}:** {value}")
+    if not lines:
+        return ""
+    return "## Datos del cliente\n\n" + "\n".join(lines)
+
+
+def _render_tenant_playbook(playbook: dict[str, Any]) -> str:
+    sections = [
+        ("brand_voice", "Voz de la Marca"),
+        ("product_overview", "Productos y Servicios"),
+        ("policies", "Políticas"),
+        ("escalation_notes", "Notas de Escalación"),
+        ("agent_instructions", "Instrucciones Específicas del Agente"),
+    ]
+    parts = []
+    for key, title in sections:
+        content = (playbook.get(key) or "").strip()
+        if content:
+            parts.append(f"### {title}\n\n{content}")
+    if not parts:
+        return ""
+    return "## Conocimiento de la Marca\n\n" + "\n\n".join(parts)
 
 
 def _resolve_tool_definitions(allowed_slugs: list[str]) -> list[dict[str, Any]]:

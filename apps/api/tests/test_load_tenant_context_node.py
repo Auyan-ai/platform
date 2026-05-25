@@ -29,6 +29,8 @@ def _patch_module(
     system_prompt,
     commerce_integration=None,
     commerce_encrypted=None,
+    playbook=None,
+    facts=None,
 ) -> None:
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
     monkeypatch.setattr(f"{MODULE}.get_tenant_by_id", AsyncMock(return_value=tenant))
@@ -36,9 +38,9 @@ def _patch_module(
     monkeypatch.setattr(
         f"{MODULE}.get_active_system_prompt", AsyncMock(return_value=system_prompt)
     )
-    monkeypatch.setattr(
-        f"{MODULE}.list_tool_permissions", AsyncMock(return_value=[])
-    )
+    monkeypatch.setattr(f"{MODULE}.list_tool_permissions", AsyncMock(return_value=[]))
+    monkeypatch.setattr(f"{MODULE}.get_tenant_playbook", AsyncMock(return_value=playbook))
+    monkeypatch.setattr(f"{MODULE}.get_tenant_facts", AsyncMock(return_value=facts))
     monkeypatch.setattr(
         f"{MODULE}.get_primary_integration_for_kind",
         AsyncMock(return_value=commerce_integration),
@@ -343,3 +345,57 @@ async def test_decrypt_failure_falls_back_to_extra(fake_deps, monkeypatch) -> No
     ctx = out["commerce_integration_ctx"]
     assert ctx is not None
     assert ctx["credentials"]["domain"] == "fallback.myshopify.com"
+
+
+# ---------------------------------------------------------------------------
+# tenant_playbook + tenant_facts — cargados por load_tenant_context
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_playbook_and_facts_loaded_when_present(fake_deps, monkeypatch) -> None:
+    from uuid import UUID
+
+    from apps.api.db.models import TenantFacts, TenantPlaybook
+
+    playbook = TenantPlaybook(
+        tenant_id=TENANT_ID,
+        brand_voice="Amigable y cercano",
+        policies="30 días para devoluciones",
+    )
+    facts = TenantFacts(
+        tenant_id=TENANT_ID,
+        data={"business_hours": "L-V 9-18", "support_email": "hola@tienda.com"},
+    )
+    _patch_module(
+        monkeypatch,
+        tenant=make_tenant(),
+        config=make_tenant_configuration(),
+        system_prompt="ok",
+        playbook=playbook,
+        facts=facts,
+    )
+    node = make_load_tenant_context_node(fake_deps)
+    out = await node(_state())
+
+    assert out["tenant_playbook"]["brand_voice"] == "Amigable y cercano"
+    assert out["tenant_playbook"]["policies"] == "30 días para devoluciones"
+    assert out["tenant_facts"] == {"business_hours": "L-V 9-18", "support_email": "hola@tienda.com"}
+
+
+@pytest.mark.asyncio
+async def test_playbook_and_facts_none_when_not_configured(fake_deps, monkeypatch) -> None:
+    """Tenant recién creado sin onboarding: playbook y facts son None."""
+    _patch_module(
+        monkeypatch,
+        tenant=make_tenant(),
+        config=make_tenant_configuration(),
+        system_prompt="ok",
+        playbook=None,
+        facts=None,
+    )
+    node = make_load_tenant_context_node(fake_deps)
+    out = await node(_state())
+
+    assert out["tenant_playbook"] is None
+    assert out["tenant_facts"] is None

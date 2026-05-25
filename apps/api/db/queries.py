@@ -51,7 +51,9 @@ from apps.api.db.models import (
     Tenant,
     TenantAssignment,
     TenantConfiguration,
+    TenantFacts,
     TenantIntegration,
+    TenantPlaybook,
     TenantToolPermission,
     TenantUsageDaily,
     TerminationReason,
@@ -3150,3 +3152,131 @@ async def get_global_sim_cost_cents_today(conn: asyncpg.Connection) -> float:
         """
     )
     return float(row["total"]) if row else 0.0
+
+
+# ============================================================
+# Tenant Playbook (Bloque 1, Sub-PR 1.1)
+# ============================================================
+
+
+async def get_tenant_playbook(
+    conn: asyncpg.Connection, tenant_id: UUID
+) -> TenantPlaybook | None:
+    row = await conn.fetchrow(
+        "SELECT * FROM tenant_playbook WHERE tenant_id = $1",
+        tenant_id,
+    )
+    return TenantPlaybook(**dict(row)) if row else None
+
+
+async def upsert_tenant_playbook(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    brand_voice: str = "",
+    product_overview: str = "",
+    policies: str = "",
+    escalation_notes: str = "",
+    agent_instructions: str = "",
+    edited_by: UUID | None = None,
+) -> TenantPlaybook:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO tenant_playbook
+          (tenant_id, brand_voice, product_overview, policies,
+           escalation_notes, agent_instructions, last_edited_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (tenant_id) DO UPDATE SET
+          brand_voice        = EXCLUDED.brand_voice,
+          product_overview   = EXCLUDED.product_overview,
+          policies           = EXCLUDED.policies,
+          escalation_notes   = EXCLUDED.escalation_notes,
+          agent_instructions = EXCLUDED.agent_instructions,
+          last_edited_by     = EXCLUDED.last_edited_by,
+          version            = tenant_playbook.version + 1
+        RETURNING *
+        """,
+        tenant_id,
+        brand_voice,
+        product_overview,
+        policies,
+        escalation_notes,
+        agent_instructions,
+        edited_by,
+    )
+    return TenantPlaybook(**dict(row))
+
+
+async def update_tenant_playbook_section(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    section: str,
+    content: str,
+    edited_by: UUID | None = None,
+) -> TenantPlaybook | None:
+    """Actualiza una sola sección del playbook. `section` debe ser una columna válida."""
+    allowed = {"brand_voice", "product_overview", "policies", "escalation_notes", "agent_instructions"}
+    if section not in allowed:
+        raise ValueError(f"Invalid playbook section: {section!r}. Allowed: {allowed}")
+    row = await conn.fetchrow(
+        f"""
+        UPDATE tenant_playbook
+           SET {section} = $2,
+               last_edited_by = $3,
+               version = version + 1
+         WHERE tenant_id = $1
+         RETURNING *
+        """,  # noqa: S608 — section validated against allowlist above
+        tenant_id,
+        content,
+        edited_by,
+    )
+    return TenantPlaybook(**dict(row)) if row else None
+
+
+# ============================================================
+# Tenant Facts (Bloque 1, Sub-PR 1.2)
+# ============================================================
+
+
+async def get_tenant_facts(
+    conn: asyncpg.Connection, tenant_id: UUID
+) -> TenantFacts | None:
+    row = await conn.fetchrow(
+        "SELECT * FROM tenant_facts WHERE tenant_id = $1",
+        tenant_id,
+    )
+    if not row:
+        return None
+    d = dict(row)
+    # asyncpg devuelve JSONB como str cuando no hay codec registrado
+    if isinstance(d.get("data"), str):
+        import json as _json
+        d["data"] = _json.loads(d["data"])
+    return TenantFacts(**d)
+
+
+async def upsert_tenant_facts(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    data: dict,
+    edited_by: UUID | None = None,
+) -> TenantFacts:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO tenant_facts (tenant_id, data, last_edited_by)
+        VALUES ($1, $2::jsonb, $3)
+        ON CONFLICT (tenant_id) DO UPDATE SET
+          data           = EXCLUDED.data,
+          last_edited_by = EXCLUDED.last_edited_by,
+          version        = tenant_facts.version + 1
+        RETURNING *
+        """,
+        tenant_id,
+        json.dumps(data),
+        edited_by,
+    )
+    d = dict(row)
+    if isinstance(d.get("data"), str):
+        d["data"] = json.loads(d["data"])
+    return TenantFacts(**d)

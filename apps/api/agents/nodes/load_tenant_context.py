@@ -21,6 +21,8 @@ from apps.api.db.queries import (
     get_primary_integration_for_kind,
     get_tenant_by_id,
     get_tenant_configuration,
+    get_tenant_facts,
+    get_tenant_playbook,
     list_tool_permissions,
 )
 from apps.api.services.integrations_crypto import decrypt_credentials, get_integration_crypto_key
@@ -50,6 +52,8 @@ def make_load_tenant_context_node(
                 return {"error": "no_active_system_prompt"}
 
             perm_rows = await list_tool_permissions(conn, tenant_id)
+            playbook = await get_tenant_playbook(conn, tenant_id)
+            facts = await get_tenant_facts(conn, tenant_id)
             commerce_integration = await get_primary_integration_for_kind(
                 conn, tenant_id=tenant_id, kind="commerce"
             )
@@ -107,6 +111,8 @@ def make_load_tenant_context_node(
             "model_used": config.agent_model,
             "tool_permissions": tool_permissions,
             "commerce_integration_ctx": commerce_integration_ctx,
+            "tenant_playbook": playbook.model_dump(mode="json") if playbook else None,
+            "tenant_facts": facts.data if facts else None,
         }
         # Fallback sin AOPs: el tenant puede opt-in a skills vía tenant_config.extra.
         # select_aop (Sprint 7+) sobreescribe estos si el tenant tiene AOPs configurados.

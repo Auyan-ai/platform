@@ -178,7 +178,12 @@ def make_select_aop_node(
                     )
                     return {}
                 tenant_config = TenantConfiguration(**state["tenant_config"])
-                compiled = compile_aop(selected_aop, tenant_config)
+                compiled = compile_aop(
+                    selected_aop,
+                    tenant_config,
+                    tenant_playbook=state.get("tenant_playbook"),
+                    tenant_facts=state.get("tenant_facts"),
+                )
             return {
                 "aop_slug": selected_aop.slug,
                 "aop_version": selected_aop.current_version,
@@ -291,7 +296,12 @@ def make_select_aop_node(
                 return {}
 
             tenant_config = TenantConfiguration(**state["tenant_config"])
-            compiled = compile_aop(selected_aop, tenant_config)
+            compiled = compile_aop(
+                selected_aop,
+                tenant_config,
+                tenant_playbook=state.get("tenant_playbook"),
+                tenant_facts=state.get("tenant_facts"),
+            )
 
             # ── 6. Persistir ejecución del clasificador ──────────────────
             turn_number = _turn_number(state)
