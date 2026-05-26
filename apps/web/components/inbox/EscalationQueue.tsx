@@ -2,8 +2,10 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { cn } from '@/lib/utils'
 import { useEscalations, useClaimMutation, useResolveMutation } from '@/lib/api/hooks/escalations'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { EscalationStatus } from '@auyan/shared'
 import type { components } from '@auyan/shared/api-types'
 
@@ -13,10 +15,10 @@ type EscalationOut = components['schemas']['EscalationOut']
 // Helpers
 // ----------------------------------------------------------------
 
-const STATUS_STYLES: Record<EscalationStatus, string> = {
-  pending: 'bg-yellow-50 text-yellow-700',
-  claimed: 'bg-blue-50 text-blue-700',
-  resolved: 'bg-neutral-100 text-neutral-500',
+const STATUS_VARIANT: Record<EscalationStatus, BadgeProps['variant']> = {
+  pending: 'warning',
+  claimed: 'default',
+  resolved: 'muted',
 }
 
 const STATUS_LABELS: Record<EscalationStatus, string> = {
@@ -65,52 +67,41 @@ function EscalationRow({
   readOnly: boolean
 }) {
   return (
-    <div className="flex items-start gap-3 px-4 py-3 hover:bg-neutral-50 transition-colors">
-      {/* Status badge */}
-      <span
-        className={cn(
-          'mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-xs font-medium',
-          STATUS_STYLES[esc.status],
-        )}
-      >
+    <div className="flex items-start gap-3 px-4 py-3 hover:bg-surface-muted transition-colors">
+      <Badge variant={STATUS_VARIANT[esc.status]} className="mt-0.5">
         {STATUS_LABELS[esc.status]}
-      </span>
+      </Badge>
 
-      {/* Content */}
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-neutral-800 line-clamp-2">{esc.reason}</p>
-        <div className="mt-1 flex items-center gap-2 text-xs text-neutral-400">
+        <p className="text-sm text-foreground-body line-clamp-2">{esc.reason}</p>
+        <div className="mt-1 flex items-center gap-2 text-xs text-foreground-muted">
           <Link
             href={`${conversationBasePath}/${esc.conversation_id}`}
-            className="hover:text-neutral-700 underline underline-offset-2"
+            className="text-accent-foreground hover:underline underline-offset-2"
           >
             Ver conversación
           </Link>
           <span>·</span>
-          <span>{relativeTime(esc.created_at)}</span>
+          <span className="tabular-nums">{relativeTime(esc.created_at)}</span>
         </div>
       </div>
 
-      {/* Actions — ocultos en modo read-only */}
       {!readOnly && (
         <div className="shrink-0 flex gap-2">
           {esc.status === 'pending' && (
-            <button
-              onClick={() => onClaim(esc.id)}
-              disabled={isActing}
-              className="px-3 py-1 rounded-lg bg-neutral-900 text-white text-xs font-medium hover:bg-neutral-700 disabled:opacity-40"
-            >
+            <Button size="sm" onClick={() => onClaim(esc.id)} disabled={isActing}>
               Tomar
-            </button>
+            </Button>
           )}
           {esc.status === 'claimed' && (
-            <button
+            <Button
+              size="sm"
               onClick={() => onResolve(esc.id)}
               disabled={isActing}
-              className="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 disabled:opacity-40"
+              className="bg-success text-foreground-on-accent hover:bg-success-700"
             >
               Resolver
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -175,45 +166,46 @@ export function EscalationQueue({
 
   return (
     <div className="space-y-4">
-      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-neutral-900">Escalaciones</h1>
-        {isLoading && <span className="text-xs text-neutral-400">Actualizando...</span>}
+        <h1 className="text-xl font-semibold text-foreground">Escalaciones</h1>
+        {isLoading && (
+          <span className="text-xs text-foreground-muted">Actualizando…</span>
+        )}
       </div>
 
-      {/* Filtros */}
-      <div className="flex gap-1 border-b border-neutral-200 pb-0">
-        {STATUS_FILTERS.map((s) => (
-          <button
-            key={s}
-            onClick={() => { setActiveStatus(s); setOffset(0) }}
-            className={cn(
-              'px-3 py-2 text-sm font-medium transition-colors -mb-px border-b-2',
-              activeStatus === s
-                ? 'border-neutral-900 text-neutral-900'
-                : 'border-transparent text-neutral-500 hover:text-neutral-700',
-            )}
-          >
-            {FILTER_LABELS[s]}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        value={activeStatus}
+        onValueChange={(v) => {
+          setActiveStatus(v as EscalationStatus | 'all')
+          setOffset(0)
+        }}
+      >
+        <TabsList className="w-full justify-start">
+          {STATUS_FILTERS.map((s) => (
+            <TabsTrigger key={s} value={s}>
+              {FILTER_LABELS[s]}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {error && (
-        <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+        <div className="rounded-md bg-danger-subtle px-4 py-3 text-sm text-danger-foreground">
+          {error}
+        </div>
       )}
 
-      {/* Lista */}
       {isError ? (
-        <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-md bg-danger-subtle px-4 py-3 text-sm text-danger-foreground">
           Error al cargar: {queryError instanceof Error ? queryError.message : 'desconocido'}
         </div>
       ) : escalations.length === 0 && !isLoading ? (
-        <div className="py-12 text-center text-sm text-neutral-400">
-          No hay escalaciones {activeStatus !== 'all' && `con estado "${FILTER_LABELS[activeStatus]}"`}.
+        <div className="py-12 text-center text-sm text-foreground-muted">
+          No hay escalaciones{' '}
+          {activeStatus !== 'all' && `con estado "${FILTER_LABELS[activeStatus]}"`}.
         </div>
       ) : (
-        <div className="divide-y divide-neutral-100 rounded-xl border border-neutral-200 bg-white">
+        <div className="divide-y divide-border-subtle rounded-md border border-border bg-surface">
           {escalations.map((esc) => (
             <EscalationRow
               key={esc.id}
@@ -228,23 +220,24 @@ export function EscalationQueue({
         </div>
       )}
 
-      {/* Paginación */}
       {(offset > 0 || hasMore) && (
         <div className="flex justify-between">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setOffset((o) => Math.max(0, o - LIMIT))}
             disabled={offset === 0}
-            className="text-sm text-neutral-500 hover:text-neutral-900 disabled:opacity-30"
           >
             ← Anterior
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setOffset((o) => o + LIMIT)}
             disabled={!hasMore}
-            className="text-sm text-neutral-500 hover:text-neutral-900 disabled:opacity-30"
           >
             Siguiente →
-          </button>
+          </Button>
         </div>
       )}
     </div>

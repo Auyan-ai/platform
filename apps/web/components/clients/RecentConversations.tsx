@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { useConversations } from '@/lib/api/hooks/conversations'
-import { cn } from '@/lib/utils'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
 import type { ConversationStatus, ChannelType } from '@auyan/shared'
 
 const STATUS_LABELS: Record<ConversationStatus, string> = {
@@ -13,12 +14,12 @@ const STATUS_LABELS: Record<ConversationStatus, string> = {
   closed: 'Cerrada',
 }
 
-const STATUS_STYLES: Record<ConversationStatus, string> = {
-  open: 'bg-green-50 text-green-700',
-  pending: 'bg-yellow-50 text-yellow-700',
-  escalated: 'bg-red-50 text-red-700',
-  resolved: 'bg-blue-50 text-blue-700',
-  closed: 'bg-neutral-100 text-neutral-500',
+const STATUS_VARIANT: Record<ConversationStatus, BadgeProps['variant']> = {
+  open: 'default',
+  pending: 'warning',
+  escalated: 'danger',
+  resolved: 'success',
+  closed: 'muted',
 }
 
 const CHANNEL_LABELS: Record<ChannelType, string> = {
@@ -55,7 +56,7 @@ export function RecentConversations({ tenantId }: RecentConversationsProps) {
     return (
       <div className="space-y-2">
         {[...Array(5)].map((_, i) => (
-          <div key={i} className="h-12 animate-pulse rounded-lg bg-neutral-100" />
+          <Skeleton key={i} className="h-12" />
         ))}
       </div>
     )
@@ -63,7 +64,7 @@ export function RecentConversations({ tenantId }: RecentConversationsProps) {
 
   if (isError) {
     return (
-      <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="rounded-md bg-danger-subtle px-4 py-3 text-sm text-danger-foreground">
         No se pudieron cargar las conversaciones recientes.
       </div>
     )
@@ -71,35 +72,30 @@ export function RecentConversations({ tenantId }: RecentConversationsProps) {
 
   if (conversations.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-neutral-400">
+      <p className="py-8 text-center text-sm text-foreground-muted">
         No hay conversaciones aún.
       </p>
     )
   }
 
   return (
-    <div className="divide-y divide-neutral-100 rounded-xl border border-neutral-200 bg-white">
+    <div className="divide-y divide-border-subtle rounded-md border border-border bg-surface">
       {conversations.map((conv) => (
         <Link
           key={conv.id}
           href={`/clients/${tenantId}/conversations/${conv.id}`}
-          className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-neutral-50"
+          className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-muted"
         >
-          <span
-            className={cn(
-              'shrink-0 rounded-full px-2 py-0.5 text-xs font-medium',
-              STATUS_STYLES[conv.status],
-            )}
-          >
+          <Badge variant={STATUS_VARIANT[conv.status]}>
             {STATUS_LABELS[conv.status]}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-800">
+          </Badge>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground-body">
             {conv.subject ?? `Conversación ${conv.id.slice(0, 8)}`}
           </span>
-          <span className="shrink-0 text-xs text-neutral-400">
+          <span className="shrink-0 text-xs text-foreground-muted">
             {CHANNEL_LABELS[conv.channel]}
           </span>
-          <span className="shrink-0 text-xs text-neutral-400">
+          <span className="shrink-0 text-xs text-foreground-muted tabular-nums">
             {relativeTime(conv.last_message_at)}
           </span>
         </Link>

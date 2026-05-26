@@ -1,6 +1,8 @@
 'use client'
 
 import { useProposalMetrics } from '@/lib/api/hooks/proposals'
+import { Card } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
 
 interface ProposalMetricsProps {
   tenantId: string
@@ -13,10 +15,10 @@ export function ProposalMetrics({ tenantId }: ProposalMetricsProps) {
     return (
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="rounded-xl border border-neutral-200 bg-white p-4 animate-pulse">
-            <div className="h-3 w-20 bg-neutral-100 rounded mb-2" />
-            <div className="h-6 w-12 bg-neutral-100 rounded" />
-          </div>
+          <Card key={i} className="p-4 space-y-2">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-6 w-12" />
+          </Card>
         ))}
       </div>
     )
@@ -26,7 +28,7 @@ export function ProposalMetrics({ tenantId }: ProposalMetricsProps) {
     {
       label: 'Pendientes',
       value: data.pending,
-      color: 'text-amber-600',
+      tone: 'text-warning-foreground',
     },
     {
       label: 'Aceptación',
@@ -34,12 +36,12 @@ export function ProposalMetrics({ tenantId }: ProposalMetricsProps) {
         data.acceptance_rate !== null
           ? `${(data.acceptance_rate * 100).toFixed(0)}%`
           : '—',
-      color: 'text-emerald-600',
+      tone: 'text-success-foreground',
     },
     {
       label: 'Costo total',
       value: `$${data.cost_usd_total.toFixed(3)}`,
-      color: 'text-neutral-700',
+      tone: 'text-foreground',
     },
     {
       label: 'Costo / aprobada',
@@ -47,20 +49,17 @@ export function ProposalMetrics({ tenantId }: ProposalMetricsProps) {
         data.cost_per_accepted_proposal !== null
           ? `$${data.cost_per_accepted_proposal.toFixed(3)}`
           : '—',
-      color: 'text-neutral-700',
+      tone: 'text-foreground',
     },
   ]
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      {stats.map(({ label, value, color }) => (
-        <div
-          key={label}
-          className="rounded-xl border border-neutral-200 bg-white p-4"
-        >
-          <p className="text-xs text-neutral-500 mb-1">{label}</p>
-          <p className={`text-xl font-semibold tabular-nums ${color}`}>{value}</p>
-        </div>
+      {stats.map(({ label, value, tone }) => (
+        <Card key={label} className="p-4">
+          <p className="text-xs text-foreground-muted mb-1">{label}</p>
+          <p className={`text-xl font-semibold tabular-nums ${tone}`}>{value}</p>
+        </Card>
       ))}
     </div>
   )

@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { LogOut } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
 interface LogoutButtonProps {
@@ -21,9 +22,9 @@ export function LogoutButton({ email }: LogoutButtonProps) {
   }
 
   return (
-    <div className="border-t border-neutral-100 p-3">
+    <div className="border-t border-border-subtle p-3">
       {email && (
-        <p className="mb-2 truncate px-2 text-xs text-neutral-500" title={email}>
+        <p className="mb-2 truncate px-2 text-xs text-foreground-muted" title={email}>
           {email}
         </p>
       )}
@@ -31,10 +32,10 @@ export function LogoutButton({ email }: LogoutButtonProps) {
         type="button"
         onClick={handleLogout}
         disabled={loading}
-        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex w-full items-center gap-2.5 rounded-sm px-2 py-1.5 text-sm text-foreground-body transition-colors hover:bg-surface-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
       >
-        <span>↩︎</span>
-        <span>{loading ? 'Cerrando...' : 'Cerrar sesión'}</span>
+        <LogOut className="size-4 shrink-0" />
+        <span>{loading ? 'Cerrando…' : 'Cerrar sesión'}</span>
       </button>
     </div>
   )

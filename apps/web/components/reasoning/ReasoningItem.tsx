@@ -11,9 +11,9 @@ type Props = {
 }
 
 function StatusIcon({ status }: { status: ReasoningEvent['status'] }) {
-  if (status === 'done') return <Check className="h-3.5 w-3.5 text-green-500" />
-  if (status === 'error') return <X className="h-3.5 w-3.5 text-destructive" />
-  return <Clock className="h-3.5 w-3.5 animate-pulse text-muted-foreground" />
+  if (status === 'done') return <Check className="h-3.5 w-3.5 text-success" />
+  if (status === 'error') return <X className="h-3.5 w-3.5 text-danger" />
+  return <Clock className="h-3.5 w-3.5 animate-pulse text-foreground-muted" />
 }
 
 export function ReasoningItem({ event, maskPII }: Props) {

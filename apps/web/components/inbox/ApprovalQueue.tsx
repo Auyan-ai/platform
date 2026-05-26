@@ -2,22 +2,34 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { cn } from '@/lib/utils'
 import {
   useApprovals,
   useApproveMutation,
   useRejectMutation,
 } from '@/lib/api/hooks/approvals'
 import type { ApprovalStatus, ApprovalOut } from '@/lib/api/hooks/approvals'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 // ----------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------
 
-const STATUS_STYLES: Record<ApprovalStatus, string> = {
-  pending: 'bg-amber-50 text-amber-700',
-  approved: 'bg-green-50 text-green-700',
-  rejected: 'bg-red-50 text-red-700',
+const STATUS_VARIANT: Record<ApprovalStatus, BadgeProps['variant']> = {
+  pending: 'warning',
+  approved: 'success',
+  rejected: 'danger',
 }
 
 const STATUS_LABELS: Record<ApprovalStatus, string> = {
@@ -53,49 +65,53 @@ function formatInputs(inputs: Record<string, unknown>): string {
 }
 
 // ----------------------------------------------------------------
-// Reject modal
+// Reject dialog
 // ----------------------------------------------------------------
 
-function RejectModal({
+function RejectDialog({
+  open,
+  onOpenChange,
   onConfirm,
-  onCancel,
   isPending,
 }: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
   onConfirm: (comment: string) => void
-  onCancel: () => void
   isPending: boolean
 }) {
   const [comment, setComment] = useState('')
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-        <h2 className="text-base font-semibold text-neutral-900">Rechazar acción</h2>
-        <p className="mt-1 text-sm text-neutral-500">Indica el motivo del rechazo.</p>
-        <textarea
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          placeholder="Motivo del rechazo..."
-          rows={3}
-          className="mt-3 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-neutral-900"
-        />
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            onClick={onCancel}
-            disabled={isPending}
-            className="rounded-lg px-4 py-2 text-sm text-neutral-600 hover:bg-neutral-100 disabled:opacity-40"
-          >
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Rechazar acción</DialogTitle>
+          <DialogDescription>Indica el motivo del rechazo.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Label htmlFor="reject-reason">Motivo</Label>
+          <Textarea
+            id="reject-reason"
+            autoFocus
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Motivo del rechazo…"
+            rows={3}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isPending}>
             Cancelar
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="destructive"
             onClick={() => comment.trim() && onConfirm(comment.trim())}
             disabled={isPending || !comment.trim()}
-            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-40"
           >
-            {isPending ? 'Rechazando...' : 'Rechazar'}
-          </button>
-        </div>
-      </div>
-    </div>
+            {isPending ? 'Rechazando…' : 'Rechazar'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -118,60 +134,50 @@ function ApprovalRow({
 }) {
   const isPending = approval.status === 'pending'
   return (
-    <div className="px-4 py-3 hover:bg-neutral-50 transition-colors">
+    <div className="px-4 py-3 hover:bg-surface-muted transition-colors">
       <div className="flex items-start gap-3">
-        {/* Status badge */}
-        <span
-          className={cn(
-            'mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-xs font-medium',
-            STATUS_STYLES[approval.status],
-          )}
-        >
+        <Badge variant={STATUS_VARIANT[approval.status]} className="mt-0.5">
           {STATUS_LABELS[approval.status]}
-        </span>
+        </Badge>
 
-        {/* Content */}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-neutral-800">{approval.skill_slug}</p>
-          <p className="mt-0.5 text-xs text-neutral-500 truncate">
+          <p className="text-sm font-medium text-foreground-body">{approval.skill_slug}</p>
+          <p className="mt-0.5 text-xs text-foreground-muted truncate">
             {formatInputs(approval.inputs_redacted)}
           </p>
-          <div className="mt-1 flex items-center gap-2 text-xs text-neutral-400">
+          <div className="mt-1 flex items-center gap-2 text-xs text-foreground-muted">
             <Link
               href={`/tenants/${tenantId}/conversations/${approval.conversation_id}`}
-              className="hover:text-neutral-700 underline underline-offset-2"
+              className="text-accent-foreground hover:underline underline-offset-2"
             >
               Ver conversación
             </Link>
             <span>·</span>
             <span>AOP: {approval.aop_slug} v{approval.aop_version}</span>
             <span>·</span>
-            <span>{relativeTime(approval.created_at)}</span>
+            <span className="tabular-nums">{relativeTime(approval.created_at)}</span>
           </div>
           {approval.review_comment && (
-            <p className="mt-1 text-xs text-neutral-400 italic">
+            <p className="mt-1 text-xs text-foreground-muted italic">
               &ldquo;{approval.review_comment}&rdquo;
             </p>
           )}
         </div>
 
-        {/* Actions */}
         {isPending && (
           <div className="shrink-0 flex gap-2">
-            <button
-              onClick={() => onApprove(approval.id)}
-              disabled={isActing}
-              className="px-3 py-1 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 disabled:opacity-40"
-            >
+            <Button size="sm" onClick={() => onApprove(approval.id)} disabled={isActing}>
               Aprobar
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => onReject(approval.id)}
               disabled={isActing}
-              className="px-3 py-1 rounded-lg bg-red-100 text-red-700 text-xs font-medium hover:bg-red-200 disabled:opacity-40"
+              className="border-danger-subtle text-danger-foreground hover:bg-danger-subtle"
             >
               Rechazar
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -229,56 +235,55 @@ export function ApprovalQueue({ tenantId }: { tenantId: string }) {
 
   return (
     <>
-      {rejectingId && (
-        <RejectModal
-          onConfirm={handleRejectConfirm}
-          onCancel={() => setRejectingId(null)}
-          isPending={rejectMutation.isPending}
-        />
-      )}
+      <RejectDialog
+        open={!!rejectingId}
+        onOpenChange={(v) => !v && setRejectingId(null)}
+        onConfirm={handleRejectConfirm}
+        isPending={rejectMutation.isPending}
+      />
 
       <div className="space-y-4">
-        {/* Header */}
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-neutral-900">Aprobaciones</h1>
-          {isLoading && <span className="text-xs text-neutral-400">Actualizando...</span>}
+          <h1 className="text-xl font-semibold text-foreground">Aprobaciones</h1>
+          {isLoading && (
+            <span className="text-xs text-foreground-muted">Actualizando…</span>
+          )}
         </div>
 
-        {/* Filters */}
-        <div className="flex gap-1 border-b border-neutral-200 pb-0">
-          {STATUS_FILTERS.map((s) => (
-            <button
-              key={s}
-              onClick={() => { setActiveStatus(s); setOffset(0) }}
-              className={cn(
-                'px-3 py-2 text-sm font-medium transition-colors -mb-px border-b-2',
-                activeStatus === s
-                  ? 'border-neutral-900 text-neutral-900'
-                  : 'border-transparent text-neutral-500 hover:text-neutral-700',
-              )}
-            >
-              {FILTER_LABELS[s]}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          value={activeStatus}
+          onValueChange={(v) => {
+            setActiveStatus(v as ApprovalStatus | 'all')
+            setOffset(0)
+          }}
+        >
+          <TabsList className="w-full justify-start">
+            {STATUS_FILTERS.map((s) => (
+              <TabsTrigger key={s} value={s}>
+                {FILTER_LABELS[s]}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
 
         {actionError && (
-          <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{actionError}</div>
+          <div className="rounded-md bg-danger-subtle px-4 py-3 text-sm text-danger-foreground">
+            {actionError}
+          </div>
         )}
 
-        {/* List */}
         {isError ? (
-          <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+          <div className="rounded-md bg-danger-subtle px-4 py-3 text-sm text-danger-foreground">
             Error al cargar:{' '}
             {queryError instanceof Error ? queryError.message : 'desconocido'}
           </div>
         ) : approvals.length === 0 && !isLoading ? (
-          <div className="py-12 text-center text-sm text-neutral-400">
+          <div className="py-12 text-center text-sm text-foreground-muted">
             No hay aprobaciones{' '}
             {activeStatus !== 'all' && `con estado "${FILTER_LABELS[activeStatus]}"`}.
           </div>
         ) : (
-          <div className="divide-y divide-neutral-100 rounded-xl border border-neutral-200 bg-white">
+          <div className="divide-y divide-border-subtle rounded-md border border-border bg-surface">
             {approvals.map((a) => (
               <ApprovalRow
                 key={a.id}
@@ -292,23 +297,24 @@ export function ApprovalQueue({ tenantId }: { tenantId: string }) {
           </div>
         )}
 
-        {/* Pagination */}
         {(offset > 0 || hasMore) && (
           <div className="flex justify-between">
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setOffset((o) => Math.max(0, o - LIMIT))}
               disabled={offset === 0}
-              className="text-sm text-neutral-500 hover:text-neutral-900 disabled:opacity-30"
             >
               ← Anterior
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setOffset((o) => o + LIMIT)}
               disabled={!hasMore}
-              className="text-sm text-neutral-500 hover:text-neutral-900 disabled:opacity-30"
             >
               Siguiente →
-            </button>
+            </Button>
           </div>
         )}
       </div>

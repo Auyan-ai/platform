@@ -1,6 +1,8 @@
 'use client'
 
-import { useMetrics, type TenantMetrics } from '@/lib/api/hooks/metrics'
+import { useMetrics } from '@/lib/api/hooks/metrics'
+import { Card } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
 
 interface MetricsCardsProps {
   tenantId: string
@@ -10,16 +12,25 @@ interface StatCardProps {
   label: string
   value: number | string
   sub?: string
-  accent?: string
+  tone?: 'default' | 'accent' | 'danger' | 'success'
 }
 
-function StatCard({ label, value, sub, accent = 'text-neutral-900' }: StatCardProps) {
+const TONE_CLASS: Record<NonNullable<StatCardProps['tone']>, string> = {
+  default: 'text-foreground',
+  accent: 'text-accent-foreground',
+  danger: 'text-danger-foreground',
+  success: 'text-success-foreground',
+}
+
+function StatCard({ label, value, sub, tone = 'default' }: StatCardProps) {
   return (
-    <div className="rounded-xl border border-neutral-200 bg-white p-5">
-      <p className="text-xs font-medium uppercase tracking-wider text-neutral-400">{label}</p>
-      <p className={`mt-2 text-3xl font-semibold ${accent}`}>{value}</p>
-      {sub && <p className="mt-1 text-xs text-neutral-400">{sub}</p>}
-    </div>
+    <Card className="p-(--density-card-p)">
+      <p className="text-xs font-medium uppercase tracking-wider text-foreground-muted">
+        {label}
+      </p>
+      <p className={`mt-2 text-3xl font-semibold ${TONE_CLASS[tone]}`}>{value}</p>
+      {sub && <p className="mt-1 text-xs text-foreground-muted">{sub}</p>}
+    </Card>
   )
 }
 
@@ -30,7 +41,7 @@ export function MetricsCards({ tenantId }: MetricsCardsProps) {
     return (
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="h-28 animate-pulse rounded-xl bg-neutral-100" />
+          <Skeleton key={i} className="h-28" />
         ))}
       </div>
     )
@@ -38,7 +49,7 @@ export function MetricsCards({ tenantId }: MetricsCardsProps) {
 
   if (isError || !data) {
     return (
-      <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="rounded-md bg-danger-subtle px-4 py-3 text-sm text-danger-foreground">
         No se pudieron cargar las métricas.
       </div>
     )
@@ -51,50 +62,54 @@ export function MetricsCards({ tenantId }: MetricsCardsProps) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard
-          label="Total tickets"
-          value={data.total}
-          sub="histórico"
-        />
+        <StatCard label="Total tickets" value={data.total} sub="histórico" />
         <StatCard
           label="Activas"
           value={openAndPending}
           sub={`${data.by_status.open} abiertas · ${data.by_status.pending} pendientes`}
-          accent="text-green-700"
+          tone="success"
         />
         <StatCard
           label="Escaladas"
           value={data.by_status.escalated}
           sub="requieren atención humana"
-          accent={data.by_status.escalated > 0 ? 'text-red-600' : 'text-neutral-900'}
+          tone={data.by_status.escalated > 0 ? 'danger' : 'default'}
         />
         <StatCard
           label="Resueltas + cerradas"
           value={data.by_status.resolved + data.by_status.closed}
           sub="histórico"
-          accent="text-blue-700"
+          tone="accent"
         />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white px-5 py-4">
+        <Card className="flex items-center gap-3 px-5 py-4">
           <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-neutral-400">
+            <p className="text-xs font-medium uppercase tracking-wider text-foreground-muted">
               Tasa de resolución
             </p>
-            <p className="mt-1 text-2xl font-semibold text-blue-700">{resolutionPct}</p>
+            <p className="mt-1 text-2xl font-semibold text-accent-foreground">
+              {resolutionPct}
+            </p>
           </div>
-        </div>
-        <div className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-white px-5 py-4">
+        </Card>
+        <Card className="flex items-center gap-3 px-5 py-4">
           <div>
-            <p className="text-xs font-medium uppercase tracking-wider text-neutral-400">
+            <p className="text-xs font-medium uppercase tracking-wider text-foreground-muted">
               Tasa de escalación
             </p>
-            <p className={`mt-1 text-2xl font-semibold ${data.escalation_rate > 0.1 ? 'text-red-600' : 'text-neutral-900'}`}>
+            <p
+              className={`mt-1 text-2xl font-semibold ${
+                data.escalation_rate > 0.1
+                  ? 'text-danger-foreground'
+                  : 'text-foreground'
+              }`}
+            >
               {escalationPct}
             </p>
           </div>
-        </div>
+        </Card>
       </div>
     </div>
   )

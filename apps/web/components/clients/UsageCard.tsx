@@ -1,6 +1,8 @@
 'use client'
 
 import { useUsage } from '@/lib/api/hooks/usage'
+import { Card } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
 
 interface UsageCardProps {
   tenantId: string
@@ -20,12 +22,12 @@ export function UsageCard({ tenantId }: UsageCardProps) {
   const { data, isLoading, isError } = useUsage(tenantId)
 
   if (isLoading) {
-    return <div className="h-36 animate-pulse rounded-xl bg-neutral-100" />
+    return <Skeleton className="h-36" />
   }
 
   if (isError || !data) {
     return (
-      <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div className="rounded-md bg-danger-subtle px-4 py-3 text-sm text-danger-foreground">
         No se pudo cargar el consumo.
       </div>
     )
@@ -36,19 +38,25 @@ export function UsageCard({ tenantId }: UsageCardProps) {
   const isWarning = pct >= 80
   const isCritical = pct >= 100
 
-  const barColor = isCritical
-    ? 'bg-red-500'
+  const barColorClass = isCritical
+    ? 'bg-danger'
     : isWarning
-      ? 'bg-amber-400'
-      : 'bg-blue-500'
+      ? 'bg-warning'
+      : 'bg-accent'
+
+  const numberColorClass = isCritical
+    ? 'text-danger-foreground'
+    : isWarning
+      ? 'text-warning-foreground'
+      : 'text-foreground'
 
   return (
-    <div className="rounded-xl border border-neutral-200 bg-white p-5 space-y-4">
+    <Card className="p-(--density-card-p) space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-wider text-neutral-400">
+        <p className="text-xs font-medium uppercase tracking-wider text-foreground-muted">
           Consumo hoy
         </p>
-        <span className="text-xs text-neutral-400">
+        <span className="text-xs text-foreground-muted tabular-nums">
           presupuesto ${fmt(data.budget_usd_daily, 2)}/día
         </span>
       </div>
@@ -56,27 +64,25 @@ export function UsageCard({ tenantId }: UsageCardProps) {
       {today ? (
         <>
           <div className="flex items-end gap-2">
-            <p
-              className={`text-3xl font-semibold ${
-                isCritical ? 'text-red-600' : isWarning ? 'text-amber-600' : 'text-neutral-900'
-              }`}
-            >
+            <p className={`text-3xl font-semibold tabular-nums ${numberColorClass}`}>
               ${fmt(today.cost_usd)}
             </p>
-            <p className="mb-1 text-sm text-neutral-400">USD</p>
+            <p className="mb-1 text-sm text-foreground-muted">USD</p>
           </div>
 
           {/* Barra de progreso */}
           <div>
-            <div className="flex justify-between text-xs text-neutral-400 mb-1">
-              <span>{pct.toFixed(1)}% del presupuesto</span>
+            <div className="flex justify-between text-xs text-foreground-muted mb-1">
+              <span className="tabular-nums">{pct.toFixed(1)}% del presupuesto</span>
               {isCritical && (
-                <span className="font-medium text-red-600">Presupuesto agotado</span>
+                <span className="font-medium text-danger-foreground">
+                  Presupuesto agotado
+                </span>
               )}
             </div>
-            <div className="h-2 w-full rounded-full bg-neutral-100">
+            <div className="h-2 w-full rounded-full bg-surface-muted overflow-hidden">
               <div
-                className={`h-2 rounded-full transition-all ${barColor}`}
+                className={`h-full rounded-full transition-all ${barColorClass}`}
                 style={{ width: `${pct}%` }}
               />
             </div>
@@ -84,22 +90,28 @@ export function UsageCard({ tenantId }: UsageCardProps) {
 
           <div className="grid grid-cols-3 gap-3 pt-1">
             <div>
-              <p className="text-xs text-neutral-400">Tokens entrada</p>
-              <p className="text-sm font-medium text-neutral-800">{fmtTokens(today.tokens_in)}</p>
+              <p className="text-xs text-foreground-muted">Tokens entrada</p>
+              <p className="text-sm font-medium text-foreground-body tabular-nums">
+                {fmtTokens(today.tokens_in)}
+              </p>
             </div>
             <div>
-              <p className="text-xs text-neutral-400">Tokens salida</p>
-              <p className="text-sm font-medium text-neutral-800">{fmtTokens(today.tokens_out)}</p>
+              <p className="text-xs text-foreground-muted">Tokens salida</p>
+              <p className="text-sm font-medium text-foreground-body tabular-nums">
+                {fmtTokens(today.tokens_out)}
+              </p>
             </div>
             <div>
-              <p className="text-xs text-neutral-400">Requests</p>
-              <p className="text-sm font-medium text-neutral-800">{today.request_count}</p>
+              <p className="text-xs text-foreground-muted">Requests</p>
+              <p className="text-sm font-medium text-foreground-body tabular-nums">
+                {today.request_count}
+              </p>
             </div>
           </div>
         </>
       ) : (
-        <p className="text-sm text-neutral-400">Sin actividad hoy.</p>
+        <p className="text-sm text-foreground-muted">Sin actividad hoy.</p>
       )}
-    </div>
+    </Card>
   )
 }
