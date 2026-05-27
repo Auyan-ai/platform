@@ -13,14 +13,18 @@ from apps.api.db.models import ChannelType
 from apps.api.db.queries import (
     get_tenant_configuration,
     get_tenant_facts,
+    get_tenant_onboarding,
     get_tenant_playbook,
     get_tenant_usage_range,
     list_all_tenants,
+    submit_tenant_onboarding,
+    update_tenant_lifecycle_state,
     upsert_tenant_facts,
+    upsert_tenant_onboarding,
     upsert_tenant_playbook,
 )
 from apps.api.services.tenants import get_tenant, get_tenant_config, get_tenant_metrics
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
@@ -42,6 +46,7 @@ class TenantResponse(BaseModel):
     slug: str
     name: str
     status: str
+    agent_lifecycle_state: str = "initial"
 
 
 class TenantConfigResponse(BaseModel):
@@ -120,6 +125,31 @@ class TenantFactsResponse(BaseModel):
 
 class TenantFactsUpdate(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+class TenantOnboardingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    tenant_id: UUID
+    current_step: int = 1
+    completed_steps: list[int] = Field(default_factory=list)
+    step_data: dict[str, Any] = Field(default_factory=dict)
+    submitted_at: datetime.datetime | None = None
+    completed_at: datetime.datetime | None = None
+    last_edited_by: UUID | None = None
+    updated_at: datetime.datetime | None = None
+
+
+class TenantOnboardingUpdate(BaseModel):
+    current_step: int = Field(default=1, ge=1, le=9)
+    completed_steps: list[int] = Field(default_factory=list)
+    step_data: dict[str, Any] = Field(default_factory=dict)
+
+
+class TenantLifecycleUpdate(BaseModel):
+    agent_lifecycle_state: str = Field(
+        pattern="^(initial|discovery|building|shadow|ramping|active|paused|churned)$"
+    )
 
 
 # ----------------------------------------------------------------
@@ -297,3 +327,95 @@ async def update_my_tenant_facts(
             edited_by=auth.user_id,
         )
     return TenantFactsResponse.model_validate(facts)
+
+
+@router.get(
+    "/me/onboarding",
+    response_model=TenantOnboardingResponse,
+    summary="Estado del wizard de onboarding del tenant",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def get_my_tenant_onboarding(tenant_id: TenantIdDep) -> TenantOnboardingResponse:
+    async with tenant_scope(tenant_id) as conn:
+        onboarding = await get_tenant_onboarding(conn, tenant_id)
+    if onboarding is None:
+        return TenantOnboardingResponse(tenant_id=tenant_id)
+    return TenantOnboardingResponse.model_validate(onboarding)
+
+
+@router.put(
+    "/me/onboarding",
+    response_model=TenantOnboardingResponse,
+    summary="Guarda progreso del wizard de onboarding",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def update_my_tenant_onboarding(
+    body: TenantOnboardingUpdate,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+) -> TenantOnboardingResponse:
+    completed_steps = sorted({step for step in body.completed_steps if 1 <= step <= 9})
+    async with tenant_scope(tenant_id) as conn:
+        onboarding = await upsert_tenant_onboarding(
+            conn,
+            tenant_id=tenant_id,
+            current_step=body.current_step,
+            completed_steps=completed_steps,
+            step_data=body.step_data,
+            edited_by=auth.user_id,
+        )
+    return TenantOnboardingResponse.model_validate(onboarding)
+
+
+@router.post(
+    "/me/onboarding/submit",
+    response_model=TenantOnboardingResponse,
+    summary="Confirma onboarding inicial y mueve el agente a Building",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def submit_my_tenant_onboarding(
+    request: Request,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+) -> TenantOnboardingResponse:
+    async with tenant_scope(tenant_id) as conn:
+        tenant = await get_tenant(conn, tenant_id)
+        onboarding = await submit_tenant_onboarding(
+            conn,
+            tenant_id=tenant_id,
+            edited_by=auth.user_id,
+        )
+
+    email_sender = getattr(request.app.state, "email_sender", None)
+    if email_sender is not None:
+        email_sender.send_email(
+            to=auth.email,
+            subject=f"Auyan recibió el onboarding de {tenant.name}",
+            text_body=(
+                f"Recibimos el onboarding de {tenant.name}.\n\n"
+                "El agente pasa a fase Building. El siguiente paso de Auyan es revisar "
+                "la información, preparar el playbook y configurar los primeros AOPs."
+            ),
+            tag="tenant-onboarding-submitted",
+        )
+
+    return TenantOnboardingResponse.model_validate(onboarding)
+
+
+@router.put(
+    "/me/lifecycle",
+    response_model=TenantResponse,
+    summary="Actualiza lifecycle del agente — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def update_my_tenant_lifecycle(
+    body: TenantLifecycleUpdate,
+    tenant_id: TenantIdDep,
+) -> TenantResponse:
+    async with tenant_scope(tenant_id) as conn:
+        tenant = await update_tenant_lifecycle_state(
+            conn,
+            tenant_id,
+            body.agent_lifecycle_state,
+        )
+    return TenantResponse.model_validate(tenant)

@@ -30,25 +30,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Zendesk Webhook */
+        /** Webhook inbound de Zendesk — dispara el agente para mensajes del cliente */
         post: operations["zendesk_webhook_webhooks_zendesk_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/webhooks/chatwoot": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Chatwoot Webhook */
-        post: operations["chatwoot_webhook_webhooks_chatwoot_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -66,6 +49,130 @@ export interface paths {
         put?: never;
         /** Postmark Webhook */
         post: operations["postmark_webhook_webhooks_postmark_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/chatwoot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Webhook inbound de Chatwoot — dispara el agente para mensajes del cliente */
+        post: operations["chatwoot_webhook_webhooks_chatwoot_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/gorgias": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Webhook inbound de Gorgias — dispara el agente para mensajes del cliente */
+        post: operations["gorgias_webhook_webhooks_gorgias_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/zendesk/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inicia el flujo OAuth de Zendesk para un tenant
+         * @description Redirige al usuario a Zendesk para autorizar la integración.
+         *
+         *     Requiere estar autenticado como super_admin o como tenant_admin del tenant indicado.
+         */
+        get: operations["zendesk_authorize_oauth_zendesk_authorize_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/zendesk/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Callback OAuth de Zendesk — intercambia code por token y persiste
+         * @description Recibe el callback de Zendesk, valida state, intercambia code por token
+         *     y persiste las credentials cifradas en tenant_integrations.
+         *
+         *     Este endpoint NO requiere auth — el state HMAC es la defensa CSRF.
+         */
+        get: operations["zendesk_callback_oauth_zendesk_callback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/gorgias/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inicia el flujo OAuth de Gorgias para un tenant
+         * @description Redirige al usuario a Gorgias para autorizar la integración.
+         *
+         *     Requiere estar autenticado como super_admin o como tenant_admin del tenant indicado.
+         */
+        get: operations["gorgias_authorize_oauth_gorgias_authorize_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/gorgias/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Callback OAuth de Gorgias — intercambia code por token y persiste
+         * @description Recibe el callback de Gorgias, valida state, intercambia code por token
+         *     y persiste las credentials cifradas en tenant_integrations.
+         *
+         *     Este endpoint NO requiere auth — el state HMAC es la defensa CSRF.
+         */
+        get: operations["gorgias_callback_oauth_gorgias_callback_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -150,6 +257,111 @@ export interface paths {
         /** Métricas agregadas del tenant — conteos y tasas */
         get: operations["get_my_tenant_metrics_tenants_me_metrics_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Consumo de tokens y costo LLM del tenant — hoy y últimos N días */
+        get: operations["get_my_tenant_usage_tenants_me_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/playbook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Playbook operativo del tenant — lectura cliente, edición Auyan */
+        get: operations["get_my_tenant_playbook_tenants_me_playbook_get"];
+        /** Actualiza el playbook operativo del tenant — sólo super_admin */
+        put: operations["update_my_tenant_playbook_tenants_me_playbook_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/facts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Datos factuales del tenant — usados como contexto estructurado del agente */
+        get: operations["get_my_tenant_facts_tenants_me_facts_get"];
+        /** Actualiza datos factuales del tenant */
+        put: operations["update_my_tenant_facts_tenants_me_facts_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Estado del wizard de onboarding del tenant */
+        get: operations["get_my_tenant_onboarding_tenants_me_onboarding_get"];
+        /** Guarda progreso del wizard de onboarding */
+        put: operations["update_my_tenant_onboarding_tenants_me_onboarding_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/onboarding/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirma onboarding inicial y mueve el agente a Building */
+        post: operations["submit_my_tenant_onboarding_tenants_me_onboarding_submit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/lifecycle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Actualiza lifecycle del agente — sólo super_admin */
+        put: operations["update_my_tenant_lifecycle_tenants_me_lifecycle_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -293,6 +505,466 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/aops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista todos los AOPs del tenant (activos e inactivos) */
+        get: operations["list_tenant_aops_aops_get"];
+        put?: never;
+        /** Crea un nuevo AOP */
+        post: operations["create_tenant_aop_aops_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aops/{aop_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** AOP con contenido completo por ID */
+        get: operations["get_aop_aops__aop_id__get"];
+        /** Guarda nueva versión del AOP (append-only) */
+        put: operations["update_tenant_aop_aops__aop_id__put"];
+        post?: never;
+        /** Soft-delete de un AOP */
+        delete: operations["delete_tenant_aop_aops__aop_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/aops/{aop_id}/toggle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Activa o desactiva un AOP */
+        patch: operations["toggle_tenant_aop_aops__aop_id__toggle_patch"];
+        trace?: never;
+    };
+    "/aops/{aop_id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Evalúa el AOP y lo promueve a production si pasa el eval harness
+         * @description Ejecuta el eval harness (fixtures YAML) contra el AOP.
+         *
+         *     Si pass_rate >= 80% y hay al menos 1 fixture:
+         *     - Copia el contenido al AOP de production con el mismo slug (crea o actualiza).
+         *     - Retorna promoted_to_production=True.
+         *
+         *     Si falla el gate (pass_rate < 80% o sin fixtures):
+         *     - Retorna HTTP 422 con detalles de qué fixtures fallaron.
+         *     - No modifica el AOP de production.
+         */
+        patch: operations["promote_tenant_aop_aops__aop_id__promote_patch"];
+        trace?: never;
+    };
+    "/aops/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Valida y precompila un AOP — test inmediato sin guardar
+         * @description Parsea el raw_source, compila el AOP y retorna el system_prompt renderizado.
+         *
+         *     No persiste nada. Úsalo desde el editor como 'Vista previa del prompt'.
+         */
+        post: operations["validate_aop_aops_validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista propuestas de mejora del tenant */
+        get: operations["list_proposals_proposals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Métricas del slow agent: tasa de aceptación y costo */
+        get: operations["get_metrics_proposals_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals/{proposal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detalle de una propuesta de mejora */
+        get: operations["get_proposal_proposals__proposal_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals/{proposal_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Aprueba propuesta y pre-llena el editor de AOPs */
+        post: operations["approve_proposal_proposals__proposal_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proposals/{proposal_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rechaza una propuesta de mejora */
+        post: operations["reject_proposal_proposals__proposal_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{conversation_id}/reasoning": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Reasoning Events
+         * @description Historial completo de eventos de razonamiento para una conversación.
+         */
+        get: operations["get_reasoning_events_conversations__conversation_id__reasoning_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/conversations/{conversation_id}/reasoning/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Reasoning Events
+         * @description SSE stream de eventos de razonamiento en tiempo real.
+         *
+         *     Hace polling a DB cada SSE_POLL_INTERVAL segundos y emite solo los eventos
+         *     nuevos (mayor seq que el último enviado). El cliente puede reconectar y
+         *     reanudar desde donde quedó via Last-Event-ID.
+         *     El stream se cierra automáticamente tras SSE_MAX_DURATION segundos o cuando
+         *     el cliente se desconecta.
+         */
+        get: operations["stream_reasoning_events_conversations__conversation_id__reasoning_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listar aprobaciones pendientes del tenant */
+        get: operations["list_approvals_approvals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/approvals/{approval_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detalle de una aprobación */
+        get: operations["get_approval_approvals__approval_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/approvals/{approval_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Aprobar y ejecutar skill L3
+         * @description Aprueba la pending_approval, ejecuta la skill y añade el resultado a la conversación.
+         */
+        post: operations["approve_action_approvals__approval_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/approvals/{approval_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rechazar skill L3 sin ejecutar */
+        post: operations["reject_action_approvals__approval_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/tool-permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listar permisos de skills del tenant */
+        get: operations["list_permissions_tenants_me_tool_permissions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/tool-permissions/{skill_slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Actualizar permiso de una skill */
+        put: operations["update_permission_tenants_me_tool_permissions__skill_slug__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/simulations/profiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Crear perfil de cliente sintético */
+        post: operations["create_profile_simulations_profiles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/simulations/scenarios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listar scenarios del tenant */
+        get: operations["list_scenarios_simulations_scenarios_get"];
+        put?: never;
+        /** Crear scenario de simulación */
+        post: operations["create_scenario_simulations_scenarios_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/simulations/scenarios/{scenario_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Historial de runs de un scenario */
+        get: operations["list_scenario_runs_simulations_scenarios__scenario_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/simulations/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Lanzar simulación (sync, timeout 60s) */
+        post: operations["create_run_simulations_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/simulations/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Estado y resultado de un run */
+        get: operations["get_run_simulations_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/simulations/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Lanzar batch de scenarios (async, retorna batch_id) */
+        post: operations["create_batch_simulations_batches_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/simulations/batches/{batch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Listar runs de un batch */
+        get: operations["get_batch_runs_simulations_batches__batch_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -310,10 +982,180 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readiness
+         * @description Readiness probe — verifies DB pool is reachable.
+         *
+         *     Returns 200 if the database responds to a simple query.
+         *     Returns 503 if the pool is not initialized or the query fails.
+         */
+        get: operations["readiness_health_ready_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AopDetailResponse */
+        AopDetailResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Workspace
+             * @enum {string}
+             */
+            workspace: "production" | "staging";
+            /** Current Version */
+            current_version: number;
+            /** Is Active */
+            is_active: boolean;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Yaml Frontmatter */
+            yaml_frontmatter: {
+                [key: string]: unknown;
+            };
+            /** Body Markdown */
+            body_markdown: string;
+            /** Raw Source */
+            raw_source: string;
+        };
+        /** AopSummaryResponse */
+        AopSummaryResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Workspace
+             * @enum {string}
+             */
+            workspace: "production" | "staging";
+            /** Current Version */
+            current_version: number;
+            /** Is Active */
+            is_active: boolean;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+        };
+        /** AopValidateResponse */
+        AopValidateResponse: {
+            /** Valid */
+            valid: boolean;
+            /** System Prompt */
+            system_prompt?: string | null;
+            /** Errors */
+            errors?: string[];
+        };
+        /** ApprovalOut */
+        ApprovalOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Conversation Id
+             * Format: uuid
+             */
+            conversation_id: string;
+            /** Skill Slug */
+            skill_slug: string;
+            /** Skill Tier */
+            skill_tier: string;
+            /** Inputs Redacted */
+            inputs_redacted: {
+                [key: string]: unknown;
+            };
+            /** Aop Slug */
+            aop_slug: string;
+            /** Aop Version */
+            aop_version: number;
+            /** Status */
+            status: string;
+            /** Reviewed By */
+            reviewed_by?: string | null;
+            /** Reviewed At */
+            reviewed_at?: string | null;
+            /** Review Comment */
+            review_comment?: string | null;
+            /** Created At */
+            created_at?: string | null;
+        };
+        /** ApproveProposalResponse */
+        ApproveProposalResponse: {
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
+            proposal_id: string;
+            /**
+             * Aop Id
+             * Format: uuid
+             */
+            aop_id: string;
+            /** Aop Version */
+            aop_version: number;
+            /** Workspace */
+            workspace: string;
+            /** Redirect To */
+            redirect_to: string;
+        };
+        /** ApproveRequest */
+        ApproveRequest: {
+            /** Comment */
+            comment?: string | null;
+        };
+        /** BatchCreatedOut */
+        BatchCreatedOut: {
+            /**
+             * Batch Id
+             * Format: uuid
+             */
+            batch_id: string;
+            /** Scenario Count */
+            scenario_count: number;
+        };
+        /** BatchRequest */
+        BatchRequest: {
+            /** Scenario Ids */
+            scenario_ids: string[];
+        };
         /** ConversationDetailResponse */
         ConversationDetailResponse: {
             conversation: components["schemas"]["ConversationOut"];
@@ -359,7 +1201,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "open" | "pending" | "resolved" | "escalated" | "closed";
+            status: "open" | "pending" | "resolved" | "escalated" | "closed" | "closed_abandoned";
             /** Assigned User Id */
             assigned_user_id: string | null;
             /** Last Message At */
@@ -380,6 +1222,76 @@ export interface components {
             /** Closed */
             closed: number;
         };
+        /** CreateAopRequest */
+        CreateAopRequest: {
+            /**
+             * Raw Source
+             * @description AOP completo: '---\nfrontmatter\n---\nbody'
+             */
+            raw_source: string;
+            /**
+             * Workspace
+             * @default production
+             * @enum {string}
+             */
+            workspace: "production" | "staging";
+        };
+        /** CreateProfileRequest */
+        CreateProfileRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Persona
+             * @default {}
+             */
+            persona: {
+                [key: string]: unknown;
+            };
+            /** Goal */
+            goal: string;
+            /** Initial Message */
+            initial_message: string;
+            /**
+             * Language
+             * @default es
+             */
+            language: string;
+        };
+        /** CreateScenarioRequest */
+        CreateScenarioRequest: {
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Aop Slug */
+            aop_slug: string;
+            /**
+             * User Profile Id
+             * Format: uuid
+             */
+            user_profile_id: string;
+            /** Expected Outcome */
+            expected_outcome: string;
+            /**
+             * Mock Fixtures
+             * @default {}
+             */
+            mock_fixtures: {
+                [key: string]: unknown;
+            };
+            /**
+             * Assertions
+             * @default {}
+             */
+            assertions: {
+                [key: string]: unknown;
+            };
+            /**
+             * Max Turns
+             * @default 8
+             */
+            max_turns: number;
+        };
         /** CurrentUserResponse */
         CurrentUserResponse: {
             /**
@@ -393,6 +1305,19 @@ export interface components {
             role: string;
             /** Email */
             email: string;
+        };
+        /** DailyUsage */
+        DailyUsage: {
+            /** Date */
+            date: string;
+            /** Tokens In */
+            tokens_in: number;
+            /** Tokens Out */
+            tokens_out: number;
+            /** Cost Usd */
+            cost_usd: number;
+            /** Request Count */
+            request_count: number;
         };
         /** EscalateBody */
         EscalateBody: {
@@ -480,10 +1405,237 @@ export interface components {
              */
             created_at: string;
         };
+        /** ProfileOut */
+        ProfileOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Name */
+            name: string;
+            /** Persona */
+            persona: {
+                [key: string]: unknown;
+            };
+            /** Goal */
+            goal: string;
+            /** Initial Message */
+            initial_message: string;
+            /** Language */
+            language: string;
+        };
+        /**
+         * PromoteAopResponse
+         * @description Respuesta del endpoint PATCH /aops/{id}/promote.
+         */
+        PromoteAopResponse: {
+            /**
+             * Aop Id
+             * Format: uuid
+             */
+            aop_id: string;
+            /** Slug */
+            slug: string;
+            /** Eval Pass Rate */
+            eval_pass_rate: number;
+            /** Eval Passed Fixtures */
+            eval_passed_fixtures: number;
+            /** Eval Total Fixtures */
+            eval_total_fixtures: number;
+            /** Meets Gate */
+            meets_gate: boolean;
+            /** Promoted To Production */
+            promoted_to_production: boolean;
+            /** Production Aop Id */
+            production_aop_id?: string | null;
+            /** Fixture Details */
+            fixture_details?: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** ProposalMetricsResponse */
+        ProposalMetricsResponse: {
+            /** Total */
+            total: number;
+            /** Pending */
+            pending: number;
+            /** Approved */
+            approved: number;
+            /** Rejected */
+            rejected: number;
+            /** Applied */
+            applied: number;
+            /** Acceptance Rate */
+            acceptance_rate: number | null;
+            /** Cost Usd Total */
+            cost_usd_total: number;
+            /** Cost Per Accepted Proposal */
+            cost_per_accepted_proposal: number | null;
+            /** Sonnet Tokens Total */
+            sonnet_tokens_total: number;
+            /** Opus Tokens Total */
+            opus_tokens_total: number;
+        };
+        /** ProposalResponse */
+        ProposalResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Proposal Type */
+            proposal_type: string;
+            /** Aop Slug */
+            aop_slug: string | null;
+            /** Diff Markdown */
+            diff_markdown: string;
+            /** Rationale */
+            rationale: string;
+            /** Evidence Conversations */
+            evidence_conversations: string[];
+            /** Judge Model Used */
+            judge_model_used: string;
+            /** Judge Confidence */
+            judge_confidence: number;
+            /** Requires Eval Pass */
+            requires_eval_pass: boolean;
+            /** Status */
+            status: string;
+            /** Reviewed By */
+            reviewed_by: string | null;
+            /** Reviewed At */
+            reviewed_at: string | null;
+            /** Review Comment */
+            review_comment: string | null;
+            /** Applied Version */
+            applied_version: number | null;
+        };
         /** ReplyBody */
         ReplyBody: {
             /** Content */
             content: string;
+        };
+        /** RunOut */
+        RunOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Scenario Id */
+            scenario_id?: string | null;
+            /** Aop Slug */
+            aop_slug: string;
+            /** Status */
+            status: string;
+            /** Termination Reason */
+            termination_reason?: string | null;
+            /** Turns Count */
+            turns_count?: number | null;
+            /** Transcript */
+            transcript?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Judge Eval */
+            judge_eval?: {
+                [key: string]: unknown;
+            } | null;
+            /** Assertions Results */
+            assertions_results?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Assertions Passed */
+            assertions_passed?: number | null;
+            /** Assertions Total */
+            assertions_total?: number | null;
+            /**
+             * Tokens Simulator
+             * @default 0
+             */
+            tokens_simulator: number;
+            /**
+             * Tokens Agent
+             * @default 0
+             */
+            tokens_agent: number;
+            /**
+             * Tokens Judge
+             * @default 0
+             */
+            tokens_judge: number;
+            /** Cost Cents */
+            cost_cents?: number | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+        };
+        /** RunRequest */
+        RunRequest: {
+            /**
+             * Scenario Id
+             * Format: uuid
+             */
+            scenario_id: string;
+        };
+        /** ScenarioOut */
+        ScenarioOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Aop Slug */
+            aop_slug: string;
+            /**
+             * User Profile Id
+             * Format: uuid
+             */
+            user_profile_id: string;
+            /** Expected Outcome */
+            expected_outcome: string;
+            /** Mock Fixtures */
+            mock_fixtures: {
+                [key: string]: unknown;
+            };
+            /** Assertions */
+            assertions: {
+                [key: string]: unknown;
+            };
+            /** Max Turns */
+            max_turns: number;
+            /** Is Active */
+            is_active: boolean;
         };
         /** TenantConfigResponse */
         TenantConfigResponse: {
@@ -507,6 +1659,39 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** TenantFactsResponse */
+        TenantFactsResponse: {
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Data */
+            data?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /** Last Edited By */
+            last_edited_by?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** TenantFactsUpdate */
+        TenantFactsUpdate: {
+            /** Data */
+            data?: {
+                [key: string]: unknown;
+            };
+        };
+        /** TenantLifecycleUpdate */
+        TenantLifecycleUpdate: {
+            /** Agent Lifecycle State */
+            agent_lifecycle_state: string;
+        };
         /** TenantMetricsResponse */
         TenantMetricsResponse: {
             /** Total */
@@ -516,6 +1701,117 @@ export interface components {
             resolution_rate: number;
             /** Escalation Rate */
             escalation_rate: number;
+        };
+        /** TenantOnboardingResponse */
+        TenantOnboardingResponse: {
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Current Step
+             * @default 1
+             */
+            current_step: number;
+            /** Completed Steps */
+            completed_steps?: number[];
+            /** Step Data */
+            step_data?: {
+                [key: string]: unknown;
+            };
+            /** Submitted At */
+            submitted_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Last Edited By */
+            last_edited_by?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** TenantOnboardingUpdate */
+        TenantOnboardingUpdate: {
+            /**
+             * Current Step
+             * @default 1
+             */
+            current_step: number;
+            /** Completed Steps */
+            completed_steps?: number[];
+            /** Step Data */
+            step_data?: {
+                [key: string]: unknown;
+            };
+        };
+        /** TenantPlaybookResponse */
+        TenantPlaybookResponse: {
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Brand Voice
+             * @default
+             */
+            brand_voice: string;
+            /**
+             * Product Overview
+             * @default
+             */
+            product_overview: string;
+            /**
+             * Policies
+             * @default
+             */
+            policies: string;
+            /**
+             * Escalation Notes
+             * @default
+             */
+            escalation_notes: string;
+            /**
+             * Agent Instructions
+             * @default
+             */
+            agent_instructions: string;
+            /**
+             * Version
+             * @default 1
+             */
+            version: number;
+            /** Last Edited By */
+            last_edited_by?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** TenantPlaybookUpdate */
+        TenantPlaybookUpdate: {
+            /**
+             * Brand Voice
+             * @default
+             */
+            brand_voice: string;
+            /**
+             * Product Overview
+             * @default
+             */
+            product_overview: string;
+            /**
+             * Policies
+             * @default
+             */
+            policies: string;
+            /**
+             * Escalation Notes
+             * @default
+             */
+            escalation_notes: string;
+            /**
+             * Agent Instructions
+             * @default
+             */
+            agent_instructions: string;
         };
         /** TenantResponse */
         TenantResponse: {
@@ -530,6 +1826,72 @@ export interface components {
             name: string;
             /** Status */
             status: string;
+            /**
+             * Agent Lifecycle State
+             * @default initial
+             */
+            agent_lifecycle_state: string;
+        };
+        /** TenantUsageResponse */
+        TenantUsageResponse: {
+            today: components["schemas"]["DailyUsage"] | null;
+            /** Budget Usd Daily */
+            budget_usd_daily: number;
+            /** Budget Used Pct */
+            budget_used_pct: number;
+            /** Days */
+            days: number;
+            /** History */
+            history: components["schemas"]["DailyUsage"][];
+        };
+        /** ToggleAopRequest */
+        ToggleAopRequest: {
+            /** Is Active */
+            is_active: boolean;
+        };
+        /** ToolPermissionOut */
+        ToolPermissionOut: {
+            /** Skill Slug */
+            skill_slug: string;
+            /** Is Enabled */
+            is_enabled: boolean;
+            /** Human Approval Required */
+            human_approval_required: boolean;
+            /** Threshold Override */
+            threshold_override?: number | null;
+            /** Tier */
+            tier?: string | null;
+        };
+        /** UpdateAopRequest */
+        UpdateAopRequest: {
+            /**
+             * Raw Source
+             * @description AOP completo: '---\nfrontmatter\n---\nbody'
+             */
+            raw_source: string;
+        };
+        /** UpdatePermissionRequest */
+        UpdatePermissionRequest: {
+            /** Is Enabled */
+            is_enabled: boolean;
+            /**
+             * Human Approval Required
+             * @default false
+             */
+            human_approval_required: boolean;
+            /** Threshold Override */
+            threshold_override?: number | null;
+        };
+        /** ValidateAopRequest */
+        ValidateAopRequest: {
+            /** Raw Source */
+            raw_source: string;
+            /**
+             * Workspace
+             * @default production
+             * @enum {string}
+             */
+            workspace: "production" | "staging";
         };
         /** ValidationError */
         ValidationError: {
@@ -539,6 +1901,19 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** RejectRequest */
+        apps__api__routers__approvals__RejectRequest: {
+            /** Comment */
+            comment: string;
+        };
+        /** RejectRequest */
+        apps__api__routers__proposals__RejectRequest: {
+            /**
+             * Comment
+             * @description Razón del rechazo (opcional)
+             */
+            comment?: string | null;
         };
     };
     responses: never;
@@ -591,6 +1966,28 @@ export interface operations {
             };
         };
     };
+    postmark_webhook_webhooks_postmark_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     chatwoot_webhook_webhooks_chatwoot_post: {
         parameters: {
             query?: never;
@@ -613,7 +2010,7 @@ export interface operations {
             };
         };
     };
-    postmark_webhook_webhooks_postmark_post: {
+    gorgias_webhook_webhooks_gorgias_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -631,6 +2028,138 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    zendesk_authorize_oauth_zendesk_authorize_get: {
+        parameters: {
+            query: {
+                tenant_id: string;
+                subdomain: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    zendesk_callback_oauth_zendesk_callback_get: {
+        parameters: {
+            query: {
+                code: string;
+                state: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gorgias_authorize_oauth_gorgias_authorize_get: {
+        parameters: {
+            query: {
+                tenant_id: string;
+                domain: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gorgias_callback_oauth_gorgias_callback_get: {
+        parameters: {
+            query: {
+                code: string;
+                state: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -768,10 +2297,308 @@ export interface operations {
             };
         };
     };
+    get_my_tenant_usage_tenants_me_usage_get: {
+        parameters: {
+            query?: {
+                /** @description Días de historial a retornar */
+                days?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantUsageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_tenant_playbook_tenants_me_playbook_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantPlaybookResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_my_tenant_playbook_tenants_me_playbook_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantPlaybookUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantPlaybookResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_tenant_facts_tenants_me_facts_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantFactsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_my_tenant_facts_tenants_me_facts_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantFactsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantFactsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_tenant_onboarding_tenants_me_onboarding_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantOnboardingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_my_tenant_onboarding_tenants_me_onboarding_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantOnboardingUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantOnboardingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_my_tenant_onboarding_tenants_me_onboarding_submit_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantOnboardingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_my_tenant_lifecycle_tenants_me_lifecycle_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantLifecycleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_conversations_conversations_get: {
         parameters: {
             query?: {
-                status?: ("open" | "pending" | "resolved" | "escalated" | "closed") | null;
+                status?: ("open" | "pending" | "resolved" | "escalated" | "closed" | "closed_abandoned") | null;
                 limit?: number;
                 offset?: number;
             };
@@ -1046,7 +2873,1028 @@ export interface operations {
             };
         };
     };
+    list_tenant_aops_aops_get: {
+        parameters: {
+            query?: {
+                workspace?: "production" | "staging";
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AopSummaryResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_tenant_aop_aops_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAopRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AopDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_aop_aops__aop_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                aop_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AopDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_tenant_aop_aops__aop_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                aop_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAopRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AopDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_tenant_aop_aops__aop_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                aop_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    toggle_tenant_aop_aops__aop_id__toggle_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                aop_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ToggleAopRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AopSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    promote_tenant_aop_aops__aop_id__promote_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                aop_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromoteAopResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validate_aop_aops_validate_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateAopRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AopValidateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_proposals_proposals_get: {
+        parameters: {
+            query?: {
+                proposal_status?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_metrics_proposals_metrics_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalMetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_proposal_proposals__proposal_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_proposal_proposals__proposal_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApproveProposalResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_proposal_proposals__proposal_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["apps__api__routers__proposals__RejectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_reasoning_events_conversations__conversation_id__reasoning_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_reasoning_events_conversations__conversation_id__reasoning_stream_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_approvals_approvals_get: {
+        parameters: {
+            query?: {
+                status?: ("pending" | "approved" | "rejected") | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_approval_approvals__approval_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                approval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_action_approvals__approval_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                approval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_action_approvals__approval_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                approval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["apps__api__routers__approvals__RejectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_permissions_tenants_me_tool_permissions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_permission_tenants_me_tool_permissions__skill_slug__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                skill_slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePermissionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ToolPermissionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_profile_simulations_profiles_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_scenarios_simulations_scenarios_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_scenario_simulations_scenarios_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateScenarioRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScenarioOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_scenario_runs_simulations_scenarios__scenario_id__runs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                scenario_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_run_simulations_runs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_simulations_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_batch_simulations_batches_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchCreatedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_batch_runs_simulations_batches__batch_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     health_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string | boolean;
+                    };
+                };
+            };
+        };
+    };
+    readiness_health_ready_get: {
         parameters: {
             query?: never;
             header?: never;

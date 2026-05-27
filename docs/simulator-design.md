@@ -45,37 +45,35 @@ El sistema se construye alrededor de estos tres principios.
 
 ## 2. Cómo conectar `user_simulator` ↔ grafo real sin tocar el helpdesk
 
-Decisión arquitectónica más importante. Opciones consideradas:
+Decisión arquitectónica más importante. Durante el diseño se consideró interceptar nodos de salida; durante implementación se comprobó que no hacía falta porque el grafo no envía mensajes externos por sí mismo.
 
 | Opción | Pros | Contras |
 |---|---|---|
 | A. Rebuild graph sin nodos respond/escalate | Cero side-effects | Duplica lógica; el grafo deja de ser "el agente real" |
 | B. Mock del HelpdeskProvider en deps | Limpio en concepto | El adapter se resuelve dentro del nodo desde `tenant_integrations`, no desde deps. Requiere registrar adapter falso en DB |
-| **C. Flag `simulation_mode` en `AgentState`, nodos lo chequean** | Cambio mínimo (5 líneas total), el grafo es el mismo de producción | Requiere `if` en 3 nodos |
+| **C. Flag `simulation_mode` en `AgentState` + mock solo en `execute_skill`** | El grafo real se mantiene; intercepta únicamente I/O de commerce | Requiere que las skills acepten `commerce_mock` |
 
-**Elegimos C.** Los nodos `respond`, `escalate` y `finalize_trace` chequean `state.get("simulation_mode")`. Si es `True`, omiten el lado externo y setean `agent_response`/`escalation_reason` en el state. El runner lee esos campos del `final_state` que retorna `graph.ainvoke()`.
+**Elegimos C, con implementación más pequeña que el diseño inicial.** `simulation_mode` existe en `AgentState`, pero solo lo lee `execute_skill` para inyectar `MockShopifyAdapter` en `SkillContext.commerce_mock`. Los nodos `respond`, `escalate` y `finalize_trace` quedan intactos: persisten estado interno, no hacen I/O externo al helpdesk, y el envío real lo hace `AgentService` fuera del grafo.
 
 **Diff total en producción**:
 
 ```python
-# agents/state.py — 2 campos nuevos
+# agents/state.py
 simulation_mode: bool
-simulation_fixtures: dict  # {"shopify": {<slug>: {<resp>}}}
+simulation_fixtures: dict  # fixtures por nombre de método del adapter
 
-# agents/nodes/respond.py — 3 líneas al inicio
-if state.get("simulation_mode"):
-    return {"output_message_id": None}
+# skills/base.py
+commerce_mock: Any | None
 
-# agents/nodes/escalate.py — idéntico
+# agents/nodes/execute_skill.py
 if state.get("simulation_mode"):
-    return {"escalation_id": None}
+    commerce_mock = MockShopifyAdapter(fixtures)
 
-# agents/nodes/finalize_trace.py — taggear, no omitir
-if state.get("simulation_mode"):
-    langfuse.tag("simulation", "true")
+# skills/shopify/*.py
+adapter = ctx.commerce_mock or ShopifyAdapter()
 ```
 
-**Justificación de no omitir Langfuse**: cuando una simulación falla raro, querés el trace para debugging. Mejor taggear que perder.
+**No se tocan `respond`, `escalate` ni `finalize_trace`.** Esta es la corrección importante frente al diseño inicial. Si una simulación falla raro, el debugging sale de `simulation_runs`, `messages`, `skill_audit_log` y `agent_reasoning_events`; el runner no dispara el envío post-grafo al helpdesk.
 
 ---
 
@@ -878,7 +876,7 @@ Sustentable.
 - ❌ Replay de conversaciones reales como scenarios (Bloque 2)
 - ❌ Métricas agregadas históricas (Bloque 2)
 - ❌ CI integration en cada PR (Bloque 1)
-- ❌ Mock de helpdesks (los nodos respond/escalate skip directo)
+- ❌ Mock de helpdesks (el grafo no envía al helpdesk; el caller post-grafo se omite en simulation runner)
 - ❌ Pruebas de skills no-Shopify (no hay otras providers commerce)
 - ❌ Job queue (Celery/RQ) — `asyncio.gather` con semáforo basta hasta 10-20 tenants
 
@@ -893,10 +891,10 @@ Sustentable.
 4.  simulator/assertions.py                      → testeable, sin LLM
 5.  Cambios en producción:
     - agents/state.py (2 campos)
-    - 3 nodos (respond, escalate, finalize_trace)
     - skills/base.py (1 campo)
     - 11 skills shopify (1 línea c/u)
     - execute_skill node (bloque)
+    - respond/escalate/finalize_trace: sin cambios
 6.  simulator/user_simulator.py                  → testeable con mocks de Anthropic
 7.  simulator/cost_guard.py                      → cost caps + rate limits
 8.  simulator/runner.py                          → integración con grafo + semáforo

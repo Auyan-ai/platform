@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-27 (sesión 41 — Bloque 1, Design Sprint 1.0 + sub-PRs 1.1/1.2 completados: playbook/facts API + UI, shell visual Mercury-inspired, 990 tests API verde)_
+_Última actualización: 2026-05-27 (sesión 42 — docs web/simulator sincronizados post-pivot; Bloque 1, Sub-PR 1.3 iniciado: onboarding wizard + lifecycle + email hook)_
 
 > Historial completo de Sprints 1-11 y Rate Limiting en [`docs/progress-archive.md`](progress-archive.md).
 
@@ -324,9 +324,10 @@ Tenant de prueba (Lunaria staging): `11111111-1111-1111-1111-111111111111`.
 **Estado Bloque 1:** Iniciado.
 - 1.0 Design Sprint — **completo** ✅ (`docs/DESIGN.md` v1 + tokens/primitives + refactor base dashboard).
 - 1.1 + 1.2 (tenant_playbook + tenant_facts) — **completo** ✅ (migraciones, modelos, queries, endpoints API, agent integration, UI super_admin playbook, UI cliente facts).
+- 1.3 Onboarding wizard + lifecycle — **iniciado** 🔄 (migración/modelos/queries/endpoints/UI cliente + email hook implementados localmente; falta hardening/QA completo).
 
 **Pendiente de staging:**
-- [ ] Aplicar migraciones `20260525000001` y `20260525000002` a staging
+- [ ] Aplicar migraciones `20260525000001`, `20260525000002` y `20260527000001` a staging
 - [ ] Registrar OAuth apps en Gorgias + Zendesk Developer Portals
 - [ ] Setear `POSTMARK_API_TOKEN` + dominio `auyan.ai` en Postmark
 
@@ -365,6 +366,53 @@ Tenant de prueba (Lunaria staging): `11111111-1111-1111-1111-111111111111`.
 - [ ] Aplicar migraciones a staging
 
 **Nota visual:** dashboard movido hacia una composición Mercury light: shell claro, sidebar fija de 200px, iconos de navegación de 14px, topbar no fija con búsqueda ligera, sin avatar de cuenta cliente, tarjetas densas con sombra sutil Mercury y gráfico principal integrado. Referencia revisada: `https://mercury.com` + demo público `https://demo.mercury.com`.
+
+---
+
+### Sub-PR 1.3 — Onboarding wizard + lifecycle 🔄
+
+**Estado:** Iniciado localmente. No depende de crédito Anthropic.
+
+| Archivo | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260527000001_add_tenant_onboarding.sql` | `agent_lifecycle_state` en `tenants` + tabla `tenant_onboarding` con `current_step`, `completed_steps`, `step_data`, `submitted_at`, RLS super_admin/tenant_admin |
+| `db/models.py` | `AgentLifecycleState` + `TenantOnboarding` |
+| `db/queries.py` | `get/upsert/submit_tenant_onboarding` + `update_tenant_lifecycle_state` |
+| `routers/tenants.py` | `GET/PUT /tenants/me/onboarding`, `POST /tenants/me/onboarding/submit`, `PUT /tenants/me/lifecycle` |
+| `apps/web/components/onboarding/OnboardingWizard.tsx` | Wizard cliente de 9 pasos con guardado incremental, progreso y submit |
+| `apps/web/app/clients/[tenantId]/onboarding/page.tsx` | Nueva página cliente `/clients/[tenantId]/onboarding` |
+| `apps/web/components/clients/ClientSidebar.tsx` | Link cliente a Onboarding |
+
+**Diseño inicial:**
+- Lifecycle hardcoded: `initial → discovery → building → shadow → ramping → active`, con `paused/churned` para operación.
+- El submit del wizard mueve el tenant a `building`.
+- Comunicación email usa `EmailSender.send_email`; en local/staging sin Postmark configurado hace no-op, sin bloquear el flujo.
+- `step_data` guarda respuestas por paso (`"1"`..`"9"`). La curación real a playbook/KB se hace en pasos posteriores de Bloque 1.
+
+**Verificación sesión 42:** ruff limpio en API tocada, `tests/test_tenants.py` **19/19 verde**, suite API completa **993/993 verde**, typecheck monorepo verde, Biome limpio en archivos web tocados. `pnpm --filter @auyan/web lint` completo sigue fallando por deuda previa en archivos no tocados.
+
+**Pendiente de 1.3:**
+- [ ] QA visual con browser local.
+- [ ] Decidir si el wizard debe empujar automáticamente parte del paso 3 a `tenant_facts` o mantenerlo como intake bruto.
+- [ ] Agregar vista interna de lifecycle para Auyan si hace falta antes de 1.7.
+- [ ] Aplicar migración a staging.
+
+---
+
+### Nota para 1.4 — Shopify content import / KB bootstrap 📝
+
+Idea surgida en sesión 43: reducir el esfuerzo del cliente importando contenido existente de Shopify al pipeline de KB.
+
+**Investigación inicial con docs oficiales Shopify:**
+- Shopify Admin API tiene recurso `Page` y GraphQL `pages`, con contenido HTML de páginas estáticas (`body_html`). Esto puede traer páginas tipo "Devoluciones", "FAQ", "Contacto", "Garantía", "Envíos" si el merchant las mantiene como Online Store pages.
+- Storefront API también expone Pages, Blogs y Articles; incluso hay tokenless access para contenido esencial, pero el uso de Admin API con scope `content` da mejor cobertura para onboarding autenticado.
+- Limitación importante: no todo FAQ vive como Shopify Page. Puede estar hardcodeado en el theme, en una app de FAQ, en metafields/metaobjects o en una página externa. Esto va como import asistido, no como reemplazo total del drop-zone.
+
+**Pendiente recomendado 1.4:** crear spike `shopify_content_import`:
+1. listar pages/blogs/articles;
+2. detectar títulos relevantes (`faq`, `devoluciones`, `envíos`, `garantía`, `contacto`, `privacy`, `terms`);
+3. convertir HTML → texto/markdown;
+4. mostrar preview en cola pending review para que Auyan cure antes de entrar a KB/playbook.
 
 ---
 

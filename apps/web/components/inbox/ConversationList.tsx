@@ -20,6 +20,7 @@ const STATUS_LABELS: Record<ConversationStatus | 'all', string> = {
   escalated: 'Escaladas',
   resolved: 'Resueltas',
   closed: 'Cerradas',
+  closed_abandoned: 'Abandonadas',
 }
 
 const STATUS_VARIANT: Record<ConversationStatus, BadgeProps['variant']> = {
@@ -28,6 +29,7 @@ const STATUS_VARIANT: Record<ConversationStatus, BadgeProps['variant']> = {
   escalated: 'danger',
   resolved: 'success',
   closed: 'muted',
+  closed_abandoned: 'muted',
 }
 
 const CHANNEL_LABELS: Record<ChannelType, string> = {
@@ -60,6 +62,7 @@ const STATUS_FILTERS: Array<ConversationStatus | 'all'> = [
   'pending',
   'resolved',
   'closed',
+  'closed_abandoned',
 ]
 
 // ----------------------------------------------------------------

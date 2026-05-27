@@ -12,6 +12,7 @@ const STATUS_LABELS: Record<ConversationStatus, string> = {
   escalated: 'Escalada',
   resolved: 'Resuelta',
   closed: 'Cerrada',
+  closed_abandoned: 'Abandonada',
 }
 
 const STATUS_VARIANT: Record<ConversationStatus, BadgeProps['variant']> = {
@@ -20,6 +21,7 @@ const STATUS_VARIANT: Record<ConversationStatus, BadgeProps['variant']> = {
   escalated: 'danger',
   resolved: 'success',
   closed: 'muted',
+  closed_abandoned: 'muted',
 }
 
 const CHANNEL_LABELS: Record<ChannelType, string> = {
@@ -32,6 +34,8 @@ const CHANNEL_LABELS: Record<ChannelType, string> = {
   intercom: 'Intercom',
   chatwoot: 'Chatwoot',
 }
+
+const SKELETON_ROWS = ['recent-1', 'recent-2', 'recent-3', 'recent-4', 'recent-5']
 
 function relativeTime(dateStr: string | null | undefined): string {
   if (!dateStr) return ''
@@ -55,8 +59,8 @@ export function RecentConversations({ tenantId }: RecentConversationsProps) {
   if (isLoading) {
     return (
       <div className="space-y-2">
-        {[...Array(5)].map((_, i) => (
-          <Skeleton key={i} className="h-12" />
+        {SKELETON_ROWS.map((row) => (
+          <Skeleton key={row} className="h-12" />
         ))}
       </div>
     )
