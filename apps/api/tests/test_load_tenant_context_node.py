@@ -354,8 +354,6 @@ async def test_decrypt_failure_falls_back_to_extra(fake_deps, monkeypatch) -> No
 
 @pytest.mark.asyncio
 async def test_playbook_and_facts_loaded_when_present(fake_deps, monkeypatch) -> None:
-    from uuid import UUID
-
     from apps.api.db.models import TenantFacts, TenantPlaybook
 
     playbook = TenantPlaybook(

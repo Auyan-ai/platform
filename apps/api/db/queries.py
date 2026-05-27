@@ -3215,7 +3215,13 @@ async def update_tenant_playbook_section(
     edited_by: UUID | None = None,
 ) -> TenantPlaybook | None:
     """Actualiza una sola sección del playbook. `section` debe ser una columna válida."""
-    allowed = {"brand_voice", "product_overview", "policies", "escalation_notes", "agent_instructions"}
+    allowed = {
+        "brand_voice",
+        "product_overview",
+        "policies",
+        "escalation_notes",
+        "agent_instructions",
+    }
     if section not in allowed:
         raise ValueError(f"Invalid playbook section: {section!r}. Allowed: {allowed}")
     row = await conn.fetchrow(
