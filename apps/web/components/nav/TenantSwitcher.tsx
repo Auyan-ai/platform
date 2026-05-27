@@ -26,7 +26,9 @@ export function TenantSwitcher({ activeTenantId }: { activeTenantId: string | nu
   function selectTenant(tenant: TenantResponse) {
     setOpen(false)
     const section =
-      pathname.match(/\/tenants\/[^/]+\/(conversations|escalations)/)?.[1] ?? 'conversations'
+      pathname.match(
+        /\/tenants\/[^/]+\/(conversations|escalations|approvals|playbook|aops|proposals|simulator)/,
+      )?.[1] ?? 'conversations'
     router.push(`/tenants/${tenant.id}/${section}`)
   }
 

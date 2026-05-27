@@ -1,6 +1,6 @@
 # Auyan — Estado del proyecto
 
-_Última actualización: 2026-05-25 (sesión 40 — Bloque 1, sub-PRs 1.1+1.2 iniciados: tablas tenant_playbook + tenant_facts, modelos, queries, agent integration, 984 tests verde)_
+_Última actualización: 2026-05-27 (sesión 41 — Bloque 1, Design Sprint 1.0 + sub-PRs 1.1/1.2 completados: playbook/facts API + UI, shell visual Mercury-inspired, 990 tests API verde)_
 
 > Historial completo de Sprints 1-11 y Rate Limiting en [`docs/progress-archive.md`](progress-archive.md).
 
@@ -322,7 +322,8 @@ Tenant de prueba (Lunaria staging): `11111111-1111-1111-1111-111111111111`.
 1. Re-seed AOPs (`--update`) → `--reseed --no-judge --all` → arreglar lo que quede → corrida final con judge (meta ≥20/25).
 
 **Estado Bloque 1:** Iniciado.
-- 1.1 + 1.2 (tenant_playbook + tenant_facts) — **backend completo** ✅ (migraciones, modelos, queries, agent integration). **Pendiente:** UI (super_admin editor para playbook, form cliente para facts).
+- 1.0 Design Sprint — **completo** ✅ (`docs/DESIGN.md` v1 + tokens/primitives + refactor base dashboard).
+- 1.1 + 1.2 (tenant_playbook + tenant_facts) — **completo** ✅ (migraciones, modelos, queries, endpoints API, agent integration, UI super_admin playbook, UI cliente facts).
 
 **Pendiente de staging:**
 - [ ] Aplicar migraciones `20260525000001` y `20260525000002` a staging
@@ -335,7 +336,7 @@ Tenant de prueba (Lunaria staging): `11111111-1111-1111-1111-111111111111`.
 
 ### Sub-PRs 1.1 + 1.2 — tenant_playbook + tenant_facts (backend) ✅
 
-**Estado:** Backend completo. UI pendiente (después del Design Sprint 1.0).
+**Estado:** Completo. Backend + API + UI.
 
 | Archivo | Qué se hizo |
 |---|---|
@@ -347,6 +348,10 @@ Tenant de prueba (Lunaria staging): `11111111-1111-1111-1111-111111111111`.
 | `agents/nodes/load_tenant_context.py` | Carga ambas tablas del tenant en cada request al grafo |
 | `aops/compiler.py` | `_render_tenant_facts` + `_render_tenant_playbook` + params opcionales en `compile_aop` |
 | `agents/nodes/select_aop.py` | Pasa playbook y facts a `compile_aop` |
+| `routers/tenants.py` | `GET/PUT /tenants/me/playbook` + `GET/PUT /tenants/me/facts` |
+| `apps/web/components/tenant-context/*` | Editor super_admin de playbook + form cliente de facts |
+| `apps/web/app/(dashboard)/tenants/[tenantId]/playbook/page.tsx` | Pantalla interna para mantener la biblia del cliente |
+| `apps/web/app/clients/[tenantId]/facts/page.tsx` | Pantalla cliente para mantener datos factuales |
 
 **Diseño:**
 - `tenant_playbook`: 5 secciones fijas (markdown). Solo Auyan edita. Se inyecta como bloque `## Conocimiento de la Marca` en el system prompt del agente.
@@ -354,13 +359,12 @@ Tenant de prueba (Lunaria staging): `11111111-1111-1111-1111-111111111111`.
 - Ambas tablas usan `tenant_id` como PK (una fila por tenant). Sin soft delete (no tiene sentido borrarlo).
 - Si el tenant no tiene playbook ni facts, los bloques se omiten del system prompt sin error.
 
-**Suite: 984/984 verde. Ruff limpio.**
+**Verificación sesión 41:** `tests/test_tenants.py` 16/16 verde, suite API completa **990/990 verde**, ruff limpio en backend tocado, typecheck web verde, lint de archivos tocados verde.
 
 **Pendiente de 1.1 + 1.2:**
-- [ ] Design Sprint 1.0 (antes de UI)
-- [ ] UI super_admin: editor de playbook por secciones (apps/web)
-- [ ] UI cliente: form de tenant_facts con campos estándar (apps/web)
 - [ ] Aplicar migraciones a staging
+
+**Nota visual:** dashboard movido hacia una composición Mercury-inspired: shell dark, sidebar fija, topbar con búsqueda, tarjetas densas con bordes finos y gráfico principal integrado. Referencia revisada: `https://mercury.com` + demo público `https://demo.mercury.com`.
 
 ---
 

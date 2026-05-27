@@ -136,6 +136,47 @@
   --density-text-body: 0.8125rem; /* 13px */
 }
 
+/* ── Mercury-inspired operational shell ─────────────────── */
+[data-theme="mercury"] {
+  --color-background:        #171621;
+  --color-surface:           #232232;
+  --color-surface-muted:     #2B2A3D;
+  --color-surface-elevated:  #302F44;
+
+  --color-border:            #36354A;
+  --color-border-strong:     #4A4961;
+  --color-border-subtle:     #2B2A3D;
+
+  --color-foreground:         #F6F4EF;
+  --color-foreground-body:    #D8D4CB;
+  --color-foreground-muted:   #A7A19A;
+  --color-foreground-subtle:  #797486;
+  --color-foreground-on-accent: #FFFFFF;
+
+  --color-accent:            #667CFF;
+  --color-accent-hover:      #7D90FF;
+  --color-accent-subtle:     #323754;
+  --color-accent-foreground: #BBC6FF;
+
+  --color-success-subtle:     #17382E;
+  --color-success-foreground: #7DD7B0;
+  --color-warning-subtle:     #3A311A;
+  --color-warning-foreground: #F2C56B;
+  --color-danger-subtle:      #3A2025;
+  --color-danger-foreground:  #F59CA8;
+
+  --color-card:              var(--color-surface);
+  --color-card-foreground:   var(--color-foreground);
+  --color-popover:           var(--color-surface-elevated);
+  --color-popover-foreground: var(--color-foreground);
+  --color-secondary:         var(--color-surface-muted);
+  --color-secondary-foreground: var(--color-foreground-body);
+  --color-muted:             var(--color-surface-muted);
+  --color-muted-foreground:  var(--color-foreground-muted);
+  --color-input:             var(--color-border);
+  --color-ring:              var(--color-accent);
+}
+
 /* ── Reset focus visible global ─────────────────────────── */
 *:focus-visible {
   outline: 2px solid var(--color-ring);

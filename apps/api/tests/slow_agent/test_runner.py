@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -76,7 +76,7 @@ def _fake_conv(status: str = "escalated") -> Conversation:
         end_customer_id=uuid.uuid4(),
         channel="chat",
         status=status,  # type: ignore[arg-type]
-        created_at=NOW,
+        created_at=datetime.now(UTC),
     )
 
 

@@ -2,12 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, MessagesSquare, AlertTriangle } from 'lucide-react'
+import { LayoutDashboard, MessagesSquare, AlertTriangle, Store } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LogoutButton } from '@/components/nav/LogoutButton'
 
 const NAV_ITEMS = [
   { label: 'Overview', icon: LayoutDashboard, section: 'overview' },
+  { label: 'Datos', icon: Store, section: 'facts' },
   { label: 'Conversaciones', icon: MessagesSquare, section: 'conversations' },
   { label: 'Escalaciones', icon: AlertTriangle, section: 'escalations' },
 ] as const

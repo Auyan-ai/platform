@@ -1,8 +1,8 @@
 # DESIGN.md — Sistema de diseño Auyan
 
 > Fuente única de verdad del sistema de diseño visual.
-> Versión: 1.0 (Bloque 1, Sub-PR 1.0 — Design Sprint)
-> Última actualización: 2026-05-25
+> Versión: 1.1 (Bloque 1, Sub-PRs 1.1/1.2 — Mercury-inspired dashboard shell)
+> Última actualización: 2026-05-27
 
 ---
 
@@ -53,7 +53,7 @@ Cinco reglas que ganan en cualquier discusión de diseño.
 
 | Atributo | Decisión |
 |---|---|
-| Modo por defecto | Light. Dark disponible vía `data-theme="dark"` pero NO es prioridad del Bloque 1. |
+| Modo por defecto | Dashboard operativo usa `data-theme="mercury"`: shell oscuro inspirado en Mercury, con cards densas y acento cobalto. Landing y superficies públicas mantienen light salvo decisión explícita. |
 | Paleta | Neutrales cálidos + un solo acento cobalto. Cero gradientes, cero degradés en `apps/web`. (`apps/landing` puede usar gradientes sutiles si Aceternity los trae como parte de un módulo — siempre derivados del cobalto.) |
 | Tipografía | Geist Sans (UI + display) + Geist Mono (IDs, JSON, code). |
 | Esquinas | Suaves (`6px` botones, `8px` cards, `12px` paneles grandes). Cero esquinas agudas. |
@@ -372,7 +372,17 @@ Reforzando lo de §5.2:
 | `/clients/*` (tenant cliente) | `relaxed` | text-md (15px) | Lectura cómoda, sensación premium (Sierra-style) |
 | `/(auth)/login` y similares | `relaxed` | text-base (14px) | Neutro |
 
-El wrapper raíz de cada layout setea la densidad vía `data-density="compact|relaxed"` en `<body>`. Los componentes leen las CSS vars `--density-*`.
+El wrapper raíz de cada layout setea la densidad vía `data-density="compact|relaxed"`. Los componentes leen las CSS vars `--density-*`.
+
+## 9.1 Shell operativo Mercury-inspired
+
+`apps/web` usa un shell oscuro para las áreas autenticadas:
+
+- Sidebar fija de 240px con navegación densa, iconos Lucide de 16px y estado activo sutil.
+- Topbar fija con búsqueda, acción principal compacta y controles iconográficos.
+- Canvas central `max-w-6xl`, cards con borde fino, radius `8px`, sin sombras pesadas.
+- Gráficos dentro de cards grandes; el gráfico no vive como decoración separada.
+- Acciones frecuentes en pills compactas arriba del contenido, no como CTAs enormes.
 
 ---
 

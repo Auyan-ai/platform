@@ -9,6 +9,7 @@ import {
   ScrollText,
   Sparkles,
   FlaskConical,
+  BookOpenText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { TenantSwitcher } from './TenantSwitcher'
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { label: 'Conversaciones', icon: MessagesSquare, section: 'conversations' },
   { label: 'Escalaciones', icon: AlertTriangle, section: 'escalations' },
   { label: 'Aprobaciones', icon: CheckCircle2, section: 'approvals' },
+  { label: 'Playbook', icon: BookOpenText, section: 'playbook' },
   { label: 'AOPs', icon: ScrollText, section: 'aops' },
   { label: 'Mejoras propuestas', icon: Sparkles, section: 'proposals' },
   { label: 'Simulator', icon: FlaskConical, section: 'simulator' },
