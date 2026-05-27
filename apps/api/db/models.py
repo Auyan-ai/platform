@@ -358,6 +358,37 @@ class RolePermission(_BaseModel):
     permission: str
 
 
+# ─── Tenant Playbook + Facts (Bloque 1, Sub-PR 1.1 / 1.2) ───────────────────
+
+
+class TenantPlaybook(_BaseModel):
+    """Biblia del cliente. Mantenida por Auyan (qa_km / super_admin).
+    Inyectada en el system prompt del agente — NO va al RAG."""
+
+    tenant_id: UUID
+    brand_voice: str = ""
+    product_overview: str = ""
+    policies: str = ""
+    escalation_notes: str = ""
+    agent_instructions: str = ""
+    version: int = 1
+    last_edited_by: UUID | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class TenantFacts(_BaseModel):
+    """Datos factuales del cliente editables por tenant_admin.
+    Ejemplos: horarios, teléfono, devoluciones. Inyectados en el system prompt — NO van al RAG."""
+
+    tenant_id: UUID
+    data: dict = Field(default_factory=dict)
+    version: int = 1
+    last_edited_by: UUID | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 # ─── Tenant Integrations (Bloque 0, Sub-PR 0.2) ──────────────────────────────
 
 IntegrationKind = Literal["helpdesk", "commerce", "channel", "llm"]

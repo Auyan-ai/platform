@@ -4,6 +4,9 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useConversations } from '@/lib/api/hooks/conversations'
 import { cn } from '@/lib/utils'
+import { Badge, type BadgeProps } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ConversationStatus, ChannelType } from '@auyan/shared'
 
 // ----------------------------------------------------------------
@@ -19,12 +22,12 @@ const STATUS_LABELS: Record<ConversationStatus | 'all', string> = {
   closed: 'Cerradas',
 }
 
-const STATUS_STYLES: Record<ConversationStatus, string> = {
-  open: 'bg-green-50 text-green-700',
-  pending: 'bg-yellow-50 text-yellow-700',
-  escalated: 'bg-red-50 text-red-700',
-  resolved: 'bg-blue-50 text-blue-700',
-  closed: 'bg-neutral-100 text-neutral-500',
+const STATUS_VARIANT: Record<ConversationStatus, BadgeProps['variant']> = {
+  open: 'default', // cobalto = activo/info
+  pending: 'warning',
+  escalated: 'danger',
+  resolved: 'success',
+  closed: 'muted',
 }
 
 const CHANNEL_LABELS: Record<ChannelType, string> = {
@@ -87,8 +90,8 @@ export function ConversationList({
   const hasPrev = offset > 0
   const resolvedBasePath = basePath ?? `/tenants/${tenantId}/conversations`
 
-  function handleFilterChange(next: ConversationStatus | 'all') {
-    setActiveStatus(next)
+  function handleFilterChange(next: string) {
+    setActiveStatus(next as ConversationStatus | 'all')
     setOffset(0)
   }
 
@@ -96,70 +99,57 @@ export function ConversationList({
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-neutral-900">Conversaciones</h1>
+        <h1 className="text-xl font-semibold text-foreground">Conversaciones</h1>
         {isLoading && (
-          <span className="text-xs text-neutral-400">Actualizando...</span>
+          <span className="text-xs text-foreground-muted">Actualizando…</span>
         )}
       </div>
 
       {/* Filtros de status */}
-      <div className="flex gap-1 border-b border-neutral-200 pb-0">
-        {STATUS_FILTERS.map((s) => (
-          <button
-            key={s}
-            onClick={() => handleFilterChange(s)}
-            className={cn(
-              'px-3 py-2 text-sm font-medium transition-colors',
-              '-mb-px border-b-2',
-              activeStatus === s
-                ? 'border-neutral-900 text-neutral-900'
-                : 'border-transparent text-neutral-500 hover:text-neutral-700',
-            )}
-          >
-            {STATUS_LABELS[s]}
-          </button>
-        ))}
-      </div>
+      <Tabs value={activeStatus} onValueChange={handleFilterChange}>
+        <TabsList className="w-full justify-start">
+          {STATUS_FILTERS.map((s) => (
+            <TabsTrigger key={s} value={s}>
+              {STATUS_LABELS[s]}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {/* Contenido */}
       {isError ? (
-        <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-md bg-danger-subtle px-4 py-3 text-sm text-danger-foreground">
           Error al cargar: {error instanceof Error ? error.message : 'desconocido'}
         </div>
       ) : conversations.length === 0 && !isLoading ? (
-        <div className="py-12 text-center text-sm text-neutral-400">
-          No hay conversaciones {activeStatus !== 'all' && `con estado "${STATUS_LABELS[activeStatus]}"`}.
+        <div className="py-12 text-center text-sm text-foreground-muted">
+          No hay conversaciones{' '}
+          {activeStatus !== 'all' && `con estado "${STATUS_LABELS[activeStatus]}"`}.
         </div>
       ) : (
-        <div className="divide-y divide-neutral-100 rounded-xl border border-neutral-200 bg-white">
+        <div className="divide-y divide-border-subtle rounded-md border border-border bg-surface">
           {conversations.map((conv) => (
             <Link
               key={conv.id}
               href={`${resolvedBasePath}/${conv.id}`}
-              className="flex items-center gap-3 px-4 py-3 hover:bg-neutral-50 transition-colors"
+              className={cn(
+                'flex items-center gap-3 px-4 py-3 transition-colors',
+                'hover:bg-surface-muted',
+              )}
             >
-              {/* Status badge */}
-              <span
-                className={cn(
-                  'shrink-0 rounded-full px-2 py-0.5 text-xs font-medium',
-                  STATUS_STYLES[conv.status],
-                )}
-              >
+              <Badge variant={STATUS_VARIANT[conv.status]}>
                 {STATUS_LABELS[conv.status]}
-              </span>
+              </Badge>
 
-              {/* Subject */}
-              <span className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-800">
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground-body">
                 {conv.subject ?? `Conversación ${conv.id.slice(0, 8)}`}
               </span>
 
-              {/* Canal */}
-              <span className="shrink-0 text-xs text-neutral-400">
+              <span className="shrink-0 text-xs text-foreground-muted">
                 {CHANNEL_LABELS[conv.channel]}
               </span>
 
-              {/* Tiempo */}
-              <span className="shrink-0 text-xs text-neutral-400">
+              <span className="shrink-0 text-xs text-foreground-muted tabular-nums">
                 {relativeTime(conv.last_message_at)}
               </span>
             </Link>
@@ -170,20 +160,22 @@ export function ConversationList({
       {/* Paginación */}
       {(hasPrev || hasMore) && (
         <div className="flex justify-between">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setOffset((o) => Math.max(0, o - LIMIT))}
             disabled={!hasPrev}
-            className="text-sm text-neutral-500 hover:text-neutral-900 disabled:opacity-30"
           >
             ← Anterior
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setOffset((o) => o + LIMIT)}
             disabled={!hasMore}
-            className="text-sm text-neutral-500 hover:text-neutral-900 disabled:opacity-30"
           >
             Siguiente →
-          </button>
+          </Button>
         </div>
       )}
     </div>

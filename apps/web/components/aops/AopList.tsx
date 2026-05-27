@@ -1,9 +1,12 @@
 'use client'
 
 import Link from 'next/link'
+import { Plus } from 'lucide-react'
 import { useAops, useToggleAop, useDeleteAop, type AopWorkspace } from '@/lib/api/hooks/aops'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 interface AopListProps {
   tenantId: string
@@ -28,118 +31,111 @@ export function AopList({ tenantId }: AopListProps) {
 
   return (
     <div>
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-neutral-900">Agent Operating Procedures</h1>
-          <p className="text-sm text-neutral-500 mt-0.5">
+          <h1 className="text-xl font-semibold text-foreground">Agent Operating Procedures</h1>
+          <p className="text-sm text-foreground-muted mt-0.5">
             Procedimientos que guían el comportamiento del agente por intent
           </p>
         </div>
-        <Link
-          href={`/tenants/${tenantId}/aops/new`}
-          className="rounded-lg bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-700 transition-colors"
-        >
-          + Nuevo AOP
-        </Link>
+        <Button asChild size="sm">
+          <Link href={`/tenants/${tenantId}/aops/new`}>
+            <Plus className="size-4" />
+            Nuevo AOP
+          </Link>
+        </Button>
       </div>
 
-      {/* Workspace tabs */}
-      <div className="flex gap-1 mb-4 border-b border-neutral-200">
-        {WORKSPACE_TABS.map((ws) => (
-          <button
-            key={ws}
-            onClick={() => setWorkspace(ws)}
-            className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
-              workspace === ws
-                ? 'border-neutral-900 text-neutral-900'
-                : 'border-transparent text-neutral-500 hover:text-neutral-700',
-            )}
-          >
-            {ws === 'production' ? 'Producción' : 'Staging'}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        value={workspace}
+        onValueChange={(v) => setWorkspace(v as AopWorkspace)}
+        className="mb-4"
+      >
+        <TabsList className="w-full justify-start">
+          {WORKSPACE_TABS.map((ws) => (
+            <TabsTrigger key={ws} value={ws}>
+              {ws === 'production' ? 'Producción' : 'Staging'}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
-      {/* Content */}
       {isLoading && (
-        <div className="py-12 text-center text-sm text-neutral-400">Cargando AOPs...</div>
+        <div className="py-12 text-center text-sm text-foreground-muted">
+          Cargando AOPs…
+        </div>
       )}
       {error && (
-        <div className="py-12 text-center text-sm text-red-500">
+        <div className="rounded-md bg-danger-subtle px-4 py-3 text-sm text-danger-foreground">
           Error al cargar AOPs: {error.message}
         </div>
       )}
       {!isLoading && !error && aops?.length === 0 && (
-        <div className="py-16 text-center">
-          <p className="text-neutral-500 text-sm">No hay AOPs en {workspace}.</p>
-          <Link
-            href={`/tenants/${tenantId}/aops/new`}
-            className="mt-3 inline-block text-sm text-neutral-900 underline underline-offset-2"
-          >
-            Crear el primero
-          </Link>
+        <div className="py-16 text-center space-y-3">
+          <p className="text-foreground-muted text-sm">No hay AOPs en {workspace}.</p>
+          <Button asChild variant="link" size="sm">
+            <Link href={`/tenants/${tenantId}/aops/new`}>Crear el primero</Link>
+          </Button>
         </div>
       )}
       {aops && aops.length > 0 && (
-        <div className="rounded-lg border border-neutral-200 divide-y divide-neutral-100 bg-white overflow-hidden">
+        <div className="rounded-md border border-border divide-y divide-border-subtle bg-surface overflow-hidden">
           {aops.map((aop) => (
             <div key={aop.id} className="flex items-center gap-4 px-4 py-3">
-              {/* Status dot */}
               <span
                 className={cn(
                   'h-2 w-2 rounded-full flex-shrink-0',
-                  aop.is_active ? 'bg-green-500' : 'bg-neutral-300',
+                  aop.is_active ? 'bg-success' : 'bg-border-strong',
                 )}
+                aria-label={aop.is_active ? 'Activo' : 'Inactivo'}
               />
 
-              {/* Info */}
               <div className="flex-1 min-w-0">
                 <Link
                   href={`/tenants/${tenantId}/aops/${aop.id}`}
-                  className="text-sm font-medium text-neutral-900 hover:underline truncate block"
+                  className="text-sm font-medium text-foreground hover:underline truncate block"
                 >
                   {aop.name}
                 </Link>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <code className="text-xs text-neutral-400">{aop.slug}</code>
+                  <code className="text-xs text-foreground-muted font-mono">{aop.slug}</code>
                   {aop.description && (
-                    <span className="text-xs text-neutral-400 truncate">{aop.description}</span>
+                    <span className="text-xs text-foreground-muted truncate">
+                      {aop.description}
+                    </span>
                   )}
                 </div>
               </div>
 
-              {/* Version badge */}
-              <span className="text-xs text-neutral-400 flex-shrink-0">v{aop.current_version}</span>
+              <span className="text-xs text-foreground-muted flex-shrink-0 tabular-nums font-mono">
+                v{aop.current_version}
+              </span>
 
-              {/* Actions */}
               <div className="flex items-center gap-2 flex-shrink-0">
-                <button
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => handleToggle(aop.id, aop.is_active)}
                   disabled={toggleMut.isPending}
                   className={cn(
-                    'text-xs px-2 py-1 rounded border transition-colors',
-                    aop.is_active
-                      ? 'border-neutral-200 text-neutral-600 hover:border-neutral-300'
-                      : 'border-green-200 text-green-700 hover:border-green-300',
+                    'text-xs h-7',
+                    !aop.is_active && 'border-success-subtle text-success-foreground hover:bg-success-subtle',
                   )}
                 >
                   {aop.is_active ? 'Desactivar' : 'Activar'}
-                </button>
-                <Link
-                  href={`/tenants/${tenantId}/aops/${aop.id}`}
-                  className="text-xs px-2 py-1 rounded border border-neutral-200 text-neutral-600 hover:border-neutral-300 transition-colors"
-                >
-                  Editar
-                </Link>
-                <button
+                </Button>
+                <Button asChild variant="outline" size="sm" className="text-xs h-7">
+                  <Link href={`/tenants/${tenantId}/aops/${aop.id}`}>Editar</Link>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => handleDelete(aop.id, aop.slug)}
                   disabled={deleteMut.isPending}
-                  className="text-xs px-2 py-1 rounded border border-red-100 text-red-500 hover:border-red-200 transition-colors"
+                  className="text-xs h-7 border-danger-subtle text-danger-foreground hover:bg-danger-subtle"
                 >
                   Eliminar
-                </button>
+                </Button>
               </div>
             </div>
           ))}

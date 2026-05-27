@@ -17,7 +17,9 @@ from apps.api.aops.compiler import (
     _render_kb_chunks,
     _render_required_data,
     _render_steps,
+    _render_tenant_facts,
     _render_tenant_identity,
+    _render_tenant_playbook,
     compile_aop,
     load_aop,
 )
@@ -540,3 +542,122 @@ async def test_load_aop_none_not_cached() -> None:
         await load_aop(conn, TENANT_ID, "nonexistent")
 
     assert mock_get.call_count == 2  # None no se guarda en cache
+
+
+# ─── _render_tenant_facts ───────────────────────────────────────────────────
+
+
+def test_render_tenant_facts_empty() -> None:
+    assert _render_tenant_facts({}) == ""
+
+
+def test_render_tenant_facts_all_empty_values() -> None:
+    assert _render_tenant_facts({"support_email": "", "support_phone": None}) == ""
+
+
+def test_render_tenant_facts_known_keys() -> None:
+    facts = {
+        "business_hours": "L-V 9:00-18:00",
+        "support_email": "hola@tienda.com",
+        "return_window_days": 30,
+    }
+    result = _render_tenant_facts(facts)
+    assert result.startswith("## Datos del cliente")
+    assert "Horario de atención" in result
+    assert "L-V 9:00-18:00" in result
+    assert "Email de soporte" in result
+    assert "hola@tienda.com" in result
+    assert "30" in result
+
+
+def test_render_tenant_facts_unknown_key_rendered() -> None:
+    result = _render_tenant_facts({"custom_field": "valor"})
+    assert "Custom field" in result
+    assert "valor" in result
+
+
+# ─── _render_tenant_playbook ─────────────────────────────────────────────────
+
+
+def test_render_tenant_playbook_empty_dict() -> None:
+    assert _render_tenant_playbook({}) == ""
+
+
+def test_render_tenant_playbook_all_empty_sections() -> None:
+    pb = {
+        "brand_voice": "",
+        "product_overview": "",
+        "policies": "",
+        "escalation_notes": "",
+        "agent_instructions": "",
+    }
+    assert _render_tenant_playbook(pb) == ""
+
+
+def test_render_tenant_playbook_partial_sections() -> None:
+    pb = {
+        "brand_voice": "Tono cercano y directo.",
+        "policies": "30 días para devoluciones.",
+    }
+    result = _render_tenant_playbook(pb)
+    assert result.startswith("## Conocimiento de la Marca")
+    assert "Voz de la Marca" in result
+    assert "Tono cercano y directo." in result
+    assert "Políticas" in result
+    assert "30 días para devoluciones." in result
+    # Secciones vacías NO aparecen
+    assert "Productos y Servicios" not in result
+    assert "Notas de Escalación" not in result
+
+
+def test_render_tenant_playbook_all_sections() -> None:
+    pb = {
+        "brand_voice": "Amigable.",
+        "product_overview": "Ropa deportiva.",
+        "policies": "30d devolución.",
+        "escalation_notes": "Escalar si cliente enojado.",
+        "agent_instructions": "Usar tú.",
+    }
+    result = _render_tenant_playbook(pb)
+    for section_title in [
+        "Voz de la Marca",
+        "Productos y Servicios",
+        "Políticas",
+        "Notas de Escalación",
+        "Instrucciones Específicas del Agente",
+    ]:
+        assert section_title in result
+
+
+# ─── compile_aop con playbook y facts ────────────────────────────────────────
+
+
+def test_compile_aop_injects_facts_and_playbook() -> None:
+    """compile_aop con playbook+facts produce system_prompt que los contiene."""
+    aop = _make_aop()
+    config = make_tenant_configuration()
+    facts = {"business_hours": "L-V 9-18", "support_email": "x@x.com"}
+    playbook = {"brand_voice": "Muy formal.", "policies": "Sin devoluciones."}
+
+    with patch(
+        "apps.api.aops.compiler._resolve_tool_definitions", return_value=[]
+    ):
+        result = compile_aop(aop, config, tenant_facts=facts, tenant_playbook=playbook)
+
+    assert "L-V 9-18" in result.system_prompt
+    assert "Muy formal." in result.system_prompt
+    assert "Sin devoluciones." in result.system_prompt
+
+
+def test_compile_aop_no_facts_no_playbook_no_extra_blocks() -> None:
+    """Sin facts ni playbook, los bloques correspondientes están ausentes."""
+    aop = _make_aop()
+    config = make_tenant_configuration()
+
+    with patch(
+        "apps.api.aops.compiler._resolve_tool_definitions", return_value=[]
+    ):
+        result = compile_aop(aop, config)
+
+    assert "Datos del cliente" not in result.system_prompt
+    assert "Conocimiento de la Marca" not in result.system_prompt

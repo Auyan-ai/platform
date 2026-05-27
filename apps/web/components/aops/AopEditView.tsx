@@ -13,13 +13,13 @@ export function AopEditView({ tenantId, aopId }: AopEditViewProps) {
 
   if (isLoading) {
     return (
-      <div className="py-16 text-center text-sm text-neutral-400">Cargando AOP...</div>
+      <div className="py-16 text-center text-sm text-foreground-muted">Cargando AOP…</div>
     )
   }
 
   if (error || !aop) {
     return (
-      <div className="py-16 text-center text-sm text-red-500">
+      <div className="rounded-md bg-danger-subtle px-4 py-3 text-sm text-danger-foreground">
         {error?.message ?? 'AOP no encontrado.'}
       </div>
     )

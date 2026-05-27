@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { fetchCurrentUser } from '@/lib/api/users'
 import { apiClient } from '@/lib/api/client'
 import { ClientSidebar } from '@/components/clients/ClientSidebar'
+import { AppTopbar } from '@/components/nav/AppTopbar'
 
 interface Props {
   children: ReactNode
@@ -41,9 +42,12 @@ export default async function ClientsLayout({ children, params }: Props) {
   }
 
   return (
-    <div className="flex min-h-screen bg-neutral-50">
+    <div data-density="relaxed" data-theme="mercury" className="flex min-h-screen bg-background">
       <ClientSidebar tenantId={user.tenant_id} tenantName={tenantName} userEmail={user.email} />
-      <main className="ml-60 flex-1 p-8">{children}</main>
+      <AppTopbar label={tenantName} actionLabel="Solicitar revisión" />
+      <main className="ml-60 flex-1 px-8 pb-10 pt-24">
+        <div className="mx-auto max-w-6xl">{children}</div>
+      </main>
     </div>
   )
 }

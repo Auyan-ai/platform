@@ -34,6 +34,10 @@ class AgentState(TypedDict, total=False):
     # Estructura: {"tenant_id": str, "credentials": {"domain": ..., "token": ...}, "config": dict}.
     # None si el tenant no tiene integración commerce configurada.
     commerce_integration_ctx: dict | None
+    # Playbook y facts del tenant — inyectados en el system prompt del agente por compile_aop.
+    # Ambos son None si el tenant aún no completó el onboarding.
+    tenant_playbook: dict | None  # TenantPlaybook.model_dump()
+    tenant_facts: dict | None     # TenantFacts.data (el JSONB plano)
 
     # --- Producido por load_conversation ---
     conversation_history: list[dict]

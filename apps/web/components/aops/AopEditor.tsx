@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useCreateAop, useSaveAop, useValidateAop, type AopWorkspace } from '@/lib/api/hooks/aops'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
 
 const DEFAULT_TEMPLATE = `---
 name: Nombre del AOP
@@ -34,14 +36,12 @@ Describe aquí cómo debe comportarse el agente cuando se activa este AOP.
 
 interface AopEditorProps {
   tenantId: string
-  /** Modo creación: no hay aopId */
   mode: 'create'
   initialWorkspace?: AopWorkspace
 }
 
 interface AopEditorEditProps {
   tenantId: string
-  /** Modo edición: aopId requerido */
   mode: 'edit'
   aopId: string
   initialSource: string
@@ -101,94 +101,80 @@ export function AopEditor(props: Props) {
 
   return (
     <div className="flex flex-col gap-4 h-full">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           {props.mode === 'edit' ? (
             <>
-              <h1 className="text-xl font-semibold text-neutral-900">{props.slug}</h1>
-              <p className="text-xs text-neutral-400 mt-0.5">Versión actual: v{props.currentVersion}</p>
+              <h1 className="text-xl font-semibold text-foreground font-mono">{props.slug}</h1>
+              <p className="text-xs text-foreground-muted mt-0.5 tabular-nums">
+                Versión actual: v{props.currentVersion}
+              </p>
             </>
           ) : (
-            <h1 className="text-xl font-semibold text-neutral-900">Nuevo AOP</h1>
+            <h1 className="text-xl font-semibold text-foreground">Nuevo AOP</h1>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleValidate}
-            disabled={isLoading}
-            className="rounded-lg border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50 transition-colors"
-          >
+          <Button variant="outline" size="sm" onClick={handleValidate} disabled={isLoading}>
             Vista previa del prompt
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={isLoading}
-            className="rounded-lg bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50 transition-colors"
-          >
+          </Button>
+          <Button size="sm" onClick={handleSave} disabled={isLoading}>
             {isLoading
-              ? 'Guardando...'
+              ? 'Guardando…'
               : props.mode === 'create'
                 ? 'Crear AOP'
                 : 'Guardar versión'}
-          </button>
+          </Button>
         </div>
       </div>
 
-      {/* Save error */}
       {saveError && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-md bg-danger-subtle px-4 py-3 text-sm text-danger-foreground">
           {saveError.message}
         </div>
       )}
 
-      {/* Success banner */}
       {saveMut?.isSuccess && (
-        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+        <div className="rounded-md bg-success-subtle px-4 py-3 text-sm text-success-foreground">
           Nueva versión guardada correctamente.
         </div>
       )}
 
-      {/* Editor + Preview split */}
       <div className={cn('flex gap-4', showPreview ? 'flex-row' : 'flex-col')}>
-        {/* Raw source editor */}
         <div className={cn('flex flex-col', showPreview ? 'flex-1' : 'w-full')}>
-          <label className="text-xs font-medium text-neutral-500 mb-1">
-            Fuente del AOP (YAML frontmatter + Markdown)
-          </label>
+          <Label className="mb-1">Fuente del AOP (YAML frontmatter + Markdown)</Label>
           <textarea
             value={source}
             onChange={(e) => setSource(e.target.value)}
             spellCheck={false}
             className={cn(
-              'font-mono text-sm rounded-lg border border-neutral-200 bg-neutral-50 p-4',
-              'focus:outline-none focus:ring-2 focus:ring-neutral-300 resize-none',
+              'font-mono text-sm rounded-md border border-border bg-surface-muted p-4 text-foreground',
+              'hover:border-border-strong transition-colors resize-none',
               showPreview ? 'h-[600px]' : 'h-[500px]',
             )}
           />
         </div>
 
-        {/* Preview panel */}
         {showPreview && (
           <div className="flex-1 flex flex-col">
             <div className="flex items-center justify-between mb-1">
-              <label className="text-xs font-medium text-neutral-500">
-                System prompt compilado
-              </label>
-              <button
+              <Label>System prompt compilado</Label>
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowPreview(false)}
-                className="text-xs text-neutral-400 hover:text-neutral-600"
+                className="h-6 text-xs"
               >
                 Cerrar
-              </button>
+              </Button>
             </div>
             {validateMut.isPending && (
-              <div className="flex-1 flex items-center justify-center text-sm text-neutral-400 rounded-lg border border-neutral-200 bg-neutral-50">
-                Compilando...
+              <div className="flex-1 flex items-center justify-center text-sm text-foreground-muted rounded-md border border-border bg-surface-muted">
+                Compilando…
               </div>
             )}
             {previewErrors.length > 0 && (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 space-y-1">
+              <div className="rounded-md bg-danger-subtle p-4 text-sm text-danger-foreground space-y-1">
                 <p className="font-medium">Errores de validación:</p>
                 {previewErrors.map((e, i) => (
                   <p key={i}>• {e}</p>
@@ -200,8 +186,8 @@ export function AopEditor(props: Props) {
                 readOnly
                 value={previewPrompt}
                 className={cn(
-                  'flex-1 font-mono text-xs rounded-lg border border-neutral-200',
-                  'bg-neutral-50 p-4 focus:outline-none resize-none h-[600px]',
+                  'flex-1 font-mono text-xs rounded-md border border-border',
+                  'bg-surface-muted p-4 resize-none h-[600px] text-foreground-body',
                 )}
               />
             )}
@@ -209,12 +195,12 @@ export function AopEditor(props: Props) {
         )}
       </div>
 
-      {/* Help */}
-      <p className="text-xs text-neutral-400">
-        El AOP debe comenzar con un bloque <code className="bg-neutral-100 px-1 rounded">---</code>{' '}
-        YAML que incluya al menos <code className="bg-neutral-100 px-1 rounded">slug</code> y{' '}
-        <code className="bg-neutral-100 px-1 rounded">name</code>. Cada guardado crea una nueva
-        versión inmutable.
+      <p className="text-xs text-foreground-muted">
+        El AOP debe comenzar con un bloque{' '}
+        <code className="bg-surface-muted px-1 rounded-xs font-mono">---</code> YAML que incluya al
+        menos <code className="bg-surface-muted px-1 rounded-xs font-mono">slug</code> y{' '}
+        <code className="bg-surface-muted px-1 rounded-xs font-mono">name</code>. Cada guardado
+        crea una nueva versión inmutable.
       </p>
     </div>
   )

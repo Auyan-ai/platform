@@ -90,6 +90,26 @@ def _make_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     return app
 
 
+def _make_super_admin_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    async def _fake_lookup(user_id: UUID, settings: Any) -> UserRecord:
+        return UserRecord(tenant_id=TENANT_ID, role="super_admin", email="kenny@auyan.ai")
+
+    monkeypatch.setattr("apps.api.core.security._lookup_user", _fake_lookup)
+
+    @asynccontextmanager
+    async def _fake_tenant_scope(tid: UUID) -> AsyncIterator[Any]:
+        yield AsyncMock()
+
+    monkeypatch.setattr("apps.api.routers.tenants.tenant_scope", _fake_tenant_scope)
+
+    from apps.api.core.config import get_settings
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.dependency_overrides[get_settings] = lambda: FakeAuthSettings()
+    app.include_router(tenants_router)
+    return app
+
+
 class TestGetMyTenant:
     def test_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         tenant = make_tenant()
@@ -294,3 +314,152 @@ class TestGetMyTenantUsage:
         with TestClient(app) as client:
             resp = client.get("/tenants/me/usage")
         assert resp.status_code == 401
+
+
+class TestTenantPlaybookEndpoints:
+    def test_get_playbook_returns_existing_row(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from apps.api.db.models import TenantPlaybook
+
+        playbook = TenantPlaybook(
+            tenant_id=TENANT_ID,
+            brand_voice="Cercana, clara, sin prometer de más.",
+            product_overview="Ecommerce de cosmética.",
+            policies="Devoluciones en 30 días.",
+            escalation_notes="Escalar VIPs.",
+            agent_instructions="Usar castellano de España.",
+            version=3,
+            last_edited_by=USER_ID,
+            updated_at=datetime.now(UTC),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant_playbook",
+            AsyncMock(return_value=playbook),
+        )
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get("/tenants/me/playbook", headers={"Authorization": f"Bearer {_make_jwt()}"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["tenant_id"] == str(TENANT_ID)
+        assert body["brand_voice"] == "Cercana, clara, sin prometer de más."
+        assert body["version"] == 3
+
+    def test_get_playbook_returns_empty_default_when_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant_playbook",
+            AsyncMock(return_value=None),
+        )
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get("/tenants/me/playbook", headers={"Authorization": f"Bearer {_make_jwt()}"})
+
+        assert resp.status_code == 200
+        assert resp.json()["brand_voice"] == ""
+
+    def test_update_playbook_upserts_all_sections(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from apps.api.db.models import TenantPlaybook
+
+        saved = TenantPlaybook(
+            tenant_id=TENANT_ID,
+            brand_voice="Precisa",
+            product_overview="Moda premium",
+            policies="Cambios 14 días",
+            escalation_notes="Escalar fraude",
+            agent_instructions="No inventar stock",
+            version=2,
+            last_edited_by=USER_ID,
+            updated_at=datetime.now(UTC),
+        )
+        upsert_mock = AsyncMock(return_value=saved)
+        monkeypatch.setattr("apps.api.routers.tenants.upsert_tenant_playbook", upsert_mock)
+        app = _make_super_admin_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.put(
+            "/tenants/me/playbook",
+            headers={
+                "Authorization": f"Bearer {_make_jwt()}",
+                "X-Tenant-Id": str(TENANT_ID),
+            },
+            json={
+                "brand_voice": "Precisa",
+                "product_overview": "Moda premium",
+                "policies": "Cambios 14 días",
+                "escalation_notes": "Escalar fraude",
+                "agent_instructions": "No inventar stock",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["version"] == 2
+        assert upsert_mock.await_args.kwargs["edited_by"] == USER_ID
+
+
+class TestTenantFactsEndpoints:
+    def test_get_facts_returns_existing_data(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from apps.api.db.models import TenantFacts
+
+        facts = TenantFacts(
+            tenant_id=TENANT_ID,
+            data={"support_email": "hola@acme.test", "return_window_days": 30},
+            version=4,
+            last_edited_by=USER_ID,
+            updated_at=datetime.now(UTC),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant_facts",
+            AsyncMock(return_value=facts),
+        )
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get("/tenants/me/facts", headers={"Authorization": f"Bearer {_make_jwt()}"})
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["support_email"] == "hola@acme.test"
+        assert resp.json()["version"] == 4
+
+    def test_get_facts_returns_empty_default_when_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant_facts",
+            AsyncMock(return_value=None),
+        )
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get("/tenants/me/facts", headers={"Authorization": f"Bearer {_make_jwt()}"})
+
+        assert resp.status_code == 200
+        assert resp.json()["data"] == {}
+
+    def test_update_facts_upserts_json_payload(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from apps.api.db.models import TenantFacts
+
+        saved = TenantFacts(
+            tenant_id=TENANT_ID,
+            data={"support_phone": "+34 910 123 456"},
+            version=2,
+            last_edited_by=USER_ID,
+            updated_at=datetime.now(UTC),
+        )
+        upsert_mock = AsyncMock(return_value=saved)
+        monkeypatch.setattr("apps.api.routers.tenants.upsert_tenant_facts", upsert_mock)
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.put(
+            "/tenants/me/facts",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={"data": {"support_phone": "+34 910 123 456"}},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["support_phone"] == "+34 910 123 456"
+        assert upsert_mock.await_args.kwargs["edited_by"] == USER_ID

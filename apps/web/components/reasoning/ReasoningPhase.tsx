@@ -29,11 +29,11 @@ export function ReasoningPhase({ phase, events, maskPII }: Props) {
 
   return (
     <div className="flex flex-col gap-0.5">
-      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-foreground-muted">
         {PHASE_ICON[phase]}
         <span>{PHASE_LABEL[phase]}</span>
         {allDone && (
-          <span className="ml-auto text-green-500 text-[10px]">✓</span>
+          <span className="ml-auto text-success text-[10px]">✓</span>
         )}
       </div>
       <div className="ml-5 flex flex-col">

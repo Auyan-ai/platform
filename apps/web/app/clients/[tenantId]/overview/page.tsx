@@ -1,6 +1,8 @@
 import { MetricsCards } from '@/components/clients/MetricsCards'
 import { RecentConversations } from '@/components/clients/RecentConversations'
 import { UsageCard } from '@/components/clients/UsageCard'
+import { Button } from '@/components/ui/button'
+import { MessageSquarePlus, Upload, Wand2 } from 'lucide-react'
 
 interface Props {
   params: Promise<{ tenantId: string }>
@@ -11,11 +13,27 @@ export default async function ClientOverviewPage({ params }: Props) {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-xl font-semibold text-neutral-900">Overview</h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          Estado del soporte de tu cuenta.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Bienvenido</h1>
+          <p className="mt-1 text-sm text-foreground-muted">
+            Estado operativo del soporte IA de tu cuenta.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm">
+            <MessageSquarePlus className="size-4" />
+            Revisar inbox
+          </Button>
+          <Button size="sm" variant="secondary">
+            <Upload className="size-4" />
+            Subir KB
+          </Button>
+          <Button size="sm" variant="secondary">
+            <Wand2 className="size-4" />
+            Pedir ajuste
+          </Button>
+        </div>
       </div>
 
       <MetricsCards tenantId={tenantId} />
@@ -27,7 +45,7 @@ export default async function ClientOverviewPage({ params }: Props) {
       </div>
 
       <div>
-        <h2 className="mb-3 text-sm font-semibold text-neutral-700">Conversaciones recientes</h2>
+        <h2 className="mb-3 text-sm font-semibold text-foreground">Conversaciones recientes</h2>
         <RecentConversations tenantId={tenantId} />
       </div>
     </div>

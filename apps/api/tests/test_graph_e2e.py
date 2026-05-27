@@ -65,6 +65,14 @@ def _patch_all_db_and_llm(
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
+        "apps.api.agents.nodes.load_tenant_context.get_tenant_playbook",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.load_tenant_context.get_tenant_facts",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
         "apps.api.agents.nodes.load_tenant_context.get_primary_integration_for_kind",
         AsyncMock(return_value=None),
     )
