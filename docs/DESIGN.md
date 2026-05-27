@@ -286,15 +286,15 @@ La landing decide sus propios containers y grids dentro de cada módulo de Acete
 
 ### 6.3 Sombras
 
-Mínimas en dashboard. Las separaciones de superficie se hacen con borde + color, no con drop-shadow. Tres niveles:
+Mínimas en dashboard, pero las cards principales del shell Mercury light usan la sombra exacta medida en el demo para ganar profundidad sin verse pesadas:
 
 ```
-shadow-none      ← default
-shadow-sm        ← popovers, dropdowns:  0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06)
-shadow-md        ← modales (centro):     0 4px 12px -2px rgb(0 0 0 / 0.08), 0 2px 6px -1px rgb(0 0 0 / 0.06)
+card-shadow      ← cards:    0 0 2px 0 rgb(175 178 206 / 0.56), 0 1px 4px 0 rgb(4 4 52 / 0.10)
+shadow-sm        ← popovers: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.06)
+shadow-md        ← modales:  0 4px 12px -2px rgb(0 0 0 / 0.08), 0 2px 6px -1px rgb(0 0 0 / 0.06)
 ```
 
-**Dashboard**: cero `shadow-xl` o sombras coloridas. Si necesitás más separación, primero probás cambiar `surface` o `border`.
+**Dashboard**: cero `shadow-xl` o sombras coloridas. Las cards no llevan border visible; la sombra `0 0 2px` hace de contorno fino.
 
 **Landing**: puede usar sombras de Aceternity que vienen como parte de un módulo (spotlight, glow effects sutiles) siempre que respeten la paleta — nada multicolor, nada neón.
 
@@ -379,8 +379,10 @@ El wrapper raíz de cada layout setea la densidad vía `data-density="compact|re
 `apps/web` usa un shell claro para las áreas autenticadas, siguiendo el demo público de Mercury (`demo.mercury.com`) sin abandonar los tokens Auyan:
 
 - Sidebar fija de 200px, fondo off-white, navegación densa, iconos Lucide de 14px y estado activo gris sutil.
-- Topbar fija de 56px con búsqueda visualmente ligera, acción principal compacta y controles iconográficos.
-- Canvas central `max-w-6xl`, fondo blanco, cards blancas con borde fino, radius `8px`, sin sombras pesadas.
+- Topbar de 56px en flujo normal, no fija; desaparece al hacer scroll como en Mercury.
+- Sin avatar/cuenta del lado derecho en cliente: Auyan no tiene selector de cuenta cliente en esta etapa.
+- Canvas central `max-w-6xl`, fondo blanco, cards blancas con radius `12px` y sombra Mercury sutil.
+- El contenido cliente arranca con `pt-16` bajo el topbar; todos los headers de cliente deben heredar ese aire desde el layout compartido.
 - Gráficos dentro de cards grandes; el gráfico no vive como decoración separada.
 - Acciones frecuentes en pills compactas arriba del contenido, no como CTAs enormes.
 - Acento primario sigue siendo Cobalto Salto Ángel (`#2563EB`), no el color exacto de Mercury.
@@ -434,7 +436,7 @@ Instalación obligatoria mes 1 del Bloque 1:
 
 ### 11.3 Card / panel
 
-- Default: `bg-surface border border-default rounded-md p-card-p`.
+- Default: `bg-surface rounded-lg p-card-p` + sombra Mercury sutil.
 - Eyebrow opcional arriba (`text-xs uppercase`).
 - Heading h3 (`text-lg semibold`).
 - Body con gap `space-3`.

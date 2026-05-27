@@ -42,12 +42,14 @@ export default async function ClientsLayout({ children, params }: Props) {
   }
 
   return (
-    <div data-density="relaxed" data-theme="mercury" className="flex min-h-screen bg-background">
+    <div data-density="relaxed" data-theme="mercury" className="min-h-screen bg-background">
       <ClientSidebar tenantId={user.tenant_id} tenantName={tenantName} userEmail={user.email} />
-      <AppTopbar label={tenantName} actionLabel="Solicitar revisión" />
-      <main className="ml-[200px] flex-1 px-8 pb-10 pt-20">
-        <div className="mx-auto max-w-6xl">{children}</div>
-      </main>
+      <div className="ml-[200px] min-h-screen">
+        <AppTopbar actionLabel="Solicitar revisión" />
+        <main className="px-8 pb-10 pt-16">
+          <div className="mx-auto max-w-6xl">{children}</div>
+        </main>
+      </div>
     </div>
   )
 }
