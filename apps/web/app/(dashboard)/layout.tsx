@@ -15,12 +15,14 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   }
 
   return (
-    <div data-density="compact" data-theme="mercury" className="flex min-h-screen bg-background">
+    <div data-density="compact" data-theme="mercury" className="min-h-screen bg-background">
       <Sidebar userEmail={user.email} />
-      <AppTopbar label={user.email ?? 'Auyan'} actionLabel="Revisar mejoras" />
-      <main className="ml-[200px] flex-1 px-6 pb-8 pt-20">
-        <div className="mx-auto max-w-6xl">{children}</div>
-      </main>
+      <div className="ml-[200px] min-h-screen">
+        <AppTopbar actionLabel="Revisar mejoras" />
+        <main className="px-6 pb-8 pt-10">
+          <div className="mx-auto max-w-6xl">{children}</div>
+        </main>
+      </div>
     </div>
   )
 }
