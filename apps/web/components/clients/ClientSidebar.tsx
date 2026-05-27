@@ -23,19 +23,19 @@ export function ClientSidebar({ tenantId, tenantName, userEmail }: ClientSidebar
   const pathname = usePathname()
 
   return (
-    <aside className="fixed inset-y-0 left-0 z-50 flex w-60 flex-col border-r border-border bg-surface">
+    <aside className="fixed inset-y-0 left-0 z-50 flex w-[200px] flex-col border-r border-border bg-surface-muted">
       <div className="flex h-14 items-center border-b border-border px-4">
         <span className="text-sm font-semibold tracking-tight text-foreground">Auyan</span>
       </div>
 
       <div className="border-b border-border-subtle px-4 py-3">
-        <p className="mb-0.5 text-xs font-medium uppercase tracking-wider text-foreground-muted">
+        <p className="mb-0.5 text-[11px] font-medium uppercase tracking-wider text-foreground-muted">
           Cliente
         </p>
         <p className="truncate text-sm font-medium text-foreground">{tenantName}</p>
       </div>
 
-      <nav className="flex-1 space-y-0.5 overflow-y-auto p-3 text-sm">
+      <nav className="flex-1 space-y-0.5 overflow-y-auto p-2 text-sm">
         {NAV_ITEMS.map(({ label, icon: Icon, section }) => {
           const href = `/clients/${tenantId}/${section}`
           const isActive = pathname.startsWith(href)
@@ -46,11 +46,11 @@ export function ClientSidebar({ tenantId, tenantName, userEmail }: ClientSidebar
               className={cn(
                 'flex items-center gap-2.5 rounded-sm px-2 py-1.5 transition-colors',
                 isActive
-                  ? 'bg-accent-subtle font-medium text-accent-foreground'
-                  : 'text-foreground-body hover:bg-surface-muted hover:text-foreground',
+                  ? 'bg-border-subtle font-medium text-foreground'
+                  : 'text-foreground-body hover:bg-border-subtle hover:text-foreground',
               )}
             >
-              <Icon className="size-4 shrink-0" />
+              <Icon className="size-3.5 shrink-0 text-foreground-muted" />
               <span>{label}</span>
             </Link>
           )

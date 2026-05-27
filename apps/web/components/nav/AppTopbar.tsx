@@ -8,9 +8,9 @@ interface AppTopbarProps {
 
 export function AppTopbar({ label, actionLabel = 'Acción rápida' }: AppTopbarProps) {
   return (
-    <header className="fixed left-60 right-0 top-0 z-40 flex h-16 items-center gap-4 border-b border-border bg-surface/95 px-6 backdrop-blur">
-      <div className="flex min-w-0 flex-1 items-center gap-3 rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-foreground-muted">
-        <Search className="size-4 shrink-0" />
+    <header className="fixed left-[200px] right-0 top-0 z-40 flex h-14 items-center gap-4 border-b border-border bg-surface/95 px-6 backdrop-blur">
+      <div className="flex min-w-0 flex-1 items-center gap-3 px-0 py-2 text-sm text-foreground-muted">
+        <Search className="size-3.5 shrink-0" />
         <span className="truncate">Buscar conversaciones, clientes, AOPs...</span>
         <kbd className="ml-auto hidden rounded-xs border border-border bg-surface px-1.5 py-0.5 text-[10px] font-medium text-foreground-muted md:inline">
           K
@@ -24,10 +24,10 @@ export function AppTopbar({ label, actionLabel = 'Acción rápida' }: AppTopbarP
 
       <div className="flex items-center gap-1">
         <Button variant="ghost" size="icon" aria-label="Ajustes">
-          <Settings2 className="size-4" />
+          <Settings2 className="size-3.5" />
         </Button>
         <Button variant="ghost" size="icon" aria-label="Notificaciones">
-          <Bell className="size-4" />
+          <Bell className="size-3.5" />
         </Button>
       </div>
 

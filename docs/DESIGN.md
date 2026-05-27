@@ -1,7 +1,7 @@
 # DESIGN.md — Sistema de diseño Auyan
 
 > Fuente única de verdad del sistema de diseño visual.
-> Versión: 1.1 (Bloque 1, Sub-PRs 1.1/1.2 — Mercury-inspired dashboard shell)
+> Versión: 1.2 (Bloque 1, Sub-PRs 1.1/1.2 — Mercury light dashboard shell)
 > Última actualización: 2026-05-27
 
 ---
@@ -53,7 +53,7 @@ Cinco reglas que ganan en cualquier discusión de diseño.
 
 | Atributo | Decisión |
 |---|---|
-| Modo por defecto | Dashboard operativo usa `data-theme="mercury"`: shell oscuro inspirado en Mercury, con cards densas y acento cobalto. Landing y superficies públicas mantienen light salvo decisión explícita. |
+| Modo por defecto | Dashboard operativo usa `data-theme="mercury"`: shell claro inspirado en Mercury, con cards blancas, sidebar off-white, bordes finos y acento cobalto Auyan. Landing y superficies públicas mantienen light salvo decisión explícita. |
 | Paleta | Neutrales cálidos + un solo acento cobalto. Cero gradientes, cero degradés en `apps/web`. (`apps/landing` puede usar gradientes sutiles si Aceternity los trae como parte de un módulo — siempre derivados del cobalto.) |
 | Tipografía | Geist Sans (UI + display) + Geist Mono (IDs, JSON, code). |
 | Esquinas | Suaves (`6px` botones, `8px` cards, `12px` paneles grandes). Cero esquinas agudas. |
@@ -257,7 +257,7 @@ Dos modos. Se aplican al wrapper raíz de cada sección (cliente vs interno). La
 ### 5.3 Containers y grids (solo `apps/web`)
 
 - **Max width app**: `1440px` (super_admin tiende a usarlo todo, cliente queda contenido).
-- **Sidebar**: 240px fijo (super_admin), 224px (cliente).
+- **Sidebar**: 200px fijo en super_admin y cliente, siguiendo el shell Mercury light.
 - **Content padding**: `space-6` (cliente) / `space-4` (super_admin).
 - **Grid base**: 12 columnas implícitas vía Tailwind, gap `space-4`.
 
@@ -374,15 +374,16 @@ Reforzando lo de §5.2:
 
 El wrapper raíz de cada layout setea la densidad vía `data-density="compact|relaxed"`. Los componentes leen las CSS vars `--density-*`.
 
-## 9.1 Shell operativo Mercury-inspired
+## 9.1 Shell operativo Mercury light
 
-`apps/web` usa un shell oscuro para las áreas autenticadas:
+`apps/web` usa un shell claro para las áreas autenticadas, siguiendo el demo público de Mercury (`demo.mercury.com`) sin abandonar los tokens Auyan:
 
-- Sidebar fija de 240px con navegación densa, iconos Lucide de 16px y estado activo sutil.
-- Topbar fija con búsqueda, acción principal compacta y controles iconográficos.
-- Canvas central `max-w-6xl`, cards con borde fino, radius `8px`, sin sombras pesadas.
+- Sidebar fija de 200px, fondo off-white, navegación densa, iconos Lucide de 14px y estado activo gris sutil.
+- Topbar fija de 56px con búsqueda visualmente ligera, acción principal compacta y controles iconográficos.
+- Canvas central `max-w-6xl`, fondo blanco, cards blancas con borde fino, radius `8px`, sin sombras pesadas.
 - Gráficos dentro de cards grandes; el gráfico no vive como decoración separada.
 - Acciones frecuentes en pills compactas arriba del contenido, no como CTAs enormes.
+- Acento primario sigue siendo Cobalto Salto Ángel (`#2563EB`), no el color exacto de Mercury.
 
 ---
 

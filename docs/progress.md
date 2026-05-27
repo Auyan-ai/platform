@@ -364,7 +364,7 @@ Tenant de prueba (Lunaria staging): `11111111-1111-1111-1111-111111111111`.
 **Pendiente de 1.1 + 1.2:**
 - [ ] Aplicar migraciones a staging
 
-**Nota visual:** dashboard movido hacia una composición Mercury-inspired: shell dark, sidebar fija, topbar con búsqueda, tarjetas densas con bordes finos y gráfico principal integrado. Referencia revisada: `https://mercury.com` + demo público `https://demo.mercury.com`.
+**Nota visual:** dashboard movido hacia una composición Mercury light: shell claro, sidebar fija de 200px, iconos de navegación de 14px, topbar con búsqueda ligera, tarjetas densas con bordes finos y gráfico principal integrado. Referencia revisada: `https://mercury.com` + demo público `https://demo.mercury.com`.
 
 ---
 
