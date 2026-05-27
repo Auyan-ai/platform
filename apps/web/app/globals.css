@@ -138,32 +138,32 @@
 
 /* ── Mercury-inspired operational shell ─────────────────── */
 [data-theme="mercury"] {
-  --color-background:        #171621;
-  --color-surface:           #232232;
-  --color-surface-muted:     #2B2A3D;
-  --color-surface-elevated:  #302F44;
+  --color-background:        #FFFFFF;
+  --color-surface:           #FFFFFF;
+  --color-surface-muted:     #F6F7F9;
+  --color-surface-elevated:  #FFFFFF;
 
-  --color-border:            #36354A;
-  --color-border-strong:     #4A4961;
-  --color-border-subtle:     #2B2A3D;
+  --color-border:            #E6E8EF;
+  --color-border-strong:     #D8DBE5;
+  --color-border-subtle:     #EEF0F4;
 
-  --color-foreground:         #F6F4EF;
-  --color-foreground-body:    #D8D4CB;
-  --color-foreground-muted:   #A7A19A;
-  --color-foreground-subtle:  #797486;
+  --color-foreground:         #1E1E2A;
+  --color-foreground-body:    #4A4D5B;
+  --color-foreground-muted:   #70707D;
+  --color-foreground-subtle:  #9D9DA8;
   --color-foreground-on-accent: #FFFFFF;
 
-  --color-accent:            #667CFF;
-  --color-accent-hover:      #7D90FF;
-  --color-accent-subtle:     #323754;
-  --color-accent-foreground: #BBC6FF;
+  --color-accent:            #2563EB;
+  --color-accent-hover:      #1D4ED8;
+  --color-accent-subtle:     #EEF2FF;
+  --color-accent-foreground: #1D4ED8;
 
-  --color-success-subtle:     #17382E;
-  --color-success-foreground: #7DD7B0;
-  --color-warning-subtle:     #3A311A;
-  --color-warning-foreground: #F2C56B;
-  --color-danger-subtle:      #3A2025;
-  --color-danger-foreground:  #F59CA8;
+  --color-success-subtle:     #ECFDF5;
+  --color-success-foreground: #047857;
+  --color-warning-subtle:     #FFFBEB;
+  --color-warning-foreground: #B45309;
+  --color-danger-subtle:      #FEF2F2;
+  --color-danger-foreground:  #B91C1C;
 
   --color-card:              var(--color-surface);
   --color-card-foreground:   var(--color-foreground);
