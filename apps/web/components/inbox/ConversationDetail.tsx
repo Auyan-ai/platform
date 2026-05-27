@@ -37,6 +37,7 @@ const STATUS_VARIANT: Record<ConversationOut['status'], BadgeProps['variant']> =
   escalated: 'danger',
   resolved: 'success',
   closed: 'muted',
+  closed_abandoned: 'muted',
 }
 
 const STATUS_LABELS: Record<ConversationOut['status'], string> = {
@@ -45,6 +46,7 @@ const STATUS_LABELS: Record<ConversationOut['status'], string> = {
   escalated: 'Escalada',
   resolved: 'Resuelta',
   closed: 'Cerrada',
+  closed_abandoned: 'Abandonada',
 }
 
 const ROLE_LABELS: Record<MessageOut['role'], string> = {
@@ -112,7 +114,7 @@ function Composer({
   const escalateMutation = useEscalateMutation(tenantId, conversationId)
   const closeMutation = useCloseMutation(tenantId, conversationId)
 
-  const isClosed = status === 'closed' || status === 'resolved'
+  const isClosed = status === 'closed' || status === 'closed_abandoned' || status === 'resolved'
 
   async function handleReply() {
     if (!reply.trim()) return
@@ -267,13 +269,15 @@ export function ConversationDetail({
 }) {
   const { data, isLoading, isError, error } = useConversation(tenantId, conversationId)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const messageCount = data?.messages.length ?? 0
 
   const isActive =
     data?.conversation.status === 'open' || data?.conversation.status === 'pending'
 
   useEffect(() => {
+    if (messageCount === 0) return
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [data?.messages.length])
+  }, [messageCount])
 
   if (isLoading) {
     return (

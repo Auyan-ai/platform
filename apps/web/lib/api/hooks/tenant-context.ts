@@ -26,6 +26,17 @@ export interface TenantFacts {
   updated_at: string | null
 }
 
+export interface TenantOnboarding {
+  tenant_id: string
+  current_step: number
+  completed_steps: number[]
+  step_data: Record<string, unknown>
+  submitted_at: string | null
+  completed_at: string | null
+  last_edited_by: string | null
+  updated_at: string | null
+}
+
 export type TenantPlaybookPayload = Pick<
   TenantPlaybook,
   'brand_voice' | 'product_overview' | 'policies' | 'escalation_notes' | 'agent_instructions'
@@ -103,6 +114,51 @@ export function useSaveTenantFacts(tenantId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.tenants.facts(tenantId) })
+    },
+  })
+}
+
+export function useTenantOnboarding(tenantId: string) {
+  return useQuery({
+    queryKey: queryKeys.tenants.onboarding(tenantId),
+    queryFn: async () => {
+      const token = await getToken()
+      return tenantContextFetch<TenantOnboarding>(token, tenantId, '/tenants/me/onboarding')
+    },
+    staleTime: 30_000,
+  })
+}
+
+export function useSaveTenantOnboarding(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: Pick<TenantOnboarding, 'current_step' | 'completed_steps' | 'step_data'>) => {
+      const token = await getToken()
+      return tenantContextFetch<TenantOnboarding>(token, tenantId, '/tenants/me/onboarding', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.onboarding(tenantId) })
+    },
+  })
+}
+
+export function useSubmitTenantOnboarding(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      const token = await getToken()
+      return tenantContextFetch<TenantOnboarding>(
+        token,
+        tenantId,
+        '/tenants/me/onboarding/submit',
+        { method: 'POST' },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.onboarding(tenantId) })
     },
   })
 }

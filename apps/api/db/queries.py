@@ -53,6 +53,7 @@ from apps.api.db.models import (
     TenantConfiguration,
     TenantFacts,
     TenantIntegration,
+    TenantOnboarding,
     TenantPlaybook,
     TenantToolPermission,
     TenantUsageDaily,
@@ -100,7 +101,7 @@ async def get_tenant_by_id(conn: asyncpg.Connection, tenant_id: UUID) -> Tenant 
     """Bootstrap: traer tenant por id. Útil para validar existencia."""
     row = await conn.fetchrow(
         """
-        SELECT id, slug, name, status
+        SELECT id, slug, name, status, agent_lifecycle_state
           FROM tenants
          WHERE id = $1 AND deleted_at IS NULL
         """,
@@ -113,7 +114,7 @@ async def get_tenant_by_slug(conn: asyncpg.Connection, slug: str) -> Tenant | No
     """Bootstrap: traer tenant por slug. Se ejecuta SIN tenant scope."""
     row = await conn.fetchrow(
         """
-        SELECT id, slug, name, status
+        SELECT id, slug, name, status, agent_lifecycle_state
           FROM tenants
          WHERE slug = $1 AND deleted_at IS NULL
         """,
@@ -733,7 +734,7 @@ async def list_all_tenants(conn: asyncpg.Connection) -> list[Tenant]:
     """Super-admin: listar todos los tenants activos sin tenant_scope."""
     rows = await conn.fetch(
         """
-        SELECT id, slug, name, status
+        SELECT id, slug, name, status, agent_lifecycle_state
           FROM tenants
          WHERE deleted_at IS NULL
          ORDER BY name
@@ -3286,3 +3287,107 @@ async def upsert_tenant_facts(
     if isinstance(d.get("data"), str):
         d["data"] = json.loads(d["data"])
     return TenantFacts(**d)
+
+
+# ============================================================
+# Tenant Onboarding (Bloque 1, Sub-PR 1.3)
+# ============================================================
+
+
+def _tenant_onboarding_from_row(row: asyncpg.Record) -> TenantOnboarding:
+    d = dict(row)
+    for key in ("completed_steps", "step_data"):
+        if isinstance(d.get(key), str):
+            d[key] = json.loads(d[key])
+    return TenantOnboarding(**d)
+
+
+async def get_tenant_onboarding(
+    conn: asyncpg.Connection, tenant_id: UUID
+) -> TenantOnboarding | None:
+    row = await conn.fetchrow(
+        "SELECT * FROM tenant_onboarding WHERE tenant_id = $1",
+        tenant_id,
+    )
+    return _tenant_onboarding_from_row(row) if row else None
+
+
+async def upsert_tenant_onboarding(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    current_step: int,
+    completed_steps: list[int],
+    step_data: dict[str, Any],
+    edited_by: UUID | None = None,
+) -> TenantOnboarding:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO tenant_onboarding
+          (tenant_id, current_step, completed_steps, step_data, last_edited_by)
+        VALUES ($1, $2, $3::jsonb, $4::jsonb, $5)
+        ON CONFLICT (tenant_id) DO UPDATE SET
+          current_step    = EXCLUDED.current_step,
+          completed_steps = EXCLUDED.completed_steps,
+          step_data       = EXCLUDED.step_data,
+          last_edited_by  = EXCLUDED.last_edited_by
+        RETURNING *
+        """,
+        tenant_id,
+        current_step,
+        json.dumps(completed_steps),
+        json.dumps(step_data),
+        edited_by,
+    )
+    return _tenant_onboarding_from_row(row)
+
+
+async def submit_tenant_onboarding(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    edited_by: UUID | None = None,
+) -> TenantOnboarding:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO tenant_onboarding
+          (tenant_id, current_step, completed_steps, step_data,
+           submitted_at, last_edited_by)
+        VALUES ($1, 9, '[1,2,3,4,5,6,7,8,9]'::jsonb, '{}'::jsonb, NOW(), $2)
+        ON CONFLICT (tenant_id) DO UPDATE SET
+          current_step    = 9,
+          completed_steps = '[1,2,3,4,5,6,7,8,9]'::jsonb,
+          submitted_at    = COALESCE(tenant_onboarding.submitted_at, NOW()),
+          last_edited_by  = EXCLUDED.last_edited_by
+        RETURNING *
+        """,
+        tenant_id,
+        edited_by,
+    )
+    await conn.execute(
+        """
+        UPDATE tenants
+           SET agent_lifecycle_state = 'building'::agent_lifecycle_state
+         WHERE id = $1
+        """,
+        tenant_id,
+    )
+    return _tenant_onboarding_from_row(row)
+
+
+async def update_tenant_lifecycle_state(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    state: str,
+) -> Tenant:
+    row = await conn.fetchrow(
+        """
+        UPDATE tenants
+           SET agent_lifecycle_state = $2::agent_lifecycle_state
+         WHERE id = $1 AND deleted_at IS NULL
+         RETURNING id, slug, name, status, agent_lifecycle_state
+        """,
+        tenant_id,
+        state,
+    )
+    return Tenant(**dict(row))

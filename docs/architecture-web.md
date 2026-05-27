@@ -1,19 +1,24 @@
-# Arquitectura — Dashboard interno (`apps/web`)
+# Arquitectura — Web app operativa (`apps/web`)
 
-_Diseño aprobado al inicio del Sprint 3 (2026-05-14). Este documento es la referencia de los sub-PRs del sprint. Cualquier cambio de fondo se discute y se versiona acá antes de modificar código._
+_Documento actualizado post-pivot el 2026-05-27. La fuente conceptual manda en [`docs/auyan-master-context.md`](auyan-master-context.md); el estado operativo manda en [`docs/progress.md`](progress.md). Este archivo describe la arquitectura real de `apps/web` después del pivot BPO → Managed AI Service._
 
 ---
 
 ## 1. Contexto y objetivo
 
-El backend ya expone 10 endpoints administrativos protegidos con Supabase JWT (Sprint 2, PR #14). Sprint 3 construye `apps/web`: una Next.js app que consume esos endpoints para que los **agentes humanos de Auyan** (rol `super_admin`) gestionen conversaciones y escalaciones de los tenants cuyo flujo de soporte hostea Auyan.
+`apps/web` es la aplicación operativa de Auyan. Sirve dos experiencias en la misma app:
 
-**No está en scope para este sprint:**
+1. **Dashboard interno** (`/(dashboard)`) para Kenny, esposa y futuros roles internos (`super_admin`, `aide`, `qa_km`, `ops_manager`, `cs_manager`). Aquí se operan tenants, simulaciones, AOPs, aprobaciones, propuestas y playbook.
+2. **Dashboard cliente** (`/clients/[tenantId]`) para `tenant_admin`. Aquí el cliente ve estado, conversaciones/escalaciones expuestas, datos factuales (`tenant_facts`) y, durante Bloque 1, onboarding, KB y reportes.
 
-- `/clients/*` (dashboard del tenant cliente con rol `tenant_admin` / `tenant_agent`). Misma app, distinto layout, se construye en Sprint 4.
-- Realtime via Supabase Realtime — bloqueado por la deuda del rol `auyan_backend` con `NOBYPASSRLS` y policies con `auth.uid()`. Sprint 3 usa polling.
-- Chat widget (`apps/widget`).
-- Integraciones de canales (Chatwoot, Zendesk, Shopify) — independientes.
+Post-pivot, Auyan **no hostea un BPO humano**. El cliente conserva su equipo CX. Auyan opera como Managed AI Service: configura, prueba, mantiene y mejora el agente IA, y empuja escalados al helpdesk del cliente cuando corresponde.
+
+**Fuera de scope de `apps/web`:**
+
+- Landing pública (`apps/landing`, Bloque 1.8).
+- Chat widget propio. Auyan hereda canales del helpdesk del cliente.
+- Canales directos WhatsApp/Instagram. Van vía Gorgias/Zendesk/Chatwoot.
+- Supabase Realtime como requisito del MVP. El patrón actual sigue siendo polling con TanStack Query.
 
 ---
 
@@ -21,7 +26,7 @@ El backend ya expone 10 endpoints administrativos protegidos con Supabase JWT (S
 
 | Decisión | Elegido | Alternativas descartadas | Razón |
 |---|---|---|---|
-| Alcance Sprint 3 | Solo `/dashboard/*` (super_admin) | Solo `/clients/*`; ambos en paralelo | Es la operación core del BPO; un solo layout, un solo rol, un solo flow de auth |
+| Alcance actual | `/(dashboard)` interno + `/clients/[tenantId]` cliente | Apps separadas por rol | Una sola app reduce duplicación; layouts separados mantienen claridad |
 | Framework | Next.js 15 App Router + TypeScript strict | Pages Router, Remix, SPA Vite | Ya definido en CLAUDE.md |
 | Package manager | pnpm + workspaces | npm, yarn, bun | Monorepo Next.js + paquetes compartidos; estándar de facto |
 | UI | shadcn/ui + Tailwind v4 | Mantine v8, Chakra v3 | Headless, copy-paste, librería de facto en 2026, fácil branding por tenant |
@@ -71,7 +76,9 @@ Browser                    Next.js (apps/web)              Supabase Auth        
 
 - `@supabase/ssr` guarda la sesión en cookies httpOnly (`sb-<project>-auth-token`).
 - `middleware.ts` corre en cada request: refresca el access_token si está por expirar y redirige a `/login` si no hay sesión.
-- `super_admin` accede solo a `/dashboard/*`. Si entra a `/clients/*` (que aún no existe), redirect a `/dashboard`.
+- `super_admin` accede al dashboard interno y puede operar tenants vía `X-Tenant-Id`.
+- `tenant_admin` accede al dashboard cliente bajo `/clients/[tenantId]`.
+- El rol `tenant_agent` fue removido en Bloque 0.1. No debe aparecer en rutas, permisos ni documentación nueva.
 - En el cliente, TanStack Query usa un hook `useApiClient()` que lee el token del cliente browser de Supabase y arma el wrapper tipado.
 - El header `X-Tenant-Id` se pone en cada request del `/dashboard/tenants/[tenantId]/*` leyendo el segmento de URL — el tenant activo vive en la URL, no en estado global, así el deep-linking funciona y el browser back también.
 
@@ -88,34 +95,40 @@ platform/
 ├── biome.json
 ├── apps/
 │   ├── api/                           # FastAPI (existente)
-│   └── web/                           # NUEVO
+│   └── web/
 │       ├── app/
 │       │   ├── (auth)/
 │       │   │   ├── login/page.tsx
 │       │   │   └── layout.tsx
-│       │   ├── (dashboard)/                       # super_admin only
-│       │   │   ├── layout.tsx                     # sidebar + tenant switcher
-│       │   │   ├── page.tsx                       # overview cross-tenant
+│       │   ├── (dashboard)/                       # dashboard interno
+│       │   │   ├── layout.tsx                     # shell Mercury light + sidebar + topbar
+│       │   │   ├── page.tsx                       # home cross-tenant
 │       │   │   └── tenants/[tenantId]/
-│       │   │       ├── layout.tsx                 # contexto del tenant activo
 │       │   │       ├── conversations/
-│       │   │       │   ├── page.tsx               # lista
-│       │   │       │   └── [id]/page.tsx          # detalle + responder
+│       │   │       │   ├── page.tsx
+│       │   │       │   └── [id]/page.tsx
 │       │   │       ├── escalations/page.tsx
-│       │   │       └── settings/page.tsx
+│       │   │       ├── approvals/page.tsx
+│       │   │       ├── aops/page.tsx
+│       │   │       ├── proposals/page.tsx
+│       │   │       ├── simulator/page.tsx
+│       │   │       └── playbook/page.tsx
+│       │   ├── clients/[tenantId]/                 # dashboard cliente
+│       │   │   ├── layout.tsx
+│       │   │   ├── overview/page.tsx
+│       │   │   ├── conversations/page.tsx
+│       │   │   ├── conversations/[id]/page.tsx
+│       │   │   ├── escalations/page.tsx
+│       │   │   └── facts/page.tsx
 │       │   ├── layout.tsx                         # root: providers (Query, Theme)
 │       │   └── globals.css
 │       ├── components/
 │       │   ├── ui/                                # shadcn primitives
-│       │   ├── inbox/
-│       │   │   ├── ConversationList.tsx
-│       │   │   ├── ConversationDetail.tsx
-│       │   │   └── MessageComposer.tsx
-│       │   ├── escalations/
-│       │   │   ├── EscalationQueue.tsx
-│       │   │   └── EscalationCard.tsx
-│       │   ├── tenant-switcher/TenantSwitcher.tsx
-│       │   └── auth/LoginForm.tsx
+│       │   ├── clients/
+│       │   ├── nav/
+│       │   ├── proposals/
+│       │   ├── simulator/
+│       │   └── tenant-context/
 │       ├── lib/
 │       │   ├── supabase/
 │       │   │   ├── client.ts                      # browser
@@ -186,7 +199,7 @@ export function apiClient(jwt: string, tenantId?: string) {
 }
 ```
 
-**Regla operativa:** cualquier PR que modifique schemas/respuestas del API corre `pnpm gen:api-types` y comitea el diff. Sub-PR del Sprint 3.7 añade verificación en CI (drift = build rojo).
+**Regla operativa:** cualquier PR que modifique schemas/respuestas del API corre `pnpm gen:api-types` y comitea el diff. La verificación de drift debe quedar en CI antes de producción.
 
 ---
 
@@ -195,12 +208,14 @@ export function apiClient(jwt: string, tenantId?: string) {
 | Vista | Pattern | Refetch |
 |---|---|---|
 | Login | client-only, sin Query | — |
-| Layout `/dashboard` | RSC shell (sidebar) + cliente para tenant switcher | — |
-| Overview (`/dashboard`) | Cliente (TanStack Query) | manual |
+| Layout `/(dashboard)` | RSC shell + cliente para tenant switcher/topbar | — |
+| Layout `/clients/[tenantId]` | RSC shell cliente + client hooks por sección | — |
+| Overview interno (`/(dashboard)`) | Cliente (TanStack Query) | manual |
 | Lista conversaciones | Cliente (TanStack Query) | `refetchInterval: 5000` mientras la tab está activa + `refetchOnWindowFocus` |
-| Detalle conversación | Cliente | `refetchInterval: 3000` (mensajes nuevos) |
-| Queue escalaciones | Cliente | `refetchInterval: 5000` |
-| Settings | RSC con fetch directo | — |
+| Detalle conversación | Cliente | `refetchInterval: 3000` |
+| Escalaciones/aprobaciones/propuestas | Cliente | `refetchInterval: 5000` donde hay colas activas |
+| Simulator | Cliente | polling en batches/runs activos |
+| Playbook/facts | Cliente con mutations | invalidación post-save |
 
 **Optimistic updates** en `reply`, `escalate`, `close`, `claim`, `resolve`. Rollback si el server responde error.
 
@@ -208,28 +223,37 @@ export function apiClient(jwt: string, tenantId?: string) {
 
 ---
 
-## 8. Páginas del dashboard interno
+## 8. Páginas actuales
 
 | # | Ruta | Endpoints | Notas |
 |---|---|---|---|
 | 1 | `/login` | (Supabase Auth) | Email + password. Redirect a `/dashboard` post-login. |
-| 2 | `/dashboard` | `GET /admin/tenants` (nuevo) | Lista de tenants accesibles. Selector → `/dashboard/tenants/{id}/conversations`. |
-| 3 | `/dashboard/tenants/[tenantId]/conversations` | `GET /conversations?status=&limit=&offset=` | Filtro por status, paginación, click → detalle. |
-| 4 | `/dashboard/tenants/[tenantId]/conversations/[id]` | `GET /conversations/{id}`, `POST /reply`, `POST /escalate`, `POST /close` | Hilo + composer. Botones secundarios: escalar, cerrar. |
-| 5 | `/dashboard/tenants/[tenantId]/escalations` | `GET /escalations`, `POST /claim`, `POST /resolve` | Queue de escalaciones pendientes; claim asigna al user logueado. |
-| 6 | `/dashboard/tenants/[tenantId]/settings` | `GET /tenants/me/config` (con `X-Tenant-Id`) | Read-only: model, threshold, channels, branding. Editable en futuro sprint. |
+| 2 | `/dashboard` | `GET /admin/tenants`, métricas agregadas | Home interno cross-tenant. Bloque 1.7 lo convertirá en Review Queue real. |
+| 3 | `/dashboard/tenants/[tenantId]/conversations` | `GET /conversations` | Debug operativo de conversaciones del tenant. |
+| 4 | `/dashboard/tenants/[tenantId]/conversations/[id]` | `GET /conversations/{id}` + acciones | Hilo, reasoning y acciones operativas. |
+| 5 | `/dashboard/tenants/[tenantId]/escalations` | `GET /escalations` + acciones | Escalaciones visibles para operación interna. |
+| 6 | `/dashboard/tenants/[tenantId]/approvals` | pending approvals | Cola L3 / human approval. |
+| 7 | `/dashboard/tenants/[tenantId]/aops` | AOP endpoints | Editor operativo de AOPs. |
+| 8 | `/dashboard/tenants/[tenantId]/proposals` | proposals endpoints | Slow agent proposals. |
+| 9 | `/dashboard/tenants/[tenantId]/simulator` | `/simulations/*` | Scenarios, runs y judge detail. |
+| 10 | `/dashboard/tenants/[tenantId]/playbook` | `GET/PUT /tenants/me/playbook` | Biblia operativa del cliente, editable por Auyan. |
+| 11 | `/clients/[tenantId]/overview` | métricas cliente | Dashboard cliente MVP existente. Bloque 1.6 lo amplía a 7 secciones. |
+| 12 | `/clients/[tenantId]/conversations` | `GET /conversations` | Vista cliente de conversaciones. |
+| 13 | `/clients/[tenantId]/escalations` | `GET /escalations` | Vista cliente de escalaciones. |
+| 14 | `/clients/[tenantId]/facts` | `GET/PUT /tenants/me/facts` | Datos factuales editables por el cliente. |
 
 ---
 
-## 9. Deuda nueva que destapa el frontend
+## 9. Estado actual y deuda
 
-Tres cosas hay que cablear en `apps/api` durante este sprint:
-
-| Pendiente | Bloquea | Sub-PR | Estimado |
+| Pendiente | Bloquea | Bloque | Nota |
 |---|---|---|---|
-| **CORS middleware en FastAPI** con allowlist `[NEXT_PUBLIC_APP_URL]` | Cualquier request del navegador | 3.7 | 15 min |
-| **`GET /admin/tenants`** — super_admin lista tenants accesibles (paginado) | Tenant switcher (página 2 del flow) | 3.6 | 1-2 h con tests |
-| **`super_admin` necesita poder llamar `GET /tenants/me/config` pasando `X-Tenant-Id`** (validar que ya funciona — el code-path existe) | Settings del tenant | verificar en 3.7 | confirmar |
+| Aplicar migraciones `tenant_playbook` y `tenant_facts` a staging | Demo live de Bloque 1.1/1.2 | 1.1/1.2 | Código y tests listos, falta operación de staging. |
+| Completar onboarding wizard + lifecycle | Flujo cliente end-to-end | 1.3 | Siguiente tarea del Bloque 1. |
+| KB drop-zone + cola pending review | Onboarding útil con documentos reales | 1.4 | Usa Supabase Storage + curación Auyan. |
+| Reportes semanales | Propuesta managed visible al cliente | 1.5 | Email resumen + dashboard como fuente completa. |
+| Dashboard cliente 7 secciones | Demo comercial completa | 1.6 | Home, Insights, Reportes, KB, Aprobaciones, Onboarding, Configuración. |
+| Review Queue interna por rol | Operación escalable | 1.7 | Home interno deja de ser solo overview. |
 
 ---
 
@@ -248,37 +272,41 @@ No usamos `SUPABASE_SERVICE_ROLE_KEY` en el web — todas las operaciones admin 
 
 ## 11. Despliegue (Railway)
 
-- App nueva: `platform-web-staging`.
-- Build context: repo root (Next.js + workspaces). Probablemente con `Dockerfile.web` o con buildpack Nixpacks; lo decidimos al llegar al sub-PR 3.7.
+- App staging: `platform-web-staging` / `auyan-web-staging`.
+- Build context: repo root (Next.js + workspaces).
 - Build cmd: `pnpm install --frozen-lockfile && pnpm --filter @auyan/web build`.
 - Start cmd: `pnpm --filter @auyan/web start --port ${PORT}`.
 - Healthcheck: `GET /api/health` (Route Handler trivial).
 
 ---
 
-## 12. Plan por sub-PRs
+## 12. Plan vigente por sub-PRs
 
-| # | Branch | Entregable | Endpoints API tocados |
-|---|---|---|---|
-| **3.1** | `feat/sprint3-monorepo-scaffold` | pnpm workspaces, `packages/shared` vacío, scaffold `apps/web` con Next.js + Tailwind + shadcn + Biome + middleware auth + página `/login` funcional contra Supabase + redirect post-login | — |
-| **3.2** | `feat/sprint3-api-client` | `openapi-typescript` integrado, `lib/api/client.ts`, TanStack Query provider, `GET /tenants/me` como smoke test renderizando datos reales | `GET /tenants/me` |
-| **3.3** | `feat/sprint3-conversation-list` | Lista de conversaciones con filtros (status) y paginación; polling 5s | `GET /conversations` |
-| **3.4** | `feat/sprint3-conversation-detail` | Detalle + composer + reply/escalate/close con optimistic updates | `GET /conversations/{id}`, `POST .../reply|escalate|close` |
-| **3.5** | `feat/sprint3-escalations` | Queue + claim/resolve | `GET /escalations`, `POST .../claim|resolve` |
-| **3.6** | `feat/sprint3-admin-tenants` | Endpoint `GET /admin/tenants` (API) + tenant switcher (web) + ruteo dinámico `/dashboard/tenants/[tenantId]/*` | `GET /admin/tenants` (nuevo) |
-| **3.7** | `feat/sprint3-deploy` | CORS en API + deploy `apps/web` a Railway staging + smoke e2e Playwright (login → ver inbox → responder) | — |
+El plan Sprint 3 original queda histórico. El plan vigente es Bloque 1, tomado de `auyan-master-context.md` y reflejado en `progress.md`.
 
-Cada sub-PR contra `develop`, merge antes de arrancar el siguiente. Después del 3.7 cerramos Sprint 3 y abrimos Sprint 4 con `/clients/*` + deuda RLS + Realtime.
+| Sub-PR | Estado | Entregable |
+|---|---|---|
+| 1.0 | ✅ completo | Design Sprint: `DESIGN.md`, tokens, primitives, refactor shell Mercury light. |
+| 1.1 | ✅ completo | `tenant_playbook` table + queries + UI super_admin editor. |
+| 1.2 | ✅ completo | `tenant_facts` table + form cliente + lectura del agente como contexto estructurado. |
+| 1.3 | ⏭️ siguiente | Onboarding wizard self-serve 9 pasos + `agent_lifecycle_state` + comunicaciones email. |
+| 1.4 | pendiente | KB drop-zone + cola pending review + Supabase Storage cifrado + UI super_admin procesamiento. |
+| 1.5 | pendiente | Reporte semanal automatizado: `weekly_reports` + cron lunes + UI aprobación + Postmark. |
+| 1.6 | pendiente | Dashboard cliente 7 secciones MVP con data viz. |
+| 1.7 | pendiente | Dashboard super_admin Home/Review Queue + filtros por rol. |
+| 1.8 | pendiente | `apps/landing` + Aceternity UI + páginas públicas + Plausible. |
+| 1.9 | pendiente | Email outbound general: templates editables + queue + retry logic. |
 
 ---
 
-## 13. Lo que NO está en scope (recordatorio explícito)
+## 13. Lo que NO está en scope de `apps/web` actual
 
-- `/clients/*` (Sprint 4)
-- Supabase Realtime (Sprint 4)
-- Editar config del tenant desde el dashboard (Sprint 5+)
-- Branding personalizado por tenant en el sidebar (Sprint 5+)
+- Landing pública. Va en `apps/landing`.
+- Construir canales directos. Se heredan del helpdesk del cliente.
+- BPO interno con agentes de Auyan respondiendo tickets. Ya fue descartado.
+- Reintroducir `tenant_agent`. El rol fue eliminado.
+- Supabase Realtime como dependencia de Bloque 1.
+- Branding profundo por tenant en el sidebar.
 - i18n — todo en español, un solo locale
-- Filtros avanzados (search, fecha, asignado)
+- Filtros avanzados fuera de las colas donde aportan valor real.
 - Notificaciones push o desktop
-- Métricas y analytics (volumen de tickets, tiempo de respuesta, costo por tenant)

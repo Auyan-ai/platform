@@ -3,7 +3,13 @@
 
 export type MessageRole = 'customer' | 'agent_ai' | 'agent_human' | 'system'
 export type MessageDirection = 'inbound' | 'outbound'
-export type ConversationStatus = 'open' | 'pending' | 'resolved' | 'escalated' | 'closed'
+export type ConversationStatus =
+  | 'open'
+  | 'pending'
+  | 'resolved'
+  | 'escalated'
+  | 'closed'
+  | 'closed_abandoned'
 export type EscalationStatus = 'pending' | 'claimed' | 'resolved'
 export type ChannelType =
   | 'email'

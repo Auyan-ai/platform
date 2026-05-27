@@ -11,6 +11,7 @@ export const queryKeys = {
     usage: (tenantId: string, days?: number) => ['tenants', tenantId, 'usage', days ?? 7] as const,
     playbook: (tenantId: string) => ['tenants', tenantId, 'playbook'] as const,
     facts: (tenantId: string) => ['tenants', tenantId, 'facts'] as const,
+    onboarding: (tenantId: string) => ['tenants', tenantId, 'onboarding'] as const,
   },
   conversations: {
     list: (tenantId: string, filters?: Record<string, unknown>) =>

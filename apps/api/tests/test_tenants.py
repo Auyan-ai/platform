@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
 import jwt
@@ -463,3 +463,87 @@ class TestTenantFactsEndpoints:
         assert resp.status_code == 200
         assert resp.json()["data"]["support_phone"] == "+34 910 123 456"
         assert upsert_mock.await_args.kwargs["edited_by"] == USER_ID
+
+
+class TestTenantOnboardingEndpoints:
+    def test_get_onboarding_returns_existing_row(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from apps.api.db.models import TenantOnboarding
+
+        onboarding = TenantOnboarding(
+            tenant_id=TENANT_ID,
+            current_step=3,
+            completed_steps=[1, 2],
+            step_data={"1": {"company_name": "Acme"}},
+            updated_at=datetime.now(UTC),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant_onboarding",
+            AsyncMock(return_value=onboarding),
+        )
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get("/tenants/me/onboarding", headers={"Authorization": f"Bearer {_make_jwt()}"})
+
+        assert resp.status_code == 200
+        assert resp.json()["current_step"] == 3
+        assert resp.json()["completed_steps"] == [1, 2]
+
+    def test_update_onboarding_sanitizes_completed_steps(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import TenantOnboarding
+
+        saved = TenantOnboarding(
+            tenant_id=TENANT_ID,
+            current_step=4,
+            completed_steps=[1, 2, 9],
+            step_data={"1": {"company_name": "Acme"}},
+            last_edited_by=USER_ID,
+        )
+        upsert_mock = AsyncMock(return_value=saved)
+        monkeypatch.setattr("apps.api.routers.tenants.upsert_tenant_onboarding", upsert_mock)
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.put(
+            "/tenants/me/onboarding",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={
+                "current_step": 4,
+                "completed_steps": [2, 1, 99, 2, 9],
+                "step_data": {"1": {"company_name": "Acme"}},
+            },
+        )
+
+        assert resp.status_code == 200
+        assert upsert_mock.await_args.kwargs["completed_steps"] == [1, 2, 9]
+        assert upsert_mock.await_args.kwargs["edited_by"] == USER_ID
+
+    def test_submit_onboarding_moves_to_building_and_sends_email(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import TenantOnboarding
+
+        onboarding = TenantOnboarding(
+            tenant_id=TENANT_ID,
+            current_step=9,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9],
+            submitted_at=datetime.now(UTC),
+        )
+        submit_mock = AsyncMock(return_value=onboarding)
+        monkeypatch.setattr("apps.api.routers.tenants.get_tenant", AsyncMock(return_value=make_tenant()))
+        monkeypatch.setattr("apps.api.routers.tenants.submit_tenant_onboarding", submit_mock)
+        app = _make_app(monkeypatch)
+        app.state.email_sender = MagicMock()
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/onboarding/submit",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["submitted_at"] is not None
+        assert submit_mock.await_args.kwargs["edited_by"] == USER_ID
+        app.state.email_sender.send_email.assert_called_once()

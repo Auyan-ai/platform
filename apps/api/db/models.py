@@ -24,6 +24,9 @@ ChannelType = Literal[
     "email", "chat", "widget", "whatsapp", "instagram", "zendesk", "intercom", "chatwoot"
 ]
 UserRole = Literal["super_admin", "tenant_admin"]
+AgentLifecycleState = Literal[
+    "initial", "discovery", "building", "shadow", "ramping", "active", "paused", "churned"
+]
 
 
 class _BaseModel(BaseModel):
@@ -35,6 +38,7 @@ class Tenant(_BaseModel):
     slug: str
     name: str
     status: str
+    agent_lifecycle_state: AgentLifecycleState = "initial"
 
 
 class TenantConfiguration(_BaseModel):
@@ -384,6 +388,24 @@ class TenantFacts(_BaseModel):
     tenant_id: UUID
     data: dict = Field(default_factory=dict)
     version: int = 1
+    last_edited_by: UUID | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+# ─── Tenant Onboarding (Bloque 1, Sub-PR 1.3) ────────────────────────────────
+
+
+class TenantOnboarding(_BaseModel):
+    """Estado del wizard self-serve del cliente.
+    `step_data` agrupa las respuestas por número de paso ("1".."9")."""
+
+    tenant_id: UUID
+    current_step: int = 1
+    completed_steps: list[int] = Field(default_factory=list)
+    step_data: dict = Field(default_factory=dict)
+    submitted_at: datetime | None = None
+    completed_at: datetime | None = None
     last_edited_by: UUID | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
