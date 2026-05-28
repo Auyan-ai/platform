@@ -27,11 +27,20 @@ const NAV_ITEMS = [
 interface ClientSidebarProps {
   tenantId: string
   tenantName: string
+  lifecycleState?: string
   userEmail?: string
 }
 
-export function ClientSidebar({ tenantId, tenantName, userEmail }: ClientSidebarProps) {
+export function ClientSidebar({
+  tenantId,
+  tenantName,
+  lifecycleState = 'initial',
+  userEmail,
+}: ClientSidebarProps) {
   const pathname = usePathname()
+  const navItems = NAV_ITEMS.filter(
+    (item) => item.section !== 'onboarding' || lifecycleState === 'initial',
+  )
 
   return (
     <aside className="fixed inset-y-0 left-0 z-50 flex w-[200px] flex-col border-r border-border bg-surface-muted">
@@ -47,7 +56,7 @@ export function ClientSidebar({ tenantId, tenantName, userEmail }: ClientSidebar
       </div>
 
       <nav className="flex-1 space-y-0.5 overflow-y-auto p-2 text-sm">
-        {NAV_ITEMS.map(({ label, icon: Icon, section }) => {
+        {navItems.map(({ label, icon: Icon, section }) => {
           const href = `/clients/${tenantId}/${section}`
           const isActive = pathname.startsWith(href)
           return (
