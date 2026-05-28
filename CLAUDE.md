@@ -10,10 +10,10 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - Backend: FastAPI (Python 3.12)
 - Frontend: Next.js 15 + TypeScript + Tailwind v4 + shadcn
 - Base de datos: Supabase (Postgres + pgvector + Auth + RLS)
-- Agente: LangGraph + Claude API (Sonnet 4.6 default, Opus 4.7 para L3/supervisor/judge, Haiku 4.5 para intent classifier)
+- Agente: LangGraph + Claude API (Sonnet 4.6 default y judge de simulator, Haiku 4.5 para intent classifier/simulator, Opus 4.7 para L3/supervisor financiero y judge/calibración explícita)
 - Embeddings: OpenAI text-embedding-3-small
-- Observabilidad: Langfuse
-- Helpdesks del cliente: Gorgias (prioridad #1) / Zendesk / Chatwoot Cloud / Intercom (reactivo)
+- Observabilidad: LangSmith como fuente primaria de staging/evals; Langfuse queda como espejo secundario existente mientras siga conectado
+- Helpdesks del cliente: Chatwoot Cloud / Gorgias / Zendesk / Intercom reactivo
 - Email saliente (Auyan→cliente): Postmark
 - Deploy: Railway
 
@@ -52,21 +52,24 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - Formato de commits: feat:, fix:, chore:, docs:
 
 ## Observabilidad — lo más importante
-- Todo lo que hace el agente se loguea en Langfuse sin excepción
+- LangSmith es la fuente primaria de observabilidad en staging/evals
+- Langfuse ya no es la fuente de verdad operativa; si sigue conectado, funciona como espejo secundario
+- Todo lo que hace el agente debe quedar traceado en LangSmith sin excepción
 - Cada decisión de escalar lleva razón explícita registrada
-- Cada conversación tiene trace completo: qué pensó, qué tool llamó, por qué decidió
+- Cada conversación tiene trace completo: qué pensó, qué nodo del grafo corrió, qué skill/tool llamó, por qué decidió, coste y errores
+- Cada run visible en LangSmith debe correlacionar con Supabase (conversación, audit log y/o run correspondiente)
 - Errores se capturan, loguean y alertan — nunca se silencian
 - Tracking de tokens y costo por conversación y por tenant
 
 ## Flujo del agente
-1. Ticket entra al helpdesk del cliente (Gorgias/Zendesk/Chatwoot) → webhook a Auyan
+1. Ticket entra al helpdesk del cliente → webhook a Auyan
 2. Se identifica el tenant
 3. El agente recupera contexto (historial + knowledge base del tenant)
 4. El nodo select_aop clasifica el intent y activa el AOP correspondiente
 5. El agente ejecuta el loop ReAct: reason → (execute_skill si aplica) → respond o escalate
 6. Si resuelve: responde vía el adapter del helpdesk del cliente
 7. Si escala: push al helpdesk del cliente con contexto completo y razón del escalado (el equipo CX del cliente atiende)
-8. Todo queda registrado en Langfuse y en Supabase
+8. Todo queda registrado en LangSmith y en Supabase; Langfuse solo como espejo secundario si está activo
 
 ## Roles del sistema
 - `super_admin` — acceso total cross-tenant (Kenny + esposa)
@@ -74,9 +77,9 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - NO existe `tenant_agent` (removido en Bloque 0, sub-PR 0.1)
 
 ## Integraciones
-- Gorgias: helpdesk principal, OAuth, bidireccional (adapter Bloque 0.6)
-- Chatwoot Cloud: helpdesk alternativo, API key, bidireccional (adapter Bloque 0.4)
-- Zendesk: helpdesk alternativo, OAuth, bidireccional (adapter Bloque 0.5)
+- Chatwoot Cloud: helpdesk con API key, bidireccional
+- Gorgias: helpdesk importante para Shopify, OAuth, bidireccional
+- Zendesk: helpdesk alternativo, OAuth, bidireccional
 - Intercom: reactivo (si cliente lo pide)
 - Shopify: 11 skills implementadas — 5 L1 (lectura), 2 L2 (escritura reversible), 4 L3 (destructivas con approval)
 - Postmark: email saliente Auyan→cliente (reports, notificaciones)
@@ -109,7 +112,7 @@ No vocees, habla acento caraqueño venezolano, tuteame.
   - skills/shopify/ → 11 skills (5 L1 + 2 L2 + 4 L3)
 - slow_agent/ → LLM-as-judge batch (transcript, judge, runner, sampling)
 - evals/ → harness de eval + fixtures YAML por AOP
-- integrations/ → clientes HTTP externos (shopify.py, langfuse_client.py, anthropic_client.py, etc.)
+- integrations/ → clientes HTTP externos (shopify.py, langfuse_client.py mientras exista como espejo, futuro langsmith_client.py, anthropic_client.py, etc.)
 - services/ → lógica de negocio reutilizable (tenants, conversations, escalations, cleanup, reasoning, audit, pii, rate_limit)
 - db/ → modelos Pydantic + queries asyncpg
 - core/ → config (pydantic-settings), security (JWT ES256), errors (DomainError)
@@ -131,8 +134,8 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 ### docs
 - auyan-master-context.md → fuente única de verdad del negocio + arquitectura post-pivot
 - architecture-agent-v2.md → detalle técnico del agente v2 (Skills, AOPs, Supervisor, Slow Agent)
-- bloque-0-plan.md → plan de ejecución detallado Bloque 0
-- progress.md → bitácora de sprints terminados y próximo paso operativo
+- bloque-0-plan.md → plan histórico original de Bloque 0
+- progress.md → bitácora operativa de sprints terminados y próximos pasos
 
 ### Raíz del proyecto
 - CLAUDE.md → este archivo

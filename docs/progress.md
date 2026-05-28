@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-05-28 (sesión 50 — Bloque 0.11 reencuadrado como verificación madura del agente en staging con LangSmith, Shopify real y Chatwoot primero)._
+_Última actualización: 2026-05-28 (sesión 51 — primer corte 0.11A: LangSmith primario + simulator costeado; falta env/staging y validación real)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
 
@@ -19,7 +19,7 @@ _Última actualización: 2026-05-28 (sesión 50 — Bloque 0.11 reencuadrado com
 | Bloque 0 | 0.1–0.10 completados. 0.11 reencuadrado como Agent Verification Staging. |
 | Bloque 1 | 1.0–1.9 completados y archivados. 1.10 billing manual tiene runbook, pero depende de inputs externos por cliente. |
 | Staging DB | Migraciones de Bloque 1 aplicadas; ya no bloquean la validación. |
-| Siguiente paso | 0.11A — LangSmith como fuente primaria de observabilidad + simulator optimizado por coste. |
+| Siguiente paso | 0.11A — configurar LangSmith en staging, validar runs reales y avanzar fixture Shopify/Chatwoot. |
 
 ---
 
@@ -106,7 +106,8 @@ Tenant de prueba Lunaria staging: `11111111-1111-1111-1111-111111111111`.
 
 | Pendiente | Estado |
 |---|---|
-| LangSmith | Falta configurar proyecto/env vars y conectar `AgentService` como fuente primaria de observabilidad. |
+| LangSmith | Código base conectado: `AgentService` usa LangSmith como observabilidad primaria y Langfuse como espejo. Falta configurar proyecto/env vars en staging y validar runs reales en UI. |
+| Simulator | Código base optimizado: Sonnet judge por defecto, Opus opcional y cap normal de `$5/día` por tenant. Falta corrida real 25/25 contra tenant Lunaria staging. |
 | Shopify test store | Falta preparar tienda con órdenes reales `auyan-e2e`, credenciales en `tenant_integrations` y scripts de seed/verify. |
 | Chatwoot sandbox | Primer helpdesk para verificación real; falta crear cuenta/inbox/webhook/token y registrar integración. |
 | Gorgias OAuth app | Sigue pendiente; se implementará después de Chatwoot. |

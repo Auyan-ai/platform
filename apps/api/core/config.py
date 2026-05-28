@@ -46,8 +46,11 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr = Field(..., description="API key de OpenAI (embeddings)")
 
     # --- Observability ---
-    langfuse_public_key: SecretStr = Field(...)
-    langfuse_secret_key: SecretStr = Field(...)
+    langsmith_api_key: SecretStr | None = None
+    langsmith_project: str = "auyan-staging"
+    langsmith_endpoint: HttpUrl = Field(default=HttpUrl("https://api.smith.langchain.com"))
+    langfuse_public_key: SecretStr | None = None
+    langfuse_secret_key: SecretStr | None = None
     langfuse_host: HttpUrl = Field(default=HttpUrl("https://cloud.langfuse.com"))
 
     # --- Postmark (email outbound Auyan→cliente) ---

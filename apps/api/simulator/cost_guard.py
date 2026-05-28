@@ -1,7 +1,7 @@
 """Guardas de costo para el simulador.
 
 Dos niveles:
-  - Per-tenant: $10/día. Previene que un tenant queme presupuesto sin control.
+  - Per-tenant: $5/día. Previene que un tenant queme presupuesto sin control.
   - Global: $50/día en todo el proceso. Previene runaway en casos de bug/abuso.
 
 Ambos caps usan la DB directamente (no Redis — no está en el stack actual).
@@ -25,12 +25,12 @@ from fastapi import HTTPException
 logger = logging.getLogger(__name__)
 
 # Límites en centavos de dólar
-_TENANT_DAILY_CAP_CENTS: float = 1000.0   # $10/día por tenant
+_TENANT_DAILY_CAP_CENTS: float = 500.0    # $5/día por tenant
 _GLOBAL_DAILY_CAP_CENTS: float = 5000.0   # $50/día cross-tenant
 
 
 async def check_tenant_cost_cap(tenant_id: UUID) -> None:
-    """Lanza HTTPException 429 si el tenant superó $10/día en simulaciones."""
+    """Lanza HTTPException 429 si el tenant superó $5/día en simulaciones."""
     async with tenant_scope(tenant_id) as conn:
         total = await get_tenant_sim_cost_cents_today(conn, tenant_id)
 

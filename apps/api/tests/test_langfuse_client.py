@@ -5,7 +5,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from apps.api.integrations.langfuse_client import LangfuseClient
+from apps.api.integrations.langfuse_client import LangfuseClient, build_langfuse_client
+from pydantic import HttpUrl, SecretStr
 
 
 class TestEnabled:
@@ -175,3 +176,28 @@ class TestFlush:
         client = LangfuseClient(inner)
         # No debe propagar
         await client.flush()
+
+
+class TestBuildLangfuseClient:
+    def test_missing_credentials_disables_client(self) -> None:
+        settings = MagicMock()
+        settings.langfuse_public_key = None
+        settings.langfuse_secret_key = None
+
+        client = build_langfuse_client(settings)
+
+        assert client.is_enabled is False
+
+    def test_present_credentials_builds_client(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        settings = MagicMock()
+        settings.langfuse_public_key = SecretStr("public")
+        settings.langfuse_secret_key = SecretStr("secret")
+        settings.langfuse_host = HttpUrl("https://cloud.langfuse.com")
+        inner = MagicMock()
+        langfuse_cls = MagicMock(return_value=inner)
+        monkeypatch.setattr("apps.api.integrations.langfuse_client.Langfuse", langfuse_cls)
+
+        client = build_langfuse_client(settings)
+
+        assert client.is_enabled is True
+        langfuse_cls.assert_called_once()
