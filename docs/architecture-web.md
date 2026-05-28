@@ -249,10 +249,10 @@ export function apiClient(jwt: string, tenantId?: string) {
 | Pendiente | Bloquea | Bloque | Nota |
 |---|---|---|---|
 | Aplicar migraciones `tenant_playbook` y `tenant_facts` a staging | Demo live de Bloque 1.1/1.2 | 1.1/1.2 | Código y tests listos, falta operación de staging. |
-| Completar onboarding wizard + lifecycle | Flujo cliente end-to-end | 1.3 | Siguiente tarea del Bloque 1. |
-| KB drop-zone + cola pending review | Onboarding útil con documentos reales | 1.4 | Usa Supabase Storage + curación Auyan. |
-| Reportes semanales | Propuesta managed visible al cliente | 1.5 | Email resumen + dashboard como fuente completa. |
-| Dashboard cliente 7 secciones | Demo comercial completa | 1.6 | Home, Insights, Reportes, KB, Aprobaciones, Onboarding, Configuración. |
+| Completar onboarding wizard + lifecycle | Flujo cliente end-to-end | 1.3 | ✅ Completo. |
+| KB drop-zone + cola pending review | Onboarding útil con documentos reales | 1.4 | ✅ Completo con curación Auyan. |
+| Reportes semanales | Propuesta managed visible al cliente | 1.5 | ✅ Completo: email resumen + dashboard como fuente completa. |
+| Dashboard cliente 7 secciones | Demo comercial completa | 1.6 | ✅ Completo: Home, Insights, Reportes, KB, Aprobaciones, Onboarding, Configuración. |
 | Review Queue interna por rol | Operación escalable | 1.7 | Home interno deja de ser solo overview. |
 
 ---
@@ -289,11 +289,11 @@ El plan Sprint 3 original queda histórico. El plan vigente es Bloque 1, tomado 
 | 1.0 | ✅ completo | Design Sprint: `DESIGN.md`, tokens, primitives, refactor shell Mercury light. |
 | 1.1 | ✅ completo | `tenant_playbook` table + queries + UI super_admin editor. |
 | 1.2 | ✅ completo | `tenant_facts` table + form cliente + lectura del agente como contexto estructurado. |
-| 1.3 | ⏭️ siguiente | Onboarding wizard self-serve 9 pasos + `agent_lifecycle_state` + comunicaciones email. |
-| 1.4 | pendiente | KB drop-zone + cola pending review + Supabase Storage cifrado + UI super_admin procesamiento. |
-| 1.5 | pendiente | Reporte semanal automatizado: `weekly_reports` + cron lunes + UI aprobación + Postmark. |
-| 1.6 | pendiente | Dashboard cliente 7 secciones MVP con data viz. |
-| 1.7 | pendiente | Dashboard super_admin Home/Review Queue + filtros por rol. |
+| 1.3 | ✅ completo | Onboarding wizard self-serve 9 pasos + `agent_lifecycle_state` + comunicaciones email. |
+| 1.4 | ✅ completo | KB drop-zone + cola pending review + UI super_admin procesamiento. |
+| 1.5 | ✅ completo | Reporte semanal automatizado: `weekly_reports` + cron lunes + UI aprobación + Postmark. |
+| 1.6 | ✅ completo | Dashboard cliente 7 secciones MVP con data viz. |
+| 1.7 | ⏭️ siguiente | Dashboard super_admin Home/Review Queue + filtros por rol. |
 | 1.8 | pendiente | `apps/landing` + Aceternity UI + páginas públicas + Plausible. |
 | 1.9 | pendiente | Email outbound general: templates editables + queue + retry logic. |
 

@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-05-28 (sesión 44 — Bloque 1.5 completado y archivado; siguiente paso técnico: Bloque 1.6 dashboard cliente 7 secciones MVP)._
+_Última actualización: 2026-05-28 (sesión 45 — Bloque 1.6 completado y archivado; siguiente paso técnico: Bloque 1.7 Review Queue interna por rol)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
 
@@ -17,8 +17,8 @@ _Última actualización: 2026-05-28 (sesión 44 — Bloque 1.5 completado y arch
 | Área | Estado |
 |---|---|
 | Bloque 0 | 0.1–0.10 completados. 0.11 sigue bloqueado por crédito Anthropic para corrida final con judge. |
-| Bloque 1 | 1.0–1.5 completados y archivados. |
-| Siguiente paso | 1.6 — Dashboard cliente 7 secciones MVP, según `auyan-master-context.md` y `architecture-web.md`. |
+| Bloque 1 | 1.0–1.6 completados y archivados. |
+| Siguiente paso | 1.7 — Dashboard super_admin Home/Review Queue + filtros por rol. |
 
 ---
 
@@ -34,17 +34,18 @@ _Última actualización: 2026-05-28 (sesión 44 — Bloque 1.5 completado y arch
 | 1.3 | Onboarding wizard + lifecycle | ✅ [PR #102](https://github.com/Auyan-ai/platform/pull/102), QA manual aprobado |
 | 1.4 | KB drop-zone + pending review | ✅ Archivado |
 | 1.5 | Reporte semanal + aprobación + Postmark + cron | ✅ [PR #104](https://github.com/Auyan-ai/platform/pull/104)–[#107](https://github.com/Auyan-ai/platform/pull/107) |
+| 1.6 | Dashboard cliente 7 secciones MVP | ✅ [PR #109](https://github.com/Auyan-ai/platform/pull/109)–[#113](https://github.com/Auyan-ai/platform/pull/113) |
 
-### Siguiente: Sub-PR 1.6 — Dashboard cliente 7 secciones MVP
+### Siguiente: Sub-PR 1.7 — Review Queue interna por rol
 
-**Objetivo:** consolidar el dashboard cliente MVP descrito en el contexto maestro: email semanal como resumen, dashboard como fuente completa, y 7 secciones operativas.
+**Objetivo:** convertir el Home interno super_admin en una cola operativa real para revisar trabajo pendiente por tenant y por rol Auyan.
 
-Scope recomendado, sin abrir funcionalidades de Bloque 2:
+Scope recomendado:
 
-1. Home cliente con KPIs, fase del agente y acceso al reporte semanal actual.
-2. `Insights` como evolución de conversaciones: lectura ejecutiva de intents, escalaciones y tendencias.
-3. Reportes, KB, onboarding/facts y configuración alineados al shell Mercury light ya vigente.
-4. Mantener AI Data Assistant y visualizaciones avanzadas fuera del MVP; pertenecen a Bloque 2.
+1. Home interno con Review Queue cross-tenant.
+2. Filtros por tipo: KB pending, weekly reports pending review, L3 approvals, proposals.
+3. Preparar filtros por rol interno (`aide`, `qa_km`, `ops_admin`) usando la estructura DB ya existente.
+4. Mantener el dashboard cliente sin AI Data Assistant; eso sigue en Bloque 2.
 
 ### Nota para 1.4 — Shopify content import / KB bootstrap
 
