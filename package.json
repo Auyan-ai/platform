@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev:web": "pnpm --filter @auyan/web dev",
+    "dev:landing": "pnpm --filter @auyan/landing dev",
     "build:web": "pnpm --filter @auyan/web build",
+    "build:landing": "pnpm --filter @auyan/landing build",
     "typecheck": "pnpm -r typecheck",
     "gen:api-types": "openapi-typescript ${API_URL:-http://localhost:8000}/openapi.json -o packages/shared/src/api-types.ts"
   },

@@ -227,6 +227,9 @@ apps/web/.next/
 apps/web/out/
 apps/web/.turbo/
 apps/web/next-env.d.ts
+apps/landing/.next/
+apps/landing/out/
+apps/landing/.turbo/
 *.tsbuildinfo
 
 # pnpm
@@ -236,3 +239,5 @@ node_modules/
 # Env files locales (el .env.local de apps/web)
 apps/web/.env.local
 apps/web/.env*.local
+apps/landing/.env.local
+apps/landing/.env*.local
