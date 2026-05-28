@@ -3990,3 +3990,63 @@ async def approve_weekly_report(
         approved_by,
     )
     return _weekly_report_from_row(row) if row else None
+
+
+async def mark_weekly_report_sent(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    report_id: UUID,
+    *,
+    sent_by: UUID,
+    postmark_message_id: str | None,
+) -> WeeklyReport | None:
+    row = await conn.fetchrow(
+        """
+        UPDATE weekly_reports
+           SET status = 'sent'::weekly_report_status,
+               sent_by = $3,
+               sent_at = NOW(),
+               postmark_message_id = $4,
+               send_error = NULL
+         WHERE tenant_id = $1
+           AND id = $2
+           AND status = 'approved'::weekly_report_status
+           AND deleted_at IS NULL
+        RETURNING id, tenant_id, week_start::text, week_end::text, status, subject,
+                  recipient_email, metrics, narrative, created_by, approved_by,
+                  approved_at, sent_by, sent_at, postmark_message_id, send_error,
+                  created_at, updated_at
+        """,
+        tenant_id,
+        report_id,
+        sent_by,
+        postmark_message_id,
+    )
+    return _weekly_report_from_row(row) if row else None
+
+
+async def mark_weekly_report_send_failed(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    report_id: UUID,
+    *,
+    send_error: str,
+) -> WeeklyReport | None:
+    row = await conn.fetchrow(
+        """
+        UPDATE weekly_reports
+           SET send_error = $3
+         WHERE tenant_id = $1
+           AND id = $2
+           AND status = 'approved'::weekly_report_status
+           AND deleted_at IS NULL
+        RETURNING id, tenant_id, week_start::text, week_end::text, status, subject,
+                  recipient_email, metrics, narrative, created_by, approved_by,
+                  approved_at, sent_by, sent_at, postmark_message_id, send_error,
+                  created_at, updated_at
+        """,
+        tenant_id,
+        report_id,
+        send_error,
+    )
+    return _weekly_report_from_row(row) if row else None

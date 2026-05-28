@@ -319,7 +319,11 @@ class TestGetMyTenantUsage:
         assert resp.status_code == 401
 
 
-def _make_weekly_report(status: str = "draft") -> Any:
+def _make_weekly_report(
+    status: str = "draft",
+    *,
+    recipient_email: str | None = "ops@acme.test",
+) -> Any:
     from apps.api.db.models import WeeklyReport
 
     return WeeklyReport(
@@ -329,7 +333,7 @@ def _make_weekly_report(status: str = "draft") -> Any:
         week_end="2026-05-24",
         status=status,
         subject="Reporte semanal Auyan: 2026-05-18 a 2026-05-24",
-        recipient_email="ops@acme.test",
+        recipient_email=recipient_email,
         metrics={
             "volume": {"conversations": 10, "messages": 44},
             "resolution_rate": 70.0,
@@ -466,6 +470,91 @@ class TestWeeklyReportEndpoints:
         assert resp.status_code == 200
         assert resp.json()["status"] == "approved"
         assert approve_mock.await_args.kwargs["approved_by"] == USER_ID
+
+    def test_send_report_marks_sent_after_postmark_success(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_weekly_report",
+            AsyncMock(return_value=_make_weekly_report(status="approved")),
+        )
+        sent_report = _make_weekly_report(status="sent")
+        mark_sent = AsyncMock(return_value=sent_report)
+        monkeypatch.setattr("apps.api.routers.tenants.mark_weekly_report_sent", mark_sent)
+        mark_failed = AsyncMock()
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.mark_weekly_report_send_failed",
+            mark_failed,
+        )
+        app = _make_super_admin_app(monkeypatch)
+        email_sender = MagicMock()
+        email_sender.send_email_now = AsyncMock(return_value={"MessageID": "pm-123"})
+        app.state.email_sender = email_sender
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/weekly-reports/12121212-1212-1212-1212-121212121212/send",
+            headers={
+                "Authorization": f"Bearer {_make_jwt()}",
+                "X-Tenant-Id": str(TENANT_ID),
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "sent"
+        assert resp.json()["postmark_message_id"] is None
+        email_sender.send_email_now.assert_awaited_once()
+        assert email_sender.send_email_now.await_args.kwargs["tag"] == "weekly-report"
+        assert mark_sent.await_args.kwargs["postmark_message_id"] == "pm-123"
+        assert mark_sent.await_args.kwargs["sent_by"] == USER_ID
+        mark_failed.assert_not_awaited()
+
+    def test_send_report_requires_recipient_email(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_weekly_report",
+            AsyncMock(return_value=_make_weekly_report(status="approved", recipient_email=None)),
+        )
+        app = _make_super_admin_app(monkeypatch)
+        app.state.email_sender = MagicMock()
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/weekly-reports/12121212-1212-1212-1212-121212121212/send",
+            headers={
+                "Authorization": f"Bearer {_make_jwt()}",
+                "X-Tenant-Id": str(TENANT_ID),
+            },
+        )
+
+        assert resp.status_code == 400
+
+    def test_send_report_records_postmark_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_weekly_report",
+            AsyncMock(return_value=_make_weekly_report(status="approved")),
+        )
+        mark_failed = AsyncMock(return_value=_make_weekly_report(status="approved"))
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.mark_weekly_report_send_failed",
+            mark_failed,
+        )
+        monkeypatch.setattr("apps.api.routers.tenants.mark_weekly_report_sent", AsyncMock())
+        app = _make_super_admin_app(monkeypatch)
+        email_sender = MagicMock()
+        email_sender.send_email_now = AsyncMock(side_effect=RuntimeError("Postmark down"))
+        app.state.email_sender = email_sender
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/weekly-reports/12121212-1212-1212-1212-121212121212/send",
+            headers={
+                "Authorization": f"Bearer {_make_jwt()}",
+                "X-Tenant-Id": str(TENANT_ID),
+            },
+        )
+
+        assert resp.status_code == 503
+        assert mark_failed.await_args.kwargs["send_error"] == "Postmark down"
 
 
 class TestTenantPlaybookEndpoints:

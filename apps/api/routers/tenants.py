@@ -25,6 +25,8 @@ from apps.api.db.queries import (
     list_all_tenants,
     list_tenant_knowledge_submissions,
     list_weekly_reports,
+    mark_weekly_report_send_failed,
+    mark_weekly_report_sent,
     reject_tenant_knowledge_submission,
     submit_tenant_onboarding,
     submit_weekly_report_for_review,
@@ -500,6 +502,79 @@ async def approve_my_weekly_report(
         )
     if report is None:
         raise HTTPException(status_code=409, detail="El reporte ya no está en revisión")
+    return WeeklyReportResponse.model_validate(report)
+
+
+@router.post(
+    "/me/weekly-reports/{report_id}/send",
+    response_model=WeeklyReportResponse,
+    summary="Envía un reporte aprobado por Postmark — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def send_my_weekly_report(
+    report_id: UUID,
+    request: Request,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+) -> WeeklyReportResponse:
+    async with tenant_scope(tenant_id) as conn:
+        current = await get_weekly_report(conn, tenant_id, report_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="Reporte semanal no encontrado")
+    if current.status != "approved":
+        raise HTTPException(status_code=409, detail="Sólo reportes aprobados se envían")
+    if not current.recipient_email:
+        raise HTTPException(status_code=400, detail="Reporte sin recipient_email")
+
+    email_sender = getattr(request.app.state, "email_sender", None)
+    if email_sender is None:
+        async with tenant_scope(tenant_id) as conn:
+            await mark_weekly_report_send_failed(
+                conn,
+                tenant_id,
+                report_id,
+                send_error="email_sender_not_configured",
+            )
+        raise HTTPException(status_code=503, detail="Email sender no configurado")
+
+    from apps.api.services.email_templates import weekly_report
+
+    subject, text_body, html_body = weekly_report.render(
+        subject=current.subject,
+        week_start=current.week_start,
+        week_end=current.week_end,
+        metrics=current.metrics,
+        narrative=current.narrative,
+    )
+    try:
+        result = await email_sender.send_email_now(
+            to=current.recipient_email,
+            subject=subject,
+            text_body=text_body,
+            html_body=html_body,
+            tag="weekly-report",
+        )
+    except Exception as exc:
+        async with tenant_scope(tenant_id) as conn:
+            await mark_weekly_report_send_failed(
+                conn,
+                tenant_id,
+                report_id,
+                send_error=str(exc),
+            )
+        raise HTTPException(status_code=503, detail="Postmark no pudo enviar el reporte") from exc
+
+    message_id = result.get("MessageID") or result.get("MessageId")
+    async with tenant_scope(tenant_id) as conn:
+        report = await mark_weekly_report_sent(
+            conn,
+            tenant_id,
+            report_id,
+            sent_by=auth.user_id,
+            postmark_message_id=str(message_id) if message_id else None,
+        )
+    if report is None:
+        raise HTTPException(status_code=409, detail="El reporte ya no está aprobado")
     return WeeklyReportResponse.model_validate(report)
 
 
