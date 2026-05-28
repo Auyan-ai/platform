@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from apps.api.db.models import (
     AgentReasoningEvent,
@@ -53,6 +53,9 @@ from apps.api.db.models import (
     TenantConfiguration,
     TenantFacts,
     TenantIntegration,
+    TenantKnowledgeSourceType,
+    TenantKnowledgeSubmission,
+    TenantKnowledgeSubmissionStatus,
     TenantOnboarding,
     TenantPlaybook,
     TenantToolPermission,
@@ -665,6 +668,10 @@ async def resolve_escalation(
 # ============================================================
 
 
+def _embedding_to_pg_vector(embedding: list[float]) -> str:
+    return "[" + ",".join(str(x) for x in embedding) + "]"
+
+
 async def search_knowledge_chunks(
     conn: asyncpg.Connection,
     tenant_id: UUID,
@@ -702,6 +709,54 @@ async def search_knowledge_chunks(
         min_similarity,
     )
     return [KnowledgeChunk(**dict(r)) for r in rows]
+
+
+async def create_knowledge_document_with_chunks(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    title: str,
+    source: str | None,
+    content: str,
+    metadata: dict[str, Any],
+    chunks: list[tuple[str, list[float]]],
+) -> UUID:
+    """Inserta un documento RAG y sus chunks ya embedidos."""
+    document_id = uuid4()
+    await conn.execute(
+        """
+        INSERT INTO knowledge_base_documents
+          (id, tenant_id, title, source, content, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+        """,
+        document_id,
+        tenant_id,
+        title,
+        source,
+        content,
+        json.dumps(metadata),
+    )
+    rows = [
+        (
+            uuid4(),
+            tenant_id,
+            document_id,
+            index,
+            chunk_content,
+            _embedding_to_pg_vector(embedding),
+            len(chunk_content.split()),
+        )
+        for index, (chunk_content, embedding) in enumerate(chunks)
+    ]
+    await conn.executemany(
+        """
+        INSERT INTO knowledge_base_chunks
+          (id, tenant_id, document_id, chunk_index, content, embedding, token_count)
+        VALUES ($1, $2, $3, $4, $5, $6::vector, $7)
+        """,
+        rows,
+    )
+    return document_id
 
 
 async def get_tenant_metrics(
@@ -3391,3 +3446,182 @@ async def update_tenant_lifecycle_state(
         state,
     )
     return Tenant(**dict(row))
+
+
+# ============================================================
+# Tenant Knowledge Submissions (Bloque 1, Sub-PR 1.4)
+# ============================================================
+
+
+def _tenant_knowledge_submission_from_row(
+    row: asyncpg.Record,
+) -> TenantKnowledgeSubmission:
+    d = dict(row)
+    if isinstance(d.get("metadata"), str):
+        d["metadata"] = json.loads(d["metadata"])
+    return TenantKnowledgeSubmission(**d)
+
+
+async def list_tenant_knowledge_submissions(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    status: TenantKnowledgeSubmissionStatus | None = None,
+) -> list[TenantKnowledgeSubmission]:
+    rows = await conn.fetch(
+        """
+        SELECT *
+          FROM tenant_knowledge_submissions
+         WHERE tenant_id = $1
+           AND deleted_at IS NULL
+           AND ($2::tenant_knowledge_submission_status IS NULL OR status = $2)
+         ORDER BY created_at DESC
+        """,
+        tenant_id,
+        status,
+    )
+    return [_tenant_knowledge_submission_from_row(r) for r in rows]
+
+
+async def get_tenant_knowledge_submission(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    submission_id: UUID,
+) -> TenantKnowledgeSubmission | None:
+    row = await conn.fetchrow(
+        """
+        SELECT *
+          FROM tenant_knowledge_submissions
+         WHERE tenant_id = $1
+           AND id = $2
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        submission_id,
+    )
+    return _tenant_knowledge_submission_from_row(row) if row else None
+
+
+async def create_tenant_knowledge_submission(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    title: str,
+    source_type: TenantKnowledgeSourceType,
+    source_url: str | None = None,
+    original_filename: str | None = None,
+    content: str = "",
+    notes: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    submitted_by: UUID | None = None,
+) -> TenantKnowledgeSubmission:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO tenant_knowledge_submissions
+          (tenant_id, title, source_type, source_url, original_filename,
+           content, notes, metadata, submitted_by)
+        VALUES ($1, $2, $3::tenant_knowledge_source_type, $4, $5, $6, $7, $8::jsonb, $9)
+        RETURNING *
+        """,
+        tenant_id,
+        title,
+        source_type,
+        source_url,
+        original_filename,
+        content,
+        notes,
+        json.dumps(metadata or {}),
+        submitted_by,
+    )
+    return _tenant_knowledge_submission_from_row(row)
+
+
+async def reject_tenant_knowledge_submission(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    submission_id: UUID,
+    *,
+    reviewed_by: UUID,
+    review_note: str | None = None,
+) -> TenantKnowledgeSubmission | None:
+    row = await conn.fetchrow(
+        """
+        UPDATE tenant_knowledge_submissions
+           SET status = 'rejected'::tenant_knowledge_submission_status,
+               reviewed_by = $3,
+               reviewed_at = NOW(),
+               review_note = $4
+         WHERE tenant_id = $1
+           AND id = $2
+           AND status = 'pending_review'::tenant_knowledge_submission_status
+           AND deleted_at IS NULL
+        RETURNING *
+        """,
+        tenant_id,
+        submission_id,
+        reviewed_by,
+        review_note,
+    )
+    return _tenant_knowledge_submission_from_row(row) if row else None
+
+
+async def approve_tenant_knowledge_submission_with_document(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    submission_id: UUID,
+    *,
+    reviewed_by: UUID,
+    review_note: str | None,
+    chunks: list[tuple[str, list[float]]],
+) -> TenantKnowledgeSubmission | None:
+    row = await conn.fetchrow(
+        """
+        SELECT *
+          FROM tenant_knowledge_submissions
+         WHERE tenant_id = $1
+           AND id = $2
+           AND deleted_at IS NULL
+         FOR UPDATE
+        """,
+        tenant_id,
+        submission_id,
+    )
+    if row is None:
+        return None
+    submission = _tenant_knowledge_submission_from_row(row)
+    if submission.status != "pending_review":
+        return None
+
+    document_id = await create_knowledge_document_with_chunks(
+        conn,
+        tenant_id,
+        title=submission.title,
+        source=submission.source_url or submission.original_filename or submission.source_type,
+        content=submission.content,
+        metadata={
+            **submission.metadata,
+            "source_submission_id": str(submission.id),
+            "source_type": submission.source_type,
+            "reviewed_by": str(reviewed_by),
+        },
+        chunks=chunks,
+    )
+    updated = await conn.fetchrow(
+        """
+        UPDATE tenant_knowledge_submissions
+           SET status = 'approved'::tenant_knowledge_submission_status,
+               reviewed_by = $3,
+               reviewed_at = NOW(),
+               review_note = $4,
+               processed_document_id = $5
+         WHERE tenant_id = $1
+           AND id = $2
+        RETURNING *
+        """,
+        tenant_id,
+        submission_id,
+        reviewed_by,
+        review_note,
+        document_id,
+    )
+    return _tenant_knowledge_submission_from_row(updated)

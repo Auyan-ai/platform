@@ -1,15 +1,23 @@
 'use client'
 
+import { LogoutButton } from '@/components/nav/LogoutButton'
+import { cn } from '@/lib/utils'
+import {
+  AlertTriangle,
+  ClipboardList,
+  FileText,
+  LayoutDashboard,
+  MessagesSquare,
+  Store,
+} from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { AlertTriangle, ClipboardList, LayoutDashboard, MessagesSquare, Store } from 'lucide-react'
-import { cn } from '@/lib/utils'
-import { LogoutButton } from '@/components/nav/LogoutButton'
 
 const NAV_ITEMS = [
   { label: 'Overview', icon: LayoutDashboard, section: 'overview' },
   { label: 'Onboarding', icon: ClipboardList, section: 'onboarding' },
   { label: 'Datos', icon: Store, section: 'facts' },
+  { label: 'Conocimiento', icon: FileText, section: 'knowledge' },
   { label: 'Conversaciones', icon: MessagesSquare, section: 'conversations' },
   { label: 'Escalaciones', icon: AlertTriangle, section: 'escalations' },
 ] as const

@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
@@ -44,6 +45,8 @@ class FakeAuthSettings:
     supabase_jwt_algorithm: str = JWT_ALG
     supabase_jwt_audience: str = JWT_AUD
     budget_usd_daily: float = 10.0
+    embedding_model: str = "text-embedding-3-small"
+    llm_max_retries: int = 1
 
     @property
     def supabase_jwt_secret(self) -> _SecretWrap:
@@ -547,3 +550,159 @@ class TestTenantOnboardingEndpoints:
         assert resp.json()["submitted_at"] is not None
         assert submit_mock.await_args.kwargs["edited_by"] == USER_ID
         app.state.email_sender.send_email.assert_called_once()
+
+
+class TestTenantKnowledgeSubmissionsEndpoints:
+    def test_list_kb_submissions_returns_rows(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from apps.api.db.models import TenantKnowledgeSubmission
+
+        submission = TenantKnowledgeSubmission(
+            id=UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            tenant_id=TENANT_ID,
+            title="Política de devoluciones",
+            source_type="text",
+            content="El cliente puede devolver productos durante 30 días.",
+            status="pending_review",
+            submitted_by=USER_ID,
+            created_at=datetime.now(UTC),
+        )
+        list_mock = AsyncMock(return_value=[submission])
+        monkeypatch.setattr("apps.api.routers.tenants.list_tenant_knowledge_submissions", list_mock)
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get(
+            "/tenants/me/kb-submissions?status=pending_review",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["title"] == "Política de devoluciones"
+        assert list_mock.await_args.kwargs["status"] == "pending_review"
+
+    def test_create_kb_submission_stores_pending_review(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import TenantKnowledgeSubmission
+
+        submission = TenantKnowledgeSubmission(
+            id=UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            tenant_id=TENANT_ID,
+            title="FAQ envíos",
+            source_type="url",
+            source_url="https://acme.test/envios",
+            content="Los pedidos tardan 24-48 horas hábiles.",
+            status="pending_review",
+            submitted_by=USER_ID,
+        )
+        create_mock = AsyncMock(return_value=submission)
+        monkeypatch.setattr("apps.api.routers.tenants.create_tenant_knowledge_submission", create_mock)
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/kb-submissions",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={
+                "title": "FAQ envíos",
+                "source_type": "url",
+                "source_url": "https://acme.test/envios",
+                "content": "Los pedidos tardan 24-48 horas hábiles.",
+            },
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["status"] == "pending_review"
+        assert create_mock.await_args.kwargs["submitted_by"] == USER_ID
+
+    def test_create_kb_submission_requires_content_or_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/kb-submissions",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={"title": "Vacío", "source_type": "text", "content": ""},
+        )
+
+        assert resp.status_code == 422
+
+    def test_reject_kb_submission_marks_reviewed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from apps.api.db.models import TenantKnowledgeSubmission
+
+        rejected = TenantKnowledgeSubmission(
+            id=UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            tenant_id=TENANT_ID,
+            title="FAQ vieja",
+            source_type="text",
+            content="Contenido antiguo.",
+            status="rejected",
+            reviewed_by=USER_ID,
+            review_note="Duplicado",
+        )
+        reject_mock = AsyncMock(return_value=rejected)
+        monkeypatch.setattr("apps.api.routers.tenants.reject_tenant_knowledge_submission", reject_mock)
+        app = _make_super_admin_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/kb-submissions/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/reject",
+            headers={"Authorization": f"Bearer {_make_jwt()}", "X-Tenant-Id": str(TENANT_ID)},
+            json={"review_note": "Duplicado"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "rejected"
+        assert reject_mock.await_args.kwargs["reviewed_by"] == USER_ID
+
+    def test_approve_kb_submission_embeds_and_indexes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import TenantKnowledgeSubmission
+
+        submission_id = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        pending = TenantKnowledgeSubmission(
+            id=submission_id,
+            tenant_id=TENANT_ID,
+            title="FAQ envíos",
+            source_type="text",
+            content="Los pedidos tardan 24-48 horas hábiles.",
+            status="pending_review",
+            submitted_by=USER_ID,
+        )
+        approved = pending.model_copy(
+            update={
+                "status": "approved",
+                "reviewed_by": USER_ID,
+                "processed_document_id": UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+            }
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant_knowledge_submission",
+            AsyncMock(return_value=pending),
+        )
+        approve_mock = AsyncMock(return_value=approved)
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.approve_tenant_knowledge_submission_with_document",
+            approve_mock,
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.embed_kb_chunks",
+            AsyncMock(return_value=[("Los pedidos tardan 24-48 horas hábiles.", [0.1] * 1536)]),
+        )
+        app = _make_super_admin_app(monkeypatch)
+        app.state.agent_deps = SimpleNamespace(openai=object())
+        client = TestClient(app)
+
+        resp = client.post(
+            f"/tenants/me/kb-submissions/{submission_id}/approve",
+            headers={"Authorization": f"Bearer {_make_jwt()}", "X-Tenant-Id": str(TENANT_ID)},
+            json={"review_note": "Aprobado"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "approved"
+        assert approve_mock.await_args.kwargs["reviewed_by"] == USER_ID
+        assert approve_mock.await_args.kwargs["chunks"][0][1] == [0.1] * 1536
