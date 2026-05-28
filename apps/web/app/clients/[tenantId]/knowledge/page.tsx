@@ -1,4 +1,4 @@
-import { KnowledgeDropZone } from '@/components/knowledge/KnowledgeDropZone'
+import { ClientKnowledgeBase } from '@/components/knowledge/ClientKnowledgeBase'
 
 interface Props {
   params: Promise<{ tenantId: string }>
@@ -19,7 +19,7 @@ export default async function ClientKnowledgePage({ params }: Props) {
         </p>
       </div>
 
-      <KnowledgeDropZone tenantId={tenantId} />
+      <ClientKnowledgeBase tenantId={tenantId} />
     </div>
   )
 }
