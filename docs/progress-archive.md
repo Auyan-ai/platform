@@ -586,7 +586,7 @@ Pendiente vivo: reseed AOPs, corrida `--reseed --no-judge --all`, fixes restante
 
 ---
 
-## Bloque 1 — Sprint A completado hasta Sub-PR 1.7 ✅
+## Bloque 1 — Sprint A completado hasta Sub-PR 1.8 ✅
 
 ### 1.0 — Design Sprint + shell visual
 
@@ -720,3 +720,18 @@ Qué incluye:
 - Tipos OpenAPI regenerados.
 
 Verificación sesión 46: `poetry run ruff check`, `pytest tests/test_tenants.py`, `pnpm --filter @auyan/web typecheck`, Biome focal, `pnpm build:web` y CI verdes.
+
+### 1.8 — Landing pública ✅
+
+Implementado en [PR #117](https://github.com/Auyan-ai/platform/pull/117).
+
+Qué incluye:
+
+- App pública separada `apps/landing` sobre Next.js App Router.
+- Home de primer viewport para Auyan como Managed AI Service de CX e-commerce, no SaaS self-serve.
+- Páginas públicas `/pricing`, `/founding-partner`, `/security`, `/about` y `/blog`.
+- Componentes visuales con Framer Motion y composición alineada al sistema Mercury light.
+- Plausible preparado vía `NEXT_PUBLIC_PLAUSIBLE_DOMAIN`.
+- Scripts raíz `dev:landing` y `build:landing`, más ignores para output local de la app.
+
+Verificación sesión 47: `pnpm --filter @auyan/landing typecheck`, `pnpm build:landing`, `pnpm typecheck`, Biome focal, `git diff --check` y CI verdes.
