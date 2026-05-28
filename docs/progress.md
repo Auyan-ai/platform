@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-05-28 (sesión 47 — Bloque 1.8 completado y archivado; siguiente paso técnico: Bloque 1.9 email outbound general)._
+_Última actualización: 2026-05-28 (sesión 48 — Bloque 1.9 completado y archivado; siguiente paso operativo: Bloque 1.10 billing manual primeros clientes)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
 
@@ -17,8 +17,8 @@ _Última actualización: 2026-05-28 (sesión 47 — Bloque 1.8 completado y arch
 | Área | Estado |
 |---|---|
 | Bloque 0 | 0.1–0.10 completados. 0.11 sigue bloqueado por crédito Anthropic para corrida final con judge. |
-| Bloque 1 | 1.0–1.8 completados y archivados. |
-| Siguiente paso | 1.9 — Email outbound general: templates editables + queue + retry logic. |
+| Bloque 1 | 1.0–1.9 completados y archivados. |
+| Siguiente paso | 1.10 — Billing manual primeros 1–2 clientes (no técnico). |
 
 ---
 
@@ -37,17 +37,18 @@ _Última actualización: 2026-05-28 (sesión 47 — Bloque 1.8 completado y arch
 | 1.6 | Dashboard cliente 7 secciones MVP | ✅ [PR #109](https://github.com/Auyan-ai/platform/pull/109)–[#113](https://github.com/Auyan-ai/platform/pull/113) |
 | 1.7 | Review Queue interna cross-tenant | ✅ [PR #115](https://github.com/Auyan-ai/platform/pull/115) |
 | 1.8 | Landing pública `apps/landing` + Plausible | ✅ [PR #117](https://github.com/Auyan-ai/platform/pull/117) |
+| 1.9 | Email outbound general: templates + queue + retry + UI | ✅ [PR #119](https://github.com/Auyan-ai/platform/pull/119)–[#121](https://github.com/Auyan-ai/platform/pull/121) |
 
-### Siguiente: Sub-PR 1.9 — Email outbound general
+### Siguiente: Sub-PR 1.10 — Billing manual primeros clientes
 
-**Objetivo:** generalizar el envío outbound de emails más allá de reportes/onboarding: templates editables, cola persistente, estados de entrega y retry logic.
+**Objetivo:** cerrar operación manual de cobro para los primeros 1–2 clientes antes de abrir Stripe/Billing técnico en Bloque 2.
 
 Scope recomendado:
 
-1. Modelo persistente para templates y jobs de outbound email por tenant.
-2. API interna para crear/enqueuear emails transaccionales u operativos.
-3. Worker/servicio reutilizable sobre Postmark con retry/backoff e idempotencia básica.
-4. UI interna mínima para revisar templates, estado de cola y fallos recientes.
+1. Definir precio final acordado por cliente y responsable comercial.
+2. Documentar método manual de cobro/facturación fuera del producto.
+3. Confirmar destinatarios de facturación y contacto operativo.
+4. Mantener Stripe Subscriptions + Stripe Tax fuera del MVP técnico hasta Bloque 2.
 
 ### Nota para 1.4 — Shopify content import / KB bootstrap
 

@@ -295,7 +295,8 @@ El plan Sprint 3 original queda histórico. El plan vigente es Bloque 1, tomado 
 | 1.6 | ✅ completo | Dashboard cliente 7 secciones MVP con data viz. |
 | 1.7 | ✅ completo | Dashboard super_admin Home/Review Queue + filtros por rol. |
 | 1.8 | ✅ completo | `apps/landing` + Aceternity UI-style + páginas públicas + Plausible. |
-| 1.9 | ⏭️ siguiente | Email outbound general: templates editables + queue + retry logic. |
+| 1.9 | ✅ completo | Email outbound general: templates editables + queue + retry logic + consola interna. |
+| 1.10 | ⏭️ siguiente | Billing manual primeros 1–2 clientes; Stripe queda para Bloque 2. |
 
 ---
 
