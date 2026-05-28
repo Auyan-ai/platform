@@ -40,6 +40,7 @@ export interface TenantOnboarding {
 export type KnowledgeSubmissionStatus = 'pending_review' | 'approved' | 'rejected'
 export type KnowledgeSourceType = 'text' | 'url' | 'file'
 export type WeeklyReportStatus = 'draft' | 'pending_review' | 'approved' | 'sent'
+export type OutboundEmailJobStatus = 'queued' | 'sending' | 'sent' | 'failed' | 'canceled'
 
 export interface TenantKnowledgeSubmission {
   id: string
@@ -100,6 +101,47 @@ export interface WeeklyReport {
   updated_at: string | null
 }
 
+export interface OutboundEmailTemplate {
+  id: string
+  tenant_id: string
+  key: string
+  name: string
+  subject_template: string
+  text_body_template: string
+  html_body_template: string | null
+  variables: string[]
+  is_active: boolean
+  version: number
+  created_by: string | null
+  updated_by: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface OutboundEmailJob {
+  id: string
+  tenant_id: string
+  template_id: string | null
+  recipient_email: string
+  subject: string
+  text_body: string
+  html_body: string | null
+  tag: string | null
+  payload: Record<string, unknown>
+  status: OutboundEmailJobStatus
+  attempts: number
+  max_attempts: number
+  next_attempt_at: string | null
+  last_attempt_at: string | null
+  sent_at: string | null
+  postmark_message_id: string | null
+  error: string | null
+  requested_by: string | null
+  idempotency_key: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
 export type TenantPlaybookPayload = Pick<
   TenantPlaybook,
   'brand_voice' | 'product_overview' | 'policies' | 'escalation_notes' | 'agent_instructions'
@@ -123,6 +165,31 @@ export interface WeeklyReportUpdatePayload {
   subject: string
   narrative: string
   recipient_email?: string | null
+}
+
+export type OutboundEmailTemplatePayload = Pick<
+  OutboundEmailTemplate,
+  | 'key'
+  | 'name'
+  | 'subject_template'
+  | 'text_body_template'
+  | 'html_body_template'
+  | 'variables'
+  | 'is_active'
+>
+
+export interface OutboundEmailTemplateUpdatePayload
+  extends Omit<OutboundEmailTemplatePayload, 'key'> {
+  templateId: string
+}
+
+export type OutboundEmailJobPayload = Pick<
+  OutboundEmailJob,
+  'recipient_email' | 'subject' | 'text_body' | 'html_body' | 'tag' | 'payload'
+> & {
+  template_id?: string | null
+  idempotency_key?: string | null
+  max_attempts?: number
 }
 
 async function tenantContextFetch<T>(
@@ -475,6 +542,102 @@ export function useSendWeeklyReport(tenantId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.tenants.weeklyReports(tenantId) })
       qc.invalidateQueries({ queryKey: queryKeys.tenants.weeklyReports(tenantId, 'sent') })
+    },
+  })
+}
+
+export function useOutboundEmailTemplates(tenantId: string) {
+  return useQuery({
+    queryKey: queryKeys.tenants.outboundEmailTemplates(tenantId),
+    queryFn: async () => {
+      const token = await getToken()
+      return tenantContextFetch<OutboundEmailTemplate[]>(
+        token,
+        tenantId,
+        '/tenants/me/outbound-email/templates?include_inactive=true',
+      )
+    },
+    staleTime: 20_000,
+  })
+}
+
+export function useCreateOutboundEmailTemplate(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: OutboundEmailTemplatePayload) => {
+      const token = await getToken()
+      return tenantContextFetch<OutboundEmailTemplate>(
+        token,
+        tenantId,
+        '/tenants/me/outbound-email/templates',
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.outboundEmailTemplates(tenantId) })
+    },
+  })
+}
+
+export function useUpdateOutboundEmailTemplate(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ templateId, ...payload }: OutboundEmailTemplateUpdatePayload) => {
+      const token = await getToken()
+      return tenantContextFetch<OutboundEmailTemplate>(
+        token,
+        tenantId,
+        `/tenants/me/outbound-email/templates/${templateId}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.outboundEmailTemplates(tenantId) })
+    },
+  })
+}
+
+export function useOutboundEmailJobs(tenantId: string, status?: OutboundEmailJobStatus) {
+  return useQuery({
+    queryKey: queryKeys.tenants.outboundEmailJobs(tenantId, status),
+    queryFn: async () => {
+      const token = await getToken()
+      const suffix = status ? `?status=${status}&limit=50` : '?limit=50'
+      return tenantContextFetch<OutboundEmailJob[]>(
+        token,
+        tenantId,
+        `/tenants/me/outbound-email/jobs${suffix}`,
+      )
+    },
+    staleTime: 10_000,
+  })
+}
+
+export function useEnqueueOutboundEmailJob(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: OutboundEmailJobPayload) => {
+      const token = await getToken()
+      return tenantContextFetch<OutboundEmailJob>(
+        token,
+        tenantId,
+        '/tenants/me/outbound-email/jobs',
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.outboundEmailJobs(tenantId) })
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.outboundEmailJobs(tenantId, 'queued') })
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.outboundEmailJobs(tenantId, 'failed') })
     },
   })
 }

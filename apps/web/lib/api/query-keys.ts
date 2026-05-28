@@ -19,6 +19,10 @@ export const queryKeys = {
       ['tenants', tenantId, 'kb-submissions', status ?? 'all'] as const,
     weeklyReports: (tenantId: string, status?: string) =>
       ['tenants', tenantId, 'weekly-reports', status ?? 'all'] as const,
+    outboundEmailTemplates: (tenantId: string) =>
+      ['tenants', tenantId, 'outbound-email', 'templates'] as const,
+    outboundEmailJobs: (tenantId: string, status?: string) =>
+      ['tenants', tenantId, 'outbound-email', 'jobs', status ?? 'all'] as const,
   },
   conversations: {
     list: (tenantId: string, filters?: Record<string, unknown>) =>

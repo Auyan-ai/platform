@@ -1,11 +1,11 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter, usePathname } from 'next/navigation'
-import { ChevronDown, ChevronUp } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { useAdminTenants } from '@/lib/api/hooks/tenants'
+import { cn } from '@/lib/utils'
 import type { components } from '@auyan/shared/api-types'
+import { ChevronDown, ChevronUp } from 'lucide-react'
+import { usePathname, useRouter } from 'next/navigation'
+import { useState } from 'react'
 
 type TenantResponse = components['schemas']['TenantResponse']
 
@@ -27,7 +27,7 @@ export function TenantSwitcher({ activeTenantId }: { activeTenantId: string | nu
     setOpen(false)
     const section =
       pathname.match(
-        /\/tenants\/[^/]+\/(conversations|escalations|approvals|playbook|aops|proposals|simulator)/,
+        /\/tenants\/[^/]+\/(conversations|escalations|approvals|playbook|knowledge|reports|emails|aops|proposals|simulator)/,
       )?.[1] ?? 'conversations'
     router.push(`/tenants/${tenant.id}/${section}`)
   }
@@ -40,7 +40,7 @@ export function TenantSwitcher({ activeTenantId }: { activeTenantId: string | nu
         className="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-left hover:bg-surface-muted transition-colors"
       >
         <span className="flex-1 truncate font-medium text-foreground-body">
-          {isLoading ? '…' : active?.name ?? 'Selecciona tenant'}
+          {isLoading ? '…' : (active?.name ?? 'Selecciona tenant')}
         </span>
         {open ? (
           <ChevronUp className="size-3.5 text-foreground-subtle" />
