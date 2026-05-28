@@ -1,13 +1,13 @@
 'use client'
 
-import { useState } from 'react'
-import Link from 'next/link'
-import { useConversations } from '@/lib/api/hooks/conversations'
-import { cn } from '@/lib/utils'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import type { ConversationStatus, ChannelType } from '@auyan/shared'
+import { useConversations } from '@/lib/api/hooks/conversations'
+import { cn } from '@/lib/utils'
+import type { ChannelType, ConversationStatus } from '@auyan/shared'
+import Link from 'next/link'
+import { useState } from 'react'
 
 // ----------------------------------------------------------------
 // Helpers
@@ -72,9 +72,13 @@ const STATUS_FILTERS: Array<ConversationStatus | 'all'> = [
 export function ConversationList({
   tenantId,
   basePath,
+  title = 'Conversaciones',
+  description,
 }: {
   tenantId: string
   basePath?: string
+  title?: string
+  description?: string
 }) {
   const [activeStatus, setActiveStatus] = useState<ConversationStatus | 'all'>('all')
   const [offset, setOffset] = useState(0)
@@ -102,10 +106,13 @@ export function ConversationList({
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-foreground">Conversaciones</h1>
-        {isLoading && (
-          <span className="text-xs text-foreground-muted">Actualizando…</span>
-        )}
+        <div>
+          <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+          {description && (
+            <p className="mt-1 max-w-2xl text-sm text-foreground-muted">{description}</p>
+          )}
+        </div>
+        {isLoading && <span className="text-xs text-foreground-muted">Actualizando…</span>}
       </div>
 
       {/* Filtros de status */}
@@ -140,9 +147,7 @@ export function ConversationList({
                 'hover:bg-surface-muted',
               )}
             >
-              <Badge variant={STATUS_VARIANT[conv.status]}>
-                {STATUS_LABELS[conv.status]}
-              </Badge>
+              <Badge variant={STATUS_VARIANT[conv.status]}>{STATUS_LABELS[conv.status]}</Badge>
 
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground-body">
                 {conv.subject ?? `Conversación ${conv.id.slice(0, 8)}`}

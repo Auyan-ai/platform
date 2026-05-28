@@ -1,4 +1,4 @@
-import { ConversationList } from '@/components/inbox/ConversationList'
+import { redirect } from 'next/navigation'
 
 interface Props {
   params: Promise<{ tenantId: string }>
@@ -6,10 +6,6 @@ interface Props {
 
 export default async function ClientConversationsPage({ params }: Props) {
   const { tenantId } = await params
-  return (
-    <ConversationList
-      tenantId={tenantId}
-      basePath={`/clients/${tenantId}/conversations`}
-    />
-  )
+
+  redirect(`/clients/${tenantId}/insights`)
 }

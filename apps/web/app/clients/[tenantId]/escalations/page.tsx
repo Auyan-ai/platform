@@ -10,7 +10,7 @@ export default async function ClientEscalationsPage({ params }: Props) {
     <EscalationQueue
       tenantId={tenantId}
       readOnly
-      conversationBasePath={`/clients/${tenantId}/conversations`}
+      conversationBasePath={`/clients/${tenantId}/insights`}
     />
   )
 }
