@@ -63,6 +63,8 @@ from apps.api.db.models import (
     TerminationReason,
     UserProfile,
     UserRole,
+    WeeklyReport,
+    WeeklyReportStatus,
 )
 
 if TYPE_CHECKING:
@@ -3625,3 +3627,366 @@ async def approve_tenant_knowledge_submission_with_document(
         document_id,
     )
     return _tenant_knowledge_submission_from_row(updated)
+
+
+# ============================================================
+# Weekly Reports (Bloque 1, Sub-PR 1.5)
+# ============================================================
+
+
+def _weekly_report_from_row(row: asyncpg.Record) -> WeeklyReport:
+    d = dict(row)
+    for key in ("week_start", "week_end"):
+        value = d.get(key)
+        if hasattr(value, "isoformat"):
+            d[key] = value.isoformat()
+    if isinstance(d.get("metrics"), str):
+        d["metrics"] = json.loads(d["metrics"])
+    return WeeklyReport(**d)
+
+
+def _build_weekly_report_narrative(metrics: dict[str, Any]) -> str:
+    volume = metrics.get("volume", {})
+    cost = metrics.get("cost", {})
+    resolution_rate = metrics.get("resolution_rate", 0.0)
+    escalation_rate = metrics.get("escalation_rate", 0.0)
+    top_intents = metrics.get("top_intents", [])
+    escalation_drivers = metrics.get("escalation_drivers", [])
+
+    top_intent_label = "sin intents suficientes"
+    if top_intents:
+        top = top_intents[0]
+        top_intent_label = f"{top.get('intent', 'desconocido')} ({top.get('count', 0)})"
+
+    driver_label = "sin drivers destacados"
+    if escalation_drivers:
+        driver = escalation_drivers[0]
+        driver_label = f"{driver.get('reason', 'Sin razon')} ({driver.get('count', 0)})"
+
+    return (
+        "Resumen de la semana\n\n"
+        f"- Conversaciones recibidas: {volume.get('conversations', 0)}.\n"
+        f"- Mensajes procesados: {volume.get('messages', 0)}.\n"
+        f"- Resolution rate: {resolution_rate:.1f}%.\n"
+        f"- Escalation rate: {escalation_rate:.1f}%.\n"
+        f"- Principal intent detectado: {top_intent_label}.\n"
+        f"- Principal driver de escalacion: {driver_label}.\n"
+        f"- Coste LLM estimado: ${float(cost.get('usd', 0.0)):.4f}.\n\n"
+        "Notas de Auyan\n\n"
+        "Editar esta seccion antes de enviar al cliente."
+    )
+
+
+async def build_weekly_report_metrics(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    week_start: str,
+    week_end: str,
+) -> dict[str, Any]:
+    """Calcula los agregados base para el reporte semanal del tenant."""
+    metrics = await conn.fetchval(
+        """
+        WITH bounds AS (
+          SELECT $2::date AS week_start, $3::date AS week_end
+        ),
+        conversation_counts AS (
+          SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE status IN ('resolved', 'closed'))::int AS resolved,
+            COUNT(*) FILTER (WHERE status = 'escalated')::int AS escalated
+          FROM conversations c, bounds b
+          WHERE c.tenant_id = $1
+            AND c.deleted_at IS NULL
+            AND c.is_simulation = FALSE
+            AND c.created_at >= b.week_start
+            AND c.created_at < b.week_end + INTERVAL '1 day'
+        ),
+        message_counts AS (
+          SELECT COUNT(*)::int AS total
+          FROM messages m, bounds b
+          WHERE m.tenant_id = $1
+            AND m.deleted_at IS NULL
+            AND m.created_at >= b.week_start
+            AND m.created_at < b.week_end + INTERVAL '1 day'
+        ),
+        usage_counts AS (
+          SELECT
+            COALESCE(SUM(tokens_in), 0)::int AS tokens_in,
+            COALESCE(SUM(tokens_out), 0)::int AS tokens_out,
+            COALESCE(SUM(cost_usd), 0)::float AS cost_usd,
+            COALESCE(SUM(request_count), 0)::int AS request_count
+          FROM tenant_usage_daily u, bounds b
+          WHERE u.tenant_id = $1
+            AND u.deleted_at IS NULL
+            AND u.date >= b.week_start
+            AND u.date <= b.week_end
+        ),
+        escalation_driver_counts AS (
+          SELECT e.reason, COUNT(*)::int AS count
+          FROM escalations e, bounds b
+          WHERE e.tenant_id = $1
+            AND e.created_at >= b.week_start
+            AND e.created_at < b.week_end + INTERVAL '1 day'
+          GROUP BY e.reason
+          ORDER BY count DESC, e.reason ASC
+          LIMIT 5
+        ),
+        intent_counts AS (
+          SELECT i.primary_slug, COUNT(*)::int AS count
+          FROM intent_classifier_runs i, bounds b
+          WHERE i.tenant_id = $1
+            AND i.created_at >= b.week_start
+            AND i.created_at < b.week_end + INTERVAL '1 day'
+          GROUP BY i.primary_slug
+          ORDER BY count DESC, i.primary_slug ASC
+          LIMIT 5
+        ),
+        escalation_drivers AS (
+          SELECT COALESCE(
+            jsonb_agg(jsonb_build_object('reason', reason, 'count', count)),
+            '[]'::jsonb
+          ) AS items
+          FROM escalation_driver_counts
+        ),
+        top_intents AS (
+          SELECT COALESCE(
+            jsonb_agg(jsonb_build_object('intent', primary_slug, 'count', count)),
+            '[]'::jsonb
+          ) AS items
+          FROM intent_counts
+        )
+        SELECT jsonb_build_object(
+          'week_start', $2::date::text,
+          'week_end', $3::date::text,
+          'volume', jsonb_build_object(
+            'conversations', cc.total,
+            'messages', mc.total
+          ),
+          'resolution_rate',
+            CASE
+              WHEN cc.total = 0 THEN 0
+              ELSE ROUND((cc.resolved::numeric / cc.total) * 100, 1)
+            END,
+          'escalation_rate',
+            CASE
+              WHEN cc.total = 0 THEN 0
+              ELSE ROUND((cc.escalated::numeric / cc.total) * 100, 1)
+            END,
+          'escalation_drivers', ed.items,
+          'top_intents', ti.items,
+          'cost', jsonb_build_object(
+            'usd', uc.cost_usd,
+            'tokens_in', uc.tokens_in,
+            'tokens_out', uc.tokens_out,
+            'request_count', uc.request_count
+          )
+        )
+        FROM conversation_counts cc,
+             message_counts mc,
+             usage_counts uc,
+             escalation_drivers ed,
+             top_intents ti
+        """,
+        tenant_id,
+        week_start,
+        week_end,
+    )
+    if isinstance(metrics, str):
+        return json.loads(metrics)
+    return dict(metrics or {})
+
+
+async def list_weekly_reports(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    status: WeeklyReportStatus | None = None,
+) -> list[WeeklyReport]:
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, week_start::text, week_end::text, status, subject,
+               recipient_email, metrics, narrative, created_by, approved_by,
+               approved_at, sent_by, sent_at, postmark_message_id, send_error,
+               created_at, updated_at
+          FROM weekly_reports
+         WHERE tenant_id = $1
+           AND deleted_at IS NULL
+           AND ($2::weekly_report_status IS NULL OR status = $2)
+         ORDER BY week_start DESC, created_at DESC
+        """,
+        tenant_id,
+        status,
+    )
+    return [_weekly_report_from_row(r) for r in rows]
+
+
+async def get_weekly_report(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    report_id: UUID,
+) -> WeeklyReport | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, week_start::text, week_end::text, status, subject,
+               recipient_email, metrics, narrative, created_by, approved_by,
+               approved_at, sent_by, sent_at, postmark_message_id, send_error,
+               created_at, updated_at
+          FROM weekly_reports
+         WHERE tenant_id = $1
+           AND id = $2
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        report_id,
+    )
+    return _weekly_report_from_row(row) if row else None
+
+
+async def create_or_refresh_weekly_report_draft(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    week_start: str,
+    week_end: str,
+    created_by: UUID,
+    recipient_email: str | None = None,
+) -> WeeklyReport:
+    metrics = await build_weekly_report_metrics(
+        conn,
+        tenant_id,
+        week_start=week_start,
+        week_end=week_end,
+    )
+    subject = f"Reporte semanal Auyan: {week_start} a {week_end}"
+    narrative = _build_weekly_report_narrative(metrics)
+    row = await conn.fetchrow(
+        """
+        INSERT INTO weekly_reports
+          (tenant_id, week_start, week_end, status, subject, recipient_email,
+           metrics, narrative, created_by)
+        VALUES ($1, $2::date, $3::date, 'draft'::weekly_report_status, $4, $5, $6::jsonb, $7, $8)
+        ON CONFLICT (tenant_id, week_start)
+        DO UPDATE SET
+          week_end = CASE
+            WHEN weekly_reports.status = 'draft'::weekly_report_status THEN EXCLUDED.week_end
+            ELSE weekly_reports.week_end
+          END,
+          subject = CASE
+            WHEN weekly_reports.status = 'draft'::weekly_report_status THEN EXCLUDED.subject
+            ELSE weekly_reports.subject
+          END,
+          recipient_email = CASE
+            WHEN weekly_reports.status = 'draft'::weekly_report_status THEN EXCLUDED.recipient_email
+            ELSE weekly_reports.recipient_email
+          END,
+          metrics = CASE
+            WHEN weekly_reports.status = 'draft'::weekly_report_status THEN EXCLUDED.metrics
+            ELSE weekly_reports.metrics
+          END,
+          narrative = CASE
+            WHEN weekly_reports.status = 'draft'::weekly_report_status THEN EXCLUDED.narrative
+            ELSE weekly_reports.narrative
+          END
+        RETURNING id, tenant_id, week_start::text, week_end::text, status, subject,
+                  recipient_email, metrics, narrative, created_by, approved_by,
+                  approved_at, sent_by, sent_at, postmark_message_id, send_error,
+                  created_at, updated_at
+        """,
+        tenant_id,
+        week_start,
+        week_end,
+        subject,
+        recipient_email,
+        json.dumps(metrics),
+        narrative,
+        created_by,
+    )
+    assert row is not None
+    return _weekly_report_from_row(row)
+
+
+async def update_weekly_report_draft(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    report_id: UUID,
+    *,
+    subject: str,
+    narrative: str,
+    recipient_email: str | None,
+) -> WeeklyReport | None:
+    row = await conn.fetchrow(
+        """
+        UPDATE weekly_reports
+           SET subject = $3,
+               narrative = $4,
+               recipient_email = $5
+         WHERE tenant_id = $1
+           AND id = $2
+           AND status = 'draft'::weekly_report_status
+           AND deleted_at IS NULL
+        RETURNING id, tenant_id, week_start::text, week_end::text, status, subject,
+                  recipient_email, metrics, narrative, created_by, approved_by,
+                  approved_at, sent_by, sent_at, postmark_message_id, send_error,
+                  created_at, updated_at
+        """,
+        tenant_id,
+        report_id,
+        subject,
+        narrative,
+        recipient_email,
+    )
+    return _weekly_report_from_row(row) if row else None
+
+
+async def submit_weekly_report_for_review(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    report_id: UUID,
+) -> WeeklyReport | None:
+    row = await conn.fetchrow(
+        """
+        UPDATE weekly_reports
+           SET status = 'pending_review'::weekly_report_status
+         WHERE tenant_id = $1
+           AND id = $2
+           AND status = 'draft'::weekly_report_status
+           AND deleted_at IS NULL
+        RETURNING id, tenant_id, week_start::text, week_end::text, status, subject,
+                  recipient_email, metrics, narrative, created_by, approved_by,
+                  approved_at, sent_by, sent_at, postmark_message_id, send_error,
+                  created_at, updated_at
+        """,
+        tenant_id,
+        report_id,
+    )
+    return _weekly_report_from_row(row) if row else None
+
+
+async def approve_weekly_report(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    report_id: UUID,
+    *,
+    approved_by: UUID,
+) -> WeeklyReport | None:
+    row = await conn.fetchrow(
+        """
+        UPDATE weekly_reports
+           SET status = 'approved'::weekly_report_status,
+               approved_by = $3,
+               approved_at = NOW()
+         WHERE tenant_id = $1
+           AND id = $2
+           AND status = 'pending_review'::weekly_report_status
+           AND deleted_at IS NULL
+        RETURNING id, tenant_id, week_start::text, week_end::text, status, subject,
+                  recipient_email, metrics, narrative, created_by, approved_by,
+                  approved_at, sent_by, sent_at, postmark_message_id, send_error,
+                  created_at, updated_at
+        """,
+        tenant_id,
+        report_id,
+        approved_by,
+    )
+    return _weekly_report_from_row(row) if row else None

@@ -12,6 +12,8 @@ from apps.api.db.client import bootstrap_connection, tenant_scope
 from apps.api.db.models import ChannelType
 from apps.api.db.queries import (
     approve_tenant_knowledge_submission_with_document,
+    approve_weekly_report,
+    create_or_refresh_weekly_report_draft,
     create_tenant_knowledge_submission,
     get_tenant_configuration,
     get_tenant_facts,
@@ -19,11 +21,15 @@ from apps.api.db.queries import (
     get_tenant_onboarding,
     get_tenant_playbook,
     get_tenant_usage_range,
+    get_weekly_report,
     list_all_tenants,
     list_tenant_knowledge_submissions,
+    list_weekly_reports,
     reject_tenant_knowledge_submission,
     submit_tenant_onboarding,
+    submit_weekly_report_for_review,
     update_tenant_lifecycle_state,
+    update_weekly_report_draft,
     upsert_tenant_facts,
     upsert_tenant_onboarding,
     upsert_tenant_playbook,
@@ -209,6 +215,55 @@ KnowledgeStatusQuery = Annotated[
     Query(alias="status"),
 ]
 
+WeeklyReportStatus = Literal["draft", "pending_review", "approved", "sent"]
+
+
+class WeeklyReportResponse(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    week_start: str
+    week_end: str
+    status: WeeklyReportStatus
+    subject: str
+    recipient_email: str | None = None
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    narrative: str = ""
+    created_by: UUID | None = None
+    approved_by: UUID | None = None
+    approved_at: datetime.datetime | None = None
+    sent_by: UUID | None = None
+    sent_at: datetime.datetime | None = None
+    postmark_message_id: str | None = None
+    send_error: str | None = None
+    created_at: datetime.datetime | None = None
+    updated_at: datetime.datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WeeklyReportGenerateRequest(BaseModel):
+    week_start: datetime.date
+    week_end: datetime.date
+    recipient_email: str | None = Field(default=None, max_length=320)
+
+    @model_validator(mode="after")
+    def _valid_range(self) -> WeeklyReportGenerateRequest:
+        if self.week_end < self.week_start:
+            raise ValueError("week_end debe ser mayor o igual a week_start.")
+        return self
+
+
+class WeeklyReportUpdateRequest(BaseModel):
+    subject: str = Field(min_length=3, max_length=240)
+    narrative: str = Field(min_length=1, max_length=50_000)
+    recipient_email: str | None = Field(default=None, max_length=320)
+
+
+WeeklyReportStatusQuery = Annotated[
+    WeeklyReportStatus | None,
+    Query(alias="status"),
+]
+
 
 # ----------------------------------------------------------------
 # Endpoints
@@ -311,6 +366,141 @@ async def get_my_tenant_usage(
         days=days,
         history=history,
     )
+
+
+@router.get(
+    "/me/weekly-reports",
+    response_model=list[WeeklyReportResponse],
+    summary="Lista reportes semanales del tenant",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def list_my_weekly_reports(
+    tenant_id: TenantIdDep,
+    status_filter: WeeklyReportStatusQuery = None,
+) -> list[WeeklyReportResponse]:
+    async with tenant_scope(tenant_id) as conn:
+        reports = await list_weekly_reports(conn, tenant_id, status=status_filter)
+    return [WeeklyReportResponse.model_validate(report) for report in reports]
+
+
+@router.post(
+    "/me/weekly-reports/generate",
+    response_model=WeeklyReportResponse,
+    summary="Genera o refresca borrador de reporte semanal — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def generate_my_weekly_report(
+    body: WeeklyReportGenerateRequest,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+) -> WeeklyReportResponse:
+    async with tenant_scope(tenant_id) as conn:
+        report = await create_or_refresh_weekly_report_draft(
+            conn,
+            tenant_id,
+            week_start=body.week_start.isoformat(),
+            week_end=body.week_end.isoformat(),
+            recipient_email=body.recipient_email,
+            created_by=auth.user_id,
+        )
+    return WeeklyReportResponse.model_validate(report)
+
+
+@router.get(
+    "/me/weekly-reports/{report_id}",
+    response_model=WeeklyReportResponse,
+    summary="Detalle de un reporte semanal",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def get_my_weekly_report(
+    report_id: UUID,
+    tenant_id: TenantIdDep,
+) -> WeeklyReportResponse:
+    async with tenant_scope(tenant_id) as conn:
+        report = await get_weekly_report(conn, tenant_id, report_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Reporte semanal no encontrado")
+    return WeeklyReportResponse.model_validate(report)
+
+
+@router.patch(
+    "/me/weekly-reports/{report_id}",
+    response_model=WeeklyReportResponse,
+    summary="Edita asunto, destinatario y narrativa del borrador — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def update_my_weekly_report(
+    report_id: UUID,
+    body: WeeklyReportUpdateRequest,
+    tenant_id: TenantIdDep,
+) -> WeeklyReportResponse:
+    async with tenant_scope(tenant_id) as conn:
+        current = await get_weekly_report(conn, tenant_id, report_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Reporte semanal no encontrado")
+        if current.status != "draft":
+            raise HTTPException(status_code=409, detail="Sólo se pueden editar borradores")
+        report = await update_weekly_report_draft(
+            conn,
+            tenant_id,
+            report_id,
+            subject=body.subject.strip(),
+            narrative=body.narrative.strip(),
+            recipient_email=body.recipient_email.strip() if body.recipient_email else None,
+        )
+    if report is None:
+        raise HTTPException(status_code=409, detail="El reporte ya no está en borrador")
+    return WeeklyReportResponse.model_validate(report)
+
+
+@router.post(
+    "/me/weekly-reports/{report_id}/submit",
+    response_model=WeeklyReportResponse,
+    summary="Mueve un borrador a cola de revisión interna — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def submit_my_weekly_report(
+    report_id: UUID,
+    tenant_id: TenantIdDep,
+) -> WeeklyReportResponse:
+    async with tenant_scope(tenant_id) as conn:
+        current = await get_weekly_report(conn, tenant_id, report_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Reporte semanal no encontrado")
+        if current.status != "draft":
+            raise HTTPException(status_code=409, detail="Sólo borradores pasan a revisión")
+        report = await submit_weekly_report_for_review(conn, tenant_id, report_id)
+    if report is None:
+        raise HTTPException(status_code=409, detail="El reporte ya no está en borrador")
+    return WeeklyReportResponse.model_validate(report)
+
+
+@router.post(
+    "/me/weekly-reports/{report_id}/approve",
+    response_model=WeeklyReportResponse,
+    summary="Aprueba un reporte semanal para envío — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def approve_my_weekly_report(
+    report_id: UUID,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+) -> WeeklyReportResponse:
+    async with tenant_scope(tenant_id) as conn:
+        current = await get_weekly_report(conn, tenant_id, report_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Reporte semanal no encontrado")
+        if current.status != "pending_review":
+            raise HTTPException(status_code=409, detail="Sólo reportes en revisión se aprueban")
+        report = await approve_weekly_report(
+            conn,
+            tenant_id,
+            report_id,
+            approved_by=auth.user_id,
+        )
+    if report is None:
+        raise HTTPException(status_code=409, detail="El reporte ya no está en revisión")
+    return WeeklyReportResponse.model_validate(report)
 
 
 @router.get(

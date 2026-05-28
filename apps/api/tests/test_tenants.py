@@ -319,6 +319,155 @@ class TestGetMyTenantUsage:
         assert resp.status_code == 401
 
 
+def _make_weekly_report(status: str = "draft") -> Any:
+    from apps.api.db.models import WeeklyReport
+
+    return WeeklyReport(
+        id=UUID("12121212-1212-1212-1212-121212121212"),
+        tenant_id=TENANT_ID,
+        week_start="2026-05-18",
+        week_end="2026-05-24",
+        status=status,
+        subject="Reporte semanal Auyan: 2026-05-18 a 2026-05-24",
+        recipient_email="ops@acme.test",
+        metrics={
+            "volume": {"conversations": 10, "messages": 44},
+            "resolution_rate": 70.0,
+            "escalation_rate": 20.0,
+            "top_intents": [{"intent": "returns", "count": 4}],
+            "escalation_drivers": [{"reason": "VIP", "count": 2}],
+            "cost": {"usd": 1.25, "tokens_in": 1000, "tokens_out": 500},
+        },
+        narrative="Resumen editable",
+        created_by=USER_ID,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+
+class TestWeeklyReportEndpoints:
+    def test_list_reports_allows_tenant_admin(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        list_mock = AsyncMock(return_value=[_make_weekly_report()])
+        monkeypatch.setattr("apps.api.routers.tenants.list_weekly_reports", list_mock)
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get(
+            "/tenants/me/weekly-reports?status=draft",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body[0]["status"] == "draft"
+        assert body[0]["metrics"]["volume"]["conversations"] == 10
+        assert list_mock.await_args.kwargs["status"] == "draft"
+
+    def test_generate_report_requires_super_admin_and_target_tenant(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        create_mock = AsyncMock(return_value=_make_weekly_report())
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.create_or_refresh_weekly_report_draft",
+            create_mock,
+        )
+        app = _make_super_admin_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/weekly-reports/generate",
+            headers={
+                "Authorization": f"Bearer {_make_jwt()}",
+                "X-Tenant-Id": str(TENANT_ID),
+            },
+            json={
+                "week_start": "2026-05-18",
+                "week_end": "2026-05-24",
+                "recipient_email": "ops@acme.test",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["subject"].startswith("Reporte semanal Auyan")
+        assert create_mock.await_args.args[1] == TENANT_ID
+        assert create_mock.await_args.kwargs["created_by"] == USER_ID
+
+    def test_update_report_rejects_non_draft(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_weekly_report",
+            AsyncMock(return_value=_make_weekly_report(status="approved")),
+        )
+        update_mock = AsyncMock()
+        monkeypatch.setattr("apps.api.routers.tenants.update_weekly_report_draft", update_mock)
+        app = _make_super_admin_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.patch(
+            "/tenants/me/weekly-reports/12121212-1212-1212-1212-121212121212",
+            headers={
+                "Authorization": f"Bearer {_make_jwt()}",
+                "X-Tenant-Id": str(TENANT_ID),
+            },
+            json={
+                "subject": "Reporte semanal editado",
+                "narrative": "Narrativa final",
+                "recipient_email": "ops@acme.test",
+            },
+        )
+
+        assert resp.status_code == 409
+        update_mock.assert_not_awaited()
+
+    def test_submit_report_moves_draft_to_pending_review(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_weekly_report",
+            AsyncMock(return_value=_make_weekly_report(status="draft")),
+        )
+        submit_mock = AsyncMock(return_value=_make_weekly_report(status="pending_review"))
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.submit_weekly_report_for_review",
+            submit_mock,
+        )
+        app = _make_super_admin_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/weekly-reports/12121212-1212-1212-1212-121212121212/submit",
+            headers={
+                "Authorization": f"Bearer {_make_jwt()}",
+                "X-Tenant-Id": str(TENANT_ID),
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "pending_review"
+        submit_mock.assert_awaited_once()
+
+    def test_approve_report_requires_pending_review(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_weekly_report",
+            AsyncMock(return_value=_make_weekly_report(status="pending_review")),
+        )
+        approve_mock = AsyncMock(return_value=_make_weekly_report(status="approved"))
+        monkeypatch.setattr("apps.api.routers.tenants.approve_weekly_report", approve_mock)
+        app = _make_super_admin_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/weekly-reports/12121212-1212-1212-1212-121212121212/approve",
+            headers={
+                "Authorization": f"Bearer {_make_jwt()}",
+                "X-Tenant-Id": str(TENANT_ID),
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "approved"
+        assert approve_mock.await_args.kwargs["approved_by"] == USER_ID
+
+
 class TestTenantPlaybookEndpoints:
     def test_get_playbook_returns_existing_row(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from apps.api.db.models import TenantPlaybook
