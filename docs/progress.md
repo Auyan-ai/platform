@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-05-28 (sesión 43 — Bloque 1.4 completado y archivado; siguiente paso: Bloque 1.5 reporte semanal)._
+_Última actualización: 2026-05-28 (sesión 44 — Bloque 1.5 completado y archivado; siguiente paso técnico: Bloque 1.6 dashboard cliente 7 secciones MVP)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
 
@@ -17,8 +17,8 @@ _Última actualización: 2026-05-28 (sesión 43 — Bloque 1.4 completado y arch
 | Área | Estado |
 |---|---|
 | Bloque 0 | 0.1–0.10 completados. 0.11 sigue bloqueado por crédito Anthropic para corrida final con judge. |
-| Bloque 1 | 1.0–1.4 completados y archivados. |
-| Siguiente paso | 1.5 — Reporte semanal automatizado + aprobación Auyan + envío Postmark. |
+| Bloque 1 | 1.0–1.5 completados y archivados. |
+| Siguiente paso | 1.6 — Dashboard cliente 7 secciones MVP, según `auyan-master-context.md` y `architecture-web.md`. |
 
 ---
 
@@ -33,18 +33,18 @@ _Última actualización: 2026-05-28 (sesión 43 — Bloque 1.4 completado y arch
 | 1.2 | `tenant_facts` | ✅ Archivado |
 | 1.3 | Onboarding wizard + lifecycle | ✅ [PR #102](https://github.com/Auyan-ai/platform/pull/102), QA manual aprobado |
 | 1.4 | KB drop-zone + pending review | ✅ Archivado |
+| 1.5 | Reporte semanal + aprobación + Postmark + cron | ✅ [PR #104](https://github.com/Auyan-ai/platform/pull/104)–[#107](https://github.com/Auyan-ai/platform/pull/107) |
 
-### Siguiente: Sub-PR 1.5 — Reporte semanal
+### Siguiente: Sub-PR 1.6 — Dashboard cliente 7 secciones MVP
 
-**Objetivo:** generar un reporte semanal por tenant, dejarlo en cola de aprobación interna y enviarlo por Postmark cuando Auyan lo apruebe.
+**Objetivo:** consolidar el dashboard cliente MVP descrito en el contexto maestro: email semanal como resumen, dashboard como fuente completa, y 7 secciones operativas.
 
-Scope recomendado:
+Scope recomendado, sin abrir funcionalidades de Bloque 2:
 
-1. Tabla `weekly_reports` con estado `draft/pending_review/approved/sent`.
-2. Agregados base: volumen, resolution rate, escalation drivers, top intents, coste.
-3. Sección narrativa editable por Auyan.
-4. UI interna de aprobación.
-5. Envío por Postmark y vista cliente de historial/report actual.
+1. Home cliente con KPIs, fase del agente y acceso al reporte semanal actual.
+2. `Insights` como evolución de conversaciones: lectura ejecutiva de intents, escalaciones y tendencias.
+3. Reportes, KB, onboarding/facts y configuración alineados al shell Mercury light ya vigente.
+4. Mantener AI Data Assistant y visualizaciones avanzadas fuera del MVP; pertenecen a Bloque 2.
 
 ### Nota para 1.4 — Shopify content import / KB bootstrap
 
@@ -75,8 +75,9 @@ Estas migraciones ya están en repo y listas para aplicar en staging:
 | `20260525000002_add_tenant_facts.sql` | `tenant_facts` |
 | `20260527000001_add_tenant_onboarding.sql` | `agent_lifecycle_state` + `tenant_onboarding` |
 | `20260528000001_add_tenant_knowledge_submissions.sql` | `tenant_knowledge_submissions` + cola KB |
+| `20260528000002_add_weekly_reports.sql` | `weekly_reports` + flujo `draft/pending_review/approved/sent/failed` |
 
-Pendiente operativo: aplicarlas manualmente en Supabase/Railway staging antes de depender de estas tablas en ambiente real.
+Pendiente operativo: aplicarlas manualmente en Supabase/Railway staging antes de depender de estas tablas en ambiente real. El cron de reportes semanales requiere además `DATABASE_URL` como secret de GitHub Actions.
 
 ---
 
@@ -102,6 +103,7 @@ Tenant de prueba Lunaria staging: `11111111-1111-1111-1111-111111111111`.
 | Gorgias OAuth app | Falta registrar app + setear env vars. |
 | Zendesk OAuth app | Falta registrar app + setear env vars. |
 | Postmark | Falta `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL` y verificar dominio `auyan.ai`. |
+| Weekly Reports cron | Falta setear `DATABASE_URL` en GitHub Actions para el workflow programado. |
 
 ---
 
