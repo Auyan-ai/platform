@@ -39,6 +39,7 @@ export interface TenantOnboarding {
 
 export type KnowledgeSubmissionStatus = 'pending_review' | 'approved' | 'rejected'
 export type KnowledgeSourceType = 'text' | 'url' | 'file'
+export type WeeklyReportStatus = 'draft' | 'pending_review' | 'approved' | 'sent'
 
 export interface TenantKnowledgeSubmission {
   id: string
@@ -60,6 +61,27 @@ export interface TenantKnowledgeSubmission {
   updated_at: string | null
 }
 
+export interface WeeklyReport {
+  id: string
+  tenant_id: string
+  week_start: string
+  week_end: string
+  status: WeeklyReportStatus
+  subject: string
+  recipient_email: string | null
+  metrics: Record<string, unknown>
+  narrative: string
+  created_by: string | null
+  approved_by: string | null
+  approved_at: string | null
+  sent_by: string | null
+  sent_at: string | null
+  postmark_message_id: string | null
+  send_error: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
 export type TenantPlaybookPayload = Pick<
   TenantPlaybook,
   'brand_voice' | 'product_overview' | 'policies' | 'escalation_notes' | 'agent_instructions'
@@ -70,6 +92,19 @@ export type TenantKnowledgeSubmissionPayload = Pick<
   'title' | 'source_type' | 'source_url' | 'original_filename' | 'content' | 'notes'
 > & {
   metadata?: Record<string, unknown>
+}
+
+export interface WeeklyReportGeneratePayload {
+  week_start: string
+  week_end: string
+  recipient_email?: string | null
+}
+
+export interface WeeklyReportUpdatePayload {
+  reportId: string
+  subject: string
+  narrative: string
+  recipient_email?: string | null
 }
 
 async function tenantContextFetch<T>(
@@ -294,6 +329,119 @@ export function useRejectTenantKnowledgeSubmission(tenantId: string) {
       qc.invalidateQueries({
         queryKey: queryKeys.tenants.kbSubmissions(tenantId, 'pending_review'),
       })
+    },
+  })
+}
+
+export function useWeeklyReports(tenantId: string, status?: WeeklyReportStatus) {
+  return useQuery({
+    queryKey: queryKeys.tenants.weeklyReports(tenantId, status),
+    queryFn: async () => {
+      const token = await getToken()
+      const suffix = status ? `?status=${status}` : ''
+      return tenantContextFetch<WeeklyReport[]>(
+        token,
+        tenantId,
+        `/tenants/me/weekly-reports${suffix}`,
+      )
+    },
+    staleTime: 20_000,
+  })
+}
+
+export function useGenerateWeeklyReport(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: WeeklyReportGeneratePayload) => {
+      const token = await getToken()
+      return tenantContextFetch<WeeklyReport>(
+        token,
+        tenantId,
+        '/tenants/me/weekly-reports/generate',
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.weeklyReports(tenantId) })
+    },
+  })
+}
+
+export function useUpdateWeeklyReport(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ reportId, ...payload }: WeeklyReportUpdatePayload) => {
+      const token = await getToken()
+      return tenantContextFetch<WeeklyReport>(
+        token,
+        tenantId,
+        `/tenants/me/weekly-reports/${reportId}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.weeklyReports(tenantId) })
+    },
+  })
+}
+
+export function useSubmitWeeklyReport(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (reportId: string) => {
+      const token = await getToken()
+      return tenantContextFetch<WeeklyReport>(
+        token,
+        tenantId,
+        `/tenants/me/weekly-reports/${reportId}/submit`,
+        { method: 'POST' },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.weeklyReports(tenantId) })
+    },
+  })
+}
+
+export function useApproveWeeklyReport(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (reportId: string) => {
+      const token = await getToken()
+      return tenantContextFetch<WeeklyReport>(
+        token,
+        tenantId,
+        `/tenants/me/weekly-reports/${reportId}/approve`,
+        { method: 'POST' },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.weeklyReports(tenantId) })
+    },
+  })
+}
+
+export function useSendWeeklyReport(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (reportId: string) => {
+      const token = await getToken()
+      return tenantContextFetch<WeeklyReport>(
+        token,
+        tenantId,
+        `/tenants/me/weekly-reports/${reportId}/send`,
+        { method: 'POST' },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.weeklyReports(tenantId) })
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.weeklyReports(tenantId, 'sent') })
     },
   })
 }

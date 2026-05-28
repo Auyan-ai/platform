@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import {
   AlertTriangle,
   ClipboardList,
+  FileBarChart2,
   FileText,
   LayoutDashboard,
   MessagesSquare,
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { label: 'Onboarding', icon: ClipboardList, section: 'onboarding' },
   { label: 'Datos', icon: Store, section: 'facts' },
   { label: 'Conocimiento', icon: FileText, section: 'knowledge' },
+  { label: 'Reportes', icon: FileBarChart2, section: 'reports' },
   { label: 'Conversaciones', icon: MessagesSquare, section: 'conversations' },
   { label: 'Escalaciones', icon: AlertTriangle, section: 'escalations' },
 ] as const
