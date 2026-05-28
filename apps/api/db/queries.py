@@ -787,6 +787,121 @@ async def get_tenant_metrics(
     return dict(row)
 
 
+async def get_tenant_insights(
+    conn: asyncpg.Connection, tenant_id: UUID, days: int = 14
+) -> dict[str, Any]:
+    """Resumen ejecutivo para el dashboard cliente Insights.
+
+    Usa sólo señales ya existentes: conversaciones, canales e intent_classifier_runs.
+    """
+    row = await conn.fetchrow(
+        """
+        WITH bounds AS (
+          SELECT
+            GREATEST($2::int, 1) AS days,
+            (CURRENT_DATE - (GREATEST($2::int, 1) - 1) * INTERVAL '1 day')::date AS start_date,
+            CURRENT_DATE::date AS end_date
+        ),
+        day_series AS (
+          SELECT generate_series(b.start_date, b.end_date, INTERVAL '1 day')::date AS day
+          FROM bounds b
+        ),
+        daily_counts AS (
+          SELECT c.created_at::date AS day, COUNT(*)::int AS count
+          FROM conversations c, bounds b
+          WHERE c.tenant_id = $1
+            AND c.deleted_at IS NULL
+            AND c.is_simulation = FALSE
+            AND c.created_at::date >= b.start_date
+            AND c.created_at::date <= b.end_date
+          GROUP BY c.created_at::date
+        ),
+        timeline AS (
+          SELECT COALESCE(
+            jsonb_agg(
+              jsonb_build_object(
+                'date', ds.day::text,
+                'conversations', COALESCE(dc.count, 0)
+              )
+              ORDER BY ds.day
+            ),
+            '[]'::jsonb
+          ) AS items
+          FROM day_series ds
+          LEFT JOIN daily_counts dc ON dc.day = ds.day
+        ),
+        intent_counts AS (
+          SELECT i.primary_slug AS label, COUNT(*)::int AS count
+          FROM intent_classifier_runs i, bounds b
+          WHERE i.tenant_id = $1
+            AND i.created_at::date >= b.start_date
+            AND i.created_at::date <= b.end_date
+          GROUP BY i.primary_slug
+          ORDER BY count DESC, i.primary_slug ASC
+          LIMIT 6
+        ),
+        top_intents AS (
+          SELECT COALESCE(
+            jsonb_agg(jsonb_build_object('label', label, 'count', count)),
+            '[]'::jsonb
+          ) AS items
+          FROM intent_counts
+        ),
+        channel_counts AS (
+          SELECT c.channel::text AS label, COUNT(*)::int AS count
+          FROM conversations c, bounds b
+          WHERE c.tenant_id = $1
+            AND c.deleted_at IS NULL
+            AND c.is_simulation = FALSE
+            AND c.created_at::date >= b.start_date
+            AND c.created_at::date <= b.end_date
+          GROUP BY c.channel
+          ORDER BY count DESC, c.channel ASC
+        ),
+        by_channel AS (
+          SELECT COALESCE(
+            jsonb_agg(jsonb_build_object('label', label, 'count', count)),
+            '[]'::jsonb
+          ) AS items
+          FROM channel_counts
+        ),
+        status_counts AS (
+          SELECT c.status::text AS label, COUNT(*)::int AS count
+          FROM conversations c, bounds b
+          WHERE c.tenant_id = $1
+            AND c.deleted_at IS NULL
+            AND c.is_simulation = FALSE
+            AND c.created_at::date >= b.start_date
+            AND c.created_at::date <= b.end_date
+          GROUP BY c.status
+          ORDER BY count DESC, c.status ASC
+        ),
+        by_status AS (
+          SELECT COALESCE(
+            jsonb_agg(jsonb_build_object('label', label, 'count', count)),
+            '[]'::jsonb
+          ) AS items
+          FROM status_counts
+        )
+        SELECT jsonb_build_object(
+          'days', (SELECT days FROM bounds),
+          'timeline', timeline.items,
+          'top_intents', top_intents.items,
+          'by_channel', by_channel.items,
+          'by_status', by_status.items
+        ) AS insights
+        FROM timeline, top_intents, by_channel, by_status
+        """,
+        tenant_id,
+        days,
+    )
+    assert row is not None
+    insights = row["insights"]
+    if isinstance(insights, str):
+        return json.loads(insights)
+    return dict(insights)
+
+
 async def list_all_tenants(conn: asyncpg.Connection) -> list[Tenant]:
     """Super-admin: listar todos los tenants activos sin tenant_scope."""
     rows = await conn.fetch(

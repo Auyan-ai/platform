@@ -180,6 +180,55 @@ class TestGetMyTenantConfig:
         assert resp.json()["error"] == "tenant_config_not_found"
 
 
+class TestGetMyTenantInsights:
+    def test_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        insights = {
+            "days": 14,
+            "timeline": [{"date": "2026-05-28", "conversations": 3}],
+            "top_intents": [{"label": "returns", "count": 2}],
+            "by_channel": [{"label": "email", "count": 3}],
+            "by_status": [{"label": "resolved", "count": 2}],
+        }
+        mock = AsyncMock(return_value=insights)
+        monkeypatch.setattr("apps.api.routers.tenants.get_tenant_insights", mock)
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get(
+            "/tenants/me/insights",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["days"] == 14
+        assert body["timeline"][0]["conversations"] == 3
+        assert body["top_intents"][0]["label"] == "returns"
+
+    def test_custom_days_param(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        mock = AsyncMock(
+            return_value={
+                "days": 30,
+                "timeline": [],
+                "top_intents": [],
+                "by_channel": [],
+                "by_status": [],
+            }
+        )
+        monkeypatch.setattr("apps.api.routers.tenants.get_tenant_insights", mock)
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get(
+            "/tenants/me/insights?days=30",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        mock.assert_awaited_once()
+        assert mock.await_args.kwargs["days"] == 30
+
+
 # ----------------------------------------------------------------
 # GET /tenants/me/usage
 # ----------------------------------------------------------------
