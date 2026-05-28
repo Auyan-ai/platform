@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-05-28 (sesión 51 — primer corte 0.11A: LangSmith primario + simulator costeado; falta env/staging y validación real)._
+_Última actualización: 2026-05-29 (sesión 52 — 0.11A LangSmith staging validado en EU: traces reales, workspace correcto y tokens/coste nativos; siguiente foco fixture Shopify/Chatwoot)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
 
@@ -19,7 +19,7 @@ _Última actualización: 2026-05-28 (sesión 51 — primer corte 0.11A: LangSmit
 | Bloque 0 | 0.1–0.10 completados. 0.11 reencuadrado como Agent Verification Staging. |
 | Bloque 1 | 1.0–1.9 completados y archivados. 1.10 billing manual tiene runbook, pero depende de inputs externos por cliente. |
 | Staging DB | Migraciones de Bloque 1 aplicadas; ya no bloquean la validación. |
-| Siguiente paso | 0.11A — configurar LangSmith en staging, validar runs reales y avanzar fixture Shopify/Chatwoot. |
+| Siguiente paso | 0.11A — avanzar fixture Shopify realista y Chatwoot sandbox; LangSmith staging ya validado. |
 
 ---
 
@@ -102,11 +102,23 @@ Criterios de aceptación iniciales:
 
 Tenant de prueba Lunaria staging: `11111111-1111-1111-1111-111111111111`.
 
+Estado LangSmith staging:
+
+- ✅ [PR #127](https://github.com/Auyan-ai/platform/pull/127): LangSmith como observabilidad primaria del agente; Langfuse queda como espejo opcional.
+- ✅ [PR #128](https://github.com/Auyan-ai/platform/pull/128): `LANGSMITH_WORKSPACE_ID`, endpoint EU, `trace_id/dotted_order` y child `agent_model_call` tipo `llm` para tokens/coste nativos.
+- ✅ Railway staging configurado con `LANGSMITH_ENDPOINT=https://eu.api.smith.langchain.com`, workspace `bd943bb5-40a8-4178-a15c-71d473fca472` y proyecto `auyan-staging`.
+- ✅ Webhooks reales validados en LangSmith: `agent_conversation` muestra input/output/decisión/confianza; `agent_model_call` muestra `input_tokens`, `output_tokens`, `total_tokens` y `total_cost`.
+
+Pendiente futuro, sólo cuando haga falta más granularidad:
+
+- Crear sub-runs internos por paso del grafo: `load_tenant_context`, `select_aop`, `retrieve_knowledge`, `reason`, `supervise`, `execute_skill`, `respond`/`escalate`.
+- Enriquecer cada sub-run con AOP seleccionado, chunks recuperados, tool calls, approvals y errores, manteniendo cuidado de no exponer secretos ni PII innecesaria.
+
 ### Staging / servicios externos
 
 | Pendiente | Estado |
 |---|---|
-| LangSmith | Código base conectado: `AgentService` usa LangSmith como observabilidad primaria y Langfuse como espejo. Falta configurar proyecto/env vars en staging y validar runs reales en UI. |
+| LangSmith | ✅ Validado en staging EU: traces reales en `auyan-staging`, root `agent_conversation` + child `agent_model_call` con tokens/coste nativos. Sub-runs internos por nodo quedan como mejora futura. |
 | Simulator | Código base optimizado: Sonnet judge por defecto, Opus opcional y cap normal de `$5/día` por tenant. Falta corrida real 25/25 contra tenant Lunaria staging. |
 | Shopify test store | Falta preparar tienda con órdenes reales `auyan-e2e`, credenciales en `tenant_integrations` y scripts de seed/verify. |
 | Chatwoot sandbox | Primer helpdesk para verificación real; falta crear cuenta/inbox/webhook/token y registrar integración. |
