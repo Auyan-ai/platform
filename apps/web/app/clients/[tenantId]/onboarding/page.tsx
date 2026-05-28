@@ -1,4 +1,7 @@
 import { OnboardingWizard } from '@/components/onboarding/OnboardingWizard'
+import { apiClient } from '@/lib/api/client'
+import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
 
 interface Props {
   params: Promise<{ tenantId: string }>
@@ -6,6 +9,22 @@ interface Props {
 
 export default async function ClientOnboardingPage({ params }: Props) {
   const { tenantId } = await params
+  const supabase = await createClient()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  if (!session) redirect('/login')
+
+  let lifecycleState = 'initial'
+  try {
+    const { data } = await apiClient(session.access_token).GET('/tenants/me')
+    if (data?.agent_lifecycle_state) lifecycleState = data.agent_lifecycle_state
+  } catch {
+    // Layout handles auth and tenant isolation; keep the form accessible if this read fails.
+  }
+
+  if (lifecycleState !== 'initial') redirect(`/clients/${tenantId}/overview`)
 
   return (
     <div className="space-y-6">
