@@ -586,7 +586,7 @@ Pendiente vivo: reseed AOPs, corrida `--reseed --no-judge --all`, fixes restante
 
 ---
 
-## Bloque 1 — Sprint A completado hasta Sub-PR 1.8 ✅
+## Bloque 1 — Sprint A completado hasta Sub-PR 1.9 ✅
 
 ### 1.0 — Design Sprint + shell visual
 
@@ -735,3 +735,22 @@ Qué incluye:
 - Scripts raíz `dev:landing` y `build:landing`, más ignores para output local de la app.
 
 Verificación sesión 47: `pnpm --filter @auyan/landing typecheck`, `pnpm build:landing`, `pnpm typecheck`, Biome focal, `git diff --check` y CI verdes.
+
+### 1.9 — Email outbound general ✅
+
+Implementado en PRs pequeños, verificados y mergeados secuencialmente:
+
+| PR | Qué se hizo |
+|---|---|
+| [#119](https://github.com/Auyan-ai/platform/pull/119) | Tablas `outbound_email_templates` y `outbound_email_jobs`, modelos, queries, endpoints super_admin y tipos OpenAPI regenerados. |
+| [#120](https://github.com/Auyan-ai/platform/pull/120) | Dispatcher de cola con claim due, envío Postmark, `sent`, retry/backoff exponencial y script `scripts.dispatch_outbound_email`. |
+| [#121](https://github.com/Auyan-ai/platform/pull/121) | Consola interna `/tenants/[tenantId]/emails` para templates, encolar jobs y revisar estado/fallos recientes. |
+
+Diseño:
+
+- Templates y jobs son tenant-scoped; sólo super_admin opera creación/edición/encolado desde UI interna.
+- El worker no reclama jobs si falta `POSTMARK_API_TOKEN`, para no consumir intentos en local/staging mal configurado.
+- La cola usa `idempotency_key`, `attempts`, `max_attempts`, `next_attempt_at`, `postmark_message_id` y `error`.
+- La UI queda en el sidebar interno como `Emails`; no se expone al dashboard cliente.
+
+Verificación sesión 48: `poetry run ruff check`, suite API 1026/1026 verde, `pnpm typecheck`, `pnpm build:web`, Biome focal, `git diff --check` y CI verdes.
