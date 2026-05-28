@@ -586,7 +586,7 @@ Pendiente vivo: reseed AOPs, corrida `--reseed --no-judge --all`, fixes restante
 
 ---
 
-## Bloque 1 — Sprint A completado hasta Sub-PR 1.5 ✅
+## Bloque 1 — Sprint A completado hasta Sub-PR 1.6 ✅
 
 ### 1.0 — Design Sprint + shell visual
 
@@ -685,3 +685,24 @@ Diseño:
 - El workflow programado queda listo para GitHub Actions; requiere `DATABASE_URL` como secret antes de correr contra staging/producción.
 
 Verificación sesión 44: ruff limpio, suite API 1013/1013 verde, `pnpm --filter @auyan/web typecheck` verde, `pnpm build:web` verde y CI verde en PRs #104–#107. El lint web completo sigue teniendo deuda previa en archivos no tocados.
+
+### 1.6 — Dashboard cliente 7 secciones MVP ✅
+
+Implementado en cinco PRs pequeños, verificados y mergeados secuencialmente:
+
+| PR | Qué se hizo |
+|---|---|
+| [#109](https://github.com/Auyan-ai/platform/pull/109) | Shell cliente de 7 secciones: Home, Insights, Reportes, Knowledge Base, Aprobaciones, Onboarding y Configuración. |
+| [#110](https://github.com/Auyan-ai/platform/pull/110) | Home con lifecycle phase, headline de reporte semanal, heatmap de actividad y alertas. |
+| [#111](https://github.com/Auyan-ai/platform/pull/111) | Endpoint `/tenants/me/insights` + Explorer cliente con heatmap, donut de intents, breakdowns y drill-down con reasoning panel. |
+| [#112](https://github.com/Auyan-ai/platform/pull/112) | Knowledge Base consolidada con drop-zone, `tenant_facts` y estado de procesamiento/revisión. |
+| [#113](https://github.com/Auyan-ai/platform/pull/113) | Onboarding auto-hide al salir de fase `initial` y redirect de acceso directo. |
+
+Diseño:
+
+- Sidebar cliente queda alineada a `auyan-master-context.md`: Home/Insights/Reportes/Knowledge Base/Aprobaciones/Onboarding/Configuración.
+- `Conversaciones` pasa a `Insights`; las URLs antiguas redirigen y el drill-down mantiene lectura con PII masked.
+- AI Data Assistant, Facturación y visualizaciones avanzadas siguen fuera del MVP y pertenecen a Bloque 2.
+- Configuración es read-only para cliente: integraciones conectadas, branding operativo y perfil AIDE.
+
+Verificación sesión 45: typecheck web verde, `pnpm build:web` verde y CI verde en PRs #109–#113. Para #111 además `poetry run ruff check` y `pytest tests/test_tenants.py` verdes.
