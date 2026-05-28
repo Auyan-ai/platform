@@ -586,7 +586,7 @@ Pendiente vivo: reseed AOPs, corrida `--reseed --no-judge --all`, fixes restante
 
 ---
 
-## Bloque 1 — Sprint A completado hasta Sub-PR 1.6 ✅
+## Bloque 1 — Sprint A completado hasta Sub-PR 1.7 ✅
 
 ### 1.0 — Design Sprint + shell visual
 
@@ -706,3 +706,17 @@ Diseño:
 - Configuración es read-only para cliente: integraciones conectadas, branding operativo y perfil AIDE.
 
 Verificación sesión 45: typecheck web verde, `pnpm build:web` verde y CI verde en PRs #109–#113. Para #111 además `poetry run ruff check` y `pytest tests/test_tenants.py` verdes.
+
+### 1.7 — Dashboard super_admin Home/Review Queue ✅
+
+Implementado en [PR #115](https://github.com/Auyan-ai/platform/pull/115).
+
+Qué incluye:
+
+- Endpoint super_admin `GET /tenants/admin/review-queue` con pendientes cross-tenant.
+- Home interno reemplazado por Review Queue con filtros de foco por rol: Todos, QA-KM, AIDE y Ops.
+- Pendientes agregados por tenant: KB pending review, weekly reports pending review, L3 approvals y improvement proposals.
+- Links directos a las pantallas scoped del tenant para operar cada pendiente.
+- Tipos OpenAPI regenerados.
+
+Verificación sesión 46: `poetry run ruff check`, `pytest tests/test_tenants.py`, `pnpm --filter @auyan/web typecheck`, Biome focal, `pnpm build:web` y CI verdes.
