@@ -29,6 +29,7 @@ AgentLifecycleState = Literal[
 ]
 TenantKnowledgeSourceType = Literal["text", "url", "file"]
 TenantKnowledgeSubmissionStatus = Literal["pending_review", "approved", "rejected"]
+WeeklyReportStatus = Literal["draft", "pending_review", "approved", "sent"]
 
 
 class _BaseModel(BaseModel):
@@ -434,6 +435,32 @@ class TenantKnowledgeSubmission(_BaseModel):
     reviewed_at: datetime | None = None
     review_note: str | None = None
     processed_document_id: UUID | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+# ─── Weekly Reports (Bloque 1, Sub-PR 1.5) ──────────────────────────────────
+
+
+class WeeklyReport(_BaseModel):
+    """Reporte semanal por tenant, revisado por Auyan antes de enviarse al cliente."""
+
+    id: UUID
+    tenant_id: UUID
+    week_start: str
+    week_end: str
+    status: WeeklyReportStatus
+    subject: str
+    recipient_email: str | None = None
+    metrics: dict = Field(default_factory=dict)
+    narrative: str = ""
+    created_by: UUID | None = None
+    approved_by: UUID | None = None
+    approved_at: datetime | None = None
+    sent_by: UUID | None = None
+    sent_at: datetime | None = None
+    postmark_message_id: str | None = None
+    send_error: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
