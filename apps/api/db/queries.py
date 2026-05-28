@@ -38,6 +38,9 @@ from apps.api.db.models import (
     Message,
     MessageDirection,
     MessageRole,
+    OutboundEmailJob,
+    OutboundEmailJobStatus,
+    OutboundEmailTemplate,
     PendingApproval,
     ReasoningEventType,
     ReasoningPhase,
@@ -4225,3 +4228,241 @@ async def mark_weekly_report_send_failed(
         send_error,
     )
     return _weekly_report_from_row(row) if row else None
+
+
+# ============================================================
+# Outbound Email (Bloque 1, Sub-PR 1.9)
+# ============================================================
+
+
+def _outbound_email_template_from_row(row: asyncpg.Record) -> OutboundEmailTemplate:
+    data = dict(row)
+    if isinstance(data.get("variables"), str):
+        data["variables"] = json.loads(data["variables"])
+    return OutboundEmailTemplate(**data)
+
+
+def _outbound_email_job_from_row(row: asyncpg.Record) -> OutboundEmailJob:
+    data = dict(row)
+    if isinstance(data.get("payload"), str):
+        data["payload"] = json.loads(data["payload"])
+    return OutboundEmailJob(**data)
+
+
+async def list_outbound_email_templates(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    include_inactive: bool = False,
+) -> list[OutboundEmailTemplate]:
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, key, name, subject_template, text_body_template,
+               html_body_template, variables, is_active, version, created_by,
+               updated_by, created_at, updated_at
+          FROM outbound_email_templates
+         WHERE tenant_id = $1
+           AND deleted_at IS NULL
+           AND ($2::boolean OR is_active = TRUE)
+         ORDER BY is_active DESC, key ASC
+        """,
+        tenant_id,
+        include_inactive,
+    )
+    return [_outbound_email_template_from_row(r) for r in rows]
+
+
+async def get_outbound_email_template(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    template_id: UUID,
+) -> OutboundEmailTemplate | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, key, name, subject_template, text_body_template,
+               html_body_template, variables, is_active, version, created_by,
+               updated_by, created_at, updated_at
+          FROM outbound_email_templates
+         WHERE tenant_id = $1
+           AND id = $2
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        template_id,
+    )
+    return _outbound_email_template_from_row(row) if row else None
+
+
+async def create_outbound_email_template(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    key: str,
+    name: str,
+    subject_template: str,
+    text_body_template: str,
+    html_body_template: str | None,
+    variables: list[str],
+    created_by: UUID | None,
+    is_active: bool = True,
+) -> OutboundEmailTemplate:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO outbound_email_templates
+          (tenant_id, key, name, subject_template, text_body_template,
+           html_body_template, variables, is_active, created_by, updated_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $9)
+        RETURNING id, tenant_id, key, name, subject_template, text_body_template,
+                  html_body_template, variables, is_active, version, created_by,
+                  updated_by, created_at, updated_at
+        """,
+        tenant_id,
+        key,
+        name,
+        subject_template,
+        text_body_template,
+        html_body_template,
+        json.dumps(variables),
+        is_active,
+        created_by,
+    )
+    assert row is not None
+    return _outbound_email_template_from_row(row)
+
+
+async def update_outbound_email_template(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    template_id: UUID,
+    *,
+    name: str,
+    subject_template: str,
+    text_body_template: str,
+    html_body_template: str | None,
+    variables: list[str],
+    is_active: bool,
+    updated_by: UUID | None,
+) -> OutboundEmailTemplate | None:
+    row = await conn.fetchrow(
+        """
+        UPDATE outbound_email_templates
+           SET name = $3,
+               subject_template = $4,
+               text_body_template = $5,
+               html_body_template = $6,
+               variables = $7::jsonb,
+               is_active = $8,
+               version = version + 1,
+               updated_by = $9
+         WHERE tenant_id = $1
+           AND id = $2
+           AND deleted_at IS NULL
+        RETURNING id, tenant_id, key, name, subject_template, text_body_template,
+                  html_body_template, variables, is_active, version, created_by,
+                  updated_by, created_at, updated_at
+        """,
+        tenant_id,
+        template_id,
+        name,
+        subject_template,
+        text_body_template,
+        html_body_template,
+        json.dumps(variables),
+        is_active,
+        updated_by,
+    )
+    return _outbound_email_template_from_row(row) if row else None
+
+
+async def list_outbound_email_jobs(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    status: OutboundEmailJobStatus | None = None,
+    limit: int = 50,
+) -> list[OutboundEmailJob]:
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, template_id, recipient_email, subject, text_body,
+               html_body, tag, payload, status, attempts, max_attempts,
+               next_attempt_at, last_attempt_at, sent_at, postmark_message_id,
+               error, requested_by, idempotency_key, created_at, updated_at
+          FROM outbound_email_jobs
+         WHERE tenant_id = $1
+           AND deleted_at IS NULL
+           AND ($2::outbound_email_job_status IS NULL OR status = $2)
+         ORDER BY created_at DESC
+         LIMIT $3
+        """,
+        tenant_id,
+        status,
+        limit,
+    )
+    return [_outbound_email_job_from_row(r) for r in rows]
+
+
+async def get_outbound_email_job(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    job_id: UUID,
+) -> OutboundEmailJob | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, template_id, recipient_email, subject, text_body,
+               html_body, tag, payload, status, attempts, max_attempts,
+               next_attempt_at, last_attempt_at, sent_at, postmark_message_id,
+               error, requested_by, idempotency_key, created_at, updated_at
+          FROM outbound_email_jobs
+         WHERE tenant_id = $1
+           AND id = $2
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        job_id,
+    )
+    return _outbound_email_job_from_row(row) if row else None
+
+
+async def enqueue_outbound_email_job(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    recipient_email: str,
+    subject: str,
+    text_body: str,
+    html_body: str | None,
+    template_id: UUID | None,
+    tag: str | None,
+    payload: dict[str, Any],
+    requested_by: UUID | None,
+    idempotency_key: str | None = None,
+    max_attempts: int = 3,
+) -> OutboundEmailJob:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO outbound_email_jobs
+          (tenant_id, template_id, recipient_email, subject, text_body, html_body,
+           tag, payload, max_attempts, requested_by, idempotency_key)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)
+        ON CONFLICT (tenant_id, idempotency_key)
+          WHERE idempotency_key IS NOT NULL AND deleted_at IS NULL
+        DO UPDATE SET updated_at = outbound_email_jobs.updated_at
+        RETURNING id, tenant_id, template_id, recipient_email, subject, text_body,
+                  html_body, tag, payload, status, attempts, max_attempts,
+                  next_attempt_at, last_attempt_at, sent_at, postmark_message_id,
+                  error, requested_by, idempotency_key, created_at, updated_at
+        """,
+        tenant_id,
+        template_id,
+        recipient_email,
+        subject,
+        text_body,
+        html_body,
+        tag,
+        json.dumps(payload),
+        max_attempts,
+        requested_by,
+        idempotency_key,
+    )
+    assert row is not None
+    return _outbound_email_job_from_row(row)

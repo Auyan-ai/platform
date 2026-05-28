@@ -644,6 +644,185 @@ class TestWeeklyReportEndpoints:
         assert mark_failed.await_args.kwargs["send_error"] == "Postmark down"
 
 
+def _make_outbound_email_template() -> Any:
+    from apps.api.db.models import OutboundEmailTemplate
+
+    return OutboundEmailTemplate(
+        id=UUID("34343434-3434-3434-3434-343434343434"),
+        tenant_id=TENANT_ID,
+        key="lifecycle.welcome",
+        name="Bienvenida lifecycle",
+        subject_template="Auyan listo para {{tenant_name}}",
+        text_body_template="Hola {{tenant_name}}, estamos listos.",
+        html_body_template="<p>Hola {{tenant_name}}, estamos listos.</p>",
+        variables=["tenant_name"],
+        is_active=True,
+        version=1,
+        created_by=USER_ID,
+        updated_by=USER_ID,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+
+def _make_outbound_email_job(status: str = "queued") -> Any:
+    from apps.api.db.models import OutboundEmailJob
+
+    return OutboundEmailJob(
+        id=UUID("45454545-4545-4545-4545-454545454545"),
+        tenant_id=TENANT_ID,
+        template_id=UUID("34343434-3434-3434-3434-343434343434"),
+        recipient_email="ops@acme.test",
+        subject="Auyan listo",
+        text_body="Hola equipo",
+        html_body="<p>Hola equipo</p>",
+        tag="lifecycle",
+        payload={"tenant_name": "Acme"},
+        status=status,
+        attempts=0,
+        max_attempts=3,
+        next_attempt_at=datetime.now(UTC),
+        requested_by=USER_ID,
+        idempotency_key="welcome-acme",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+
+class TestOutboundEmailEndpoints:
+    def test_list_templates_requires_super_admin(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        list_mock = AsyncMock(return_value=[_make_outbound_email_template()])
+        monkeypatch.setattr("apps.api.routers.tenants.list_outbound_email_templates", list_mock)
+        app = _make_super_admin_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get(
+            "/tenants/me/outbound-email/templates?include_inactive=true",
+            headers={
+                "Authorization": f"Bearer {_make_jwt()}",
+                "X-Tenant-Id": str(TENANT_ID),
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body[0]["key"] == "lifecycle.welcome"
+        assert body[0]["variables"] == ["tenant_name"]
+        assert list_mock.await_args.kwargs["include_inactive"] is True
+
+    def test_create_template_persists_editable_content(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        create_mock = AsyncMock(return_value=_make_outbound_email_template())
+        monkeypatch.setattr("apps.api.routers.tenants.create_outbound_email_template", create_mock)
+        app = _make_super_admin_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/outbound-email/templates",
+            headers={
+                "Authorization": f"Bearer {_make_jwt()}",
+                "X-Tenant-Id": str(TENANT_ID),
+            },
+            json={
+                "key": "lifecycle.welcome",
+                "name": "Bienvenida lifecycle",
+                "subject_template": "Auyan listo para {{tenant_name}}",
+                "text_body_template": "Hola {{tenant_name}}, estamos listos.",
+                "html_body_template": "<p>Hola {{tenant_name}}, estamos listos.</p>",
+                "variables": ["tenant_name"],
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["version"] == 1
+        assert create_mock.await_args.kwargs["created_by"] == USER_ID
+        assert create_mock.await_args.kwargs["key"] == "lifecycle.welcome"
+
+    def test_update_template_404_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_outbound_email_template",
+            AsyncMock(return_value=None),
+        )
+        update_mock = AsyncMock()
+        monkeypatch.setattr("apps.api.routers.tenants.update_outbound_email_template", update_mock)
+        app = _make_super_admin_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.patch(
+            "/tenants/me/outbound-email/templates/34343434-3434-3434-3434-343434343434",
+            headers={
+                "Authorization": f"Bearer {_make_jwt()}",
+                "X-Tenant-Id": str(TENANT_ID),
+            },
+            json={
+                "name": "Nueva bienvenida",
+                "subject_template": "Hola",
+                "text_body_template": "Texto",
+                "variables": [],
+                "is_active": True,
+            },
+        )
+
+        assert resp.status_code == 404
+        update_mock.assert_not_awaited()
+
+    def test_list_jobs_filters_by_status(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        list_mock = AsyncMock(return_value=[_make_outbound_email_job(status="failed")])
+        monkeypatch.setattr("apps.api.routers.tenants.list_outbound_email_jobs", list_mock)
+        app = _make_super_admin_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get(
+            "/tenants/me/outbound-email/jobs?status=failed&limit=25",
+            headers={
+                "Authorization": f"Bearer {_make_jwt()}",
+                "X-Tenant-Id": str(TENANT_ID),
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["status"] == "failed"
+        assert list_mock.await_args.kwargs["status"] == "failed"
+        assert list_mock.await_args.kwargs["limit"] == 25
+
+    def test_enqueue_job_validates_template_and_records_requester(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_outbound_email_template",
+            AsyncMock(return_value=_make_outbound_email_template()),
+        )
+        enqueue_mock = AsyncMock(return_value=_make_outbound_email_job())
+        monkeypatch.setattr("apps.api.routers.tenants.enqueue_outbound_email_job", enqueue_mock)
+        app = _make_super_admin_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/outbound-email/jobs",
+            headers={
+                "Authorization": f"Bearer {_make_jwt()}",
+                "X-Tenant-Id": str(TENANT_ID),
+            },
+            json={
+                "template_id": "34343434-3434-3434-3434-343434343434",
+                "recipient_email": "ops@acme.test",
+                "subject": "Auyan listo",
+                "text_body": "Hola equipo",
+                "html_body": "<p>Hola equipo</p>",
+                "tag": "lifecycle",
+                "payload": {"tenant_name": "Acme"},
+                "idempotency_key": "welcome-acme",
+                "max_attempts": 3,
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "queued"
+        assert enqueue_mock.await_args.kwargs["requested_by"] == USER_ID
+        assert enqueue_mock.await_args.kwargs["idempotency_key"] == "welcome-acme"
+
+
 class TestTenantPlaybookEndpoints:
     def test_get_playbook_returns_existing_row(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from apps.api.db.models import TenantPlaybook
