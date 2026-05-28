@@ -213,6 +213,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/admin/review-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Queue cross-tenant — sólo super_admin */
+        get: operations["get_admin_review_queue_tenants_admin_review_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/me": {
         parameters: {
             query?: never;
@@ -1181,6 +1198,30 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AdminReviewQueueItem */
+        AdminReviewQueueItem: {
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Tenant Name */
+            tenant_name: string;
+            /** Tenant Status */
+            tenant_status: string;
+            /** Agent Lifecycle State */
+            agent_lifecycle_state: string;
+            /** Kb Pending */
+            kb_pending: number;
+            /** Weekly Reports Pending */
+            weekly_reports_pending: number;
+            /** Approvals Pending */
+            approvals_pending: number;
+            /** Proposals Pending */
+            proposals_pending: number;
+            /** Total Pending */
+            total_pending: number;
+        };
         /** AopDetailResponse */
         AopDetailResponse: {
             /**
@@ -2561,6 +2602,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TenantResponse"][];
+                };
+            };
+        };
+    };
+    get_admin_review_queue_tenants_admin_review_queue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminReviewQueueItem"][];
                 };
             };
         };

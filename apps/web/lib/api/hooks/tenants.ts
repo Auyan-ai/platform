@@ -1,12 +1,13 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api/client'
 import { getToken } from '@/lib/api/get-token'
 import { queryKeys } from '@/lib/api/query-keys'
 import type { components } from '@auyan/shared/api-types'
+import { useQuery } from '@tanstack/react-query'
 
 type TenantResponse = components['schemas']['TenantResponse']
+type AdminReviewQueueItem = components['schemas']['AdminReviewQueueItem']
 
 export function useMyTenant() {
   return useQuery({
@@ -42,5 +43,19 @@ export function useAdminTenants() {
       return data as TenantResponse[]
     },
     staleTime: 60_000,
+  })
+}
+
+export function useAdminReviewQueue() {
+  return useQuery({
+    queryKey: queryKeys.tenants.adminReviewQueue(),
+    queryFn: async () => {
+      const token = await getToken()
+      const { data, error } = await apiClient(token).GET('/tenants/admin/review-queue')
+      if (error) throw error
+      return data as AdminReviewQueueItem[]
+    },
+    refetchInterval: 30_000,
+    staleTime: 15_000,
   })
 }

@@ -150,6 +150,44 @@ class TestGetMyTenant:
         assert resp.status_code == 401
 
 
+class TestAdminReviewQueue:
+    def test_happy_path_requires_super_admin(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        rows = [
+            {
+                "tenant_id": TENANT_ID,
+                "tenant_name": "Acme",
+                "tenant_status": "active",
+                "agent_lifecycle_state": "active",
+                "kb_pending": 2,
+                "weekly_reports_pending": 1,
+                "approvals_pending": 3,
+                "proposals_pending": 4,
+                "total_pending": 10,
+            }
+        ]
+        mock = AsyncMock(return_value=rows)
+        monkeypatch.setattr("apps.api.routers.tenants.list_admin_review_queue", mock)
+
+        @asynccontextmanager
+        async def _fake_bootstrap() -> AsyncIterator[Any]:
+            yield AsyncMock()
+
+        monkeypatch.setattr("apps.api.routers.tenants.bootstrap_connection", _fake_bootstrap)
+        app = _make_super_admin_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get(
+            "/tenants/admin/review-queue",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body[0]["tenant_name"] == "Acme"
+        assert body[0]["total_pending"] == 10
+        mock.assert_awaited_once()
+
+
 class TestGetMyTenantConfig:
     def test_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         config = make_tenant_configuration()

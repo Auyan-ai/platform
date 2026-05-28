@@ -22,6 +22,7 @@ from apps.api.db.queries import (
     get_tenant_playbook,
     get_tenant_usage_range,
     get_weekly_report,
+    list_admin_review_queue,
     list_all_tenants,
     list_tenant_knowledge_submissions,
     list_weekly_reports,
@@ -66,6 +67,18 @@ class TenantResponse(BaseModel):
     name: str
     status: str
     agent_lifecycle_state: str = "initial"
+
+
+class AdminReviewQueueItem(BaseModel):
+    tenant_id: UUID
+    tenant_name: str
+    tenant_status: str
+    agent_lifecycle_state: str
+    kb_pending: int
+    weekly_reports_pending: int
+    approvals_pending: int
+    proposals_pending: int
+    total_pending: int
 
 
 class TenantConfigResponse(BaseModel):
@@ -305,6 +318,18 @@ async def list_tenants_admin() -> list[TenantResponse]:
     async with bootstrap_connection() as conn:
         tenants = await list_all_tenants(conn)
     return [TenantResponse.model_validate(t) for t in tenants]
+
+
+@router.get(
+    "/admin/review-queue",
+    response_model=list[AdminReviewQueueItem],
+    summary="Review Queue cross-tenant — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def get_admin_review_queue() -> list[AdminReviewQueueItem]:
+    async with bootstrap_connection() as conn:
+        rows = await list_admin_review_queue(conn)
+    return [AdminReviewQueueItem.model_validate(row) for row in rows]
 
 
 @router.get(

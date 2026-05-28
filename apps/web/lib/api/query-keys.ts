@@ -7,6 +7,7 @@ export const queryKeys = {
     me: () => ['tenants', 'me'] as const,
     config: () => ['tenants', 'me', 'config'] as const,
     adminList: () => ['tenants', 'admin', 'list'] as const,
+    adminReviewQueue: () => ['tenants', 'admin', 'review-queue'] as const,
     metrics: (tenantId: string) => ['tenants', tenantId, 'metrics'] as const,
     insights: (tenantId: string, days?: number) =>
       ['tenants', tenantId, 'insights', days ?? 14] as const,
