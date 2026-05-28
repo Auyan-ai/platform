@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-05-28 (sesión 48 — Bloque 1.9 completado y archivado; siguiente paso operativo: Bloque 1.10 billing manual primeros clientes)._
+_Última actualización: 2026-05-28 (sesión 49 — Bloque 1.10 con runbook base creado; faltan datos reales por cliente para cerrar billing manual)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
 
@@ -18,7 +18,7 @@ _Última actualización: 2026-05-28 (sesión 48 — Bloque 1.9 completado y arch
 |---|---|
 | Bloque 0 | 0.1–0.10 completados. 0.11 sigue bloqueado por crédito Anthropic para corrida final con judge. |
 | Bloque 1 | 1.0–1.9 completados y archivados. |
-| Siguiente paso | 1.10 — Billing manual primeros 1–2 clientes (no técnico). |
+| Siguiente paso | 1.10 — Billing manual primeros 1–2 clientes (runbook creado; faltan datos reales por cliente). |
 
 ---
 
@@ -43,12 +43,16 @@ _Última actualización: 2026-05-28 (sesión 48 — Bloque 1.9 completado y arch
 
 **Objetivo:** cerrar operación manual de cobro para los primeros 1–2 clientes antes de abrir Stripe/Billing técnico en Bloque 2.
 
-Scope recomendado:
+Runbook base:
+
+- [`docs/billing-manual.md`](billing-manual.md) — política Founding Partner, tiers, checklist por cliente y flujo factura + transferencia.
+
+Faltan inputs externos por cliente:
 
 1. Definir precio final acordado por cliente y responsable comercial.
-2. Documentar método manual de cobro/facturación fuera del producto.
-3. Confirmar destinatarios de facturación y contacto operativo.
-4. Mantener Stripe Subscriptions + Stripe Tax fuera del MVP técnico hasta Bloque 2.
+2. Confirmar datos fiscales y destinatario de facturación.
+3. Confirmar contacto operativo y fecha de inicio de servicio.
+4. Registrar factura manual enviada y estado de cobro fuera del producto.
 
 ### Nota para 1.4 — Shopify content import / KB bootstrap
 
