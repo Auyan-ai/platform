@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-05-28 (sesión 45 — Bloque 1.6 completado y archivado; siguiente paso técnico: Bloque 1.7 Review Queue interna por rol)._
+_Última actualización: 2026-05-28 (sesión 46 — Bloque 1.7 completado y archivado; siguiente paso técnico: Bloque 1.8 landing pública)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
 
@@ -17,8 +17,8 @@ _Última actualización: 2026-05-28 (sesión 45 — Bloque 1.6 completado y arch
 | Área | Estado |
 |---|---|
 | Bloque 0 | 0.1–0.10 completados. 0.11 sigue bloqueado por crédito Anthropic para corrida final con judge. |
-| Bloque 1 | 1.0–1.6 completados y archivados. |
-| Siguiente paso | 1.7 — Dashboard super_admin Home/Review Queue + filtros por rol. |
+| Bloque 1 | 1.0–1.7 completados y archivados. |
+| Siguiente paso | 1.8 — Landing pública (`apps/landing` + Aceternity UI + Plausible). |
 
 ---
 
@@ -35,17 +35,18 @@ _Última actualización: 2026-05-28 (sesión 45 — Bloque 1.6 completado y arch
 | 1.4 | KB drop-zone + pending review | ✅ Archivado |
 | 1.5 | Reporte semanal + aprobación + Postmark + cron | ✅ [PR #104](https://github.com/Auyan-ai/platform/pull/104)–[#107](https://github.com/Auyan-ai/platform/pull/107) |
 | 1.6 | Dashboard cliente 7 secciones MVP | ✅ [PR #109](https://github.com/Auyan-ai/platform/pull/109)–[#113](https://github.com/Auyan-ai/platform/pull/113) |
+| 1.7 | Review Queue interna cross-tenant | ✅ [PR #115](https://github.com/Auyan-ai/platform/pull/115) |
 
-### Siguiente: Sub-PR 1.7 — Review Queue interna por rol
+### Siguiente: Sub-PR 1.8 — Landing pública
 
-**Objetivo:** convertir el Home interno super_admin en una cola operativa real para revisar trabajo pendiente por tenant y por rol Auyan.
+**Objetivo:** crear la landing pública de Auyan según el contexto maestro: Managed AI Service para CX e-commerce, primer viewport claro, captación founding partners y medición con Plausible.
 
 Scope recomendado:
 
-1. Home interno con Review Queue cross-tenant.
-2. Filtros por tipo: KB pending, weekly reports pending review, L3 approvals, proposals.
-3. Preparar filtros por rol interno (`aide`, `qa_km`, `ops_admin`) usando la estructura DB ya existente.
-4. Mantener el dashboard cliente sin AI Data Assistant; eso sigue en Bloque 2.
+1. `apps/landing` como app pública separada.
+2. Copy alineado a `auyan-master-context.md`: resultado operacional, no SaaS self-serve.
+3. CTA hacia demo / contacto founding partner.
+4. Plausible listo para configurar por env.
 
 ### Nota para 1.4 — Shopify content import / KB bootstrap
 

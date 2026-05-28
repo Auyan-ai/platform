@@ -253,7 +253,7 @@ export function apiClient(jwt: string, tenantId?: string) {
 | KB drop-zone + cola pending review | Onboarding útil con documentos reales | 1.4 | ✅ Completo con curación Auyan. |
 | Reportes semanales | Propuesta managed visible al cliente | 1.5 | ✅ Completo: email resumen + dashboard como fuente completa. |
 | Dashboard cliente 7 secciones | Demo comercial completa | 1.6 | ✅ Completo: Home, Insights, Reportes, KB, Aprobaciones, Onboarding, Configuración. |
-| Review Queue interna por rol | Operación escalable | 1.7 | Home interno deja de ser solo overview. |
+| Review Queue interna por rol | Operación escalable | 1.7 | ✅ Completo: Home interno cross-tenant con filtros por foco de rol. |
 
 ---
 
@@ -293,8 +293,8 @@ El plan Sprint 3 original queda histórico. El plan vigente es Bloque 1, tomado 
 | 1.4 | ✅ completo | KB drop-zone + cola pending review + UI super_admin procesamiento. |
 | 1.5 | ✅ completo | Reporte semanal automatizado: `weekly_reports` + cron lunes + UI aprobación + Postmark. |
 | 1.6 | ✅ completo | Dashboard cliente 7 secciones MVP con data viz. |
-| 1.7 | ⏭️ siguiente | Dashboard super_admin Home/Review Queue + filtros por rol. |
-| 1.8 | pendiente | `apps/landing` + Aceternity UI + páginas públicas + Plausible. |
+| 1.7 | ✅ completo | Dashboard super_admin Home/Review Queue + filtros por rol. |
+| 1.8 | ⏭️ siguiente | `apps/landing` + Aceternity UI + páginas públicas + Plausible. |
 | 1.9 | pendiente | Email outbound general: templates editables + queue + retry logic. |
 
 ---
