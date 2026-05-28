@@ -543,3 +543,125 @@ Ver `docs/auyan-master-context.md` para contexto completo.
 | 23 | Design Sprint | 1-2 semanas al inicio de Bloque 1 |
 | 24 | Iteración rápida | DB editable lo que itera con cliente, code-side lo demás |
 | 25 | Fase 0 legal | En paralelo con Bloque 0 técnico |
+
+---
+
+## Bloque 0 — Sanity check + fundación arquitectónica ✅
+
+Periodo post-pivot inmediato para dejar el stack coherente con el modelo Managed AI Service antes de construir Bloque 1.
+
+| # | Foco | Resultado |
+|---|---|---|
+| 0.1 | Hard removal `tenant_agent` | ✅ [PR #83](https://github.com/Auyan-ai/platform/pull/83)+[#84](https://github.com/Auyan-ai/platform/pull/84) |
+| 0.2 | Framework adapters base | ✅ [PR #87](https://github.com/Auyan-ai/platform/pull/87) |
+| 0.3 | ShopifyAdapter stateless | ✅ [PR #89](https://github.com/Auyan-ai/platform/pull/89) |
+| 0.4 | ChatwootAdapter stateless + webhook | ✅ [PR #90](https://github.com/Auyan-ai/platform/pull/90) |
+| 0.5 | ZendeskAdapter + OAuth flow + webhook | ✅ [PR #91](https://github.com/Auyan-ai/platform/pull/91) |
+| 0.6 | GorgiasAdapter + OAuth flow + webhook | ✅ [PR #92](https://github.com/Auyan-ai/platform/pull/92) |
+| 0.7 | PostmarkEmailAdapter + EmailSender | ✅ [PR #93](https://github.com/Auyan-ai/platform/pull/93) |
+| 0.8 | Roles internos DB | ✅ [PR #94](https://github.com/Auyan-ai/platform/pull/94) |
+| 0.9 | AOPs `steps[]` opcional + events | ✅ [PR #95](https://github.com/Auyan-ai/platform/pull/95) |
+| 0.10 | Simulator MVP + UI | ✅ [PR #96](https://github.com/Auyan-ai/platform/pull/96)+[#97](https://github.com/Auyan-ai/platform/pull/97) |
+
+### Notas clave
+
+- `tenant_agent` fue eliminado del modelo: quedan `super_admin` y `tenant_admin`.
+- Las integraciones de helpdesk/commerce pasan a adapters stateless por tenant: Shopify, Chatwoot, Zendesk y Gorgias.
+- Postmark quedó como servicio global Auyan→cliente, no como integración bidireccional por tenant.
+- Roles internos (`internal_users`, `tenant_assignments`, `role_permissions`) quedaron listos para filtrar Home/Review Queue por rol.
+- AOPs `steps[]` emiten `step_entered`/`step_completed`, acumulando datos desde el inicio para Flow Analysis en Bloque 2.
+- Simulator MVP corre el grafo real contra conversaciones sintéticas, con judge 4 dimensiones y assertions programáticas. Checkpoint E2E aprobado: CE-01 9.5/10 y RE-01 7.5/10.
+
+### Bloque 0.11 — Validación E2E parcial
+
+La validación completa de 25 scenarios quedó bloqueada por crédito Anthropic. Antes del bloqueo se arreglaron bugs deterministas offline:
+
+1. Fixture DE-04 de `update_shipping_address` sin `id`.
+2. Scenario CE-05 insatisfacible sin número de pedido.
+3. Harness `must_escalate: False` ignorado.
+4. Inyección de fecha actual en system prompt.
+5. Guardrails de CE-02 para no escalar solo por impaciencia.
+
+Pendiente vivo: reseed AOPs, corrida `--reseed --no-judge --all`, fixes restantes y corrida final con judge cuando haya crédito.
+
+---
+
+## Bloque 1 — Sprint A completado hasta Sub-PR 1.3 ✅
+
+### 1.0 — Design Sprint + shell visual
+
+- `docs/DESIGN.md` v1.2 aprobado para Bloque 1.
+- Dashboard movido hacia composición Mercury light: shell claro, sidebar fija de 200px, iconos de 14px, topbar no fija, tarjetas densas con sombra sutil.
+- Base visual lista para cliente e interno.
+
+### 1.1 + 1.2 — `tenant_playbook` + `tenant_facts` ✅
+
+| Archivo | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260525000001_add_tenant_playbook.sql` | Tabla `tenant_playbook` con 5 secciones markdown: brand_voice, product_overview, policies, escalation_notes, agent_instructions. |
+| `supabase/migrations/20260525000002_add_tenant_facts.sql` | Tabla `tenant_facts` JSONB editable por tenant_admin. |
+| `db/models.py` | `TenantPlaybook` + `TenantFacts`. |
+| `db/queries.py` | `get/upsert_tenant_playbook`, `update_tenant_playbook_section`, `get/upsert_tenant_facts`. |
+| `agents/nodes/load_tenant_context.py` | Carga playbook/facts para el grafo. |
+| `aops/compiler.py` | Render de facts/playbook dentro del system prompt. |
+| `routers/tenants.py` | `GET/PUT /tenants/me/playbook` + `GET/PUT /tenants/me/facts`. |
+| `apps/web/components/tenant-context/*` | Editor interno de playbook + form cliente de facts. |
+
+Diseño:
+
+- `tenant_playbook` lo edita Auyan y se inyecta como `## Conocimiento de la Marca`.
+- `tenant_facts` lo edita el cliente y se inyecta como `## Datos del cliente`.
+- Si el tenant no tiene datos, los bloques se omiten sin error.
+
+Verificación sesión 41: `tests/test_tenants.py` 16/16 verde, suite API 990/990 verde, ruff limpio, typecheck web verde, lint de archivos tocados verde.
+
+### 1.3 — Onboarding wizard + lifecycle ✅
+
+Mergeado en [PR #102](https://github.com/Auyan-ai/platform/pull/102).
+
+| Archivo | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260527000001_add_tenant_onboarding.sql` | `agent_lifecycle_state` en `tenants` + tabla `tenant_onboarding`. |
+| `db/models.py` | `AgentLifecycleState` + `TenantOnboarding`. |
+| `db/queries.py` | `get/upsert/submit_tenant_onboarding` + `update_tenant_lifecycle_state`. |
+| `routers/tenants.py` | `GET/PUT /tenants/me/onboarding`, `POST /tenants/me/onboarding/submit`, `PUT /tenants/me/lifecycle`. |
+| `apps/web/components/onboarding/OnboardingWizard.tsx` | Wizard cliente de 9 pasos con guardado incremental, progreso y submit. |
+| `apps/web/app/clients/[tenantId]/onboarding/page.tsx` | Nueva página cliente `/clients/[tenantId]/onboarding`. |
+| `apps/web/components/clients/ClientSidebar.tsx` | Link cliente a Onboarding. |
+
+Diseño:
+
+- Lifecycle hardcoded: `initial → discovery → building → shadow → ramping → active`, con `paused/churned` para operación.
+- Submit del wizard mueve el tenant a `building`.
+- Comunicación email usa `EmailSender.send_email`; sin Postmark configurado hace no-op y no bloquea el flujo.
+- `step_data` guarda intake bruto por paso (`"1"`..`"9"`). La curación a playbook/KB se hace en pasos posteriores.
+
+Verificación sesión 42: ruff limpio en API tocada, `tests/test_tenants.py` 19/19 verde, suite API 993/993 verde, typecheck monorepo verde, Biome limpio en archivos web tocados. `pnpm --filter @auyan/web lint` completo seguía fallando por deuda previa en archivos no tocados.
+
+QA manual 2026-05-28: onboarding probado en la sección cliente y funcionando correctamente.
+
+### 1.4 — KB drop-zone + pending review ✅
+
+Implementado en rama `codex/bloque-1-kb-dropzone`.
+
+| Archivo | Qué se hizo |
+|---|---|
+| `supabase/migrations/20260528000001_add_tenant_knowledge_submissions.sql` | Tabla `tenant_knowledge_submissions` + enums de source/status + RLS super_admin/tenant_admin. |
+| `db/models.py` | `TenantKnowledgeSubmission` + tipos `TenantKnowledgeSourceType` y `TenantKnowledgeSubmissionStatus`. |
+| `db/queries.py` | CRUD de submissions, approve/reject y creación de `knowledge_base_documents`/`knowledge_base_chunks`. |
+| `services/knowledge_ingestion.py` | Chunking simple por palabras + embeddings por chunk usando OpenAI embeddings. |
+| `routers/tenants.py` | `GET/POST /tenants/me/kb-submissions`, `POST /approve`, `POST /reject`. |
+| `apps/web/components/knowledge/KnowledgeDropZone.tsx` | Pantalla cliente para aportar contenido, URL o archivo de texto/markdown leído client-side. |
+| `apps/web/components/knowledge/KnowledgeReviewQueue.tsx` | Cola interna pending review para aprobar/indexar o rechazar. |
+| `apps/web/app/clients/[tenantId]/knowledge/page.tsx` | Ruta cliente `/clients/[tenantId]/knowledge`. |
+| `apps/web/app/(dashboard)/tenants/[tenantId]/knowledge/page.tsx` | Ruta interna `/tenants/[tenantId]/knowledge`. |
+| `packages/shared/src/api-types.ts` | Tipos OpenAPI regenerados. |
+
+Diseño:
+
+- Cliente puede crear submissions `pending_review` con texto, URL o archivo textual.
+- Super_admin revisa la cola; aprobar genera chunks, embeddings y documento RAG.
+- Rechazar deja trazabilidad con `review_note`.
+- No se mete Supabase Storage todavía; PDFs/binarios quedan para una iteración posterior.
+
+Verificación sesión 43: `tests/test_tenants.py` 24/24 verde, suite API 998/998 verde, ruff limpio en archivos tocados, Biome limpio en archivos web tocados, `pnpm typecheck` verde y `pnpm build:web` verde.

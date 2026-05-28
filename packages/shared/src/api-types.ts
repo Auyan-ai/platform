@@ -369,6 +369,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/me/kb-submissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista submissions de conocimiento del tenant */
+        get: operations["list_my_kb_submissions_tenants_me_kb_submissions_get"];
+        put?: never;
+        /** Crea un submission de conocimiento para revisión de Auyan */
+        post: operations["create_my_kb_submission_tenants_me_kb_submissions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/kb-submissions/{submission_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Aprueba un submission y lo indexa en la KB — sólo super_admin */
+        post: operations["approve_my_kb_submission_tenants_me_kb_submissions__submission_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/kb-submissions/{submission_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rechaza un submission de conocimiento — sólo super_admin */
+        post: operations["reject_my_kb_submission_tenants_me_kb_submissions__submission_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/conversations": {
         parameters: {
             query?: never;
@@ -1687,6 +1739,91 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** TenantKnowledgeSubmissionCreate */
+        TenantKnowledgeSubmissionCreate: {
+            /** Title */
+            title: string;
+            /**
+             * Source Type
+             * @default text
+             * @enum {string}
+             */
+            source_type: "text" | "url" | "file";
+            /** Source Url */
+            source_url?: string | null;
+            /** Original Filename */
+            original_filename?: string | null;
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /** Notes */
+            notes?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+        };
+        /** TenantKnowledgeSubmissionResponse */
+        TenantKnowledgeSubmissionResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Title */
+            title: string;
+            /**
+             * Source Type
+             * @enum {string}
+             */
+            source_type: "text" | "url" | "file";
+            /** Source Url */
+            source_url?: string | null;
+            /** Original Filename */
+            original_filename?: string | null;
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /** Notes */
+            notes?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending_review" | "approved" | "rejected";
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Submitted By */
+            submitted_by?: string | null;
+            /** Reviewed By */
+            reviewed_by?: string | null;
+            /** Reviewed At */
+            reviewed_at?: string | null;
+            /** Review Note */
+            review_note?: string | null;
+            /** Processed Document Id */
+            processed_document_id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** TenantKnowledgeSubmissionReview */
+        TenantKnowledgeSubmissionReview: {
+            /** Review Note */
+            review_note?: string | null;
+        };
         /** TenantLifecycleUpdate */
         TenantLifecycleUpdate: {
             /** Agent Lifecycle State */
@@ -2582,6 +2719,148 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TenantResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_my_kb_submissions_tenants_me_kb_submissions_get: {
+        parameters: {
+            query?: {
+                status?: ("pending_review" | "approved" | "rejected") | null;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantKnowledgeSubmissionResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_my_kb_submission_tenants_me_kb_submissions_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantKnowledgeSubmissionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantKnowledgeSubmissionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_my_kb_submission_tenants_me_kb_submissions__submission_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                submission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantKnowledgeSubmissionReview"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantKnowledgeSubmissionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_my_kb_submission_tenants_me_kb_submissions__submission_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                submission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantKnowledgeSubmissionReview"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantKnowledgeSubmissionResponse"];
                 };
             };
             /** @description Validation Error */

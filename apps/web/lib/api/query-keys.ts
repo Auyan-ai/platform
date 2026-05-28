@@ -12,6 +12,8 @@ export const queryKeys = {
     playbook: (tenantId: string) => ['tenants', tenantId, 'playbook'] as const,
     facts: (tenantId: string) => ['tenants', tenantId, 'facts'] as const,
     onboarding: (tenantId: string) => ['tenants', tenantId, 'onboarding'] as const,
+    kbSubmissions: (tenantId: string, status?: string) =>
+      ['tenants', tenantId, 'kb-submissions', status ?? 'all'] as const,
   },
   conversations: {
     list: (tenantId: string, filters?: Record<string, unknown>) =>
@@ -35,16 +37,14 @@ export const queryKeys = {
   proposals: {
     list: (tenantId: string, filters?: Record<string, unknown>) =>
       ['proposals', tenantId, filters] as const,
-    detail: (tenantId: string, proposalId: string) =>
-      ['proposals', tenantId, proposalId] as const,
+    detail: (tenantId: string, proposalId: string) => ['proposals', tenantId, proposalId] as const,
     metrics: (tenantId: string) => ['proposals', tenantId, 'metrics'] as const,
   },
   simulations: {
     scenarios: (tenantId: string) => ['simulations', tenantId, 'scenarios'] as const,
     scenarioRuns: (tenantId: string, scenarioId: string) =>
       ['simulations', tenantId, 'scenarios', scenarioId, 'runs'] as const,
-    run: (tenantId: string, runId: string) =>
-      ['simulations', tenantId, 'runs', runId] as const,
+    run: (tenantId: string, runId: string) => ['simulations', tenantId, 'runs', runId] as const,
     batch: (tenantId: string, batchId: string) =>
       ['simulations', tenantId, 'batches', batchId] as const,
   },

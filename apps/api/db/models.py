@@ -27,6 +27,8 @@ UserRole = Literal["super_admin", "tenant_admin"]
 AgentLifecycleState = Literal[
     "initial", "discovery", "building", "shadow", "ramping", "active", "paused", "churned"
 ]
+TenantKnowledgeSourceType = Literal["text", "url", "file"]
+TenantKnowledgeSubmissionStatus = Literal["pending_review", "approved", "rejected"]
 
 
 class _BaseModel(BaseModel):
@@ -407,6 +409,31 @@ class TenantOnboarding(_BaseModel):
     submitted_at: datetime | None = None
     completed_at: datetime | None = None
     last_edited_by: UUID | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+# ─── Tenant Knowledge Submissions (Bloque 1, Sub-PR 1.4) ────────────────────
+
+
+class TenantKnowledgeSubmission(_BaseModel):
+    """Contenido aportado por cliente para revisión QA-KM antes de entrar al RAG."""
+
+    id: UUID
+    tenant_id: UUID
+    title: str
+    source_type: TenantKnowledgeSourceType
+    source_url: str | None = None
+    original_filename: str | None = None
+    content: str = ""
+    notes: str | None = None
+    status: TenantKnowledgeSubmissionStatus
+    metadata: dict = Field(default_factory=dict)
+    submitted_by: UUID | None = None
+    reviewed_by: UUID | None = None
+    reviewed_at: datetime | None = None
+    review_note: str | None = None
+    processed_document_id: UUID | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

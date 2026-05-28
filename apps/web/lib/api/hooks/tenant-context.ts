@@ -1,8 +1,8 @@
 'use client'
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getToken } from '@/lib/api/get-token'
 import { queryKeys } from '@/lib/api/query-keys'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
@@ -37,10 +37,40 @@ export interface TenantOnboarding {
   updated_at: string | null
 }
 
+export type KnowledgeSubmissionStatus = 'pending_review' | 'approved' | 'rejected'
+export type KnowledgeSourceType = 'text' | 'url' | 'file'
+
+export interface TenantKnowledgeSubmission {
+  id: string
+  tenant_id: string
+  title: string
+  source_type: KnowledgeSourceType
+  source_url: string | null
+  original_filename: string | null
+  content: string
+  notes: string | null
+  status: KnowledgeSubmissionStatus
+  metadata: Record<string, unknown>
+  submitted_by: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  review_note: string | null
+  processed_document_id: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
 export type TenantPlaybookPayload = Pick<
   TenantPlaybook,
   'brand_voice' | 'product_overview' | 'policies' | 'escalation_notes' | 'agent_instructions'
 >
+
+export type TenantKnowledgeSubmissionPayload = Pick<
+  TenantKnowledgeSubmission,
+  'title' | 'source_type' | 'source_url' | 'original_filename' | 'content' | 'notes'
+> & {
+  metadata?: Record<string, unknown>
+}
 
 async function tenantContextFetch<T>(
   token: string,
@@ -132,7 +162,9 @@ export function useTenantOnboarding(tenantId: string) {
 export function useSaveTenantOnboarding(tenantId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (payload: Pick<TenantOnboarding, 'current_step' | 'completed_steps' | 'step_data'>) => {
+    mutationFn: async (
+      payload: Pick<TenantOnboarding, 'current_step' | 'completed_steps' | 'step_data'>,
+    ) => {
       const token = await getToken()
       return tenantContextFetch<TenantOnboarding>(token, tenantId, '/tenants/me/onboarding', {
         method: 'PUT',
@@ -159,6 +191,109 @@ export function useSubmitTenantOnboarding(tenantId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.tenants.onboarding(tenantId) })
+    },
+  })
+}
+
+export function useTenantKnowledgeSubmissions(
+  tenantId: string,
+  status?: KnowledgeSubmissionStatus,
+) {
+  return useQuery({
+    queryKey: queryKeys.tenants.kbSubmissions(tenantId, status),
+    queryFn: async () => {
+      const token = await getToken()
+      const suffix = status ? `?status=${status}` : ''
+      return tenantContextFetch<TenantKnowledgeSubmission[]>(
+        token,
+        tenantId,
+        `/tenants/me/kb-submissions${suffix}`,
+      )
+    },
+    staleTime: 20_000,
+  })
+}
+
+export function useCreateTenantKnowledgeSubmission(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: TenantKnowledgeSubmissionPayload) => {
+      const token = await getToken()
+      return tenantContextFetch<TenantKnowledgeSubmission>(
+        token,
+        tenantId,
+        '/tenants/me/kb-submissions',
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.kbSubmissions(tenantId) })
+      qc.invalidateQueries({
+        queryKey: queryKeys.tenants.kbSubmissions(tenantId, 'pending_review'),
+      })
+    },
+  })
+}
+
+export function useApproveTenantKnowledgeSubmission(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      submissionId,
+      reviewNote,
+    }: {
+      submissionId: string
+      reviewNote?: string
+    }) => {
+      const token = await getToken()
+      return tenantContextFetch<TenantKnowledgeSubmission>(
+        token,
+        tenantId,
+        `/tenants/me/kb-submissions/${submissionId}/approve`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ review_note: reviewNote ?? null }),
+        },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.kbSubmissions(tenantId) })
+      qc.invalidateQueries({
+        queryKey: queryKeys.tenants.kbSubmissions(tenantId, 'pending_review'),
+      })
+    },
+  })
+}
+
+export function useRejectTenantKnowledgeSubmission(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      submissionId,
+      reviewNote,
+    }: {
+      submissionId: string
+      reviewNote?: string
+    }) => {
+      const token = await getToken()
+      return tenantContextFetch<TenantKnowledgeSubmission>(
+        token,
+        tenantId,
+        `/tenants/me/kb-submissions/${submissionId}/reject`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ review_note: reviewNote ?? null }),
+        },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.kbSubmissions(tenantId) })
+      qc.invalidateQueries({
+        queryKey: queryKeys.tenants.kbSubmissions(tenantId, 'pending_review'),
+      })
     },
   })
 }

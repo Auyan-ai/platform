@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from apps.api.core.config import get_settings
@@ -11,21 +11,27 @@ from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id,
 from apps.api.db.client import bootstrap_connection, tenant_scope
 from apps.api.db.models import ChannelType
 from apps.api.db.queries import (
+    approve_tenant_knowledge_submission_with_document,
+    create_tenant_knowledge_submission,
     get_tenant_configuration,
     get_tenant_facts,
+    get_tenant_knowledge_submission,
     get_tenant_onboarding,
     get_tenant_playbook,
     get_tenant_usage_range,
     list_all_tenants,
+    list_tenant_knowledge_submissions,
+    reject_tenant_knowledge_submission,
     submit_tenant_onboarding,
     update_tenant_lifecycle_state,
     upsert_tenant_facts,
     upsert_tenant_onboarding,
     upsert_tenant_playbook,
 )
+from apps.api.services.knowledge_ingestion import chunk_text_for_kb, embed_kb_chunks
 from apps.api.services.tenants import get_tenant, get_tenant_config, get_tenant_metrics
-from fastapi import APIRouter, Depends, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
@@ -150,6 +156,58 @@ class TenantLifecycleUpdate(BaseModel):
     agent_lifecycle_state: str = Field(
         pattern="^(initial|discovery|building|shadow|ramping|active|paused|churned)$"
     )
+
+
+KnowledgeSourceType = Literal["text", "url", "file"]
+KnowledgeSubmissionStatus = Literal["pending_review", "approved", "rejected"]
+
+
+class TenantKnowledgeSubmissionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    title: str
+    source_type: KnowledgeSourceType
+    source_url: str | None = None
+    original_filename: str | None = None
+    content: str = ""
+    notes: str | None = None
+    status: KnowledgeSubmissionStatus
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    submitted_by: UUID | None = None
+    reviewed_by: UUID | None = None
+    reviewed_at: datetime.datetime | None = None
+    review_note: str | None = None
+    processed_document_id: UUID | None = None
+    created_at: datetime.datetime | None = None
+    updated_at: datetime.datetime | None = None
+
+
+class TenantKnowledgeSubmissionCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=200)
+    source_type: KnowledgeSourceType = "text"
+    source_url: str | None = Field(default=None, max_length=2_000)
+    original_filename: str | None = Field(default=None, max_length=500)
+    content: str = Field(default="", max_length=200_000)
+    notes: str | None = Field(default=None, max_length=5_000)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _require_content_or_url(self) -> TenantKnowledgeSubmissionCreate:
+        if not self.content.strip() and not self.source_url:
+            raise ValueError("Debes enviar contenido o una URL de origen.")
+        return self
+
+
+class TenantKnowledgeSubmissionReview(BaseModel):
+    review_note: str | None = Field(default=None, max_length=5_000)
+
+
+KnowledgeStatusQuery = Annotated[
+    KnowledgeSubmissionStatus | None,
+    Query(alias="status"),
+]
 
 
 # ----------------------------------------------------------------
@@ -419,3 +477,126 @@ async def update_my_tenant_lifecycle(
             body.agent_lifecycle_state,
         )
     return TenantResponse.model_validate(tenant)
+
+
+@router.get(
+    "/me/kb-submissions",
+    response_model=list[TenantKnowledgeSubmissionResponse],
+    summary="Lista submissions de conocimiento del tenant",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def list_my_kb_submissions(
+    tenant_id: TenantIdDep,
+    status_filter: KnowledgeStatusQuery = None,
+) -> list[TenantKnowledgeSubmissionResponse]:
+    async with tenant_scope(tenant_id) as conn:
+        rows = await list_tenant_knowledge_submissions(
+            conn,
+            tenant_id,
+            status=status_filter,
+        )
+    return [TenantKnowledgeSubmissionResponse.model_validate(row) for row in rows]
+
+
+@router.post(
+    "/me/kb-submissions",
+    response_model=TenantKnowledgeSubmissionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Crea un submission de conocimiento para revisión de Auyan",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def create_my_kb_submission(
+    body: TenantKnowledgeSubmissionCreate,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+) -> TenantKnowledgeSubmissionResponse:
+    async with tenant_scope(tenant_id) as conn:
+        submission = await create_tenant_knowledge_submission(
+            conn,
+            tenant_id,
+            title=body.title.strip(),
+            source_type=body.source_type,
+            source_url=body.source_url.strip() if body.source_url else None,
+            original_filename=body.original_filename,
+            content=body.content.strip(),
+            notes=body.notes,
+            metadata=body.metadata,
+            submitted_by=auth.user_id,
+        )
+    return TenantKnowledgeSubmissionResponse.model_validate(submission)
+
+
+@router.post(
+    "/me/kb-submissions/{submission_id}/approve",
+    response_model=TenantKnowledgeSubmissionResponse,
+    summary="Aprueba un submission y lo indexa en la KB — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def approve_my_kb_submission(
+    submission_id: UUID,
+    body: TenantKnowledgeSubmissionReview,
+    request: Request,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+    settings: SettingsDep,
+) -> TenantKnowledgeSubmissionResponse:
+    async with tenant_scope(tenant_id) as conn:
+        submission = await get_tenant_knowledge_submission(conn, tenant_id, submission_id)
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Submission no encontrado")
+    if submission.status != "pending_review":
+        raise HTTPException(status_code=409, detail="Submission ya revisado")
+    if not submission.content.strip():
+        raise HTTPException(status_code=400, detail="Submission sin contenido indexable")
+
+    chunks = chunk_text_for_kb(submission.content)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="Submission sin contenido indexable")
+
+    deps = getattr(request.app.state, "agent_deps", None)
+    openai_client = getattr(deps, "openai", None)
+    if openai_client is None:
+        raise HTTPException(status_code=503, detail="Cliente OpenAI no inicializado")
+
+    embedded_chunks = await embed_kb_chunks(
+        openai_client,
+        chunks,
+        settings=settings,
+    )
+    async with tenant_scope(tenant_id) as conn:
+        approved = await approve_tenant_knowledge_submission_with_document(
+            conn,
+            tenant_id,
+            submission_id,
+            reviewed_by=auth.user_id,
+            review_note=body.review_note,
+            chunks=embedded_chunks,
+        )
+    if approved is None:
+        raise HTTPException(status_code=409, detail="Submission ya revisado")
+    return TenantKnowledgeSubmissionResponse.model_validate(approved)
+
+
+@router.post(
+    "/me/kb-submissions/{submission_id}/reject",
+    response_model=TenantKnowledgeSubmissionResponse,
+    summary="Rechaza un submission de conocimiento — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def reject_my_kb_submission(
+    submission_id: UUID,
+    body: TenantKnowledgeSubmissionReview,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+) -> TenantKnowledgeSubmissionResponse:
+    async with tenant_scope(tenant_id) as conn:
+        rejected = await reject_tenant_knowledge_submission(
+            conn,
+            tenant_id,
+            submission_id,
+            reviewed_by=auth.user_id,
+            review_note=body.review_note,
+        )
+    if rejected is None:
+        raise HTTPException(status_code=409, detail="Submission no encontrado o ya revisado")
+    return TenantKnowledgeSubmissionResponse.model_validate(rejected)
