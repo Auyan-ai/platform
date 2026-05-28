@@ -915,6 +915,66 @@ async def list_all_tenants(conn: asyncpg.Connection) -> list[Tenant]:
     return [Tenant(**dict(r)) for r in rows]
 
 
+async def list_admin_review_queue(conn: asyncpg.Connection) -> list[dict[str, Any]]:
+    """Cola cross-tenant para el Home interno.
+
+    Corre con bootstrap_connection y sólo debe exponerse a super_admin.
+    """
+    rows = await conn.fetch(
+        """
+        WITH kb AS (
+          SELECT tenant_id, COUNT(*)::int AS pending
+          FROM tenant_knowledge_submissions
+          WHERE status = 'pending_review'::tenant_knowledge_submission_status
+            AND deleted_at IS NULL
+          GROUP BY tenant_id
+        ),
+        weekly AS (
+          SELECT tenant_id, COUNT(*)::int AS pending
+          FROM weekly_reports
+          WHERE status = 'pending_review'::weekly_report_status
+            AND deleted_at IS NULL
+          GROUP BY tenant_id
+        ),
+        approvals AS (
+          SELECT tenant_id, COUNT(*)::int AS pending
+          FROM pending_approvals
+          WHERE status = 'pending'
+          GROUP BY tenant_id
+        ),
+        proposals AS (
+          SELECT tenant_id, COUNT(*)::int AS pending
+          FROM improvement_proposals
+          WHERE status = 'pending'
+          GROUP BY tenant_id
+        )
+        SELECT
+          t.id AS tenant_id,
+          t.name AS tenant_name,
+          t.status AS tenant_status,
+          t.agent_lifecycle_state,
+          COALESCE(kb.pending, 0)::int AS kb_pending,
+          COALESCE(weekly.pending, 0)::int AS weekly_reports_pending,
+          COALESCE(approvals.pending, 0)::int AS approvals_pending,
+          COALESCE(proposals.pending, 0)::int AS proposals_pending,
+          (
+            COALESCE(kb.pending, 0)
+            + COALESCE(weekly.pending, 0)
+            + COALESCE(approvals.pending, 0)
+            + COALESCE(proposals.pending, 0)
+          )::int AS total_pending
+        FROM tenants t
+        LEFT JOIN kb ON kb.tenant_id = t.id
+        LEFT JOIN weekly ON weekly.tenant_id = t.id
+        LEFT JOIN approvals ON approvals.tenant_id = t.id
+        LEFT JOIN proposals ON proposals.tenant_id = t.id
+        WHERE t.deleted_at IS NULL
+        ORDER BY total_pending DESC, t.name ASC
+        """
+    )
+    return [dict(row) for row in rows]
+
+
 # ============================================================
 # Lifecycle de conversación — cleanup de abandonadas
 # ============================================================
