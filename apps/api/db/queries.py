@@ -4466,3 +4466,109 @@ async def enqueue_outbound_email_job(
     )
     assert row is not None
     return _outbound_email_job_from_row(row)
+
+
+async def claim_due_outbound_email_jobs(
+    conn: asyncpg.Connection,
+    *,
+    limit: int = 25,
+) -> list[OutboundEmailJob]:
+    rows = await conn.fetch(
+        """
+        WITH due AS (
+          SELECT id
+            FROM outbound_email_jobs
+           WHERE deleted_at IS NULL
+             AND status IN (
+               'queued'::outbound_email_job_status,
+               'failed'::outbound_email_job_status
+             )
+             AND attempts < max_attempts
+             AND next_attempt_at <= NOW()
+           ORDER BY next_attempt_at ASC, created_at ASC
+           LIMIT $1
+           FOR UPDATE SKIP LOCKED
+        )
+        UPDATE outbound_email_jobs j
+           SET status = 'sending'::outbound_email_job_status,
+               attempts = j.attempts + 1,
+               last_attempt_at = NOW(),
+               error = NULL
+          FROM due
+         WHERE j.id = due.id
+        RETURNING j.id, j.tenant_id, j.template_id, j.recipient_email, j.subject,
+                  j.text_body, j.html_body, j.tag, j.payload, j.status, j.attempts,
+                  j.max_attempts, j.next_attempt_at, j.last_attempt_at, j.sent_at,
+                  j.postmark_message_id, j.error, j.requested_by, j.idempotency_key,
+                  j.created_at, j.updated_at
+        """,
+        limit,
+    )
+    return [_outbound_email_job_from_row(r) for r in rows]
+
+
+async def mark_outbound_email_job_sent(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    job_id: UUID,
+    *,
+    postmark_message_id: str | None,
+) -> OutboundEmailJob | None:
+    row = await conn.fetchrow(
+        """
+        UPDATE outbound_email_jobs
+           SET status = 'sent'::outbound_email_job_status,
+               sent_at = NOW(),
+               postmark_message_id = $3,
+               error = NULL
+         WHERE tenant_id = $1
+           AND id = $2
+           AND status = 'sending'::outbound_email_job_status
+           AND deleted_at IS NULL
+        RETURNING id, tenant_id, template_id, recipient_email, subject, text_body,
+                  html_body, tag, payload, status, attempts, max_attempts,
+                  next_attempt_at, last_attempt_at, sent_at, postmark_message_id,
+                  error, requested_by, idempotency_key, created_at, updated_at
+        """,
+        tenant_id,
+        job_id,
+        postmark_message_id,
+    )
+    return _outbound_email_job_from_row(row) if row else None
+
+
+async def mark_outbound_email_job_failed(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    job_id: UUID,
+    *,
+    error: str,
+    retry_delay_seconds: int,
+) -> OutboundEmailJob | None:
+    row = await conn.fetchrow(
+        """
+        UPDATE outbound_email_jobs
+           SET status = CASE
+                 WHEN attempts >= max_attempts THEN 'failed'::outbound_email_job_status
+                 ELSE 'queued'::outbound_email_job_status
+               END,
+               next_attempt_at = CASE
+                 WHEN attempts >= max_attempts THEN next_attempt_at
+                 ELSE NOW() + ($3::int * INTERVAL '1 second')
+               END,
+               error = $4
+         WHERE tenant_id = $1
+           AND id = $2
+           AND status = 'sending'::outbound_email_job_status
+           AND deleted_at IS NULL
+        RETURNING id, tenant_id, template_id, recipient_email, subject, text_body,
+                  html_body, tag, payload, status, attempts, max_attempts,
+                  next_attempt_at, last_attempt_at, sent_at, postmark_message_id,
+                  error, requested_by, idempotency_key, created_at, updated_at
+        """,
+        tenant_id,
+        job_id,
+        retry_delay_seconds,
+        error[:1_000],
+    )
+    return _outbound_email_job_from_row(row) if row else None
