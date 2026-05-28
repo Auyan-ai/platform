@@ -1,7 +1,7 @@
 """Orquestador entre webhook router y el grafo.
 
 Responsabilidades:
-- Abrir/cerrar trace de Langfuse alrededor de la invocación del grafo.
+- Abrir/cerrar trace de observabilidad alrededor de la invocación del grafo.
 - Construir el `AgentState` inicial.
 - Invocar el grafo compilado (`ainvoke`).
 - Mapear el final state a `AgentOutcome` para el caller.
@@ -20,7 +20,7 @@ from uuid import UUID
 from apps.api.agents.state import AgentState
 
 if TYPE_CHECKING:
-    from apps.api.integrations.langfuse_client import LangfuseClient
+    from apps.api.integrations.observability import ObservabilityClient
     from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
@@ -45,9 +45,9 @@ class AgentOutcome:
 
 
 class AgentService:
-    def __init__(self, *, graph: CompiledStateGraph, langfuse: LangfuseClient) -> None:
+    def __init__(self, *, graph: CompiledStateGraph, observability: ObservabilityClient) -> None:
         self._graph = graph
-        self._langfuse = langfuse
+        self._observability = observability
 
     async def process_inbound(
         self,
@@ -59,14 +59,14 @@ class AgentService:
         channel: str,
         end_customer_id: UUID,
     ) -> AgentOutcome:
-        trace = self._langfuse.start_conversation_trace(
+        trace = self._observability.start_conversation_trace(
             tenant_id=str(tenant_id),
             conversation_id=str(conversation_id),
             end_customer_id=str(end_customer_id),
             channel=channel,
             input_text=inbound_message_content,
         )
-        trace_id = self._langfuse.trace_id(trace)
+        trace_id = self._observability.trace_id(trace)
 
         initial_state: AgentState = {
             "tenant_id": str(tenant_id),
@@ -75,6 +75,8 @@ class AgentService:
             "inbound_message_content": inbound_message_content,
             "channel": channel,
             "end_customer_id": str(end_customer_id),
+            # Backward-compatible field name. Its value is the primary
+            # observability trace id (LangSmith when enabled).
             "langfuse_trace_id": trace_id,
             # ReAct loop defaults — load_tenant_context puede overridear desde
             # tenant_config.extra. allowed_skills queda vacío hasta Sprint 7
@@ -94,7 +96,7 @@ class AgentService:
                 "graph_invocation_failed",
                 extra={"tenant_id": str(tenant_id), "conversation_id": str(conversation_id)},
             )
-            self._langfuse.finalize_trace(
+            self._observability.finalize_trace(
                 trace,
                 decision=None,
                 confidence=None,
@@ -124,7 +126,7 @@ class AgentService:
         error = final_state.get("error")
         decision = "error" if error else final_state.get("decision", "error")
 
-        self._langfuse.finalize_trace(
+        self._observability.finalize_trace(
             trace,
             decision=decision,
             confidence=final_state.get("confidence"),

@@ -112,6 +112,10 @@ class LangfuseClient:
 
 def build_langfuse_client(settings: Settings) -> LangfuseClient:
     """Construye el cliente o devuelve un wrapper deshabilitado si falla la init."""
+    if settings.langfuse_public_key is None or settings.langfuse_secret_key is None:
+        logger.info("langfuse_disabled_missing_credentials")
+        return LangfuseClient(None)
+
     try:
         lf = Langfuse(
             public_key=settings.langfuse_public_key.get_secret_value(),

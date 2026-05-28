@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from apps.api.simulator.judge import (
+    DEFAULT_JUDGE_MODEL,
+    OPUS_JUDGE_MODEL,
+    SONNET_JUDGE_MODEL,
     SimulatorJudgeVerdict,
     _fallback_verdict,
     _parse_verdict,
+    normalize_judge_model,
     verdict_to_dict,
 )
 
@@ -31,7 +35,7 @@ class TestParseVerdict:
         assert v.reasoning_score == 8
         assert v.verdict == "pass"
         assert v.judge_goal_achieved
-        assert v.model_used == "claude-opus-4-7"
+        assert v.model_used == DEFAULT_JUDGE_MODEL
         assert v.input_tokens == 500
         assert v.output_tokens == 100
 
@@ -62,6 +66,24 @@ class TestFallbackVerdict:
         assert v.reasoning_explanation == "parse_error"
 
 
+class TestNormalizeJudgeModel:
+    def test_defaults_to_sonnet(self):
+        assert normalize_judge_model(None) == SONNET_JUDGE_MODEL
+        assert normalize_judge_model("sonnet") == SONNET_JUDGE_MODEL
+
+    def test_allows_opus_explicitly(self):
+        assert normalize_judge_model("opus") == OPUS_JUDGE_MODEL
+        assert normalize_judge_model(OPUS_JUDGE_MODEL) == OPUS_JUDGE_MODEL
+
+    def test_rejects_unknown_model(self):
+        try:
+            normalize_judge_model("claude-future-99")
+        except ValueError as exc:
+            assert "unsupported_simulator_judge_model" in str(exc)
+        else:
+            raise AssertionError("expected ValueError")
+
+
 class TestVerdictToDict:
     def test_serializes_all_fields(self):
         v = SimulatorJudgeVerdict(
@@ -78,7 +100,7 @@ class TestVerdictToDict:
             judge_goal_achieved=True,
             judge_goal_explanation="logrado",
             suggestions="ninguna",
-            model_used="claude-opus-4-7",
+            model_used=DEFAULT_JUDGE_MODEL,
             input_tokens=100,
             output_tokens=50,
         )
@@ -86,4 +108,4 @@ class TestVerdictToDict:
         assert d["verdict"] == "pass"
         assert d["overall_score"] == 8.0
         assert d["judge_goal_achieved"] is True
-        assert d["model_used"] == "claude-opus-4-7"
+        assert d["model_used"] == DEFAULT_JUDGE_MODEL

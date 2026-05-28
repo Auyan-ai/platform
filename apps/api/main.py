@@ -4,11 +4,11 @@ Lifespan ordenado:
     startup:
         1. Cargar settings (falla en boot si falta cualquier var requerida).
         2. Inicializar pool de Postgres.
-        3. Construir clientes LLM (Anthropic, OpenAI) y Langfuse.
+        3. Construir clientes LLM (Anthropic, OpenAI) y observabilidad.
         4. Compilar el grafo + crear AgentService.
         5. Exponer en app.state.
     shutdown:
-        1. Flush de Langfuse (manda los traces pendientes).
+        1. Flush de observabilidad (manda los traces pendientes).
         2. Cerrar pool de Postgres.
 
 Para correr localmente:
@@ -35,6 +35,8 @@ from apps.api.core.errors import register_exception_handlers
 from apps.api.db.client import close_pool, init_pool
 from apps.api.integrations.anthropic_client import build_anthropic_client
 from apps.api.integrations.langfuse_client import build_langfuse_client
+from apps.api.integrations.langsmith_client import build_langsmith_client
+from apps.api.integrations.observability import ObservabilityClient
 from apps.api.integrations.openai_embeddings import build_openai_client
 from apps.api.integrations.postmark import build_postmark_adapter
 from apps.api.routers.aops import router as aops_router
@@ -96,7 +98,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     anthropic = build_anthropic_client(settings.anthropic_api_key.get_secret_value())
     openai = build_openai_client(settings.openai_api_key.get_secret_value())
+    langsmith = build_langsmith_client(settings)
     langfuse = build_langfuse_client(settings)
+    observability = ObservabilityClient(primary=langsmith, mirror=langfuse)
 
     reasoning_tracker = ReasoningTracker()
     audit_logger = AuditLogger()
@@ -110,13 +114,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         audit_logger=audit_logger,
     )
     graph = build_graph(deps)
-    service = AgentService(graph=graph, langfuse=langfuse)
+    service = AgentService(graph=graph, observability=observability)
 
     app.state.agent_service = service
     app.state.agent_deps = deps
+    app.state.observability = observability
+    app.state.langsmith = langsmith
     app.state.langfuse = langfuse
 
-    logger.info("agent_service_ready langfuse_enabled=%s", langfuse.is_enabled)
+    logger.info(
+        "agent_service_ready langsmith_enabled=%s langfuse_mirror_enabled=%s",
+        observability.primary_enabled,
+        observability.mirror_enabled,
+    )
 
     cleanup_task = asyncio.create_task(
         _cleanup_loop(settings.cleanup_interval_seconds),
@@ -134,7 +144,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         cleanup_task.cancel()
         await asyncio.gather(cleanup_task, return_exceptions=True)
         await aop_listener.stop()
-        await langfuse.flush()
+        await observability.flush()
         await close_pool()
         logger.info("shutdown_complete")
 
@@ -172,7 +182,17 @@ app.include_router(simulations_router)
 @app.get("/health", tags=["health"])
 async def health() -> dict[str, str | bool]:
     settings = get_settings()
-    return {"ok": True, "env": settings.app_env}
+    data: dict[str, str | bool] = {"ok": True, "env": settings.app_env}
+    observability = getattr(app.state, "observability", None)
+    if observability is not None:
+        data.update(
+            {
+                "langsmith_enabled": bool(observability.primary_enabled),
+                "langsmith_project": str(observability.primary_project),
+                "langfuse_mirror_enabled": bool(observability.mirror_enabled),
+            }
+        )
+    return data
 
 
 @app.get("/health/ready", tags=["health"])

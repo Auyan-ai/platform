@@ -28,6 +28,7 @@ asyncpg = "^0.30.0"
 pgvector = "^0.3.5"
 
 # Observability
+langsmith = "^0.8.4"
 langfuse = "^2.55.0"
 structlog = "^24.4.0"
 
@@ -86,7 +87,7 @@ no_implicit_optional = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["pgvector.*", "langfuse.*", "langgraph.*"]
+module = ["pgvector.*", "langfuse.*", "langsmith.*", "langgraph.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

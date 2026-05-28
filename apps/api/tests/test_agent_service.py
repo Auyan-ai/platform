@@ -16,12 +16,12 @@ from tests.conftest import (
 )
 
 
-def _fake_langfuse(trace_id: str = "trace-abc") -> MagicMock:
-    lf = MagicMock()
-    lf.start_conversation_trace.return_value = MagicMock(id=trace_id)
-    lf.trace_id.return_value = trace_id
-    lf.finalize_trace = MagicMock()
-    return lf
+def _fake_observability(trace_id: str = "trace-abc") -> MagicMock:
+    obs = MagicMock()
+    obs.start_conversation_trace.return_value = MagicMock(id=trace_id)
+    obs.trace_id.return_value = trace_id
+    obs.finalize_trace = MagicMock()
+    return obs
 
 
 def _kwargs() -> dict:
@@ -51,8 +51,8 @@ class TestProcessInbound:
                 "output_message_id": str(OUTBOUND_MSG_ID),
             }
         )
-        lf = _fake_langfuse()
-        service = AgentService(graph=graph, langfuse=lf)
+        obs = _fake_observability()
+        service = AgentService(graph=graph, observability=obs)
 
         outcome = await service.process_inbound(**_kwargs())
 
@@ -62,8 +62,8 @@ class TestProcessInbound:
         assert outcome.output_message_id == str(OUTBOUND_MSG_ID)
         assert outcome.error is None
         assert outcome.trace_id == "trace-abc"
-        lf.start_conversation_trace.assert_called_once()
-        lf.finalize_trace.assert_called_once()
+        obs.start_conversation_trace.assert_called_once()
+        obs.finalize_trace.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_escalate_outcome(self) -> None:
@@ -80,7 +80,7 @@ class TestProcessInbound:
                 "cost_usd": 0.0003,
             }
         )
-        service = AgentService(graph=graph, langfuse=_fake_langfuse())
+        service = AgentService(graph=graph, observability=_fake_observability())
 
         outcome = await service.process_inbound(**_kwargs())
 
@@ -98,7 +98,7 @@ class TestProcessInbound:
                 "escalation_id": "esc-fallback",
             }
         )
-        service = AgentService(graph=graph, langfuse=_fake_langfuse())
+        service = AgentService(graph=graph, observability=_fake_observability())
 
         outcome = await service.process_inbound(**_kwargs())
 
@@ -111,8 +111,8 @@ class TestProcessInbound:
         """Si el grafo lanza (no debería, los nodos están guarded), igual recuperamos."""
         graph = AsyncMock()
         graph.ainvoke = AsyncMock(side_effect=RuntimeError("graph_internal_error"))
-        lf = _fake_langfuse()
-        service = AgentService(graph=graph, langfuse=lf)
+        obs = _fake_observability()
+        service = AgentService(graph=graph, observability=obs)
 
         outcome = await service.process_inbound(**_kwargs())
 
@@ -120,14 +120,14 @@ class TestProcessInbound:
         assert outcome.error is not None
         assert "graph_internal_error" in outcome.error
         # finalize_trace siempre se llama, incluso ante excepción
-        lf.finalize_trace.assert_called_once()
+        obs.finalize_trace.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_initial_state_carries_all_ids(self) -> None:
         """Verifica que el state inicial pasado al grafo tiene los IDs correctos."""
         graph = AsyncMock()
         graph.ainvoke = AsyncMock(return_value={"decision": "respond", "agent_response": "x"})
-        service = AgentService(graph=graph, langfuse=_fake_langfuse())
+        service = AgentService(graph=graph, observability=_fake_observability())
 
         await service.process_inbound(**_kwargs())
 
@@ -145,27 +145,27 @@ class TestProcessInbound:
         graph.ainvoke = AsyncMock(
             return_value={"error": "boom", "decision": None}
         )
-        lf = _fake_langfuse()
-        service = AgentService(graph=graph, langfuse=lf)
+        obs = _fake_observability()
+        service = AgentService(graph=graph, observability=obs)
 
         await service.process_inbound(**_kwargs())
 
         # El kwarg `error` debe llegar a finalize_trace
-        kwargs = lf.finalize_trace.call_args.kwargs
+        kwargs = obs.finalize_trace.call_args.kwargs
         assert kwargs["error"] == "boom"
 
     @pytest.mark.asyncio
-    async def test_langfuse_disabled_still_works(self) -> None:
-        """Si Langfuse no está configurado, start_trace devuelve None — todo sigue funcionando."""
-        lf = MagicMock()
-        lf.start_conversation_trace.return_value = None
-        lf.trace_id.return_value = None
-        lf.finalize_trace = MagicMock()
+    async def test_observability_disabled_still_works(self) -> None:
+        """Si observabilidad no está configurada, el agente sigue funcionando."""
+        obs = MagicMock()
+        obs.start_conversation_trace.return_value = None
+        obs.trace_id.return_value = None
+        obs.finalize_trace = MagicMock()
         graph = AsyncMock()
         graph.ainvoke = AsyncMock(
             return_value={"decision": "respond", "agent_response": "ok"}
         )
-        service = AgentService(graph=graph, langfuse=lf)
+        service = AgentService(graph=graph, observability=obs)
 
         outcome = await service.process_inbound(**_kwargs())
 

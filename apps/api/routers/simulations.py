@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from apps.api.core.errors import ForbiddenError, NotFoundError
@@ -78,10 +78,12 @@ class CreateScenarioRequest(BaseModel):
 
 class RunRequest(BaseModel):
     scenario_id: UUID
+    judge_model: Literal["sonnet", "opus"] = "sonnet"
 
 
 class BatchRequest(BaseModel):
     scenario_ids: list[UUID]
+    judge_model: Literal["sonnet", "opus"] = "sonnet"
 
 
 class ProfileOut(BaseModel):
@@ -273,6 +275,7 @@ async def create_run(body: RunRequest, auth: AuthDep, tenant_id: TenantIdDep) ->
                 anthropic=anthropic,
                 graph=graph,
                 triggered_by=triggered_by,
+                judge_model=body.judge_model,
             ),
             timeout=RUN_SYNC_TIMEOUT_SECONDS,
         )
@@ -339,6 +342,7 @@ async def create_batch(
                 anthropic=anthropic,
                 graph=graph,
                 triggered_by=triggered_by,
+                judge_model=body.judge_model,
             )
         except Exception:
             logger.exception("sim_background_batch_failed batch_id=%s", batch_id)

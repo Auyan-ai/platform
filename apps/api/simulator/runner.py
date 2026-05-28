@@ -43,9 +43,13 @@ from apps.api.db.queries import (
 )
 from apps.api.simulator.assertions import check_assertions, summarize
 from apps.api.simulator.judge import (
+    DEFAULT_JUDGE_MODEL,
     JUDGE_TIMEOUT_SECONDS,
+    OPUS_JUDGE_MODEL,
+    JudgeModelAlias,
     SimulatorJudgeVerdict,
     judge_simulation,
+    normalize_judge_model,
     verdict_to_dict,
 )
 from apps.api.simulator.transcript import (
@@ -95,6 +99,7 @@ class _RunAccumulator:
     tokens_agent_out: int = 0
     tokens_judge_in: int = 0
     tokens_judge_out: int = 0
+    judge_model: str = DEFAULT_JUDGE_MODEL
     last_agent_messages: list[str] = field(default_factory=list)
 
 
@@ -107,10 +112,11 @@ async def run_simulation(
     triggered_by: UUID | None = None,
     batch_id: UUID | None = None,
     skip_judge: bool = False,
+    judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_MODEL,
 ) -> UUID:
     """Corre un scenario completo. Retorna el run_id.
 
-    skip_judge=True salta la evaluación del judge (Opus, caro/lento). Pensado para
+    skip_judge=True salta la evaluación del judge. Pensado para
     cazar bugs de assertions/fixtures rápido; la corrida final SIEMPRE corre el judge.
     """
     async with _GLOBAL_SIM_SEMAPHORE:
@@ -122,6 +128,7 @@ async def run_simulation(
             triggered_by=triggered_by,
             batch_id=batch_id,
             skip_judge=skip_judge,
+            judge_model=judge_model,
         )
 
 
@@ -132,6 +139,7 @@ async def run_batch(
     anthropic: AsyncAnthropic,
     graph: CompiledStateGraph,
     triggered_by: UUID | None = None,
+    judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_MODEL,
 ) -> UUID:
     """Corre múltiples scenarios en paralelo (limitado por el semáforo global).
     Retorna un batch_id compartido por todos los runs del batch.
@@ -146,6 +154,7 @@ async def run_batch(
                 graph=graph,
                 triggered_by=triggered_by,
                 batch_id=batch_id,
+                judge_model=judge_model,
             )
         )
         for sid in scenario_ids
@@ -166,6 +175,7 @@ async def _run_simulation_inner(
     triggered_by: UUID | None,
     batch_id: UUID | None,
     skip_judge: bool = False,
+    judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_MODEL,
 ) -> UUID:
     async with tenant_scope(tenant_id) as conn:
         scenario = await get_simulation_scenario(conn, tenant_id, scenario_id)
@@ -177,6 +187,7 @@ async def _run_simulation_inner(
                 f"UserProfile {scenario.user_profile_id} not found for tenant {tenant_id}"
             )
 
+    normalized_judge_model = normalize_judge_model(judge_model)
     run_id = uuid4()
 
     try:
@@ -196,6 +207,7 @@ async def _run_simulation_inner(
         run_id=run_id,
         conversation_id=conversation_id,
         end_customer_id=end_customer_id,
+        judge_model=normalized_judge_model,
         transcript=SimulatorTranscript(
             scenario=scenario,
             profile_name=profile.name,
@@ -258,6 +270,7 @@ async def _run_simulation_inner(
                     anthropic=anthropic,
                     transcript=acc.transcript,
                     scenario=scenario,
+                    judge_model=acc.judge_model,
                 ),
                 timeout=JUDGE_TIMEOUT_SECONDS + 30,
             )
@@ -611,8 +624,18 @@ def _estimate_cost_cents(acc: _RunAccumulator) -> float:
         acc.tokens_agent_in / 1000 * _SONNET_IN_CENTS_PER_1K
         + acc.tokens_agent_out / 1000 * _SONNET_OUT_CENTS_PER_1K
     )
+    judge_in_rate = (
+        _OPUS_IN_CENTS_PER_1K
+        if acc.judge_model == OPUS_JUDGE_MODEL
+        else _SONNET_IN_CENTS_PER_1K
+    )
+    judge_out_rate = (
+        _OPUS_OUT_CENTS_PER_1K
+        if acc.judge_model == OPUS_JUDGE_MODEL
+        else _SONNET_OUT_CENTS_PER_1K
+    )
     judge_cost = (
-        acc.tokens_judge_in / 1000 * _OPUS_IN_CENTS_PER_1K
-        + acc.tokens_judge_out / 1000 * _OPUS_OUT_CENTS_PER_1K
+        acc.tokens_judge_in / 1000 * judge_in_rate
+        + acc.tokens_judge_out / 1000 * judge_out_rate
     )
     return round(sim_cost + agent_cost + judge_cost, 4)

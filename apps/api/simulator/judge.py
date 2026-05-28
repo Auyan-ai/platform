@@ -1,7 +1,7 @@
-"""Judge del simulador — evalúa 4 dimensiones con Opus 4.7.
+"""Judge del simulador — evalúa 4 dimensiones con Sonnet por defecto.
 
-A diferencia del slow_agent (two-step Sonnet→Opus), el simulator usa Opus directo:
-el volumen es bajo (~25 runs/batch) y la señal pesa más que el costo marginal.
+Opus queda disponible para calibraciones explícitas, pero la corrida normal usa
+Sonnet para mantener el batch bajo control de coste.
 
 Prompt caching habilitado en el system prompt fijo.
 """
@@ -20,9 +20,12 @@ from apps.api.simulator.transcript import SimulatorTranscript, format_for_sim_ju
 
 logger = logging.getLogger(__name__)
 
-JUDGE_MODEL = "claude-opus-4-7"
+SONNET_JUDGE_MODEL = "claude-sonnet-4-6"
+OPUS_JUDGE_MODEL = "claude-opus-4-7"
+DEFAULT_JUDGE_MODEL = SONNET_JUDGE_MODEL
+JudgeModelAlias = Literal["sonnet", "opus"]
 JUDGE_MAX_TOKENS = 1024
-JUDGE_TIMEOUT_SECONDS = 90  # tope por llamada — Opus analizando transcript
+JUDGE_TIMEOUT_SECONDS = 90  # tope por llamada analizando transcript
 
 SimVerdict = Literal["pass", "partial", "fail"]
 
@@ -51,12 +54,15 @@ async def judge_simulation(
     anthropic: AsyncAnthropic,
     transcript: SimulatorTranscript,
     scenario: SimulationScenario,
+    *,
+    judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_MODEL,
 ) -> SimulatorJudgeVerdict:
-    """Llama al judge Opus y retorna el veredicto 4-dim."""
+    """Llama al judge y retorna el veredicto 4-dim."""
     formatted = format_for_sim_judge(transcript)
+    model = normalize_judge_model(judge_model)
 
     response = await anthropic.messages.create(
-        model=JUDGE_MODEL,
+        model=model,
         max_tokens=JUDGE_MAX_TOKENS,
         system=[
             {
@@ -70,14 +76,32 @@ async def judge_simulation(
     )
 
     raw = response.content[0].text.strip() if response.content else "{}"
-    return _parse_verdict(raw, response.usage.input_tokens, response.usage.output_tokens)
+    return _parse_verdict(
+        raw,
+        response.usage.input_tokens,
+        response.usage.output_tokens,
+        model_used=model,
+    )
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
+def normalize_judge_model(judge_model: JudgeModelAlias | str | None) -> str:
+    """Normaliza alias CLI/API a IDs reales de Anthropic."""
+    if judge_model in (None, "", "sonnet", SONNET_JUDGE_MODEL):
+        return SONNET_JUDGE_MODEL
+    if judge_model in ("opus", OPUS_JUDGE_MODEL):
+        return OPUS_JUDGE_MODEL
+    raise ValueError(f"unsupported_simulator_judge_model:{judge_model}")
+
+
 def _parse_verdict(
-    raw: str, input_tokens: int, output_tokens: int
+    raw: str,
+    input_tokens: int,
+    output_tokens: int,
+    *,
+    model_used: str = DEFAULT_JUDGE_MODEL,
 ) -> SimulatorJudgeVerdict:
     """Parsea el JSON del judge. Retorna veredicto conservador en caso de error."""
     try:
@@ -89,7 +113,7 @@ def _parse_verdict(
             data = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         logger.warning("sim_judge_json_parse_failed raw=%s", raw[:200])
-        return _fallback_verdict(input_tokens, output_tokens)
+        return _fallback_verdict(input_tokens, output_tokens, model_used=model_used)
 
     r = int(data.get("reasoning_score", 0))
     k = int(data.get("knowledge_score", 0))
@@ -113,13 +137,18 @@ def _parse_verdict(
         judge_goal_achieved=bool(data.get("judge_goal_achieved", False)),
         judge_goal_explanation=str(data.get("judge_goal_explanation", "")),
         suggestions=str(data.get("suggestions", "")),
-        model_used=JUDGE_MODEL,
+        model_used=model_used,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
     )
 
 
-def _fallback_verdict(input_tokens: int, output_tokens: int) -> SimulatorJudgeVerdict:
+def _fallback_verdict(
+    input_tokens: int,
+    output_tokens: int,
+    *,
+    model_used: str = DEFAULT_JUDGE_MODEL,
+) -> SimulatorJudgeVerdict:
     return SimulatorJudgeVerdict(
         reasoning_score=0,
         knowledge_score=0,
@@ -134,7 +163,7 @@ def _fallback_verdict(input_tokens: int, output_tokens: int) -> SimulatorJudgeVe
         judge_goal_achieved=False,
         judge_goal_explanation="parse_error",
         suggestions="",
-        model_used=JUDGE_MODEL,
+        model_used=model_used,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
     )

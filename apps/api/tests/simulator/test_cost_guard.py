@@ -22,7 +22,7 @@ class TestCheckTenantCostCap:
             patch(
                 "apps.api.simulator.cost_guard.get_tenant_sim_cost_cents_today",
                 new_callable=AsyncMock,
-                return_value=500.0,  # $5, bajo el cap de $10
+                return_value=400.0,  # $4, bajo el cap de $5
             ),
         ):
             from apps.api.simulator.cost_guard import check_tenant_cost_cap
@@ -40,7 +40,7 @@ class TestCheckTenantCostCap:
             patch(
                 "apps.api.simulator.cost_guard.get_tenant_sim_cost_cents_today",
                 new_callable=AsyncMock,
-                return_value=1000.0,  # $10 exacto — lanza
+                return_value=500.0,  # $5 exacto — lanza
             ),
         ):
             from apps.api.simulator.cost_guard import check_tenant_cost_cap

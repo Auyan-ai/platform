@@ -70,6 +70,7 @@ async def main(
     scenario_name: str | None,
     run_all: bool,
     no_judge: bool,
+    judge_model: str,
     reseed: bool,
 ) -> int:
     import apps.api.skills  # noqa: F401 — registra skills
@@ -159,6 +160,7 @@ async def main(
                     anthropic=anthropic,
                     graph=graph,
                     skip_judge=no_judge,
+                    judge_model=judge_model,
                 )
                 # Obtener resultado
                 from apps.api.db.queries import get_simulation_run
@@ -246,7 +248,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--no-judge",
         action="store_true",
-        help="Salta el judge (Opus) — solo evalúa assertions. Para cazar bugs rápido.",
+        help="Salta el judge — solo evalúa assertions. Para cazar bugs rápido.",
+    )
+    parser.add_argument(
+        "--judge-model",
+        choices=["sonnet", "opus"],
+        default="sonnet",
+        help="Modelo del judge. Default: sonnet. Usa opus solo para calibración explícita.",
     )
     parser.add_argument(
         "--reseed",
@@ -270,6 +278,7 @@ if __name__ == "__main__":
             scenario_name=args.scenario,
             run_all=args.all,
             no_judge=args.no_judge,
+            judge_model=args.judge_model,
             reseed=args.reseed,
         )
     )
