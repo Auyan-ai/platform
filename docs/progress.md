@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-05-28 (sesión 46 — Bloque 1.7 completado y archivado; siguiente paso técnico: Bloque 1.8 landing pública)._
+_Última actualización: 2026-05-28 (sesión 47 — Bloque 1.8 completado y archivado; siguiente paso técnico: Bloque 1.9 email outbound general)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
 
@@ -17,8 +17,8 @@ _Última actualización: 2026-05-28 (sesión 46 — Bloque 1.7 completado y arch
 | Área | Estado |
 |---|---|
 | Bloque 0 | 0.1–0.10 completados. 0.11 sigue bloqueado por crédito Anthropic para corrida final con judge. |
-| Bloque 1 | 1.0–1.7 completados y archivados. |
-| Siguiente paso | 1.8 — Landing pública (`apps/landing` + Aceternity UI + Plausible). |
+| Bloque 1 | 1.0–1.8 completados y archivados. |
+| Siguiente paso | 1.9 — Email outbound general: templates editables + queue + retry logic. |
 
 ---
 
@@ -36,17 +36,18 @@ _Última actualización: 2026-05-28 (sesión 46 — Bloque 1.7 completado y arch
 | 1.5 | Reporte semanal + aprobación + Postmark + cron | ✅ [PR #104](https://github.com/Auyan-ai/platform/pull/104)–[#107](https://github.com/Auyan-ai/platform/pull/107) |
 | 1.6 | Dashboard cliente 7 secciones MVP | ✅ [PR #109](https://github.com/Auyan-ai/platform/pull/109)–[#113](https://github.com/Auyan-ai/platform/pull/113) |
 | 1.7 | Review Queue interna cross-tenant | ✅ [PR #115](https://github.com/Auyan-ai/platform/pull/115) |
+| 1.8 | Landing pública `apps/landing` + Plausible | ✅ [PR #117](https://github.com/Auyan-ai/platform/pull/117) |
 
-### Siguiente: Sub-PR 1.8 — Landing pública
+### Siguiente: Sub-PR 1.9 — Email outbound general
 
-**Objetivo:** crear la landing pública de Auyan según el contexto maestro: Managed AI Service para CX e-commerce, primer viewport claro, captación founding partners y medición con Plausible.
+**Objetivo:** generalizar el envío outbound de emails más allá de reportes/onboarding: templates editables, cola persistente, estados de entrega y retry logic.
 
 Scope recomendado:
 
-1. `apps/landing` como app pública separada.
-2. Copy alineado a `auyan-master-context.md`: resultado operacional, no SaaS self-serve.
-3. CTA hacia demo / contacto founding partner.
-4. Plausible listo para configurar por env.
+1. Modelo persistente para templates y jobs de outbound email por tenant.
+2. API interna para crear/enqueuear emails transaccionales u operativos.
+3. Worker/servicio reutilizable sobre Postmark con retry/backoff e idempotencia básica.
+4. UI interna mínima para revisar templates, estado de cola y fallos recientes.
 
 ### Nota para 1.4 — Shopify content import / KB bootstrap
 

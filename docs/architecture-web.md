@@ -294,8 +294,8 @@ El plan Sprint 3 original queda histórico. El plan vigente es Bloque 1, tomado 
 | 1.5 | ✅ completo | Reporte semanal automatizado: `weekly_reports` + cron lunes + UI aprobación + Postmark. |
 | 1.6 | ✅ completo | Dashboard cliente 7 secciones MVP con data viz. |
 | 1.7 | ✅ completo | Dashboard super_admin Home/Review Queue + filtros por rol. |
-| 1.8 | ⏭️ siguiente | `apps/landing` + Aceternity UI + páginas públicas + Plausible. |
-| 1.9 | pendiente | Email outbound general: templates editables + queue + retry logic. |
+| 1.8 | ✅ completo | `apps/landing` + Aceternity UI-style + páginas públicas + Plausible. |
+| 1.9 | ⏭️ siguiente | Email outbound general: templates editables + queue + retry logic. |
 
 ---
 
