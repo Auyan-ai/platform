@@ -26,6 +26,7 @@ class LangSmithTrace:
     """Handle mínimo para actualizar un run raíz en LangSmith."""
 
     run_id: UUID
+    dotted_order: str
 
 
 class LangSmithClient:
@@ -43,6 +44,89 @@ class LangSmithClient:
     def project_name(self) -> str:
         return self._project_name
 
+    @staticmethod
+    def _dotted_order_segment(start_time: datetime, run_id: UUID) -> str:
+        return start_time.strftime("%Y%m%dT%H%M%S%fZ") + str(run_id)
+
+    @staticmethod
+    def _usage_metadata(
+        *,
+        tokens_in: int,
+        tokens_out: int,
+        cost_usd: float,
+    ) -> dict[str, int | float]:
+        usage: dict[str, int | float] = {
+            "input_tokens": max(tokens_in, 0),
+            "output_tokens": max(tokens_out, 0),
+            "total_tokens": max(tokens_in, 0) + max(tokens_out, 0),
+        }
+        if cost_usd > 0:
+            usage["total_cost"] = cost_usd
+        return usage
+
+    def _record_model_usage_run(
+        self,
+        trace: LangSmithTrace,
+        *,
+        decision: str | None,
+        confidence: float | None,
+        response_text: str | None,
+        tokens_in: int,
+        tokens_out: int,
+        cost_usd: float,
+        model: str | None,
+    ) -> None:
+        if self._client is None:
+            return
+        if tokens_in <= 0 and tokens_out <= 0 and cost_usd <= 0:
+            return
+
+        run_id = uuid4()
+        start_time = datetime.now(UTC)
+        dotted_order = f"{trace.dotted_order}.{self._dotted_order_segment(start_time, run_id)}"
+        usage_metadata = self._usage_metadata(
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=cost_usd,
+        )
+
+        self._client.create_run(
+            id=run_id,
+            trace_id=trace.run_id,
+            parent_run_id=trace.run_id,
+            dotted_order=dotted_order,
+            project_name=self._project_name,
+            name="agent_model_call",
+            run_type="llm",
+            inputs={"model": model, "aggregate_usage": True},
+            start_time=start_time,
+            tags=["source:agent_service", "usage:aggregate"],
+            extra={
+                "metadata": {
+                    "model": model,
+                    "decision": decision,
+                    "confidence": confidence,
+                    "usage_metadata": usage_metadata,
+                    "aggregate_usage": True,
+                }
+            },
+        )
+        self._client.update_run(
+            run_id,
+            trace_id=trace.run_id,
+            parent_run_id=trace.run_id,
+            dotted_order=dotted_order,
+            end_time=datetime.now(UTC),
+            outputs={"response_text": response_text},
+            extra={
+                "metadata": {
+                    "model": model,
+                    "usage_metadata": usage_metadata,
+                    "aggregate_usage": True,
+                }
+            },
+        )
+
     def start_conversation_trace(
         self,
         *,
@@ -56,14 +140,18 @@ class LangSmithClient:
             return None
 
         run_id = uuid4()
+        start_time = datetime.now(UTC)
+        dotted_order = self._dotted_order_segment(start_time, run_id)
         try:
             self._client.create_run(
                 id=run_id,
+                trace_id=run_id,
+                dotted_order=dotted_order,
                 project_name=self._project_name,
                 name="agent_conversation",
                 run_type="chain",
                 inputs={"message": input_text},
-                start_time=datetime.now(UTC),
+                start_time=start_time,
                 tags=[f"tenant:{tenant_id}", f"channel:{channel}", "source:agent_service"],
                 extra={
                     "metadata": {
@@ -74,7 +162,7 @@ class LangSmithClient:
                     }
                 },
             )
-            return LangSmithTrace(run_id=run_id)
+            return LangSmithTrace(run_id=run_id, dotted_order=dotted_order)
         except Exception:
             logger.exception("langsmith_trace_start_failed")
             return None
@@ -97,8 +185,24 @@ class LangSmithClient:
             return
 
         try:
+            self._record_model_usage_run(
+                trace,
+                decision=decision,
+                confidence=confidence,
+                response_text=response_text,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                cost_usd=cost_usd,
+                model=model,
+            )
+        except Exception:
+            logger.exception("langsmith_model_usage_run_failed")
+
+        try:
             self._client.update_run(
                 trace.run_id,
+                trace_id=trace.run_id,
+                dotted_order=trace.dotted_order,
                 end_time=datetime.now(UTC),
                 outputs={
                     "decision": decision,
@@ -145,6 +249,8 @@ def build_langsmith_client(settings: Settings) -> LangSmithClient:
         client = Client(
             api_key=settings.langsmith_api_key.get_secret_value(),
             api_url=str(settings.langsmith_endpoint),
+            workspace_id=settings.langsmith_workspace_id,
+            auto_batch_tracing=False,
             tracing_error_callback=lambda exc: logger.error(
                 "langsmith_background_trace_failed",
                 exc_info=(type(exc), exc, exc.__traceback__),

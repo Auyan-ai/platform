@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     langsmith_api_key: SecretStr | None = None
     langsmith_project: str = "auyan-staging"
     langsmith_endpoint: HttpUrl = Field(default=HttpUrl("https://api.smith.langchain.com"))
+    langsmith_workspace_id: str | None = None
     langfuse_public_key: SecretStr | None = None
     langfuse_secret_key: SecretStr | None = None
     langfuse_host: HttpUrl = Field(default=HttpUrl("https://cloud.langfuse.com"))

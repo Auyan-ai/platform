@@ -49,6 +49,8 @@ class TestStartTrace:
         inner.create_run.assert_called_once()
         kwargs = inner.create_run.call_args.kwargs
         assert isinstance(kwargs["id"], UUID)
+        assert kwargs["trace_id"] == kwargs["id"]
+        assert isinstance(kwargs["dotted_order"], str)
         assert kwargs["project_name"] == "auyan-test"
         assert kwargs["name"] == "agent_conversation"
         assert kwargs["run_type"] == "chain"
@@ -91,7 +93,10 @@ class TestFinalizeTrace:
     def test_calls_update_run_with_outputs_and_metadata(self) -> None:
         inner = MagicMock()
         client = LangSmithClient(inner, project_name="auyan-test")
-        trace = LangSmithTrace(run_id=UUID("00000000-0000-0000-0000-000000000001"))
+        trace = LangSmithTrace(
+            run_id=UUID("00000000-0000-0000-0000-000000000001"),
+            dotted_order="20260101T000000000000Z00000000-0000-0000-0000-000000000001",
+        )
 
         client.finalize_trace(
             trace,
@@ -106,9 +111,24 @@ class TestFinalizeTrace:
             error=None,
         )
 
-        inner.update_run.assert_called_once()
-        args, kwargs = inner.update_run.call_args
+        assert inner.create_run.call_count == 1
+        usage_create_kwargs = inner.create_run.call_args.kwargs
+        assert usage_create_kwargs["name"] == "agent_model_call"
+        assert usage_create_kwargs["run_type"] == "llm"
+        assert usage_create_kwargs["trace_id"] == trace.run_id
+        assert usage_create_kwargs["parent_run_id"] == trace.run_id
+        assert usage_create_kwargs["extra"]["metadata"]["usage_metadata"] == {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "total_tokens": 15,
+            "total_cost": 0.001,
+        }
+
+        assert inner.update_run.call_count == 2
+        args, kwargs = inner.update_run.call_args_list[-1]
         assert args[0] == trace.run_id
+        assert kwargs["trace_id"] == trace.run_id
+        assert kwargs["dotted_order"] == trace.dotted_order
         assert kwargs["outputs"]["decision"] == "respond"
         assert kwargs["extra"]["metadata"]["tokens_in"] == 10
         assert kwargs["error"] is None
@@ -116,7 +136,10 @@ class TestFinalizeTrace:
     def test_sets_error_on_error(self) -> None:
         inner = MagicMock()
         client = LangSmithClient(inner, project_name="auyan-test")
-        trace = LangSmithTrace(run_id=UUID("00000000-0000-0000-0000-000000000001"))
+        trace = LangSmithTrace(
+            run_id=UUID("00000000-0000-0000-0000-000000000001"),
+            dotted_order="20260101T000000000000Z00000000-0000-0000-0000-000000000001",
+        )
 
         client.finalize_trace(
             trace,
@@ -135,11 +158,39 @@ class TestFinalizeTrace:
         assert kwargs["error"] == "boom"
         assert kwargs["extra"]["metadata"]["had_error"] is True
 
+    def test_finalizes_root_when_model_usage_child_fails(self) -> None:
+        inner = MagicMock()
+        inner.create_run.side_effect = RuntimeError("child failed")
+        client = LangSmithClient(inner, project_name="auyan-test")
+        trace = LangSmithTrace(
+            run_id=UUID("00000000-0000-0000-0000-000000000001"),
+            dotted_order="20260101T000000000000Z00000000-0000-0000-0000-000000000001",
+        )
+
+        client.finalize_trace(
+            trace,
+            decision="respond",
+            confidence=0.9,
+            response_text="x",
+            escalation_reason=None,
+            tokens_in=10,
+            tokens_out=5,
+            cost_usd=0.001,
+            model="m",
+            error=None,
+        )
+
+        inner.update_run.assert_called_once()
+        assert inner.update_run.call_args.args[0] == trace.run_id
+
     def test_swallows_exceptions_from_inner_client(self) -> None:
         inner = MagicMock()
         inner.update_run.side_effect = RuntimeError("network_error")
         client = LangSmithClient(inner, project_name="auyan-test")
-        trace = LangSmithTrace(run_id=UUID("00000000-0000-0000-0000-000000000001"))
+        trace = LangSmithTrace(
+            run_id=UUID("00000000-0000-0000-0000-000000000001"),
+            dotted_order="20260101T000000000000Z00000000-0000-0000-0000-000000000001",
+        )
 
         client.finalize_trace(
             trace,
@@ -161,7 +212,10 @@ class TestTraceId:
 
     def test_extracts_run_id(self) -> None:
         run_id = UUID("00000000-0000-0000-0000-000000000001")
-        trace = LangSmithTrace(run_id=run_id)
+        trace = LangSmithTrace(
+            run_id=run_id,
+            dotted_order="20260101T000000000000Z00000000-0000-0000-0000-000000000001",
+        )
         assert LangSmithClient(MagicMock(), project_name="auyan-test").trace_id(trace) == str(run_id)
 
 
