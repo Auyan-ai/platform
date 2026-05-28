@@ -248,7 +248,7 @@ export function apiClient(jwt: string, tenantId?: string) {
 
 | Pendiente | Bloquea | Bloque | Nota |
 |---|---|---|---|
-| Aplicar migraciones `tenant_playbook` y `tenant_facts` a staging | Demo live de Bloque 1.1/1.2 | 1.1/1.2 | Código y tests listos, falta operación de staging. |
+| Aplicar migraciones Bloque 1 a staging | Demo live end-to-end de Bloque 1 | 1.1–1.9 | Código y tests listos; falta aplicar las migraciones listadas en `progress.md` y configurar secrets operativos. |
 | Completar onboarding wizard + lifecycle | Flujo cliente end-to-end | 1.3 | ✅ Completo. |
 | KB drop-zone + cola pending review | Onboarding útil con documentos reales | 1.4 | ✅ Completo con curación Auyan. |
 | Reportes semanales | Propuesta managed visible al cliente | 1.5 | ✅ Completo: email resumen + dashboard como fuente completa. |
