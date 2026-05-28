@@ -61,6 +61,24 @@ export interface TenantKnowledgeSubmission {
   updated_at: string | null
 }
 
+export interface TenantInsightTimelinePoint {
+  date: string
+  conversations: number
+}
+
+export interface TenantInsightBreakdownItem {
+  label: string
+  count: number
+}
+
+export interface TenantInsights {
+  days: number
+  timeline: TenantInsightTimelinePoint[]
+  top_intents: TenantInsightBreakdownItem[]
+  by_channel: TenantInsightBreakdownItem[]
+  by_status: TenantInsightBreakdownItem[]
+}
+
 export interface WeeklyReport {
   id: string
   tenant_id: string
@@ -246,6 +264,21 @@ export function useTenantKnowledgeSubmissions(
       )
     },
     staleTime: 20_000,
+  })
+}
+
+export function useTenantInsights(tenantId: string, days = 14) {
+  return useQuery({
+    queryKey: queryKeys.tenants.insights(tenantId, days),
+    queryFn: async () => {
+      const token = await getToken()
+      return tenantContextFetch<TenantInsights>(
+        token,
+        tenantId,
+        `/tenants/me/insights?days=${days}`,
+      )
+    },
+    staleTime: 30_000,
   })
 }
 

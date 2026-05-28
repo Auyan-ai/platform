@@ -264,6 +264,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/me/insights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Insights agregados del tenant para dashboard cliente */
+        get: operations["get_my_tenant_insights_tenants_me_insights_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/me/usage": {
         parameters: {
             query?: never;
@@ -1842,6 +1859,33 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** TenantInsightBreakdownItem */
+        TenantInsightBreakdownItem: {
+            /** Label */
+            label: string;
+            /** Count */
+            count: number;
+        };
+        /** TenantInsightTimelinePoint */
+        TenantInsightTimelinePoint: {
+            /** Date */
+            date: string;
+            /** Conversations */
+            conversations: number;
+        };
+        /** TenantInsightsResponse */
+        TenantInsightsResponse: {
+            /** Days */
+            days: number;
+            /** Timeline */
+            timeline: components["schemas"]["TenantInsightTimelinePoint"][];
+            /** Top Intents */
+            top_intents: components["schemas"]["TenantInsightBreakdownItem"][];
+            /** By Channel */
+            by_channel: components["schemas"]["TenantInsightBreakdownItem"][];
+            /** By Status */
+            by_status: components["schemas"]["TenantInsightBreakdownItem"][];
+        };
         /** TenantKnowledgeSubmissionCreate */
         TenantKnowledgeSubmissionCreate: {
             /** Title */
@@ -2601,6 +2645,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TenantMetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_tenant_insights_tenants_me_insights_get: {
+        parameters: {
+            query?: {
+                /** @description Días de historial a retornar */
+                days?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantInsightsResponse"];
                 };
             };
             /** @description Validation Error */

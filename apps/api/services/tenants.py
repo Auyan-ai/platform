@@ -11,6 +11,7 @@ from uuid import UUID
 from apps.api.core.errors import NotFoundError
 from apps.api.db.models import Tenant, TenantConfiguration
 from apps.api.db.queries import get_tenant_by_id, get_tenant_configuration
+from apps.api.db.queries import get_tenant_insights as _get_tenant_insights
 from apps.api.db.queries import get_tenant_metrics as _get_tenant_metrics
 
 if TYPE_CHECKING:
@@ -54,3 +55,9 @@ async def get_tenant_metrics(conn: asyncpg.Connection, tenant_id: UUID) -> dict[
         "resolution_rate": resolution_rate,
         "escalation_rate": escalation_rate,
     }
+
+
+async def get_tenant_insights(
+    conn: asyncpg.Connection, tenant_id: UUID, days: int = 14
+) -> dict[str, object]:
+    return await _get_tenant_insights(conn, tenant_id, days)

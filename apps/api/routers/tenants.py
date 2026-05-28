@@ -37,7 +37,12 @@ from apps.api.db.queries import (
     upsert_tenant_playbook,
 )
 from apps.api.services.knowledge_ingestion import chunk_text_for_kb, embed_kb_chunks
-from apps.api.services.tenants import get_tenant, get_tenant_config, get_tenant_metrics
+from apps.api.services.tenants import (
+    get_tenant,
+    get_tenant_config,
+    get_tenant_insights,
+    get_tenant_metrics,
+)
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -87,6 +92,24 @@ class TenantMetricsResponse(BaseModel):
     by_status: ConversationStatusCounts
     resolution_rate: float
     escalation_rate: float
+
+
+class TenantInsightTimelinePoint(BaseModel):
+    date: str
+    conversations: int
+
+
+class TenantInsightBreakdownItem(BaseModel):
+    label: str
+    count: int
+
+
+class TenantInsightsResponse(BaseModel):
+    days: int
+    timeline: list[TenantInsightTimelinePoint]
+    top_intents: list[TenantInsightBreakdownItem]
+    by_channel: list[TenantInsightBreakdownItem]
+    by_status: list[TenantInsightBreakdownItem]
 
 
 class DailyUsage(BaseModel):
@@ -321,6 +344,21 @@ async def get_my_tenant_metrics(tenant_id: TenantIdDep) -> TenantMetricsResponse
         resolution_rate=data["resolution_rate"],  # type: ignore[arg-type]
         escalation_rate=data["escalation_rate"],  # type: ignore[arg-type]
     )
+
+
+@router.get(
+    "/me/insights",
+    response_model=TenantInsightsResponse,
+    summary="Insights agregados del tenant para dashboard cliente",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def get_my_tenant_insights(
+    tenant_id: TenantIdDep,
+    days: int = Query(default=14, ge=1, le=90, description="Días de historial a retornar"),
+) -> TenantInsightsResponse:
+    async with tenant_scope(tenant_id) as conn:
+        data = await get_tenant_insights(conn, tenant_id, days=days)
+    return TenantInsightsResponse.model_validate(data)
 
 
 @router.get(
