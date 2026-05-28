@@ -586,7 +586,7 @@ Pendiente vivo: reseed AOPs, corrida `--reseed --no-judge --all`, fixes restante
 
 ---
 
-## Bloque 1 — Sprint A completado hasta Sub-PR 1.3 ✅
+## Bloque 1 — Sprint A completado hasta Sub-PR 1.5 ✅
 
 ### 1.0 — Design Sprint + shell visual
 
@@ -665,3 +665,23 @@ Diseño:
 - No se mete Supabase Storage todavía; PDFs/binarios quedan para una iteración posterior.
 
 Verificación sesión 43: `tests/test_tenants.py` 24/24 verde, suite API 998/998 verde, ruff limpio en archivos tocados, Biome limpio en archivos web tocados, `pnpm typecheck` verde y `pnpm build:web` verde.
+
+### 1.5 — Reporte semanal automatizado ✅
+
+Implementado en cuatro PRs pequeños, verificados y mergeados secuencialmente:
+
+| PR | Qué se hizo |
+|---|---|
+| [#104](https://github.com/Auyan-ai/platform/pull/104) | Tabla `weekly_reports`, modelos, queries y endpoints para listar, generar, editar, enviar a revisión y aprobar drafts semanales. |
+| [#105](https://github.com/Auyan-ai/platform/pull/105) | Envío Postmark del reporte aprobado, template HTML/texto, tracking `sent/failed` y manejo de errores de entrega. |
+| [#106](https://github.com/Auyan-ai/platform/pull/106) | Consola interna de revisión, historial/vista cliente de reportes y tipos OpenAPI regenerados. |
+| [#107](https://github.com/Auyan-ai/platform/pull/107) | Script `scripts.generate_weekly_reports` y GitHub Actions semanal para crear drafts del lunes a partir de la semana anterior. |
+
+Diseño:
+
+- Email semanal = resumen ejecutivo; dashboard cliente = fuente completa.
+- Auyan debe aprobar antes de enviar; el cliente sólo ve historial y reportes enviados.
+- UI sigue el shell Mercury light de `docs/DESIGN.md`, sin abrir AI Data Assistant ni visualizaciones de Bloque 2.
+- El workflow programado queda listo para GitHub Actions; requiere `DATABASE_URL` como secret antes de correr contra staging/producción.
+
+Verificación sesión 44: ruff limpio, suite API 1013/1013 verde, `pnpm --filter @auyan/web typecheck` verde, `pnpm build:web` verde y CI verde en PRs #104–#107. El lint web completo sigue teniendo deuda previa en archivos no tocados.
