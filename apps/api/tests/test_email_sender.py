@@ -106,6 +106,37 @@ class TestEmailSenderFireAndForget:
         adapter.send_email.assert_not_awaited()
 
 
+class TestEmailSenderAwaitableSend:
+    @pytest.mark.asyncio
+    async def test_send_email_now_returns_adapter_response(self) -> None:
+        adapter = _make_adapter({"MessageID": "pm-123"})
+        sender = EmailSender(adapter=adapter)
+
+        result = await sender.send_email_now(
+            to="x@y.com",
+            subject="Reporte",
+            text_body="Texto",
+            html_body="<p>Texto</p>",
+            tag="weekly-report",
+        )
+
+        assert result["MessageID"] == "pm-123"
+        adapter.send_email.assert_awaited_once_with(
+            to="x@y.com",
+            subject="Reporte",
+            text_body="Texto",
+            html_body="<p>Texto</p>",
+            tag="weekly-report",
+        )
+
+    @pytest.mark.asyncio
+    async def test_send_email_now_raises_without_adapter(self) -> None:
+        sender = EmailSender(adapter=None)
+
+        with pytest.raises(RuntimeError, match="email_adapter_not_configured"):
+            await sender.send_email_now(to="x@y.com", subject="s", text_body="t")
+
+
 # ---------------------------------------------------------------------------
 # send_escalation_fallback
 # ---------------------------------------------------------------------------

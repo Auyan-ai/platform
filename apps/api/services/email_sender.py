@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, ClassVar
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from apps.api.integrations.postmark import PostmarkEmailAdapter
@@ -27,7 +28,7 @@ class EmailSender:
                  o None si POSTMARK_API_TOKEN no está configurado.
     """
 
-    _pending_tasks: ClassVar[set[asyncio.Task[None]]] = set()
+    _pending_tasks: ClassVar[set[asyncio.Task[Any]]] = set()
 
     def __init__(self, adapter: PostmarkEmailAdapter | None) -> None:
         self._adapter = adapter
@@ -54,7 +55,7 @@ class EmailSender:
             )
             return
         self._schedule(
-            self._adapter.send_email(
+            lambda: self._adapter.send_email(
                 to=to,
                 subject=subject,
                 text_body=text_body,
@@ -62,6 +63,30 @@ class EmailSender:
                 tag=tag,
             ),
             name=f"email_send_{to}",
+        )
+
+    async def send_email_now(
+        self,
+        *,
+        to: str,
+        subject: str,
+        text_body: str,
+        html_body: str | None = None,
+        tag: str | None = None,
+    ) -> dict[str, Any]:
+        """Envía un email y devuelve la respuesta del adapter.
+
+        Útil para flujos que necesitan persistir un resultado exacto, como
+        reportes semanales marcados como `sent`.
+        """
+        if self._adapter is None:
+            raise RuntimeError("email_adapter_not_configured")
+        return await self._adapter.send_email(
+            to=to,
+            subject=subject,
+            text_body=text_body,
+            html_body=html_body,
+            tag=tag,
         )
 
     def send_escalation_fallback(
@@ -98,7 +123,7 @@ class EmailSender:
             agent_summary=agent_summary,
         )
         self._schedule(
-            self._adapter.send_email(
+            lambda: self._adapter.send_email(
                 to=to_email,
                 subject=subject,
                 text_body=text_body,
@@ -110,7 +135,7 @@ class EmailSender:
 
     # ── Internals ──────────────────────────────────────────────────────────────
 
-    def _schedule(self, coro: object, *, name: str) -> None:
+    def _schedule(self, coro_factory: Callable[[], Awaitable[Any]], *, name: str) -> None:
         """Crea un asyncio.Task y lo registra en _pending_tasks."""
         try:
             loop = asyncio.get_running_loop()
@@ -118,13 +143,13 @@ class EmailSender:
             logger.warning("email_send_no_event_loop name=%s", name)
             return
 
-        task = loop.create_task(coro, name=name)  # type: ignore[arg-type]
+        task = loop.create_task(coro_factory(), name=name)
         self._pending_tasks.add(task)
         task.add_done_callback(self._pending_tasks.discard)
         task.add_done_callback(self._log_task_error)
 
     @staticmethod
-    def _log_task_error(task: asyncio.Task[None]) -> None:
+    def _log_task_error(task: asyncio.Task[Any]) -> None:
         if not task.cancelled() and task.exception() is not None:
             logger.error(
                 "email_send_failed task=%s error=%s",
