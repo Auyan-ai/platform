@@ -1,7 +1,8 @@
 # Simulator MVP — Documento de diseño (Sub-PR 0.10)
 
-> Diseñado y aprobado 2026-05-24. Modelo: Opus 4.7.
-> Estado: aprobado — listo para implementación.
+> Diseñado y aprobado 2026-05-24. Modelo original: Opus 4.7 para judge.
+> Estado 2026-05-28: implementado como base del Bloque 0.10; las decisiones operativas vigentes de coste/evals viven en `docs/progress.md`.
+> Nota 0.11A: Sonnet 4.6 es el judge por defecto; Opus queda como calibración opcional y explícita.
 
 ---
 
@@ -21,7 +22,7 @@ El sistema se construye alrededor de estos tres principios.
 
 > **Nota de implementación (2026-05-25):** al implementar se descubrió que el grafo
 > **no hace I/O externo** — los nodos `respond`/`escalate` solo persisten en DB y el
-> envío al helpdesk + cierre de Langfuse los hace el **caller** (`AgentService`)
+> envío al helpdesk + cierre de observabilidad los hace el **caller** (`AgentService`)
 > post-grafo. Por eso `simulation_mode` solo se usa en `execute_skill` (inyección del
 > mock). NO se tocan respond/escalate/finalize_trace. El runner simplemente no invoca
 > el envío post-grafo. Además: fixtures indexadas por **nombre de método del adapter**
@@ -34,7 +35,7 @@ El sistema se construye alrededor de estos tres principios.
 | D2 | Mock de Shopify vía `SkillContext.commerce_mock` inyectado por `execute_skill` desde fixtures del scenario | Type-safe (`CommerceProvider`), no monkey-patching, async-safe, 1 línea por skill |
 | D3 | Conversación sintética persiste en `conversations` con `is_simulation=TRUE` | Reusa toda la infra del grafo (load_conversation, audit_log, reasoning_events); soft-delete al terminar |
 | D4 | user_simulator usa Haiku 4.5 con prompt fijo + persona JSONB | Coste 10x menor que Sonnet; basta con coherencia, no inteligencia |
-| D5 | Judge usa Opus 4.7 directo, sin two-step | Volumen bajo (~25 runs/batch), stakes altos |
+| D5 | Judge configurable: Sonnet 4.6 por defecto, Opus opcional para calibración puntual | Mantiene señal suficiente sin romper el tope normal de coste |
 | D6 | Assertions programáticas (deterministas) + judge LLM (cualitativo) corren en paralelo | Las assertions atrapan el 70% de regresiones sin costo de LLM |
 | D7 | Scenarios como código Python en `simulator/scenarios/` + seed a DB | Code review + git history desde día 1; UI de autoría es Bloque 2 |
 | D8 | Bulk runs en paralelo limitado por semáforo PROCESS-wide (`Semaphore(10)`) | Aísla a 10 tenants concurrentes sin saturar Anthropic API ni DB pool |
@@ -362,12 +363,12 @@ escrituras → `{"ok": true, "simulated": true}`. El `_error` fuerza al mock a l
 | Input | Transcript real (sin expectativas) | Transcript sintético + `goal` + `expected_outcome` + `assertions` |
 | Objetivo | "¿Hay que cambiar el AOP?" → propone diff | "¿Pasó este test?" → scores + diagnóstico |
 | Output schema | `JudgeVerdict` (proposal_type, diff_markdown) | `SimulatorJudgeVerdict` (4 scores, assertions_results, suggestions) |
-| Modelo | Sonnet → Opus (two-step) | **Opus directo** |
+| Modelo | Sonnet → Opus (two-step) | **Sonnet por defecto; Opus opcional** |
 | Volumen | ~50 conversations/semana/tenant | ~25 runs/batch, manual |
 
-### Por qué Opus directo
+### Modelo actual del judge
 
-El two-step del slow agent existe porque el volumen es alto y la mayoría no necesita Opus. En el simulador, cada run cuesta ~$0.06 con Opus directo; el escalado dinámico ahorra centavos pero introduce variance. La señal pesa más que el costo.
+La decisión original favorecía Opus para todos los juicios porque el volumen esperado era bajo. En 0.11A el foco cambió: necesitamos correr más veces en staging, comparar versiones y mantener una corrida normal bajo `$5`. Por eso el default es `claude-sonnet-4-6`; Opus se reserva para calibrar una muestra pequeña cuando la señal de Sonnet sea ambigua o cuando se quiera auditar un cambio de alto riesgo.
 
 ### Lo que se reutiliza
 
@@ -810,6 +811,7 @@ Defensa en profundidad. Cada layer protege contra una clase de fallo:
 | Capa | Límite | Acción |
 |---|---|---|
 | Per-tenant rate limit | 5 batches/h, 20 runs/h | HTTP 429 al endpoint |
+| Per-run budget recomendado | $5 por corrida normal | CLI/runner corta antes de iniciar runs que excedan presupuesto estimado |
 | Per-tenant daily cost cap | $10/día | HTTP 429 antes de iniciar run |
 | Global daily cost cap | $50/día across all tenants | HTTP 429 + alerta a super_admin |
 | Process semaphore | 10 concurrent simulations | Cliente espera, no falla |
@@ -819,19 +821,16 @@ Defensa en profundidad. Cada layer protege contra una clase de fallo:
 - `user_simulator` recibe solo últimos 5 turnos del history
 - Judge recibe skill_audit_log filtrado a solo skills llamadas
 
-**Costo estimado**:
+**Costo operativo actual**:
 
-| Pieza | Costo |
+| Corrida | Judge | Objetivo |
 |---|---|
-| Simulador (Haiku 4.5) por batch | ~$0.30 (con caching) |
-| Agente (Sonnet 4.6) por batch | ~$1.50 |
-| Judge (Opus 4.7) por batch | ~$1.00 (con caching) |
-| **Total por batch** | **~$2.80** |
+| Smoke CE-01 + RE-01 | No | Validar que grafo, fixtures y assertions críticas siguen sanas. |
+| 25 scenarios completos | No | Regresión barata; debe pasar critical assertions. |
+| Sample 8 scenarios | Sonnet 4.6 | Evaluación cualitativa normal; promedio mínimo `8/10`. |
+| Calibración puntual | Opus | Solo manual, sobre muestra pequeña y con razón explícita. |
 
-**Proyección a 10 tenants**:
-- Batch semanal por tenant: $2.80 × 10 × 4 = **~$112/mes**
-- Batch diario por tenant: $2.80 × 10 × 30 = **~$840/mes** (sin caching seria ~$1,400/mes)
-- Con cost caps activos: **imposible exceder $50/día = $1,500/mes global**
+La proyección mensual debe recalcularse con `apps/api/integrations/pricing.py`; no duplicar precios hardcoded dentro del runner.
 
 Sustentable.
 
@@ -847,7 +846,7 @@ Sustentable.
 | R4 | Mocks faltan métodos cuando se agregan skills nuevas | Baja | MockShopifyAdapter retorna `None` por default; fácil extender |
 | R5 | Anthropic rate limit en batches concurrentes | Media | `_GLOBAL_SIM_SEMAPHORE(10)` + backoff exponencial en 429 |
 | R6 | Determinismo: dos runs del mismo scenario dan resultados distintos | Media | Pinear `temperature=0` para el agente en simulation_mode. Aceptable porque simulator (Haiku) tiene 0.7. |
-| R7 | Langfuse noise: 125 trazas/batch contaminan dashboards | Media | Tag `simulation=true`; filtro default en Langfuse UI |
+| R7 | Ruido de observabilidad: 125 trazas/batch contaminan dashboards | Media | Tag `simulation=true`; LangSmith como fuente primaria de evals, Langfuse como espejo secundario existente |
 | R8 | Costo runaway por loop accidental de "Run all" | Baja | 3 capas de cost guards (rate limit + per-tenant cap + global cap) |
 
 ---
@@ -923,7 +922,7 @@ Sustentable.
 | `db/models.py` | + `is_simulation` en Conversation; UserProfile, SimulationScenario, SimulationRun | ✅ hecho |
 | `agents/nodes/respond.py` | NINGUNO — el nodo no hace I/O externo | ✅ no se toca |
 | `agents/nodes/escalate.py` | NINGUNO — idem | ✅ no se toca |
-| `agents/nodes/finalize_trace.py` | NINGUNO — Langfuse lo cierra el caller | ✅ no se toca |
+| `agents/nodes/finalize_trace.py` | NINGUNO — observabilidad la cierra el caller | ✅ no se toca |
 
 **Total real**: 11 skills × 1 línea + execute_skill (1 bloque) + 2 campos de state + 1 campo de SkillContext. Menos invasivo que lo estimado: respond/escalate/finalize_trace quedan intactos.
 

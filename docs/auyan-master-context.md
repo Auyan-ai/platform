@@ -1,7 +1,7 @@
 # Auyan — Contexto Maestro
 
 > Fuente única de verdad del proyecto. Documento vivo, versionado en git.
-> Última actualización: 2026-05-22 (post grill-me — pivot BPO → Managed AI service).
+> Última actualización: 2026-05-28 (post grill-me — pivot BPO → Managed AI service; 0.11 reencuadrado a Agent Verification Staging).
 > Versión: 2.0 (post-pivot)
 
 ---
@@ -256,7 +256,7 @@ Decisión clave del grill: Auyan **no construye canales directos** (WhatsApp, In
 - Instagram DM del cliente
 - Facebook Messenger, TikTok, etc
 
-Para clientes sin helpdesk: Auyan **recomienda Chatwoot Paid (Cloud)**, cliente paga directo a Chatwoot, Auyan solo se conecta. NO self-hosted nuestro.
+Para clientes sin helpdesk: Auyan **recomienda Chatwoot Cloud**. En staging/verificación se usa plan free o sandbox; en cliente real se pasa a plan paid si volumen/features lo requieren. El cliente paga directo a Chatwoot, Auyan solo se conecta. NO self-hosted nuestro.
 
 ### Integración Shopify (ya construida)
 - Lectura: pedidos, productos, clientes, inventario, devoluciones
@@ -366,7 +366,7 @@ Tiempo primera respuesta: 47s · CSAT estimado: 4.3/5
 2. Cuestionario brand voice (~20 preguntas estructuradas)
 3. `tenant_facts` (horarios, teléfono, dirección, links)
 4. Conectar Shopify (OAuth 1 botón)
-5. Conectar helpdesk (Gorgias/Zendesk OAuth, Chatwoot API key)
+5. Conectar helpdesk (Chatwoot primero para validación/no-helpdesk; Gorgias/Zendesk después según cliente)
 6. Drop-zone info inicial (emails históricos, PDFs, URLs)
 7. DPA + T&C + GDPR consent (firma digital)
 8. Call con AIDE opcional (Calendly)
@@ -409,14 +409,14 @@ Ticket complejo entra → AI sin confianza alta → Escala al equipo del cliente
 | Capa | Tecnología |
 |---|---|
 | Backend | FastAPI (Python 3.12) |
-| Frontend | Next.js 15 + TypeScript + Tailwind v4 + shadcn + **tremor** (charts) |
+| Frontend | Next.js 15 + TypeScript + Tailwind v4 + shadcn |
 | Landing | Next.js 15 + **Aceternity UI** (free, look Sierra/Decagon/Scale AI) + Framer Motion + MDX + ISR + Plausible |
 | Base de datos | Supabase (Postgres + pgvector + Auth + RLS) |
-| Agente | LangGraph + Claude (Sonnet 4.6 default, Opus 4.7 L3+supervisor+judge, Haiku 4.5 intent classifier) |
+| Agente | LangGraph + Claude (Sonnet 4.6 default, Haiku 4.5 intent/user simulator, Opus solo para casos L3/calibración explícita) |
 | Embeddings | OpenAI text-embedding-3-small (1536 dims) |
-| Observabilidad | Langfuse |
+| Observabilidad | LangSmith como fuente primaria de staging/evals; Langfuse como espejo secundario existente |
 | Email saliente (Auyan→cliente) | Postmark |
-| Helpdesk del cliente | Gorgias / Zendesk / Intercom / Chatwoot Cloud (4 adapters al final) |
+| Helpdesk del cliente | Chatwoot Cloud primero para verificación; Gorgias/Zendesk después; Intercom reactivo |
 | Billing (Bloque 2+) | Stripe Subscriptions + Stripe Tax |
 | Deploy | Railway |
 
@@ -439,7 +439,7 @@ Ticket complejo entra → AI sin confianza alta → Escala al equipo del cliente
 - Audit log con pseudonimización GDPR-ready (Sprint 9.3)
 - Rate limiting + budget gate por tenant (Sub-PRs A.1-A.4)
 - Cleanup automático con timeouts por canal
-- 628+ tests, 64 fixtures de eval, 15 migraciones aplicadas
+- 1000+ tests, fixtures de eval/simulator y migraciones de Bloque 1 aplicadas en staging
 
 ---
 
@@ -489,9 +489,9 @@ Modelo Sierra/Decagon:
 4. Draft se postea como **internal note** en el helpdesk (NO se envía al cliente final)
 5. Equipo cliente ve internal note "🤖 Auyan sugiere: [draft]" y responde manualmente
 6. Auyan registra diff entre draft y respuesta real → aprendizaje
-7. Después de N tickets con alta concordancia por categoría → Auyan activa esa categoría
+7. Después de N tickets con alta concordancia por categoría → Auyan propone activar esa categoría
 8. Activación **por categoría** (consulta_envio activa antes que devoluciones)
-9. Cliente NO tiene botón "activar" — Auyan decide
+9. El cliente no opera prompts ni reglas, pero la activación automática requiere su aprobación explícita.
 
 ### Simulator / Observability
 
@@ -510,6 +510,7 @@ Modelo Sierra/Decagon:
 
 **Bloques de escalada**:
 - Bloque 0 MVP: scenarios manuales + judge 4-dim + UI super_admin
+- 0.11A: LangSmith como fuente primaria de observabilidad/evals, Sonnet judge por defecto, Shopify test store con órdenes reales y Chatwoot primero
 - Bloque 2: auto-gen personas/scenarios + bulk runner + scheduled nightly + Diagnostic Tools + Watchtower rubrics
 - Bloque 3: production A/B + canary deployment (5%→100%) reemplaza shadow puro
 
@@ -566,10 +567,10 @@ Estructura DB lista desde Bloque 0: `internal_users` con role enum + `tenant_ass
 | Área | Medida | Estado |
 |---|---|---|
 | Credentials integraciones | `credentials_encrypted` bytea con salt por tenant | Bloque 0 |
-| Uploads cliente | Supabase Storage cifrado + bucket por tenant + RLS + retention 180d | Bloque 1 |
+| Uploads cliente | `tenant_knowledge_submissions` con texto/URL/archivo textual client-side; PDFs/binarios + Storage quedan para iteración posterior | Bloque 1 completado |
 | PII en mensajes | SHA-256 + salt por tenant | ✅ Sprint 9.3 |
 | Cross-tenant access | Solo super_admin con MFA + audit log accesos | Reforzar Bloque 0 |
-| Langfuse traces | Redacción PII pre-log | ✅ Sprint 9.3 |
+| Trazas de observabilidad | Staging usa LangSmith como fuente primaria y puede trazar datos test/autorizados completos; producción requiere redacción/retención formal antes de activar | 0.11A staging |
 | GDPR DPA | Firma digital en onboarding paso 7 | Bloque 1 |
 | Right to erasure | Endpoint `DELETE /tenants/me/data` + cron purga 30d | Bloque 1 |
 | Servidores | EU (Supabase EU, Railway EU, Postmark EU) | ✅ ya configurado |
@@ -808,9 +809,9 @@ SL constituida · Asesor fiscal · Pacto socios · Cuenta bancaria · Decisión 
 | 1.1 | `tenant_playbook` table + queries + UI super_admin editor |
 | 1.2 | `tenant_facts` table + form cliente + lectura del agente como contexto estructurado |
 | 1.3 | Onboarding wizard self-serve 9 pasos + `agent_lifecycle_state` + comunicaciones email |
-| 1.4 | KB drop-zone + cola "pending review" + Supabase Storage cifrado + UI super_admin procesamiento |
+| 1.4 | KB drop-zone + cola `tenant_knowledge_submissions` pending review + UI super_admin procesamiento; Storage/PDFs quedan posterior |
 | 1.5 | Reporte semanal automatizado: `weekly_reports` table + cron Lunes 6am + UI super_admin aprobación + envío Postmark |
-| 1.6 | Dashboard cliente 7 secciones MVP (Home/Insights/Reportes/KB/Aprobaciones/Onboarding/Configuración) con tremor |
+| 1.6 | Dashboard cliente 7 secciones MVP (Home/Insights/Reportes/KB/Aprobaciones/Onboarding/Configuración) |
 | 1.7 | Dashboard super_admin con Home/Review Queue + filtros por rol |
 | 1.8 | `apps/landing` Next.js + Aceternity UI + páginas (home/pricing/founding-partner/blog/security/about) + Plausible |
 | 1.9 | Email outbound general (no solo reportes): templates editables + queue + retry logic |
@@ -860,7 +861,7 @@ SL constituida · Asesor fiscal · Pacto socios · Cuenta bancaria · Decisión 
 | 2 | KB | 3 niveles: nunca/aporta/edita factual |
 | 3 | Helpdesks | 4 adapters bidireccionales: Gorgias + Chatwoot + Zendesk + (Intercom reactivo) |
 | 4 | Canales WhatsApp/IG/Widget | Heredados via helpdesk, NO construidos directamente |
-| 5 | Chatwoot Cloud Paid | Recomendado al cliente sin helpdesk; cliente paga directo a Chatwoot |
+| 5 | Chatwoot Cloud | Free/sandbox para verificación; paid si el cliente real lo necesita; cliente paga directo a Chatwoot |
 | 6 | Shadow mode | Internal notes en helpdesk del cliente |
 | 7 | Activación gradual | Por categoría, decisión Auyan no cliente |
 | 8 | Escalación | Mix por tenant: push helpdesk default, email fallback |

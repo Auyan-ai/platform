@@ -2,7 +2,7 @@
 
 > Fuente única de verdad del sistema de diseño visual.
 > Versión: 1.2 (Bloque 1, Sub-PRs 1.1/1.2 — Mercury light dashboard shell)
-> Última actualización: 2026-05-27
+> Última actualización: 2026-05-28
 
 ---
 
@@ -506,7 +506,7 @@ Cuando toques un componente existente:
 - Dark mode completo. Variables están preparadas para soportarlo, pero la implementación se posterga.
 - Branding por tenant (logos, paletas del cliente). Se discutirá en Bloque 2.
 - Ilustraciones y empty states ilustrados.
-- Data viz (charts) en el dashboard cliente — se hace cuando llegue tremor en Bloque 1.5.
+- Nuevas visualizaciones avanzadas fuera de las ya implementadas en dashboard cliente. Si se agregan charts, deben seguir los tokens existentes y reutilizar la librería ya instalada; no introducir una librería nueva sin una razón clara.
 - Sistema de email templates visuales (`apps/api/services/email_templates`) — se cubre en sub-PR 1.5.
 
 ---

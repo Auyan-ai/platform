@@ -754,3 +754,27 @@ Diseño:
 - La UI queda en el sidebar interno como `Emails`; no se expone al dashboard cliente.
 
 Verificación sesión 48: `poetry run ruff check`, suite API 1026/1026 verde, `pnpm typecheck`, `pnpm build:web`, Biome focal, `git diff --check` y CI verdes.
+
+---
+
+## Sesión 50 — Limpieza de `progress` + staging DB desbloqueado ✅
+
+Se limpió `docs/progress.md` para quitar información operativa ya obsoleta y evitar dos focos paralelos.
+
+Cambios archivados:
+
+- Las migraciones de Bloque 1 dejaron de aparecer como pendiente activo porque ya fueron aplicadas en staging.
+- El Bloque 0.11 se reencuadró desde una validación E2E básica bloqueada por crédito hacia una verificación madura del agente en staging.
+- Billing manual 1.10 queda documentado como pendiente por inputs externos, pero no como foco activo.
+- Chatwoot queda definido como primer helpdesk real para la verificación; Zendesk y Gorgias siguen pendientes posteriores.
+
+Migraciones confirmadas como desbloqueadas:
+
+| Migración | Incluye |
+|---|---|
+| `20260525000001_add_tenant_playbook.sql` | `tenant_playbook` |
+| `20260525000002_add_tenant_facts.sql` | `tenant_facts` |
+| `20260527000001_add_tenant_onboarding.sql` | `agent_lifecycle_state` + `tenant_onboarding` |
+| `20260528000001_add_tenant_knowledge_submissions.sql` | `tenant_knowledge_submissions` + cola KB |
+| `20260528000002_add_weekly_reports.sql` | `weekly_reports` + flujo `draft/pending_review/approved/sent/failed` |
+| `20260528000003_add_outbound_email_queue.sql` | `outbound_email_templates` + `outbound_email_jobs` |

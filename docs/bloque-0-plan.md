@@ -2,7 +2,8 @@
 
 > Sanity check + fundación arquitectónica post-pivot 2026-05-22.
 > Duración esperada: **3-4 semanas** de trabajo concentrado.
-> Modelo recomendado: Sonnet salvo donde indique Opus (sub-PR 0.10 Simulator).
+> Modelo original del plan: Sonnet salvo el diseño inicial del simulator. El criterio vigente para 0.11A usa Sonnet por defecto y Opus solo para calibración explícita.
+> **Estado histórico:** este documento conserva el plan original de Bloque 0. No usarlo como plan activo. El estado operativo vigente vive en [`docs/progress.md`](progress.md), donde 0.11 fue reencuadrado como Agent Verification Staging con LangSmith, simulator costeado, Shopify real y Chatwoot primero.
 
 ---
 
@@ -359,10 +360,10 @@ Estos NO bloquean código pero sí bloquean tests E2E con OAuth real.
 
 ---
 
-### Sub-PR 0.10 — Simulator MVP ⚠️ Opus recomendado
+### Sub-PR 0.10 — Simulator MVP
 
 **Cuándo:** Después de adapters refactorizados. **Pieza más grande de Bloque 0.**
-**Modelo:** **Opus** — define arquitectura crítica que afecta Bloques 2/3.
+**Modelo original:** Opus para diseño del simulator. Criterio vigente 0.11A: Sonnet judge por defecto y Opus solo para calibración explícita.
 **Dependencias:** 0.2-0.7 mergeados (necesita adapters para mockear integraciones).
 **Tiempo estimado:** 5-7 días.
 
@@ -433,7 +434,7 @@ Estos NO bloquean código pero sí bloquean tests E2E con OAuth real.
 - Bulk run de los 20+ scenarios completa
 - Judge da feedback útil (no genérico)
 - UI super_admin permite correr scenario individual y ver resultado
-- Documentado cómo crear un scenario nuevo (mini guide en `docs/simulator-guide.md`)
+- Documentar cómo crear un scenario nuevo dentro de `docs/simulator-design.md` o en el README del módulo simulator. No existe una guía separada.
 
 ---
 
@@ -443,6 +444,8 @@ Estos NO bloquean código pero sí bloquean tests E2E con OAuth real.
 **Modelo:** Sonnet.
 **Dependencias:** 0.10 (simulator funcionando).
 **Tiempo estimado:** 3-5 días (depende de bugs encontrados).
+
+**Nota 2026-05-28:** esta versión de 0.11 quedó superada. El alcance activo es `0.11A — Agent Verification Staging` en `docs/progress.md`: LangSmith como fuente primaria, simulator con Sonnet judge por defecto y tope normal de `$5`, Shopify test store con órdenes reales y Chatwoot como primer helpdesk.
 
 **Plan:**
 
