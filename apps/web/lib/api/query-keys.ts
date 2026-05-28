@@ -14,6 +14,8 @@ export const queryKeys = {
     onboarding: (tenantId: string) => ['tenants', tenantId, 'onboarding'] as const,
     kbSubmissions: (tenantId: string, status?: string) =>
       ['tenants', tenantId, 'kb-submissions', status ?? 'all'] as const,
+    weeklyReports: (tenantId: string, status?: string) =>
+      ['tenants', tenantId, 'weekly-reports', status ?? 'all'] as const,
   },
   conversations: {
     list: (tenantId: string, filters?: Record<string, unknown>) =>
