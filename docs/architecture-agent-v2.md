@@ -2,8 +2,8 @@
 
 _Diseño actualizado del agente conversacional para soportar acciones, AOPs (Agent Operating Procedures), supervisor pattern y mejora continua._
 
-> **Estado:** diseño aprobado, pendiente de implementación a lo largo de los Sprints 6–14.
-> Supersede el diseño v1 descrito en `agents/graph.py` (decisión binaria `respond_or_escalate` sin tools reales).
+> **Estado 2026-05-28:** documento de arquitectura histórico-vivo. Muchas piezas ya están implementadas; el estado operativo vigente manda en `docs/progress.md`.
+> 0.11A reencuadra la verificación del agente: LangSmith como observabilidad primaria de staging/evals, simulator con Sonnet judge por defecto, Shopify test store real y Chatwoot primero.
 
 ---
 
@@ -334,7 +334,7 @@ class GetOrderByEmail(Skill):
 
 | Tier | Naturaleza | Activación | Threshold default | Supervisor | Audit log |
 |---|---|---|---|---|---|
-| **L1** | Read-only | Día 1 con todo tenant | 0.70 | No | Solo Langfuse trace |
+| **L1** | Read-only | Día 1 con todo tenant | 0.70 | No | Trace en LangSmith; Langfuse queda como espejo secundario existente |
 | **L2** | Write bajo riesgo | Día 1, opt-in en `tenant_tool_permissions` | 0.85 | Sonnet | Tabla dedicada |
 | **L3** | Write alto riesgo (financiero, irreversible) | Tras 2-4 semanas, opt-in | 0.95 | Opus | Tabla dedicada + `human_approval_required` primer mes |
 
@@ -796,7 +796,7 @@ Esto evita el caso clásico que mencionaste ("hola, dónde está mi pedido y tam
 
 ### 7.5 Métricas obligatorias del clasificador
 
-Trackear desde el día 1 en Langfuse + tabla `intent_classifier_runs`:
+Trackear desde el día 1 en LangSmith + tabla `intent_classifier_runs`:
 
 | Métrica | Cómo se mide | Acción si se desvía |
 |---|---|---|
@@ -1157,7 +1157,7 @@ class GetOrderByEmailInput(SkillInput):
 
 **Reglas de persistencia**:
 
-| Campo | En audit log (`inputs_redacted`) | En `inputs_hash` | En Langfuse trace |
+| Campo | En audit log (`inputs_redacted`) | En `inputs_hash` | En trazas LangSmith/Langfuse |
 |---|---|---|---|
 | Email | pseudonimizado: `sha256(email + tenant_salt)[:16]` | hash original (para detección de duplicados) | mismo pseudónimo que audit log |
 | Teléfono | últimos 4 dígitos `***-1234` | hash | últimos 4 dígitos |
@@ -1436,7 +1436,7 @@ Métricas comparativas: CSAT, resolution_rate, escalation_rate, cost_per_convers
 |---|---|---|
 | **6** ✅ | Skills framework + Shopify read tools + ReAct loop **+ lifecycle básico** | 5 skills L1, grafo refactorizado, credenciales Shopify por tenant, estado `closed_abandoned` |
 | **7** ✅ | AOPs en DB + selector de intent + workspaces + UI básica **+ eval harness obligatorio** | Tablas, compiler, `select_aop` node, editor dashboard, harness con 13 fixtures |
-| **8** ✅ | Supervisor pattern + Agent Reasoning UI | Nodo `supervise`, schema tactical/structural, métricas Langfuse, UI reasoning panel |
+| **8** ✅ | Supervisor pattern + Agent Reasoning UI | Nodo `supervise`, schema tactical/structural, métricas de observabilidad, UI reasoning panel |
 | **9** ✅ | Skills L2 + permissions + audit log PII + idempotency + nudges + cache invalidation | 2 skills L2, audit log pseudonimizado, AOP cache invalidation NOTIFY |
 | **10** ✅ | Skills L3 + human approval mode + UI de aprobación | 4 skills L3, flujo aprobación, idempotency, 52 fixtures adversarial |
 | **11** ✅ | Slow agent skeleton (sampling + Sonnet judge) | Job semanal manual, sampling, tabla proposals, UI cola, two-step judge |
@@ -1495,7 +1495,7 @@ Ver detalle en sección 20 abajo. Resumen:
 - ~~**Adapters por tenant**~~ → `MessageProvider` (base) + `HelpdeskProvider` (extends). Una abstracción unificada.
 - ~~**Helpdesks en Bloque 0**~~ → 3 adapters: Gorgias + Chatwoot + Zendesk. Intercom reactivo (Bloque 4).
 - ~~**Canales WhatsApp/Instagram/Widget**~~ → heredados via helpdesk, NO construidos directamente.
-- ~~**Chatwoot self-hosted**~~ → descartado. Recomendamos Chatwoot Paid (cliente paga directo).
+- ~~**Chatwoot self-hosted**~~ → descartado. Usamos Chatwoot Cloud; free/sandbox para verificación y paid si el cliente real lo necesita.
 - ~~**Shadow mode**~~ → internal notes en helpdesk del cliente (modelo Sierra/Decagon).
 - ~~**Activación gradual**~~ → por categoría, decisión Auyan no cliente.
 - ~~**Onboarding**~~ → 9 pasos self-serve + call AIDE opcional.
@@ -1584,7 +1584,7 @@ Ver también sección 18.
 
 ### 19.4 Detección de alucinaciones (estado actual y roadmap)
 
-Estado actual: **no hay detección automática**. Puedes detectar alucinación manualmente en Langfuse comparando los chunks recuperados con la respuesta del agente. La emisión de `retrieved_chunks` en los reasoning events ayuda.
+Estado actual: **no hay detección automática**. En 0.11A la revisión manual debe hacerse principalmente en LangSmith comparando chunks recuperados, tool outputs y respuesta del agente; Langfuse queda como espejo secundario mientras exista. La emisión de `retrieved_chunks` en los reasoning events ayuda.
 
 Roadmap:
 - **Inmediato (manual):** KB con datos fantasiosos específicos (números impares, nombres únicos) donde cualquier desviación es obvia. Script `seed_kb.py` implementado en sesión 19.
@@ -1692,10 +1692,10 @@ CREATE TABLE tenant_integrations (
    - Si auto-response → ya está enviado
 6. Auyan registra diff entre draft y respuesta final del equipo cliente
 7. Slow agent detecta patrones de concordancia/discordancia → propone updates
-8. Cuando una categoría supera threshold de concordancia → Auyan activa esa categoría (auto-response)
+8. Cuando una categoría supera threshold de concordancia → Auyan propone activar esa categoría (auto-response)
 ```
 
-**Importante:** el cliente NO tiene botón "activar". Auyan decide activación gradual por categoría según métricas. Esto preserva el modelo Crescendo (cliente ve resultados, Auyan opera).
+**Importante:** el cliente no opera prompts ni reglas, pero la activación automática requiere aprobación explícita del cliente. Auyan recomienda y ejecuta la activación gradual por categoría según métricas.
 
 **Bloque 3** evoluciona a **canary deployment**: en lugar de "shadow puro → 100%", se hace ramp 5%→25%→50%→100% por categoría con métricas tiempo real.
 
@@ -1724,7 +1724,7 @@ ALTER TABLE escalations
 | Nivel | Quién | Qué | Storage |
 |---|---|---|---|
 | 🔴 Nunca toca | Solo Auyan (super_admin/qa_km) | Prompts, AOPs, contenido RAG, retrieval config | Tablas `aops`, `kb_chunks` con embeddings |
-| 🟡 Aporta no edita | Cliente sube → Auyan cura | Documentos, PDFs, URLs, políticas, descripciones | `kb_uploads` (cola pending review) → procesado a `kb_chunks` |
+| 🟡 Aporta no edita | Cliente sube → Auyan cura | Documentos, URLs, políticas, descripciones y archivos textuales | `tenant_knowledge_submissions` (cola pending review) → procesado a `knowledge_base_documents`/`knowledge_base_chunks` |
 | 🟢 Edita directo | Cliente form plano | `tenant_facts`: horarios, teléfono, dirección, links | Tabla nueva `tenant_facts` (NO entra al RAG) |
 
 **`tenant_facts` se lee como contexto estructurado del agente** (no como retrieval). Update inmediato sin curación. Schema editable por vertical (`tenant_fact_schema` table).
@@ -1953,7 +1953,7 @@ Código a actualizar:
 | **AI Data Assistant cliente** | Chat conversacional NL sobre métricas (Duet for customers) | 2 |
 | **Facturación** | Plan + tickets usados + factura próxima + historial PDFs | 2 |
 
-**Stack:** shadcn + tremor (charts) + sidebar ChatGPT/Claude-style.
+**Stack:** shadcn + componentes chart existentes + sidebar ChatGPT/Claude-style.
 
 ### 20.10 Iteración rápida — qué va a DB editable
 
@@ -1981,10 +1981,10 @@ Principio transversal cerrado en grill:
 | Área | Medida | Estado |
 |---|---|---|
 | Credentials integraciones | `credentials_encrypted` BYTEA con salt por tenant (NO env var global) | Bloque 0 |
-| Uploads cliente (KB drop-zone) | Supabase Storage cifrado + bucket por tenant + RLS + retention 180d | Bloque 1 |
+| Uploads cliente (KB drop-zone) | `tenant_knowledge_submissions` con texto/URL/archivo textual client-side; Supabase Storage/PDFs quedan posterior | Bloque 1 completado |
 | PII pseudonimización | ✅ Sprint 9.3 | OK |
 | Cross-tenant access | Solo `super_admin` con MFA obligatorio + audit log de accesos cross-tenant | Refuerzo Bloque 0 |
-| Langfuse traces | Redacción PII pre-log | ✅ Sprint 9.3 |
+| Trazas de observabilidad | Staging usa LangSmith como fuente primaria y puede trazar datos test/autorizados completos; producción requiere redacción/retención formal antes de activar | 0.11A staging |
 | GDPR DPA | Firma digital en onboarding paso 7 | Bloque 1 |
 | Right to erasure | Endpoint `DELETE /tenants/me/data` + cron purga real 30d | Bloque 1 |
 | Servidores | EU (Supabase EU, Railway EU, Postmark EU) | ✅ ya configurado |

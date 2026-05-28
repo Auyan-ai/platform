@@ -1,6 +1,6 @@
 # Arquitectura — Web app operativa (`apps/web`)
 
-_Documento actualizado post-pivot el 2026-05-27. La fuente conceptual manda en [`docs/auyan-master-context.md`](auyan-master-context.md); el estado operativo manda en [`docs/progress.md`](progress.md). Este archivo describe la arquitectura real de `apps/web` después del pivot BPO → Managed AI Service._
+_Documento actualizado post-pivot el 2026-05-28. La fuente conceptual manda en [`docs/auyan-master-context.md`](auyan-master-context.md); el estado operativo manda en [`docs/progress.md`](progress.md). Este archivo describe la arquitectura real de `apps/web` después del pivot BPO → Managed AI Service._
 
 ---
 
@@ -248,7 +248,7 @@ export function apiClient(jwt: string, tenantId?: string) {
 
 | Pendiente | Bloquea | Bloque | Nota |
 |---|---|---|---|
-| Aplicar migraciones Bloque 1 a staging | Demo live end-to-end de Bloque 1 | 1.1–1.9 | Código y tests listos; falta aplicar las migraciones listadas en `progress.md` y configurar secrets operativos. |
+| Agent Verification Staging | Confianza operativa antes de vender/activar clientes reales | 0.11 | Foco activo según `progress.md`: LangSmith, simulator costeado, Shopify test store real y Chatwoot primero. Cambios principalmente en API/scripts; web solo consume resultados existentes. |
 | Completar onboarding wizard + lifecycle | Flujo cliente end-to-end | 1.3 | ✅ Completo. |
 | KB drop-zone + cola pending review | Onboarding útil con documentos reales | 1.4 | ✅ Completo con curación Auyan. |
 | Reportes semanales | Propuesta managed visible al cliente | 1.5 | ✅ Completo: email resumen + dashboard como fuente completa. |
@@ -282,10 +282,11 @@ No usamos `SUPABASE_SERVICE_ROLE_KEY` en el web — todas las operaciones admin 
 
 ## 12. Plan vigente por sub-PRs
 
-El plan Sprint 3 original queda histórico. El plan vigente es Bloque 1, tomado de `auyan-master-context.md` y reflejado en `progress.md`.
+El plan Sprint 3 original queda histórico. El estado operativo vigente lo manda `progress.md`.
 
 | Sub-PR | Estado | Entregable |
 |---|---|---|
+| 0.11A | activo | Agent Verification Staging: LangSmith como observabilidad primaria, simulator optimizado por coste, Shopify real y Chatwoot primero. |
 | 1.0 | ✅ completo | Design Sprint: `DESIGN.md`, tokens, primitives, refactor shell Mercury light. |
 | 1.1 | ✅ completo | `tenant_playbook` table + queries + UI super_admin editor. |
 | 1.2 | ✅ completo | `tenant_facts` table + form cliente + lectura del agente como contexto estructurado. |

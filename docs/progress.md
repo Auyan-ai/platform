@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-05-28 (sesión 49 — Bloque 1.10 con runbook base creado; faltan datos reales por cliente para cerrar billing manual)._
+_Última actualización: 2026-05-28 (sesión 50 — Bloque 0.11 reencuadrado como verificación madura del agente en staging con LangSmith, Shopify real y Chatwoot primero)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
 
@@ -8,7 +8,7 @@ _Última actualización: 2026-05-28 (sesión 49 — Bloque 1.10 con runbook base
 
 ## Empezar aquí
 
-**Modelo recomendado:** Sonnet para continuar Bloque 1.
+**Modelo recomendado:** Sonnet.
 
 **Rama actual esperada:** `develop`.
 
@@ -16,9 +16,10 @@ _Última actualización: 2026-05-28 (sesión 49 — Bloque 1.10 con runbook base
 
 | Área | Estado |
 |---|---|
-| Bloque 0 | 0.1–0.10 completados. 0.11 sigue bloqueado por crédito Anthropic para corrida final con judge. |
-| Bloque 1 | 1.0–1.9 completados y archivados. |
-| Siguiente paso | 1.10 — Billing manual primeros 1–2 clientes (runbook creado; faltan datos reales por cliente). |
+| Bloque 0 | 0.1–0.10 completados. 0.11 reencuadrado como Agent Verification Staging. |
+| Bloque 1 | 1.0–1.9 completados y archivados. 1.10 billing manual tiene runbook, pero depende de inputs externos por cliente. |
+| Staging DB | Migraciones de Bloque 1 aplicadas; ya no bloquean la validación. |
+| Siguiente paso | 0.11A — LangSmith como fuente primaria de observabilidad + simulator optimizado por coste. |
 
 ---
 
@@ -39,9 +40,11 @@ _Última actualización: 2026-05-28 (sesión 49 — Bloque 1.10 con runbook base
 | 1.8 | Landing pública `apps/landing` + Plausible | ✅ [PR #117](https://github.com/Auyan-ai/platform/pull/117) |
 | 1.9 | Email outbound general: templates + queue + retry + UI | ✅ [PR #119](https://github.com/Auyan-ai/platform/pull/119)–[#121](https://github.com/Auyan-ai/platform/pull/121) |
 
-### Siguiente: Sub-PR 1.10 — Billing manual primeros clientes
+### Sub-PR 1.10 — Billing manual primeros clientes
 
 **Objetivo:** cerrar operación manual de cobro para los primeros 1–2 clientes antes de abrir Stripe/Billing técnico en Bloque 2.
+
+Estado: runbook creado; bloqueado por inputs externos por cliente. No es el foco activo mientras se prioriza la verificación del agente.
 
 Runbook base:
 
@@ -54,7 +57,7 @@ Faltan inputs externos por cliente:
 3. Confirmar contacto operativo y fecha de inicio de servicio.
 4. Registrar factura manual enviada y estado de cobro fuera del producto.
 
-### Nota para 1.4 — Shopify content import / KB bootstrap
+### Nota viva — Shopify content import / KB bootstrap
 
 Idea recomendada para reducir fricción de onboarding: importar contenido existente de Shopify al pipeline de KB.
 
@@ -73,35 +76,29 @@ Spike sugerido:
 
 ---
 
-## Migraciones listas para staging
-
-Estas migraciones ya están en repo y listas para aplicar en staging:
-
-| Migración | Incluye |
-|---|---|
-| `20260525000001_add_tenant_playbook.sql` | `tenant_playbook` |
-| `20260525000002_add_tenant_facts.sql` | `tenant_facts` |
-| `20260527000001_add_tenant_onboarding.sql` | `agent_lifecycle_state` + `tenant_onboarding` |
-| `20260528000001_add_tenant_knowledge_submissions.sql` | `tenant_knowledge_submissions` + cola KB |
-| `20260528000002_add_weekly_reports.sql` | `weekly_reports` + flujo `draft/pending_review/approved/sent/failed` |
-| `20260528000003_add_outbound_email_queue.sql` | `outbound_email_templates` + `outbound_email_jobs` |
-
-Pendiente operativo: aplicarlas manualmente en Supabase/Railway staging antes de depender de estas tablas en ambiente real. El cron de reportes semanales requiere además `DATABASE_URL` como secret de GitHub Actions.
-
----
-
 ## Pendientes vivos
 
-### Bloque 0.11 — Validación E2E
+### Bloque 0.11 — Agent Verification Staging
 
-Bloqueado por crédito Anthropic.
+Objetivo: verificar que el agente funciona correctamente en condiciones cercanas a vida real, sin depender de datos inventados y con LangSmith como fuente primaria de observabilidad.
 
-Cuando haya crédito:
+Alcance reencuadrado:
 
-1. Re-seed AOPs: `seed_test_aops.py --tenant <Lunaria> --update`.
-2. Mapa barato sin judge: `run_simulator.py --tenant <Lunaria> --reseed --no-judge --all`.
-3. Arreglar lo que quede.
-4. Corrida final con judge para confirmar meta ≥20/25.
+1. Integrar LangSmith en staging para trazas de conversación, grafo, nodos, decisiones, skills, coste y errores.
+2. Optimizar simulator: Sonnet como judge default, Opus opcional, corrida normal con tope de coste de `$5`.
+3. Crear fixture realista de tenant: playbook, facts, onboarding, KB, AOPs, tool permissions e integraciones.
+4. Preparar Shopify test store con órdenes reales marcadas `auyan-e2e`; no aceptar verificación formal sobre datos inventados.
+5. Probar primero `/webhooks/inbound` y luego Chatwoot real como primer helpdesk.
+6. Medir alineación entre propuesta del agente y decisión humana para decidir cuándo una skill puede pasar a automático por tenant.
+
+Criterios de aceptación iniciales:
+
+- 25/25 scenarios pasan critical assertions sin judge.
+- Sample con judge Sonnet obtiene promedio mínimo `8/10`.
+- 0 acciones L3 ejecutadas sin aprobación.
+- 0 tracking/refunds/orders inventados.
+- Corrida normal bajo `$5`.
+- 100% de runs visibles en LangSmith con correlación a DB.
 
 Tenant de prueba Lunaria staging: `11111111-1111-1111-1111-111111111111`.
 
@@ -109,8 +106,11 @@ Tenant de prueba Lunaria staging: `11111111-1111-1111-1111-111111111111`.
 
 | Pendiente | Estado |
 |---|---|
-| Gorgias OAuth app | Falta registrar app + setear env vars. |
-| Zendesk OAuth app | Falta registrar app + setear env vars. |
+| LangSmith | Falta configurar proyecto/env vars y conectar `AgentService` como fuente primaria de observabilidad. |
+| Shopify test store | Falta preparar tienda con órdenes reales `auyan-e2e`, credenciales en `tenant_integrations` y scripts de seed/verify. |
+| Chatwoot sandbox | Primer helpdesk para verificación real; falta crear cuenta/inbox/webhook/token y registrar integración. |
+| Gorgias OAuth app | Sigue pendiente; se implementará después de Chatwoot. |
+| Zendesk OAuth app | Sigue pendiente; se implementará después de Chatwoot. |
 | Postmark | Falta `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL` y verificar dominio `auyan.ai`. |
 | Weekly Reports cron | Falta setear `DATABASE_URL` en GitHub Actions para el workflow programado. |
 
