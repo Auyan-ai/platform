@@ -3849,7 +3849,7 @@ async def create_or_refresh_weekly_report_draft(
     *,
     week_start: str,
     week_end: str,
-    created_by: UUID,
+    created_by: UUID | None,
     recipient_email: str | None = None,
 ) -> WeeklyReport:
     metrics = await build_weekly_report_metrics(

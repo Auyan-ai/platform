@@ -1,0 +1,51 @@
+name: Weekly Reports
+
+on:
+  schedule:
+    # Mondays 04:00 UTC, aligned with 06:00 Europe/Madrid during CEST.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      tenant_id:
+        description: "Optional tenant UUID to generate only one report"
+        required: false
+        type: string
+      dry_run:
+        description: "List targets without writing drafts"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  generate:
+    name: Generate weekly report drafts
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pip install poetry==1.8.5
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --only main
+
+      - name: Generate drafts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          ARGS=()
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          if [ -n "${{ inputs.tenant_id }}" ]; then
+            ARGS+=(--tenant-id "${{ inputs.tenant_id }}")
+          fi
+          poetry run python -m scripts.generate_weekly_reports "${ARGS[@]}"
