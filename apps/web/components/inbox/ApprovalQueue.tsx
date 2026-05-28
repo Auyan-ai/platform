@@ -1,18 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import Link from 'next/link'
-import {
-  useApprovals,
-  useApproveMutation,
-  useRejectMutation,
-} from '@/lib/api/hooks/approvals'
-import type { ApprovalStatus, ApprovalOut } from '@/lib/api/hooks/approvals'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Label } from '@/components/ui/label'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
   DialogContent,
@@ -21,6 +10,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
+import { useApprovals, useApproveMutation, useRejectMutation } from '@/lib/api/hooks/approvals'
+import type { ApprovalOut, ApprovalStatus } from '@/lib/api/hooks/approvals'
+import Link from 'next/link'
+import { useState } from 'react'
 
 // ----------------------------------------------------------------
 // Helpers
@@ -121,13 +117,13 @@ function RejectDialog({
 
 function ApprovalRow({
   approval,
-  tenantId,
+  conversationBasePath,
   onApprove,
   onReject,
   isActing,
 }: {
   approval: ApprovalOut
-  tenantId: string
+  conversationBasePath: string
   onApprove: (id: string) => void
   onReject: (id: string) => void
   isActing: boolean
@@ -147,13 +143,15 @@ function ApprovalRow({
           </p>
           <div className="mt-1 flex items-center gap-2 text-xs text-foreground-muted">
             <Link
-              href={`/tenants/${tenantId}/conversations/${approval.conversation_id}`}
+              href={`${conversationBasePath}/${approval.conversation_id}`}
               className="text-accent-foreground hover:underline underline-offset-2"
             >
               Ver conversación
             </Link>
             <span>·</span>
-            <span>AOP: {approval.aop_slug} v{approval.aop_version}</span>
+            <span>
+              AOP: {approval.aop_slug} v{approval.aop_version}
+            </span>
             <span>·</span>
             <span className="tabular-nums">{relativeTime(approval.created_at)}</span>
           </div>
@@ -191,7 +189,13 @@ function ApprovalRow({
 
 const LIMIT = 50
 
-export function ApprovalQueue({ tenantId }: { tenantId: string }) {
+export function ApprovalQueue({
+  tenantId,
+  conversationBasePath = `/tenants/${tenantId}/conversations`,
+}: {
+  tenantId: string
+  conversationBasePath?: string
+}) {
   const [activeStatus, setActiveStatus] = useState<ApprovalStatus | 'all'>('pending')
   const [offset, setOffset] = useState(0)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -199,7 +203,12 @@ export function ApprovalQueue({ tenantId }: { tenantId: string }) {
 
   const status = activeStatus === 'all' ? undefined : activeStatus
 
-  const { data, isLoading, isError, error: queryError } = useApprovals({
+  const {
+    data,
+    isLoading,
+    isError,
+    error: queryError,
+  } = useApprovals({
     tenantId,
     status,
     limit: LIMIT,
@@ -245,9 +254,7 @@ export function ApprovalQueue({ tenantId }: { tenantId: string }) {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold text-foreground">Aprobaciones</h1>
-          {isLoading && (
-            <span className="text-xs text-foreground-muted">Actualizando…</span>
-          )}
+          {isLoading && <span className="text-xs text-foreground-muted">Actualizando…</span>}
         </div>
 
         <Tabs
@@ -274,8 +281,7 @@ export function ApprovalQueue({ tenantId }: { tenantId: string }) {
 
         {isError ? (
           <div className="rounded-md bg-danger-subtle px-4 py-3 text-sm text-danger-foreground">
-            Error al cargar:{' '}
-            {queryError instanceof Error ? queryError.message : 'desconocido'}
+            Error al cargar: {queryError instanceof Error ? queryError.message : 'desconocido'}
           </div>
         ) : approvals.length === 0 && !isLoading ? (
           <div className="py-12 text-center text-sm text-foreground-muted">
@@ -288,7 +294,7 @@ export function ApprovalQueue({ tenantId }: { tenantId: string }) {
               <ApprovalRow
                 key={a.id}
                 approval={a}
-                tenantId={tenantId}
+                conversationBasePath={conversationBasePath}
                 onApprove={handleApprove}
                 onReject={setRejectingId}
                 isActing={isActing}

@@ -3,25 +3,25 @@
 import { LogoutButton } from '@/components/nav/LogoutButton'
 import { cn } from '@/lib/utils'
 import {
-  AlertTriangle,
+  BarChart3,
+  BookOpenText,
   ClipboardList,
   FileBarChart2,
-  FileText,
-  LayoutDashboard,
-  MessagesSquare,
-  Store,
+  Home,
+  Settings,
+  ShieldCheck,
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const NAV_ITEMS = [
-  { label: 'Overview', icon: LayoutDashboard, section: 'overview' },
-  { label: 'Onboarding', icon: ClipboardList, section: 'onboarding' },
-  { label: 'Datos', icon: Store, section: 'facts' },
-  { label: 'Conocimiento', icon: FileText, section: 'knowledge' },
+  { label: 'Home', icon: Home, section: 'overview' },
+  { label: 'Insights', icon: BarChart3, section: 'insights' },
   { label: 'Reportes', icon: FileBarChart2, section: 'reports' },
-  { label: 'Conversaciones', icon: MessagesSquare, section: 'conversations' },
-  { label: 'Escalaciones', icon: AlertTriangle, section: 'escalations' },
+  { label: 'Knowledge Base', icon: BookOpenText, section: 'knowledge' },
+  { label: 'Aprobaciones', icon: ShieldCheck, section: 'approvals' },
+  { label: 'Onboarding', icon: ClipboardList, section: 'onboarding' },
+  { label: 'Configuración', icon: Settings, section: 'settings' },
 ] as const
 
 interface ClientSidebarProps {

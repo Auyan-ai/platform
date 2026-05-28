@@ -1,4 +1,4 @@
-import { ConversationDetail } from '@/components/inbox/ConversationDetail'
+import { redirect } from 'next/navigation'
 
 interface Props {
   params: Promise<{ tenantId: string; id: string }>
@@ -6,13 +6,6 @@ interface Props {
 
 export default async function ClientConversationDetailPage({ params }: Props) {
   const { tenantId, id } = await params
-  return (
-    <ConversationDetail
-      tenantId={tenantId}
-      conversationId={id}
-      readOnly
-      maskPII
-      backHref={`/clients/${tenantId}/conversations`}
-    />
-  )
+
+  redirect(`/clients/${tenantId}/insights/${id}`)
 }

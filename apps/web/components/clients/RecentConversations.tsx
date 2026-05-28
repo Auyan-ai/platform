@@ -1,10 +1,10 @@
 'use client'
 
-import Link from 'next/link'
-import { useConversations } from '@/lib/api/hooks/conversations'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { ConversationStatus, ChannelType } from '@auyan/shared'
+import { useConversations } from '@/lib/api/hooks/conversations'
+import type { ChannelType, ConversationStatus } from '@auyan/shared'
+import Link from 'next/link'
 
 const STATUS_LABELS: Record<ConversationStatus, string> = {
   open: 'Abierta',
@@ -76,9 +76,7 @@ export function RecentConversations({ tenantId }: RecentConversationsProps) {
 
   if (conversations.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-foreground-muted">
-        No hay conversaciones aún.
-      </p>
+      <p className="py-8 text-center text-sm text-foreground-muted">No hay conversaciones aún.</p>
     )
   }
 
@@ -87,12 +85,10 @@ export function RecentConversations({ tenantId }: RecentConversationsProps) {
       {conversations.map((conv) => (
         <Link
           key={conv.id}
-          href={`/clients/${tenantId}/conversations/${conv.id}`}
+          href={`/clients/${tenantId}/insights/${conv.id}`}
           className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-muted"
         >
-          <Badge variant={STATUS_VARIANT[conv.status]}>
-            {STATUS_LABELS[conv.status]}
-          </Badge>
+          <Badge variant={STATUS_VARIANT[conv.status]}>{STATUS_LABELS[conv.status]}</Badge>
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground-body">
             {conv.subject ?? `Conversación ${conv.id.slice(0, 8)}`}
           </span>
