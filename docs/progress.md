@@ -80,6 +80,7 @@ Estas migraciones ya están en repo y listas para aplicar en staging:
 | `20260527000001_add_tenant_onboarding.sql` | `agent_lifecycle_state` + `tenant_onboarding` |
 | `20260528000001_add_tenant_knowledge_submissions.sql` | `tenant_knowledge_submissions` + cola KB |
 | `20260528000002_add_weekly_reports.sql` | `weekly_reports` + flujo `draft/pending_review/approved/sent/failed` |
+| `20260528000003_add_outbound_email_queue.sql` | `outbound_email_templates` + `outbound_email_jobs` |
 
 Pendiente operativo: aplicarlas manualmente en Supabase/Railway staging antes de depender de estas tablas en ambiente real. El cron de reportes semanales requiere además `DATABASE_URL` como secret de GitHub Actions.
 
