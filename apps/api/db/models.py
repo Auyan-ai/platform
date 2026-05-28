@@ -30,6 +30,7 @@ AgentLifecycleState = Literal[
 TenantKnowledgeSourceType = Literal["text", "url", "file"]
 TenantKnowledgeSubmissionStatus = Literal["pending_review", "approved", "rejected"]
 WeeklyReportStatus = Literal["draft", "pending_review", "approved", "sent"]
+OutboundEmailJobStatus = Literal["queued", "sending", "sent", "failed", "canceled"]
 
 
 class _BaseModel(BaseModel):
@@ -461,6 +462,54 @@ class WeeklyReport(_BaseModel):
     sent_at: datetime | None = None
     postmark_message_id: str | None = None
     send_error: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+# ─── Outbound Email (Bloque 1, Sub-PR 1.9) ──────────────────────────────────
+
+
+class OutboundEmailTemplate(_BaseModel):
+    """Template editable por Auyan para emails outbound operativos por tenant."""
+
+    id: UUID
+    tenant_id: UUID
+    key: str
+    name: str
+    subject_template: str
+    text_body_template: str
+    html_body_template: str | None = None
+    variables: list[str] = Field(default_factory=list)
+    is_active: bool = True
+    version: int = 1
+    created_by: UUID | None = None
+    updated_by: UUID | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class OutboundEmailJob(_BaseModel):
+    """Job persistente de email outbound listo para ser despachado por worker."""
+
+    id: UUID
+    tenant_id: UUID
+    template_id: UUID | None = None
+    recipient_email: str
+    subject: str
+    text_body: str
+    html_body: str | None = None
+    tag: str | None = None
+    payload: dict = Field(default_factory=dict)
+    status: OutboundEmailJobStatus
+    attempts: int = 0
+    max_attempts: int = 3
+    next_attempt_at: datetime | None = None
+    last_attempt_at: datetime | None = None
+    sent_at: datetime | None = None
+    postmark_message_id: str | None = None
+    error: str | None = None
+    requested_by: UUID | None = None
+    idempotency_key: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

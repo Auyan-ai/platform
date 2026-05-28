@@ -14,7 +14,11 @@ from apps.api.db.queries import (
     approve_tenant_knowledge_submission_with_document,
     approve_weekly_report,
     create_or_refresh_weekly_report_draft,
+    create_outbound_email_template,
     create_tenant_knowledge_submission,
+    enqueue_outbound_email_job,
+    get_outbound_email_job,
+    get_outbound_email_template,
     get_tenant_configuration,
     get_tenant_facts,
     get_tenant_knowledge_submission,
@@ -24,6 +28,8 @@ from apps.api.db.queries import (
     get_weekly_report,
     list_admin_review_queue,
     list_all_tenants,
+    list_outbound_email_jobs,
+    list_outbound_email_templates,
     list_tenant_knowledge_submissions,
     list_weekly_reports,
     mark_weekly_report_send_failed,
@@ -31,6 +37,7 @@ from apps.api.db.queries import (
     reject_tenant_knowledge_submission,
     submit_tenant_onboarding,
     submit_weekly_report_for_review,
+    update_outbound_email_template,
     update_tenant_lifecycle_state,
     update_weekly_report_draft,
     upsert_tenant_facts,
@@ -299,6 +306,90 @@ class WeeklyReportUpdateRequest(BaseModel):
 
 WeeklyReportStatusQuery = Annotated[
     WeeklyReportStatus | None,
+    Query(alias="status"),
+]
+
+OutboundEmailJobStatus = Literal["queued", "sending", "sent", "failed", "canceled"]
+
+
+class OutboundEmailTemplateResponse(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    key: str
+    name: str
+    subject_template: str
+    text_body_template: str
+    html_body_template: str | None = None
+    variables: list[str] = Field(default_factory=list)
+    is_active: bool = True
+    version: int
+    created_by: UUID | None = None
+    updated_by: UUID | None = None
+    created_at: datetime.datetime | None = None
+    updated_at: datetime.datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OutboundEmailTemplateCreateRequest(BaseModel):
+    key: str = Field(min_length=1, max_length=120, pattern=r"^[a-z0-9][a-z0-9_.-]*$")
+    name: str = Field(min_length=2, max_length=160)
+    subject_template: str = Field(min_length=1, max_length=240)
+    text_body_template: str = Field(min_length=1, max_length=50_000)
+    html_body_template: str | None = Field(default=None, max_length=100_000)
+    variables: list[str] = Field(default_factory=list, max_length=50)
+    is_active: bool = True
+
+
+class OutboundEmailTemplateUpdateRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    subject_template: str = Field(min_length=1, max_length=240)
+    text_body_template: str = Field(min_length=1, max_length=50_000)
+    html_body_template: str | None = Field(default=None, max_length=100_000)
+    variables: list[str] = Field(default_factory=list, max_length=50)
+    is_active: bool = True
+
+
+class OutboundEmailJobResponse(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    template_id: UUID | None = None
+    recipient_email: str
+    subject: str
+    text_body: str
+    html_body: str | None = None
+    tag: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: OutboundEmailJobStatus
+    attempts: int
+    max_attempts: int
+    next_attempt_at: datetime.datetime | None = None
+    last_attempt_at: datetime.datetime | None = None
+    sent_at: datetime.datetime | None = None
+    postmark_message_id: str | None = None
+    error: str | None = None
+    requested_by: UUID | None = None
+    idempotency_key: str | None = None
+    created_at: datetime.datetime | None = None
+    updated_at: datetime.datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OutboundEmailJobCreateRequest(BaseModel):
+    template_id: UUID | None = None
+    recipient_email: str = Field(min_length=3, max_length=320)
+    subject: str = Field(min_length=1, max_length=240)
+    text_body: str = Field(min_length=1, max_length=50_000)
+    html_body: str | None = Field(default=None, max_length=100_000)
+    tag: str | None = Field(default=None, max_length=80)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    idempotency_key: str | None = Field(default=None, max_length=160)
+    max_attempts: int = Field(default=3, ge=1, le=10)
+
+
+OutboundEmailJobStatusQuery = Annotated[
+    OutboundEmailJobStatus | None,
     Query(alias="status"),
 ]
 
@@ -639,6 +730,156 @@ async def send_my_weekly_report(
     if report is None:
         raise HTTPException(status_code=409, detail="El reporte ya no está aprobado")
     return WeeklyReportResponse.model_validate(report)
+
+
+@router.get(
+    "/me/outbound-email/templates",
+    response_model=list[OutboundEmailTemplateResponse],
+    summary="Lista templates de email outbound — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def list_my_outbound_email_templates(
+    tenant_id: TenantIdDep,
+    include_inactive: bool = Query(default=False),
+) -> list[OutboundEmailTemplateResponse]:
+    async with tenant_scope(tenant_id) as conn:
+        templates = await list_outbound_email_templates(
+            conn,
+            tenant_id,
+            include_inactive=include_inactive,
+        )
+    return [OutboundEmailTemplateResponse.model_validate(template) for template in templates]
+
+
+@router.post(
+    "/me/outbound-email/templates",
+    response_model=OutboundEmailTemplateResponse,
+    summary="Crea template de email outbound — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def create_my_outbound_email_template(
+    body: OutboundEmailTemplateCreateRequest,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+) -> OutboundEmailTemplateResponse:
+    async with tenant_scope(tenant_id) as conn:
+        template = await create_outbound_email_template(
+            conn,
+            tenant_id,
+            key=body.key.strip(),
+            name=body.name.strip(),
+            subject_template=body.subject_template.strip(),
+            text_body_template=body.text_body_template.strip(),
+            html_body_template=body.html_body_template.strip() if body.html_body_template else None,
+            variables=body.variables,
+            is_active=body.is_active,
+            created_by=auth.user_id,
+        )
+    return OutboundEmailTemplateResponse.model_validate(template)
+
+
+@router.patch(
+    "/me/outbound-email/templates/{template_id}",
+    response_model=OutboundEmailTemplateResponse,
+    summary="Actualiza template de email outbound — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def update_my_outbound_email_template(
+    template_id: UUID,
+    body: OutboundEmailTemplateUpdateRequest,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+) -> OutboundEmailTemplateResponse:
+    async with tenant_scope(tenant_id) as conn:
+        current = await get_outbound_email_template(conn, tenant_id, template_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Template de email no encontrado")
+        template = await update_outbound_email_template(
+            conn,
+            tenant_id,
+            template_id,
+            name=body.name.strip(),
+            subject_template=body.subject_template.strip(),
+            text_body_template=body.text_body_template.strip(),
+            html_body_template=body.html_body_template.strip() if body.html_body_template else None,
+            variables=body.variables,
+            is_active=body.is_active,
+            updated_by=auth.user_id,
+        )
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template de email no encontrado")
+    return OutboundEmailTemplateResponse.model_validate(template)
+
+
+@router.get(
+    "/me/outbound-email/jobs",
+    response_model=list[OutboundEmailJobResponse],
+    summary="Lista jobs de email outbound — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def list_my_outbound_email_jobs(
+    tenant_id: TenantIdDep,
+    status_filter: OutboundEmailJobStatusQuery = None,
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[OutboundEmailJobResponse]:
+    async with tenant_scope(tenant_id) as conn:
+        jobs = await list_outbound_email_jobs(
+            conn,
+            tenant_id,
+            status=status_filter,
+            limit=limit,
+        )
+    return [OutboundEmailJobResponse.model_validate(job) for job in jobs]
+
+
+@router.get(
+    "/me/outbound-email/jobs/{job_id}",
+    response_model=OutboundEmailJobResponse,
+    summary="Detalle de job de email outbound — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def get_my_outbound_email_job(
+    job_id: UUID,
+    tenant_id: TenantIdDep,
+) -> OutboundEmailJobResponse:
+    async with tenant_scope(tenant_id) as conn:
+        job = await get_outbound_email_job(conn, tenant_id, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job de email no encontrado")
+    return OutboundEmailJobResponse.model_validate(job)
+
+
+@router.post(
+    "/me/outbound-email/jobs",
+    response_model=OutboundEmailJobResponse,
+    summary="Encola job de email outbound — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def enqueue_my_outbound_email_job(
+    body: OutboundEmailJobCreateRequest,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+) -> OutboundEmailJobResponse:
+    async with tenant_scope(tenant_id) as conn:
+        if body.template_id is not None:
+            template = await get_outbound_email_template(conn, tenant_id, body.template_id)
+            if template is None:
+                raise HTTPException(status_code=404, detail="Template de email no encontrado")
+        job = await enqueue_outbound_email_job(
+            conn,
+            tenant_id,
+            template_id=body.template_id,
+            recipient_email=body.recipient_email.strip(),
+            subject=body.subject.strip(),
+            text_body=body.text_body.strip(),
+            html_body=body.html_body.strip() if body.html_body else None,
+            tag=body.tag.strip() if body.tag else None,
+            payload=body.payload,
+            idempotency_key=body.idempotency_key.strip() if body.idempotency_key else None,
+            max_attempts=body.max_attempts,
+            requested_by=auth.user_id,
+        )
+    return OutboundEmailJobResponse.model_validate(job)
 
 
 @router.get(

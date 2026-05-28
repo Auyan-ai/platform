@@ -418,6 +418,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/me/outbound-email/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista templates de email outbound — sólo super_admin */
+        get: operations["list_my_outbound_email_templates_tenants_me_outbound_email_templates_get"];
+        put?: never;
+        /** Crea template de email outbound — sólo super_admin */
+        post: operations["create_my_outbound_email_template_tenants_me_outbound_email_templates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/outbound-email/templates/{template_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Actualiza template de email outbound — sólo super_admin */
+        patch: operations["update_my_outbound_email_template_tenants_me_outbound_email_templates__template_id__patch"];
+        trace?: never;
+    };
+    "/tenants/me/outbound-email/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lista jobs de email outbound — sólo super_admin */
+        get: operations["list_my_outbound_email_jobs_tenants_me_outbound_email_jobs_get"];
+        put?: never;
+        /** Encola job de email outbound — sólo super_admin */
+        post: operations["enqueue_my_outbound_email_job_tenants_me_outbound_email_jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/outbound-email/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detalle de job de email outbound — sólo super_admin */
+        get: operations["get_my_outbound_email_job_tenants_me_outbound_email_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/me/playbook": {
         parameters: {
             query?: never;
@@ -1617,6 +1687,166 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** OutboundEmailJobCreateRequest */
+        OutboundEmailJobCreateRequest: {
+            /** Template Id */
+            template_id?: string | null;
+            /** Recipient Email */
+            recipient_email: string;
+            /** Subject */
+            subject: string;
+            /** Text Body */
+            text_body: string;
+            /** Html Body */
+            html_body?: string | null;
+            /** Tag */
+            tag?: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /** Idempotency Key */
+            idempotency_key?: string | null;
+            /**
+             * Max Attempts
+             * @default 3
+             */
+            max_attempts: number;
+        };
+        /** OutboundEmailJobResponse */
+        OutboundEmailJobResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Template Id */
+            template_id?: string | null;
+            /** Recipient Email */
+            recipient_email: string;
+            /** Subject */
+            subject: string;
+            /** Text Body */
+            text_body: string;
+            /** Html Body */
+            html_body?: string | null;
+            /** Tag */
+            tag?: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "sending" | "sent" | "failed" | "canceled";
+            /** Attempts */
+            attempts: number;
+            /** Max Attempts */
+            max_attempts: number;
+            /** Next Attempt At */
+            next_attempt_at?: string | null;
+            /** Last Attempt At */
+            last_attempt_at?: string | null;
+            /** Sent At */
+            sent_at?: string | null;
+            /** Postmark Message Id */
+            postmark_message_id?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Requested By */
+            requested_by?: string | null;
+            /** Idempotency Key */
+            idempotency_key?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** OutboundEmailTemplateCreateRequest */
+        OutboundEmailTemplateCreateRequest: {
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Subject Template */
+            subject_template: string;
+            /** Text Body Template */
+            text_body_template: string;
+            /** Html Body Template */
+            html_body_template?: string | null;
+            /** Variables */
+            variables?: string[];
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+        };
+        /** OutboundEmailTemplateResponse */
+        OutboundEmailTemplateResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Subject Template */
+            subject_template: string;
+            /** Text Body Template */
+            text_body_template: string;
+            /** Html Body Template */
+            html_body_template?: string | null;
+            /** Variables */
+            variables?: string[];
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+            /** Version */
+            version: number;
+            /** Created By */
+            created_by?: string | null;
+            /** Updated By */
+            updated_by?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** OutboundEmailTemplateUpdateRequest */
+        OutboundEmailTemplateUpdateRequest: {
+            /** Name */
+            name: string;
+            /** Subject Template */
+            subject_template: string;
+            /** Text Body Template */
+            text_body_template: string;
+            /** Html Body Template */
+            html_body_template?: string | null;
+            /** Variables */
+            variables?: string[];
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
         };
         /** ProfileOut */
         ProfileOut: {
@@ -3011,6 +3241,213 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WeeklyReportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_my_outbound_email_templates_tenants_me_outbound_email_templates_get: {
+        parameters: {
+            query?: {
+                include_inactive?: boolean;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboundEmailTemplateResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_my_outbound_email_template_tenants_me_outbound_email_templates_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutboundEmailTemplateCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboundEmailTemplateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_my_outbound_email_template_tenants_me_outbound_email_templates__template_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                template_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutboundEmailTemplateUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboundEmailTemplateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_my_outbound_email_jobs_tenants_me_outbound_email_jobs_get: {
+        parameters: {
+            query?: {
+                status?: ("queued" | "sending" | "sent" | "failed" | "canceled") | null;
+                limit?: number;
+            };
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboundEmailJobResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enqueue_my_outbound_email_job_tenants_me_outbound_email_jobs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OutboundEmailJobCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboundEmailJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_outbound_email_job_tenants_me_outbound_email_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutboundEmailJobResponse"];
                 };
             };
             /** @description Validation Error */
