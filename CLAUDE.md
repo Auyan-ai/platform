@@ -149,12 +149,12 @@ por último, estas no son normas grabadas para siempre, si tienes alguna sugeren
 
 ### Issue tracker
 
-Los issues y PRDs viven como GitHub Issues en `Auyan-ai/platform` (CLI `gh`). Ver `docs/agents/issue-tracker.md`.
+Los issues y PRDs viven como GitHub Issues en `Auyan-ai/platform` (CLI `gh`).
 
 ### Triage labels
 
-Roles canónicos con nombres por defecto: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. Ver `docs/agents/triage-labels.md`.
+Labels canónicos: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
 
 ### Domain docs
 
-Single-context: un `CONTEXT.md` + `docs/adr/` en la raíz. Ver `docs/agents/domain.md`.
+Single-context: un `CONTEXT.md` + `docs/adr/` en la raíz.

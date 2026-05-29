@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-05-29 (sesión 52 — 0.11A LangSmith staging validado en EU: traces reales, workspace correcto y tokens/coste nativos; siguiente foco fixture Shopify/Chatwoot)._
+_Última actualización: 2026-05-29 (sesión 54 — infra de staging: integración real de Chatwoot Cloud registrada en Lunaria + webhook apuntando a staging. Customer Discovery sigue como foco estratégico en sesión paralela; la regla dura de "no tocar el agente hasta 3 mensajes de descubrimiento" se mantiene — esto es habilitar verificación, no cambiar comportamiento del agente)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
 
@@ -19,7 +19,27 @@ _Última actualización: 2026-05-29 (sesión 52 — 0.11A LangSmith staging vali
 | Bloque 0 | 0.1–0.10 completados. 0.11 reencuadrado como Agent Verification Staging. |
 | Bloque 1 | 1.0–1.9 completados y archivados. 1.10 billing manual tiene runbook, pero depende de inputs externos por cliente. |
 | Staging DB | Migraciones de Bloque 1 aplicadas; ya no bloquean la validación. |
-| Siguiente paso | 0.11A — avanzar fixture Shopify realista y Chatwoot sandbox; LangSmith staging ya validado. |
+| Siguiente paso | **Customer Discovery** sigue como foco estratégico (sesión paralela). En el track técnico: Chatwoot Cloud ya quedó configurado en staging → siguientes micro-pasos son el smoke test end-to-end (mensaje real → agente → traza LangSmith) y la corrida simulator 25/25. |
+| Reciente en develop | #131 recalibró pricing (billing-manual + master-context), #132 configuró agent skills, #133 Chatwoot HMAC + simulator reseed. **Local sin pushear:** limpieza de CLAUDE.md (refs a `docs/agents/` eliminados). |
+| Chatwoot staging | ✅ Integración real registrada en Lunaria (cuenta `Purigu`, `account_id 167723`) + webhook apuntando a `/webhooks/chatwoot`. Pendiente: smoke test e2e. |
+
+---
+
+## Foco actual — Customer Discovery (sesión 53)
+
+**Diagnóstico:** ~75k líneas, ~90% del stack, **0 clientes reales** entrevistados. Lunaria es simulador, no cliente. La ansiedad por la competencia (Sierra, Decagon, Permut, GuruSup, ElevenLabs) es síntoma: el diferenciador de Auyan no es la calidad del agente (table-stakes en 2026), es la **operación gestionada** del agente para el segmento.
+
+**Regla dura:** no tocar el agente hasta mandar 3 mensajes de descubrimiento. Interés ≠ demanda.
+
+**Objetivo de la semana:** 10 marcas ICP → 3 mensajes → 3 conversaciones.
+
+**ICP Starter:** Shopify España, 2,5–5 M€ facturación, 500–1.000 tickets/mes, ≥1 persona cuyo trabajo sea CX (filtro duro). Dos cohortes a partes iguales — **ya-usa-bot** (Gorgias AI / Tidio / Intercom Fin / Zendesk AI) vs **no-bot**; el contraste ES el mapa de mercado.
+
+Plan completo en [`docs/customer-discovery.md`](customer-discovery.md): reencuadre, mensaje de outreach verbatim, formulario de 9 preguntas, e hipótesis testeables de pricing / wedge / GTM.
+
+**En marcha (otro chat):** construir `docs/discovery-targets.md` con 10 marcas reales (no inventar datos) usando herramientas €0 (Store Leads, Wappalyzer, view-source, Trustpilot, LinkedIn).
+
+**Seguridad:** repo `Auyan-ai/platform` ahora **privado** (antes público con docs de estrategia expuestos, 0 forks). `.gitignore` no borra historia ya commiteada — privado es el fix limpio.
 
 ---
 
@@ -119,9 +139,9 @@ Pendiente futuro, sólo cuando haga falta más granularidad:
 | Pendiente | Estado |
 |---|---|
 | LangSmith | ✅ Validado en staging EU: traces reales en `auyan-staging`, root `agent_conversation` + child `agent_model_call` con tokens/coste nativos. Sub-runs internos por nodo quedan como mejora futura. |
-| Simulator | Código base optimizado: Sonnet judge por defecto, Opus opcional y cap normal de `$5/día` por tenant. Falta corrida real 25/25 contra tenant Lunaria staging. |
+| Simulator | Optimizado: Sonnet judge por defecto, Opus opcional, cap `$5/día` por tenant. #133 añadió reseed de user profiles y modo sin-judge en `_compute_status`. Falta la corrida real 25/25 contra Lunaria staging. |
 | Shopify test store | ✅ Tres órdenes reales `auyan-e2e` creadas en Lunaria: `#1001` (`CE-NO-TRACKING`, sin tracking), `#1002` (`CE-TRACKING`, tracking `1Z999AA10123456784`) y `#1003` (`RETURNS-IN-WINDOW`, tracking `1Z999AA10123456785`). ✅ Shopify registrado como integración primaria `commerce/shopify` en `tenant_integrations` con credentials cifradas. |
-| Chatwoot sandbox | En progreso: script `configure_staging_integrations.py` valida account/token y registra la integración Chatwoot cifrada en `tenant_integrations`. Falta crear cuenta/inbox/webhook/token reales y ejecutar contra staging. |
+| Chatwoot Cloud | ✅ Integración real registrada en Lunaria staging vía `configure_staging_integrations.py`: cuenta `Purigu` (`account_id 167723`, `app.chatwoot.com`), credentials cifradas, token validado contra la API de Chatwoot. Inbox creado y webhook de Chatwoot Cloud apuntando a `/webhooks/chatwoot` de staging. #133 dejó lista la firma HMAC-SHA256 real (`X-Chatwoot-Signature` + `X-Chatwoot-Timestamp`) con fallback legacy. **Falta:** smoke test end-to-end con un mensaje real (entra → agente responde → traza en LangSmith). |
 | Gorgias OAuth app | Sigue pendiente; se implementará después de Chatwoot. |
 | Zendesk OAuth app | Sigue pendiente; se implementará después de Chatwoot. |
 | Postmark | Falta `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL` y verificar dominio `auyan.ai`. |
@@ -132,6 +152,8 @@ Pendiente futuro, sólo cuando haga falta más granularidad:
 ## Referencias rápidas
 
 - [`docs/progress-archive.md`](progress-archive.md) — historial completo.
+- [`docs/customer-discovery.md`](customer-discovery.md) — plan de descubrimiento de clientes (sesión 53).
+- [`docs/billing-manual.md`](billing-manual.md) — pricing, tiers, ICP y billing manual.
 - [`docs/auyan-master-context.md`](auyan-master-context.md) — fuente única de verdad negocio + producto.
 - [`docs/architecture-agent-v2.md`](architecture-agent-v2.md) — arquitectura técnica del agente.
 - [`docs/architecture-web.md`](architecture-web.md) — arquitectura dashboard web.
