@@ -120,8 +120,8 @@ Pendiente futuro, sólo cuando haga falta más granularidad:
 |---|---|
 | LangSmith | ✅ Validado en staging EU: traces reales en `auyan-staging`, root `agent_conversation` + child `agent_model_call` con tokens/coste nativos. Sub-runs internos por nodo quedan como mejora futura. |
 | Simulator | Código base optimizado: Sonnet judge por defecto, Opus opcional y cap normal de `$5/día` por tenant. Falta corrida real 25/25 contra tenant Lunaria staging. |
-| Shopify test store | Falta preparar tienda con órdenes reales `auyan-e2e`, credenciales en `tenant_integrations` y scripts de seed/verify. |
-| Chatwoot sandbox | Primer helpdesk para verificación real; falta crear cuenta/inbox/webhook/token y registrar integración. |
+| Shopify test store | ✅ Tres órdenes reales `auyan-e2e` creadas en Lunaria: `#1001` (`CE-NO-TRACKING`, sin tracking), `#1002` (`CE-TRACKING`, tracking `1Z999AA10123456784`) y `#1003` (`RETURNS-IN-WINDOW`, tracking `1Z999AA10123456785`). ✅ Shopify registrado como integración primaria `commerce/shopify` en `tenant_integrations` con credentials cifradas. |
+| Chatwoot sandbox | En progreso: script `configure_staging_integrations.py` valida account/token y registra la integración Chatwoot cifrada en `tenant_integrations`. Falta crear cuenta/inbox/webhook/token reales y ejecutar contra staging. |
 | Gorgias OAuth app | Sigue pendiente; se implementará después de Chatwoot. |
 | Zendesk OAuth app | Sigue pendiente; se implementará después de Chatwoot. |
 | Postmark | Falta `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL` y verificar dominio `auyan.ai`. |
