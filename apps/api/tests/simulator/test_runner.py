@@ -6,7 +6,7 @@ from typing import Any, cast
 from uuid import uuid4
 
 from apps.api.simulator.judge import DEFAULT_JUDGE_MODEL, OPUS_JUDGE_MODEL
-from apps.api.simulator.runner import _estimate_cost_cents, _RunAccumulator
+from apps.api.simulator.runner import _compute_status, _estimate_cost_cents, _RunAccumulator
 
 
 def _acc(*, judge_model: str) -> _RunAccumulator:
@@ -33,3 +33,22 @@ class TestEstimateCostCents:
         acc.tokens_judge_out = 1000
 
         assert _estimate_cost_cents(acc) == 9.0
+
+
+class TestComputeStatus:
+    def test_no_judge_mode_uses_assertions_only(self) -> None:
+        assert _compute_status(
+            all_critical_passed=True,
+            passed=3,
+            total=3,
+            judge_verdict=None,
+            judge_required=False,
+        ) == "passed"
+
+    def test_missing_required_judge_is_errored(self) -> None:
+        assert _compute_status(
+            all_critical_passed=True,
+            passed=3,
+            total=3,
+            judge_verdict=None,
+        ) == "errored"

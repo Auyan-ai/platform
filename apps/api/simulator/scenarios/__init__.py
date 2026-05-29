@@ -17,6 +17,7 @@ from apps.api.db.queries import (
     insert_simulation_scenario,
     insert_user_profile,
     update_simulation_scenario,
+    update_user_profile,
 )
 from apps.api.simulator.scenarios.consulta_envio import SCENARIOS as CE_SCENARIOS
 from apps.api.simulator.scenarios.default import SCENARIOS as DE_SCENARIOS
@@ -34,9 +35,9 @@ async def seed_scenarios(
 ) -> dict[str, int]:
     """Inserta profiles y scenarios base para el tenant. Idempotente por nombre.
 
-    Con reseed=True, actualiza los campos mutables (mock_fixtures, assertions,
-    expected_outcome, description, aop_slug, max_turns) de los scenarios que ya
-    existen, en vez de saltarlos. El profile/initial_message no se toca.
+    Con reseed=True, actualiza los campos mutables y el profile específico del
+    scenario, para que cambios en goal/initial_message/persona no queden viejos
+    en la DB.
 
     Retorna {"profiles": N, "scenarios": N, "updated": N} con los counts.
     """
@@ -77,6 +78,15 @@ async def seed_scenarios(
             if reseed:
                 existing_sc = await get_scenario_by_name(conn, tenant_id, sc["name"])
                 if existing_sc is not None:
+                    await update_user_profile(
+                        conn,
+                        tenant_id=tenant_id,
+                        profile_id=existing_sc.user_profile_id,
+                        persona=PERSONAS[sc["profile"]],
+                        goal=sc["goal"],
+                        initial_message=sc["initial_message"],
+                        language="es",
+                    )
                     await update_simulation_scenario(
                         conn,
                         tenant_id=tenant_id,

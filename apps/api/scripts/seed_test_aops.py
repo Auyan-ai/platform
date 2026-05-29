@@ -17,8 +17,13 @@ import asyncio
 import logging
 import sys
 import uuid
+from pathlib import Path
 
 import asyncpg
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 logging.basicConfig(
     level=logging.INFO,

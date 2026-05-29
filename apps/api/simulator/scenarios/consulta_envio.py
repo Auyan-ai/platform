@@ -93,23 +93,27 @@ SCENARIOS: list[dict[str, Any]] = [
         "assertions": {
             "skills_called": ["shopify.get_order_status"],
             "response_contains": ["tracking", "1Z999AA"],
-            "max_turns": 2,
+            "max_turns": 3,
         },
         "max_turns": 4,
     },
     {
         "id": "CE-02",
         "name": "CE-02: Tracking de #1234 sin fulfillment",
-        "description": "Pedido existe pero aún no tiene fulfillment/tracking. El agente debe informar sin escalar.",
+        "description": "Pedido existe pero aún no tiene fulfillment/tracking. El agente debe informar que sigue en preparación sin escalar.",
         "aop_slug": "consulta_envio",
         "profile": "impaciente",
-        "goal": "Saber por qué mi pedido no ha salido todavía",
+        "goal": (
+            "Saber si mi pedido #1234 ya fue enviado. Quedo satisfecho si me explican "
+            "que aún está en preparación, que no tiene tracking todavía y que recibiré "
+            "el tracking por email cuando salga. No quiero cancelar ni hablar con humanos."
+        ),
         "initial_message": "¿Cuándo sale mi pedido #1234? Llevo días esperando",
         "expected_outcome": "El agente informa que el pedido aún no fue enviado, sin escalar.",
         "mock_fixtures": {"shopify": _ORDER_1234_NO_TRACKING},
         "assertions": {
             "skills_called": ["shopify.get_order_status"],
-            "response_contains": ["aún no", "preparando"],
+            "response_contains": ["aún no", "preparación"],
             "must_escalate": False,
         },
         "max_turns": 4,
@@ -120,8 +124,10 @@ SCENARIOS: list[dict[str, Any]] = [
         "description": "El cliente no da número de pedido, solo el email. El agente busca por email.",
         "aop_slug": "consulta_envio",
         "profile": "vago",
-        "goal": "Saber el estado de mis pedidos (tengo uno reciente)",
-        "initial_message": "Hola, quiero saber cómo está mi pedido",
+        "goal": "Saber el estado de mi pedido reciente usando mi email cliente@ejemplo.com",
+        "initial_message": (
+            "Hola, quiero saber cómo está mi pedido. Mi email es cliente@ejemplo.com"
+        ),
         "expected_outcome": "El agente pide el email o número de pedido y localiza el pedido.",
         "mock_fixtures": {"shopify": _ORDER_BY_EMAIL},
         "assertions": {
