@@ -1,7 +1,7 @@
 # Auyan — Contexto Maestro
 
 > Fuente única de verdad del proyecto. Documento vivo, versionado en git.
-> Última actualización: 2026-05-28 (post grill-me — pivot BPO → Managed AI service; 0.11 reencuadrado a Agent Verification Staging).
+> Última actualización: 2026-05-29 (ElevenLabs re-clasificado como competidor/proveedor según caso; README viejo eliminado).
 > Versión: 2.0 (post-pivot)
 
 ---
@@ -96,10 +96,12 @@ Cuando haya conflicto entre este documento y otros, este manda en lo conceptual;
 > "Somos tu equipo externo de Agent Engineers. Tu equipo de soporte se queda. Nosotros construimos, mantenemos y mejoramos cada semana el agente IA que reduce su carga 60-70%. Ni configuras nada, ni gestionas créditos, ni inventas qué optimizar. Reportamos semanalmente con propuestas concretas. Tú apruebas o rechazas."
 
 ### Posicionamiento clave (cerrado en grill)
-**Producto Decagon/Sierra (uso interno) + entrega Crescendo (cliente)**.
+**Servicio managed con control plane propio: producto Decagon/Sierra (uso interno) + entrega Crescendo (cliente)**.
 
 - Internamente Auyan opera con power tools tipo Duet/Agent Studio: editor pleno de AOPs, simulator con user profiles, auto-generación de AOPs desde transcripts, auto-tests, diagnostic tools, watchtower-style QA.
 - El cliente experimenta el modelo Crescendo: dashboard read-only + reportes proactivos + AIDE asignado humano + cero configuración técnica.
+- Auyan puede usar ElevenLabs, helpdesks, modelos u otras plataformas como infraestructura cuando convenga. La defensibilidad no está en poseer cada runtime, sino en el control plane operativo propio: AOPs, simulator, approvals, QA, audit, playbooks, reports y mejora semanal.
+- La analogía estratégica: **Sierra/Decagon para SMB+ y mid-market low-end español que no tiene acceso a equipos técnicos**, entregado como servicio managed.
 
 ---
 
@@ -119,6 +121,7 @@ Cuando haya conflicto entre este documento y otros, este manda en lo conceptual;
 |---|---|
 | BPO con humanos | Margen bajo, no escala, esposa no quiere |
 | SaaS self-serve (Permut, GuruSup, Chatbase) | Ventaja injusta vale cero. Race to the bottom |
+| Implementador puro encima de ElevenLabs/Gorgias/etc. | Captura poco valor, fácil de saltar por el cliente, defensibilidad baja |
 | Sierra enterprise | Cliente target requiere $200K+/año + 400 empleados |
 | **Managed AI a la Crescendo SMB+ español** ✅ | Hueco vacío. Ventaja injusta aplica. Margen 80%. Stack 90% ya construido |
 
@@ -136,10 +139,11 @@ Cuando haya conflicto entre este documento y otros, este manda en lo conceptual;
 - **Crescendo** $91M ARR aterrizó UK abril 2026. Mid-market enterprise. No habla español nativo, no toca SMB+.
 - **Sierra/Decagon** enterprise USA. No bajan a SMB+ EU en 12-24 meses.
 - **14.ai** $3M YC marzo 2026. Mismo modelo, USA.
+- **ElevenLabs / ElevenAgents**: empezó Conversational AI el 2024-12-03; agregó Chat Mode el 2025-08-19; renombró a ElevenLabs Agents el 2025-09-03; lanzó ElevenAgents for Support el 2026-02-17. Competidor fuerte en plataforma de agentes voz/chat y posible proveedor futuro de voz. No debe ser tratado como enemigo principal de Auyan mientras Auyan compita en operación managed, e-commerce español, QA, shadow mode, activación por categoría y reportes semanales.
 - **GuruSup** €1.3M seed abril 2026 (4Founders Capital). Founder ex-GuruWalk. SaaS self-serve.
 - **Permut Inc** (Barcelona) SaaS self-serve.
 
-**Ventana real: 12-18 meses para clavar PMF en SMB+ español antes que GuruSup/Permut decidan subir tier o gigantes USA bajen.**
+**Ventana real: 12-18 meses para clavar PMF en SMB+ español antes que GuruSup/Permut decidan subir tier, ElevenLabs empaquete servicios managed por vertical, o gigantes USA bajen.**
 
 ### Métricas año 1 objetivo
 
@@ -184,6 +188,8 @@ Cuando haya conflicto entre este documento y otros, este manda en lo conceptual;
 - Founder accesible o Head of CX identificable en LinkedIn
 - Pueden estar usando: Gorgias, Zendesk, Intercom, Permut, GuruSup → frustrados por no llegar a >50% resolution rate
 
+**Restricción primeros 5 clientes:** Shopify + helpdesk existente o ya decidido (Gorgias/Zendesk/Intercom/Chatwoot Cloud). No abrir WooCommerce ni marcas sin helpdesk salvo excepción deliberada por aprendizaje comercial muy claro. La meta inicial es caso de estudio limpio, no amplitud de integraciones.
+
 ### Ejemplos que SÍ son ICP
 Tipo Mundimoto (170 empl, $65M raised, e-commerce motos, ya con Permut), Housfy (317 empl, proptech), Yuxus, Scuffers, BeLevels, Tramas+, OffUgo, Aston Rentals, Reveni, Waynabox.
 
@@ -211,7 +217,7 @@ Tipo Mundimoto (170 empl, $65M raised, e-commerce motos, ya con Permut), Housfy 
 |---|---|---|---|
 | L1 | Infra modelos | OpenAI, Anthropic | Proveedor |
 | L2 | Frameworks | LangGraph, Voiceflow | Proveedor |
-| L3 | SaaS self-serve | Chatbase, Permut, GuruSup, Tidio Lyro | Competencia indirecta |
+| L3 | SaaS / agent platforms self-serve | Chatbase, Permut, GuruSup, Tidio Lyro, ElevenAgents | Competencia indirecta o proveedor según modalidad |
 | **L4** | **Servicio managed** | **Sierra, 14.ai, Crescendo** | **Tu zona** |
 | L5 | BPO tradicional | Atento, Konecta | Sustituto en mente del cliente |
 
@@ -220,6 +226,7 @@ Tipo Mundimoto (170 empl, $65M raised, e-commerce motos, ya con Permut), Housfy 
 - **vs Permut/GuruSup**: ellos venden herramienta (cliente configura + mantiene); tú vendes resultado operacional (Auyan configura + opera + reporta).
 - **vs Sierra**: ellos enterprise $200K+/año; tú SMB+ €890-5.990/mes. Mercados que no se tocan.
 - **vs Crescendo**: ellos USA/UK mid-market; tú España SMB+. Coexisten.
+- **vs ElevenLabs/ElevenAgents**: ellos venden plataforma/infra de agentes con voz y chat excelentes. Tú vendes resultado operacional: diagnóstico, implementación, integraciones profundas, QA semanal, shadow mode, activación por categoría y mejora continua. Si conviene, ElevenLabs puede ser proveedor de voz en Bloque 4; no se construye la narrativa pública alrededor de pelearles en voz, latencia o modelos.
 - **vs BPOs**: ellos meten humanos; tú reduces necesidad de humanos.
 - **vs construir interno**: tarda 6+ meses interno; tú en 30 días con expertise probada.
 
@@ -238,7 +245,7 @@ Múltiplos típicos AI services con MRR recurrente: **3-6x revenue. A €2M ARR 
 ## 8. Producto y propuesta de valor
 
 ### Qué reemplaza
-**NO software**. Reemplaza horas-humano de profesionales CX caros que hacen trabajo repetitivo (lectura/clasificación, búsqueda/matching, comunicación rutinaria). Eso es 60-80% del trabajo de un agente CX en e-commerce. El 20-40% restante (juicio, emoción, casos complejos) lo sigue haciendo el equipo del cliente.
+**NO software** y **NO reemplaza al equipo CX completo**. Reduce carga real del equipo existente: lectura/clasificación, búsqueda/matching, comunicación rutinaria y acciones operativas repetibles (consultar pedido, iniciar devolución, actualizar dirección, cancelar bajo política, preparar reembolso bajo approval). Eso puede ser 60-80% del trabajo repetitivo en e-commerce, pero el 20-40% restante (juicio, emoción, excepciones, casos ambiguos) lo sigue haciendo el equipo del cliente.
 
 ### Qué gana el cliente
 1. **Velocidad brutal**: respuesta en segundos, no horas.
@@ -246,6 +253,10 @@ Múltiplos típicos AI services con MRR recurrente: **3-6x revenue. A €2M ARR 
 3. **Operación experta continua**: Auyan optimiza el agente cada semana.
 4. **Reportes proactivos con propuestas**: cliente no decide qué optimizar.
 5. **Tiempo recuperado del manager CX**: deja de gestionar prompts y configuraciones.
+
+### Framing comercial
+
+No vender como "reemplazamos tu equipo de soporte". Vender como "quitamos carga repetitiva de forma real, incluyendo acciones, para que tu equipo se quede con los casos donde hace falta criterio". El cliente mantiene control, escalados y ownership de CX; Auyan opera la capa repetible con QA, approvals y mejora semanal.
 
 ### Canales (vía helpdesk del cliente)
 Decisión clave del grill: Auyan **no construye canales directos** (WhatsApp, Instagram, Widget). Se conecta al **helpdesk del cliente** (Gorgias / Zendesk / Chatwoot Cloud / Intercom) y hereda todos los canales del helpdesk:
@@ -257,6 +268,10 @@ Decisión clave del grill: Auyan **no construye canales directos** (WhatsApp, In
 - Facebook Messenger, TikTok, etc
 
 Para clientes sin helpdesk: Auyan **recomienda Chatwoot Cloud**. En staging/verificación se usa plan free o sandbox; en cliente real se pasa a plan paid si volumen/features lo requieren. El cliente paga directo a Chatwoot, Auyan solo se conecta. NO self-hosted nuestro.
+
+### Voz / llamadas
+
+Voz **no forma parte del wedge inicial**. No está descartada estratégicamente, pero queda fuera del MVP comercial hasta tener clientes reales, datos de demanda y claridad de go-to-market. La cuña inicial es soporte escrito vía helpdesk existente + Shopify + operación managed. Cuando haya clientes, se decidirá si voz se lanza como expansión, tier adicional o piloto específico; ElevenLabs puede ser proveedor potencial si conviene.
 
 ### Integración Shopify (ya construida)
 - Lectura: pedidos, productos, clientes, inventario, devoluciones
@@ -293,6 +308,8 @@ Tiempo primera respuesta: 47s · CSAT estimado: 4.3/5
 
 ## 9. Pricing
 
+> **Estado:** pricing provisional. Los precios y límites de tickets siguen sujetos a validación con los primeros Founding Partners, datos reales de volumen, coste LLM y horas humanas post-onboarding. No tratar como definitivo hasta cerrar evidencia comercial.
+
 ### Programa Founding Partner (primeros 5 clientes, mes 1-6)
 - Setup gratis
 - Mes 1 gratis
@@ -305,9 +322,10 @@ Tiempo primera respuesta: 47s · CSAT estimado: 4.3/5
 
 | Tier | Setup | Mensual | Tickets/mes | Comentarios |
 |---|---|---|---|---|
-| **Starter** | Gratis | €890 | 1.500 | Cliente típico: 2-5 personas CX, 500-1.500 tk |
-| **Growth** (target) | €1.500 | €2.490 | 5.000 | Cliente típico: 5-15 personas CX, 2-5K tk |
-| **Scale** | €4.000 | €5.990 | 15.000 | Cliente típico: 15-30 personas CX, 5-15K tk |
+| **Starter** | Gratis | €890 | 1.000 | Cliente típico: 2-4 personas CX, 500-1.000 tk |
+| **Growth** (target) | €1.500 | €2.490 | 3.000 | Cliente típico: 4-10 personas CX, 1.500-3K tk |
+| **Scale** | €4.000 | €5.990 | 10.000 | Cliente típico: 10-25 personas CX, 3-10K tk |
+| **Custom** | Custom | Custom | 10.000+ | Mid-market fuerte; no prometer estándar sin revisar operación y margen |
 
 ### Overage
 €0.15-0.30/ticket extra dependiendo del tier.
@@ -317,7 +335,7 @@ Tiempo primera respuesta: 47s · CSAT estimado: 4.3/5
 - Growth: 40% crédito si <60% mes 6
 - Scale: 50% crédito si <70% mes 6 + SLA First Response <2 min
 
-### Comparativa Growth típico (5.000 tk/mes)
+### Comparativa Growth típico (3.000 tk/mes)
 
 | Opción | Coste mensual | Quién optimiza |
 |---|---|---|
@@ -724,6 +742,7 @@ Cubre: salida, decisiones unanimidad, vesting (4 años cliff 1), no competencia,
 | Churn >15% mes 3 | 3 | 5 | 15 | Onboarding 30 días check-ins semanales primer mes, NPS día 14/30/60 |
 | CAC >€1.500 sostenido | 3 | 5 | 15 | No ads >€500/mes hasta mes 4-5, outreach personalizado mes 1-3 |
 | GuruSup/Permut suben a managed <12 meses | 3 | 5 | 15 | Velocidad máxima ejecución, casos de estudio mes 6+, marca founder |
+| ElevenLabs empaqueta managed support por vertical o partners ES | 3 | 4 | 12 | No vender "agente de voz/chat"; fijar Auyan como operación managed vertical e-commerce español. Mantener ElevenLabs como proveedor potencial de voz, no como capa estratégica propia. |
 | Crescendo baja a SMB+ ES <12 meses | 2 | 5 | 10 | Foco España + vertical e-commerce profundo |
 | Kenny burnout | 3 | 4 | 12 | Disciplina horarios, esposa co-founder operativa, calls limitadas |
 
@@ -891,6 +910,7 @@ SL constituida · Asesor fiscal · Pacto socios · Cuenta bancaria · Decisión 
 - **AI-native services**: modelo donde no vendes software, vendes el resultado. Ola 3.
 - **Managed AI service**: subtipo de Modelo 4. Crescendo "Managed AI" tier sin agentes humanos. Mi modelo.
 - **BPO**: Business Process Outsourcing. NO es mi modelo.
+- **ElevenLabs / ElevenAgents**: plataforma de agentes voz/chat. Para Auyan es competidor indirecto en plataforma self-serve y proveedor potencial de voz futuro; no es el enemigo principal. La diferenciación de Auyan vive en operación managed vertical, integraciones, QA, shadow mode, activación por categoría y reporte semanal.
 - **SMB+**: Small-Medium Business lado alto. Mi ICP.
 - **Mid-market**: 50-500 empleados, €5-100M revenue. Mid-market low-end es mi ICP fase 2.
 - **AIDE**: AI Deployment Engineer. Rol Crescendo. En Auyan mes 1-12 lo hace Kenny.
