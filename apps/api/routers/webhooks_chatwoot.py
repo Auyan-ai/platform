@@ -4,17 +4,19 @@ Flujo:
 1. Recibir POST de Chatwoot.
 2. Filtrar: solo event=message_created + message_type=incoming.
 3. Resolver tenant por account_id (config de tenant_integrations, cross-tenant).
-4. Descifrar credenciales + validar X-Chatwoot-Signature-Token (si configurado).
+4. Descifrar credenciales + validar firma HMAC de Chatwoot (si configurado).
 5. Ejecutar flujo inbound estándar (customer, conversación, mensaje, agente).
 6. Si el agente responde: send_outbound al adapter de Chatwoot.
 
 Seguridad: si la integración tiene `webhook_secret_token` en sus credenciales,
-la request debe incluir `X-Chatwoot-Signature-Token` con ese valor exacto.
+la request debe incluir `X-Chatwoot-Signature` + `X-Chatwoot-Timestamp`.
 Sin token configurado se acepta el webhook sin validación de firma.
 """
 
 from __future__ import annotations
 
+import hmac
+import json
 import logging
 from typing import Annotated, Any
 
@@ -38,7 +40,7 @@ from apps.api.db.queries import (
     update_conversation_last_message,
 )
 from apps.api.integrations.base import IntegrationContext
-from apps.api.integrations.chatwoot import ChatwootAdapter
+from apps.api.integrations.chatwoot import ChatwootAdapter, verify_chatwoot_signature
 from apps.api.services.integrations_crypto import decrypt_credentials, get_integration_crypto_key
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
@@ -75,6 +77,7 @@ async def chatwoot_webhook(
     settings: SettingsDep,
     agent_service: AgentServiceDep,
 ) -> dict[str, Any]:
+    raw_body = await request.body()
     payload: dict[str, Any] = await request.json()
 
     # 1. Filtrar: solo procesar mensajes inbound del cliente.
@@ -109,13 +112,32 @@ async def chatwoot_webhook(
             status.HTTP_500_INTERNAL_SERVER_ERROR, detail="credentials_not_found"
         )
     crypto_key = get_integration_crypto_key(settings)
-    credentials = decrypt_credentials(encrypted, crypto_key)
+    credentials = json.loads(decrypt_credentials(encrypted, crypto_key).decode())
 
-    # 4. Validar firma opcional.
-    signature_token = request.headers.get("X-Chatwoot-Signature-Token", "")
-    expected_token = credentials.get("webhook_secret_token", "")
-    if expected_token and signature_token != expected_token:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="invalid_signature_token")
+    # 4. Validar firma HMAC opcional.
+    signing_secret = credentials.get("webhook_secret_token", "")
+    if signing_secret:
+        sig_header = request.headers.get("X-Chatwoot-Signature", "")
+        sig_ts = request.headers.get("X-Chatwoot-Timestamp", "")
+        if sig_header and sig_ts:
+            if not verify_chatwoot_signature(
+                signing_secret=signing_secret,
+                timestamp=sig_ts,
+                raw_body=raw_body,
+                signature_header=sig_header,
+            ):
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="invalid_signature")
+        else:
+            # Legacy/self-hosted fallback used by the initial 0.4 integration.
+            signature_token = request.headers.get("X-Chatwoot-Signature-Token", "")
+            if not signature_token:
+                raise HTTPException(
+                    status.HTTP_401_UNAUTHORIZED, detail="missing_signature_headers"
+                )
+            if not hmac.compare_digest(signature_token, signing_secret):
+                raise HTTPException(
+                    status.HTTP_401_UNAUTHORIZED, detail="invalid_signature_token"
+                )
 
     # Construir IntegrationContext para usar el adapter.
     ctx = IntegrationContext(
