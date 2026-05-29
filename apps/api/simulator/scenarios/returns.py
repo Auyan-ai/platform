@@ -29,7 +29,7 @@ _ORDER_IN_WINDOW: dict[str, Any] = {
             "body": "Tienes 30 días desde la fecha de compra para devolver tu pedido.",
         }
     ],
-    "start_return": {"ok": True, "simulated": True, "return_id": "ret-001"},
+    "start_return": {"ok": True, "simulated": True, "id": 9001, "status": "open"},
 }
 
 _ORDER_OUT_OF_WINDOW: dict[str, Any] = {
@@ -96,15 +96,16 @@ SCENARIOS: list[dict[str, Any]] = [
     {
         "id": "RE-01",
         "name": "RE-01: Devolución en plazo",
-        "description": "Cliente cooperativo quiere devolver pedido dentro del plazo de 30 días.",
+        "description": "Cliente cooperativo quiere devolver pedido dentro del plazo de 30 días por talla/preferencia, sin defecto ni reembolso inmediato.",
         "aop_slug": "returns",
         "profile": "cooperativo",
-        "goal": "Iniciar devolución del pedido #1234",
-        "initial_message": "Hola, quiero devolver mi pedido #1234",
+        "goal": "Iniciar una devolución estándar del pedido #1234 porque la talla no me queda bien; no pedir reembolso inmediato ni cambio por defecto.",
+        "initial_message": "Hola, quiero devolver mi pedido #1234 porque la talla no me queda bien",
         "expected_outcome": "El agente inicia la devolución y confirma el proceso.",
         "mock_fixtures": {"shopify": _ORDER_IN_WINDOW},
         "assertions": {
             "skills_called": ["shopify.start_return"],
+            "skills_not_called": ["shopify.refund_partial"],
             "outcome_is": "resolved",
         },
         "max_turns": 6,

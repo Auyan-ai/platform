@@ -6,12 +6,18 @@ coexisten sin cruce de credenciales — la razón del refactor 0.4.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
 from apps.api.integrations.base import IntegrationContext
-from apps.api.integrations.chatwoot import ChatwootAdapter, ChatwootClient
+from apps.api.integrations.chatwoot import (
+    ChatwootAdapter,
+    ChatwootClient,
+    verify_chatwoot_signature,
+)
 from apps.api.integrations.registry import IntegrationRegistry
 
 # ---------------------------------------------------------------------------
@@ -130,6 +136,63 @@ class TestParseInboundWebhook:
         adapter = ChatwootAdapter()
         msg = await adapter.parse_inbound_webhook(payload)
         assert msg.content == ""
+
+
+# ---------------------------------------------------------------------------
+# verify_chatwoot_signature
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyChatwootSignature:
+    def _make_sig(self, secret: str, timestamp: str, body: bytes) -> str:
+        message = timestamp.encode() + b"." + body
+        digest = hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
+        return f"sha256={digest}"
+
+    def test_valid_signature(self) -> None:
+        secret = "cw_secret"
+        ts = "1780045200"
+        body = b'{"event":"message_created","content":"hola"}'
+        assert verify_chatwoot_signature(
+            signing_secret=secret,
+            timestamp=ts,
+            raw_body=body,
+            signature_header=self._make_sig(secret, ts, body),
+        )
+
+    def test_tampered_body_fails(self) -> None:
+        secret = "cw_secret"
+        ts = "1780045200"
+        signature = self._make_sig(secret, ts, b'{"content":"hola"}')
+        assert not verify_chatwoot_signature(
+            signing_secret=secret,
+            timestamp=ts,
+            raw_body=b'{"content":"pedido #1002"}',
+            signature_header=signature,
+        )
+
+    def test_wrong_secret_fails(self) -> None:
+        ts = "1780045200"
+        body = b'{"content":"hola"}'
+        signature = self._make_sig("right_secret", ts, body)
+        assert not verify_chatwoot_signature(
+            signing_secret="wrong_secret",
+            timestamp=ts,
+            raw_body=body,
+            signature_header=signature,
+        )
+
+    def test_missing_prefix_fails(self) -> None:
+        secret = "cw_secret"
+        ts = "1780045200"
+        body = b'{"content":"hola"}'
+        signature = self._make_sig(secret, ts, body).removeprefix("sha256=")
+        assert not verify_chatwoot_signature(
+            signing_secret=secret,
+            timestamp=ts,
+            raw_body=body,
+            signature_header=signature,
+        )
 
 
 # ---------------------------------------------------------------------------

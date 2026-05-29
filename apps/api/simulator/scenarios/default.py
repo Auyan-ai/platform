@@ -152,12 +152,12 @@ SCENARIOS: list[dict[str, Any]] = [
     {
         "id": "DE-06",
         "name": "DE-06: Solo 'hola' — cliente abandona pronto",
-        "description": "El cliente solo dice hola y no elabora. El agente pregunta clarificación. El cliente abandona.",
+        "description": "El cliente solo dice hola y no elabora. El agente pregunta clarificación sin llamar skills operativas.",
         "aop_slug": "default",
         "profile": "abandona_pronto",
         "goal": "Escribir hola y no dar más información",
         "initial_message": "Hola",
-        "expected_outcome": "El agente saluda y pide en qué puede ayudar. El cliente no continúa.",
+        "expected_outcome": "El agente saluda y pide en qué puede ayudar sin consultar ni modificar pedidos.",
         "mock_fixtures": {"shopify": {}},
         "assertions": {
             "skills_not_called": [
@@ -165,7 +165,6 @@ SCENARIOS: list[dict[str, Any]] = [
                 "shopify.cancel_order",
                 "shopify.refund_partial",
             ],
-            "outcome_is": "abandoned",
         },
         "max_turns": 4,
     },

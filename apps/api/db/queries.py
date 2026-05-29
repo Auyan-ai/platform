@@ -3068,6 +3068,38 @@ async def get_user_profile_by_name(
     return UserProfile(**dict(row)) if row else None
 
 
+async def update_user_profile(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    profile_id: UUID,
+    persona: dict,
+    goal: str,
+    initial_message: str,
+    language: str = "es",
+) -> UserProfile | None:
+    row = await conn.fetchrow(
+        """
+        UPDATE user_profiles
+           SET persona = $3,
+               goal = $4,
+               initial_message = $5,
+               language = $6,
+               updated_at = now()
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        RETURNING id, tenant_id, name, persona, goal, initial_message, language,
+                  created_at, updated_at, deleted_at
+        """,
+        tenant_id,
+        profile_id,
+        persona,
+        goal,
+        initial_message,
+        language,
+    )
+    return UserProfile(**dict(row)) if row else None
+
+
 # ─── simulation_scenarios ─────────────────────────────────────────────────────
 
 

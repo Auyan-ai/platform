@@ -57,7 +57,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "assertions": {
             "outcome_is": "abandoned",
         },
-        "max_turns": 5,
+        "max_turns": 4,
     },
     {
         "id": "EX-04",

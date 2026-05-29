@@ -27,6 +27,7 @@ Seguridad HMAC:
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Annotated, Any
 
@@ -118,7 +119,7 @@ async def zendesk_webhook(
             status.HTTP_500_INTERNAL_SERVER_ERROR, detail="credentials_not_found"
         )
     crypto_key = get_integration_crypto_key(settings)
-    credentials = decrypt_credentials(encrypted, crypto_key)
+    credentials = json.loads(decrypt_credentials(encrypted, crypto_key).decode())
 
     # 5. Validar firma HMAC opcional.
     signing_secret = credentials.get("webhook_signing_secret", "")

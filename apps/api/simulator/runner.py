@@ -287,6 +287,7 @@ async def _run_simulation_inner(
         passed=passed,
         total=total,
         judge_verdict=judge_verdict,
+        judge_required=not skip_judge,
     )
 
     cost_cents = _estimate_cost_cents(acc)
@@ -603,8 +604,16 @@ def _compute_status(
     passed: int,
     total: int,
     judge_verdict: SimulatorJudgeVerdict | None,
+    *,
+    judge_required: bool = True,
 ) -> str:
     if judge_verdict is None:
+        if not judge_required:
+            if all_critical_passed:
+                return "passed"
+            if (passed / total >= 0.5) if total > 0 else False:
+                return "partial"
+            return "failed"
         return "errored"
     overall = judge_verdict.overall_score
     goal = judge_verdict.judge_goal_achieved

@@ -8,7 +8,7 @@ Dos capas:
 Credentials esperadas en IntegrationContext:
     {
         "api_access_token": "...",
-        "webhook_secret_token": "..."   # opcional — valida X-Chatwoot-Signature-Token
+        "webhook_secret_token": "..."   # opcional — valida HMAC de webhooks Chatwoot
     }
 
 Config esperada en IntegrationContext:
@@ -21,6 +21,8 @@ Config esperada en IntegrationContext:
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 from typing import Any
@@ -35,6 +37,28 @@ from apps.api.integrations.base import (
 from apps.api.integrations.registry import IntegrationRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def verify_chatwoot_signature(
+    *,
+    signing_secret: str,
+    timestamp: str,
+    raw_body: bytes,
+    signature_header: str,
+) -> bool:
+    """Valida la firma HMAC-SHA256 de webhooks Chatwoot Cloud.
+
+    Chatwoot firma `"{timestamp}.{raw_body}"` y envía el digest como
+    `X-Chatwoot-Signature: sha256=<hex>`.
+    """
+    if not signature_header.startswith("sha256=") or not timestamp:
+        return False
+
+    message = timestamp.encode() + b"." + raw_body
+    expected = "sha256=" + hmac.new(
+        signing_secret.encode(), message, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature_header)
 
 
 # ─── Cliente HTTP con estado ───────────────────────────────────────────────────
