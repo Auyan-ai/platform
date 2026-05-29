@@ -144,3 +144,17 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - supabase/migrations/ → todas las migraciones SQL versionadas
 
 por último, estas no son normas grabadas para siempre, si tienes alguna sugerencia puedes sugerir cambios que yo tendrás que aprobar antes de continuarlos y luego actualizar este archivo
+
+## Agent skills
+
+### Issue tracker
+
+Los issues y PRDs viven como GitHub Issues en `Auyan-ai/platform` (CLI `gh`). Ver `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Roles canónicos con nombres por defecto: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. Ver `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: un `CONTEXT.md` + `docs/adr/` en la raíz. Ver `docs/agents/domain.md`.
