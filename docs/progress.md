@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-05-29 (sesión 53 — giro a Customer Discovery: ~75k líneas / 0 clientes reales. Regla dura: no tocar el agente hasta mandar 3 mensajes de descubrimiento. Repo ahora privado)._
+_Última actualización: 2026-05-29 (sesión 54 — infra de staging: integración real de Chatwoot Cloud registrada en Lunaria + webhook apuntando a staging. Customer Discovery sigue como foco estratégico en sesión paralela; la regla dura de "no tocar el agente hasta 3 mensajes de descubrimiento" se mantiene — esto es habilitar verificación, no cambiar comportamiento del agente)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
 
@@ -19,8 +19,9 @@ _Última actualización: 2026-05-29 (sesión 53 — giro a Customer Discovery: ~
 | Bloque 0 | 0.1–0.10 completados. 0.11 reencuadrado como Agent Verification Staging. |
 | Bloque 1 | 1.0–1.9 completados y archivados. 1.10 billing manual tiene runbook, pero depende de inputs externos por cliente. |
 | Staging DB | Migraciones de Bloque 1 aplicadas; ya no bloquean la validación. |
-| Siguiente paso | **Customer Discovery primero** — armar lista de 10 marcas ICP y mandar 3 mensajes de descubrimiento. El track técnico (Chatwoot sandbox real + simulator 25/25) sigue en paralelo pero secundario hasta tener conversaciones reales. |
-| Reciente en develop | #131 recalibró pricing (billing-manual + master-context), #132 configuró agent skills (issue tracker/triage/domain docs), #133 Chatwoot HMAC + simulator reseed. |
+| Siguiente paso | **Customer Discovery** sigue como foco estratégico (sesión paralela). En el track técnico: Chatwoot Cloud ya quedó configurado en staging → siguientes micro-pasos son el smoke test end-to-end (mensaje real → agente → traza LangSmith) y la corrida simulator 25/25. |
+| Reciente en develop | #131 recalibró pricing (billing-manual + master-context), #132 configuró agent skills, #133 Chatwoot HMAC + simulator reseed. **Local sin pushear:** limpieza de CLAUDE.md (refs a `docs/agents/` eliminados). |
+| Chatwoot staging | ✅ Integración real registrada en Lunaria (cuenta `Purigu`, `account_id 167723`) + webhook apuntando a `/webhooks/chatwoot`. Pendiente: smoke test e2e. |
 
 ---
 
@@ -140,7 +141,7 @@ Pendiente futuro, sólo cuando haga falta más granularidad:
 | LangSmith | ✅ Validado en staging EU: traces reales en `auyan-staging`, root `agent_conversation` + child `agent_model_call` con tokens/coste nativos. Sub-runs internos por nodo quedan como mejora futura. |
 | Simulator | Optimizado: Sonnet judge por defecto, Opus opcional, cap `$5/día` por tenant. #133 añadió reseed de user profiles y modo sin-judge en `_compute_status`. Falta la corrida real 25/25 contra Lunaria staging. |
 | Shopify test store | ✅ Tres órdenes reales `auyan-e2e` creadas en Lunaria: `#1001` (`CE-NO-TRACKING`, sin tracking), `#1002` (`CE-TRACKING`, tracking `1Z999AA10123456784`) y `#1003` (`RETURNS-IN-WINDOW`, tracking `1Z999AA10123456785`). ✅ Shopify registrado como integración primaria `commerce/shopify` en `tenant_integrations` con credentials cifradas. |
-| Chatwoot sandbox | #133 validó la firma HMAC-SHA256 real (`X-Chatwoot-Signature`) con fallback legacy y arregló la lectura de credentials cifradas en los 3 webhooks (chatwoot/gorgias/zendesk). Script `configure_staging_integrations.py` registra la integración cifrada. Falta crear cuenta/inbox/webhook/token reales y ejecutar end-to-end. |
+| Chatwoot Cloud | ✅ Integración real registrada en Lunaria staging vía `configure_staging_integrations.py`: cuenta `Purigu` (`account_id 167723`, `app.chatwoot.com`), credentials cifradas, token validado contra la API de Chatwoot. Inbox creado y webhook de Chatwoot Cloud apuntando a `/webhooks/chatwoot` de staging. #133 dejó lista la firma HMAC-SHA256 real (`X-Chatwoot-Signature` + `X-Chatwoot-Timestamp`) con fallback legacy. **Falta:** smoke test end-to-end con un mensaje real (entra → agente responde → traza en LangSmith). |
 | Gorgias OAuth app | Sigue pendiente; se implementará después de Chatwoot. |
 | Zendesk OAuth app | Sigue pendiente; se implementará después de Chatwoot. |
 | Postmark | Falta `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL` y verificar dominio `auyan.ai`. |
