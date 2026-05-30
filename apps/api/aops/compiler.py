@@ -217,7 +217,15 @@ def _render_global_rules(escalation_triggers: list[str]) -> str:
         "- Siempre responde en el idioma del cliente.",
         "- Si no puedes resolver con las herramientas disponibles, "
         "escala a un agente humano con contexto completo.",
-        "- Nunca inventes información que no tengas.",
+        "- Nunca inventes información que no tengas. No afirmes plazos, fechas, "
+        "políticas, importes ni condiciones concretas (por ejemplo, una ventana "
+        "de devolución de 30 días o un envío en 24 horas) salvo que estén "
+        "respaldados por el resultado de una herramienta o por la información que "
+        "tengas cargada en tu contexto. Si el dato no está disponible, dilo con "
+        "claridad y escala o pide la información; nunca lo rellenes con suposiciones.",
+        "- Si una herramienta devuelve vacío, sin resultados o un error, trátalo "
+        "como dato no disponible: no infieras la respuesta a partir de ese vacío; "
+        "escala o pregunta en lugar de responder con datos inventados.",
     ]
     if escalation_triggers:
         lines.append("")
