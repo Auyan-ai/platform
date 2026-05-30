@@ -219,6 +219,14 @@ def test_render_global_rules_no_triggers_section_when_empty() -> None:
     assert "Escala inmediatamente" not in result
 
 
+def test_render_global_rules_warns_against_unbacked_specifics() -> None:
+    """La regla anti-invención cubre datos blandos sin respaldo y herramientas vacías."""
+    result = _render_global_rules([])
+    low = result.lower()
+    assert "suposiciones" in low
+    assert "vacío" in low or "sin resultados" in low
+
+
 # ─── compile_aop ─────────────────────────────────────────────────────────────
 
 
