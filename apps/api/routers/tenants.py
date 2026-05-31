@@ -6,6 +6,7 @@ import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
+import httpx
 from apps.api.core.config import get_settings
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id, require_role
 from apps.api.db.client import bootstrap_connection, tenant_scope
@@ -17,6 +18,7 @@ from apps.api.db.queries import (
     create_outbound_email_template,
     create_tenant_knowledge_submission,
     enqueue_outbound_email_job,
+    get_internal_user_by_auth_id,
     get_outbound_email_job,
     get_outbound_email_template,
     get_tenant_configuration,
@@ -45,6 +47,12 @@ from apps.api.db.queries import (
     upsert_tenant_playbook,
 )
 from apps.api.services.knowledge_ingestion import chunk_text_for_kb, embed_kb_chunks
+from apps.api.services.tenant_provisioning import (
+    ProvisionRequest,
+    SlugTakenError,
+    SupabaseAdminError,
+    provision_tenant,
+)
 from apps.api.services.tenants import (
     get_tenant,
     get_tenant_config,
@@ -74,6 +82,21 @@ class TenantResponse(BaseModel):
     name: str
     status: str
     agent_lifecycle_state: str = "initial"
+    plan_tier: Literal["founding", "standard", "trial"] = "founding"
+
+
+class CreateTenantRequest(BaseModel):
+    company_name: str = Field(..., min_length=1, max_length=200)
+    slug: str = Field(..., pattern=r"^[a-z][a-z0-9-]{1,49}$")
+    plan_tier: Literal["founding", "standard", "trial"] = "founding"
+    tenant_admin_email: str = Field(..., pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=320)
+    tenant_admin_name: str = Field(..., min_length=1, max_length=200)
+
+
+class CreateTenantResponse(BaseModel):
+    tenant: TenantResponse
+    tenant_admin_user_id: UUID
+    invite_sent: bool
 
 
 class AdminReviewQueueItem(BaseModel):
@@ -409,6 +432,58 @@ async def list_tenants_admin() -> list[TenantResponse]:
     async with bootstrap_connection() as conn:
         tenants = await list_all_tenants(conn)
     return [TenantResponse.model_validate(t) for t in tenants]
+
+
+@router.post(
+    "",
+    response_model=CreateTenantResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Crear nuevo tenant + tenant_admin con invite — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def create_tenant(
+    payload: CreateTenantRequest,
+    auth: AuthDep,
+    settings: SettingsDep,
+) -> CreateTenantResponse:
+    async with bootstrap_connection() as conn:
+        internal_user = await get_internal_user_by_auth_id(conn, auth.user_id)
+        if internal_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="super_admin sin registro en internal_users — no puede asignarse como AIDE",
+            )
+        async with httpx.AsyncClient() as http:
+            try:
+                result = await provision_tenant(
+                    conn,
+                    settings=settings,
+                    http=http,
+                    request=ProvisionRequest(
+                        company_name=payload.company_name,
+                        slug=payload.slug,
+                        plan_tier=payload.plan_tier,
+                        tenant_admin_email=payload.tenant_admin_email,
+                        tenant_admin_name=payload.tenant_admin_name,
+                        creator_internal_user_id=internal_user.id,
+                    ),
+                )
+            except SlugTakenError:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"slug '{payload.slug}' ya está en uso",
+                ) from None
+            except SupabaseAdminError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Supabase Admin: {exc}",
+                ) from exc
+
+    return CreateTenantResponse(
+        tenant=TenantResponse.model_validate(result.tenant),
+        tenant_admin_user_id=result.tenant_admin_user_id,
+        invite_sent=result.invite_sent,
+    )
 
 
 @router.get(

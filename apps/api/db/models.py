@@ -27,6 +27,7 @@ UserRole = Literal["super_admin", "tenant_admin"]
 AgentLifecycleState = Literal[
     "initial", "discovery", "building", "shadow", "ramping", "active", "paused", "churned"
 ]
+PlanTier = Literal["founding", "standard", "trial"]
 TenantKnowledgeSourceType = Literal["text", "url", "file"]
 TenantKnowledgeSubmissionStatus = Literal["pending_review", "approved", "rejected"]
 WeeklyReportStatus = Literal["draft", "pending_review", "approved", "sent"]
@@ -43,6 +44,7 @@ class Tenant(_BaseModel):
     name: str
     status: str
     agent_lifecycle_state: AgentLifecycleState = "initial"
+    plan_tier: PlanTier = "founding"
 
 
 class TenantConfiguration(_BaseModel):

@@ -1,5 +1,6 @@
 'use client'
 
+import { CreateTenantDialog } from '@/components/dashboard/CreateTenantDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -76,11 +77,14 @@ export function ReviewQueueHome() {
             Pendientes cross-tenant para operar KB, reportes, aprobaciones y propuestas.
           </p>
         </div>
-        <div className="rounded-md bg-surface-muted px-3 py-2 text-right">
-          <p className="text-xs text-foreground-muted">Pendientes visibles</p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
-            {isLoading ? '...' : totals}
-          </p>
+        <div className="flex items-start gap-3">
+          <div className="rounded-md bg-surface-muted px-3 py-2 text-right">
+            <p className="text-xs text-foreground-muted">Pendientes visibles</p>
+            <p className="mt-1 text-2xl font-semibold tabular-nums text-foreground">
+              {isLoading ? '...' : totals}
+            </p>
+          </div>
+          <CreateTenantDialog />
         </div>
       </div>
 

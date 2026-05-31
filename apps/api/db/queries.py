@@ -109,7 +109,7 @@ async def get_tenant_by_id(conn: asyncpg.Connection, tenant_id: UUID) -> Tenant 
     """Bootstrap: traer tenant por id. Útil para validar existencia."""
     row = await conn.fetchrow(
         """
-        SELECT id, slug, name, status, agent_lifecycle_state
+        SELECT id, slug, name, status, agent_lifecycle_state, plan_tier
           FROM tenants
          WHERE id = $1 AND deleted_at IS NULL
         """,
@@ -122,7 +122,7 @@ async def get_tenant_by_slug(conn: asyncpg.Connection, slug: str) -> Tenant | No
     """Bootstrap: traer tenant por slug. Se ejecuta SIN tenant scope."""
     row = await conn.fetchrow(
         """
-        SELECT id, slug, name, status, agent_lifecycle_state
+        SELECT id, slug, name, status, agent_lifecycle_state, plan_tier
           FROM tenants
          WHERE slug = $1 AND deleted_at IS NULL
         """,
@@ -909,7 +909,7 @@ async def list_all_tenants(conn: asyncpg.Connection) -> list[Tenant]:
     """Super-admin: listar todos los tenants activos sin tenant_scope."""
     rows = await conn.fetch(
         """
-        SELECT id, slug, name, status, agent_lifecycle_state
+        SELECT id, slug, name, status, agent_lifecycle_state, plan_tier
           FROM tenants
          WHERE deleted_at IS NULL
          ORDER BY name
