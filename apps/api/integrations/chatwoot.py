@@ -76,6 +76,50 @@ class ChatwootClient:
     def _url(self, path: str) -> str:
         return f"{self._base_url}/api/v1/accounts/{self._account_id}{path}"
 
+    # ── Validación y registro de webhook ──────────────────────────────────────
+
+    async def validate(self) -> dict[str, Any]:
+        """Verifica token + account_id contra la cuenta. Devuelve el objeto account.
+
+        Lanza httpx.HTTPStatusError si las credenciales son inválidas.
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(self._url(""), headers=self._headers(), timeout=10)
+            response.raise_for_status()
+            return response.json()  # type: ignore[no-any-return]
+
+    async def list_webhooks(self) -> list[dict[str, Any]]:
+        """Lista los webhooks de cuenta ya registrados (para evitar duplicados)."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                self._url("/webhooks"), headers=self._headers(), timeout=10
+            )
+            response.raise_for_status()
+            payload = response.json()
+        # Chatwoot devuelve {"payload": [...]} o una lista plana según versión.
+        if isinstance(payload, dict):
+            webhooks = payload.get("payload", [])
+            return webhooks if isinstance(webhooks, list) else []
+        return payload if isinstance(payload, list) else []
+
+    async def create_webhook(
+        self, url: str, subscriptions: list[str]
+    ) -> dict[str, Any]:
+        """Registra un webhook de cuenta que apunta a Auyan.
+
+        Chatwoot no expone vía API un secreto de firma usable (bug chatwoot#13809),
+        así que el handler entrante acepta este webhook sin verificar HMAC.
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                self._url("/webhooks"),
+                headers=self._headers(),
+                json={"url": url, "subscriptions": subscriptions},
+                timeout=10,
+            )
+            response.raise_for_status()
+            return response.json()  # type: ignore[no-any-return]
+
     # ── Mensajes ─────────────────────────────────────────────────────────────
 
     async def send_message(self, conversation_id: int, content: str) -> dict[str, Any]:

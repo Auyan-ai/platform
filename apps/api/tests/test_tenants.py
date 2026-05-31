@@ -11,6 +11,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
+import httpx
 import jwt
 import pytest
 from apps.api.core.errors import register_exception_handlers
@@ -47,6 +48,8 @@ class FakeAuthSettings:
     budget_usd_daily: float = 10.0
     embedding_model: str = "text-embedding-3-small"
     llm_max_retries: int = 1
+    integrations_secret_key: str | None = None
+    api_base_url: str | None = None
 
     @property
     def supabase_jwt_secret(self) -> _SecretWrap:
@@ -1143,6 +1146,312 @@ class TestTenantOnboardingEndpoints:
         assert data["complete"] is False
         assert data["has_helpdesk_integration"] is False
         assert data["agent_lifecycle_state"] == "discovery"
+
+
+_CRYPTO_KEY_HEX = "00" * 32
+
+
+def _make_integration(kind: str, provider: str) -> Any:
+    from apps.api.db.models import TenantIntegration
+
+    return TenantIntegration(
+        id=UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+        tenant_id=TENANT_ID,
+        kind=kind,
+        provider=provider,
+        config={"verified_at": "2026-05-31T00:00:00+00:00"},
+        is_active=True,
+        is_primary_for_kind=True,
+    )
+
+
+def _http_error() -> httpx.HTTPStatusError:
+    return httpx.HTTPStatusError("401", request=MagicMock(), response=MagicMock())
+
+
+class TestTenantIntegrationsEndpoints:
+    def test_get_integrations_returns_status_and_checklist(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import OnboardingChecklist
+
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.list_integrations_for_tenant",
+            AsyncMock(return_value=[_make_integration("commerce", "shopify")]),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.compute_onboarding_checklist",
+            AsyncMock(
+                return_value=OnboardingChecklist(
+                    onboarding_submitted=True, has_commerce_integration=True
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant",
+            AsyncMock(return_value=make_tenant(agent_lifecycle_state="discovery")),
+        )
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get(
+            "/tenants/me/integrations",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["integrations"][0]["provider"] == "shopify"
+        assert data["checklist"]["has_commerce_integration"] is True
+
+    def test_connect_shopify_validates_normalizes_and_advances(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.core.config import get_settings
+        from apps.api.db.models import OnboardingChecklist
+
+        fake_client = MagicMock()
+        fake_client.validate = AsyncMock(
+            return_value={"name": "Marea", "email": "ops@marea.io"}
+        )
+        sc_factory = MagicMock(return_value=fake_client)
+        monkeypatch.setattr("apps.api.routers.tenants.ShopifyClient", sc_factory)
+        upsert_mock = AsyncMock(return_value=_make_integration("commerce", "shopify"))
+        monkeypatch.setattr("apps.api.routers.tenants.upsert_integration", upsert_mock)
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle",
+            AsyncMock(
+                return_value=(
+                    make_tenant(agent_lifecycle_state="discovery"),
+                    OnboardingChecklist(
+                        onboarding_submitted=True, has_commerce_integration=True
+                    ),
+                )
+            ),
+        )
+        app = _make_app(monkeypatch)
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX
+        )
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/integrations/shopify",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={"domain": "https://marea.myshopify.com/", "token": "shpat_x"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["integration"]["provider"] == "shopify"
+        assert data["checklist"]["has_commerce_integration"] is True
+        # Dominio normalizado (sin esquema ni barra) al construir el cliente.
+        assert sc_factory.call_args.args[0] == "marea.myshopify.com"
+        assert upsert_mock.await_args.kwargs["kind"] == "commerce"
+        assert upsert_mock.await_args.kwargs["is_primary_for_kind"] is True
+
+    def test_connect_shopify_invalid_credentials_returns_422(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.core.config import get_settings
+
+        fake_client = MagicMock()
+        fake_client.validate = AsyncMock(side_effect=_http_error())
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.ShopifyClient", MagicMock(return_value=fake_client)
+        )
+        app = _make_app(monkeypatch)
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX
+        )
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/integrations/shopify",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={"domain": "marea.myshopify.com", "token": "bad"},
+        )
+
+        assert resp.status_code == 422
+
+    def test_connect_chatwoot_registers_webhook_and_advances(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.core.config import get_settings
+        from apps.api.db.models import OnboardingChecklist
+
+        cw = MagicMock()
+        cw.validate = AsyncMock(return_value={"id": 5, "name": "Marea"})
+        cw.list_webhooks = AsyncMock(return_value=[])
+        cw.create_webhook = AsyncMock(return_value={"id": 9})
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.ChatwootClient", MagicMock(return_value=cw)
+        )
+        upsert_mock = AsyncMock(return_value=_make_integration("helpdesk", "chatwoot"))
+        monkeypatch.setattr("apps.api.routers.tenants.upsert_integration", upsert_mock)
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle",
+            AsyncMock(
+                return_value=(
+                    make_tenant(agent_lifecycle_state="building"),
+                    OnboardingChecklist(
+                        onboarding_submitted=True,
+                        has_commerce_integration=True,
+                        has_helpdesk_integration=True,
+                        has_knowledge=True,
+                    ),
+                )
+            ),
+        )
+        app = _make_app(monkeypatch)
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX, api_base_url="https://api.test"
+        )
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/integrations/chatwoot",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={
+                "base_url": "https://app.chatwoot.com/",
+                "account_id": "5",
+                "api_access_token": "tok",
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["webhook_registered"] is True
+        assert data["checklist"]["complete"] is True
+        cw.create_webhook.assert_awaited_once()
+        assert cw.create_webhook.await_args.args[0] == "https://api.test/webhooks/chatwoot"
+        assert cw.create_webhook.await_args.args[1] == ["message_created"]
+        assert upsert_mock.await_args.kwargs["kind"] == "helpdesk"
+        assert upsert_mock.await_args.kwargs["config"]["webhook_registered"] is True
+
+    def test_connect_chatwoot_skips_duplicate_webhook(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.core.config import get_settings
+        from apps.api.db.models import OnboardingChecklist
+
+        cw = MagicMock()
+        cw.validate = AsyncMock(return_value={"id": 5, "name": "Marea"})
+        cw.list_webhooks = AsyncMock(
+            return_value=[{"url": "https://api.test/webhooks/chatwoot"}]
+        )
+        cw.create_webhook = AsyncMock()
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.ChatwootClient", MagicMock(return_value=cw)
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.upsert_integration",
+            AsyncMock(return_value=_make_integration("helpdesk", "chatwoot")),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle",
+            AsyncMock(
+                return_value=(
+                    make_tenant(agent_lifecycle_state="discovery"),
+                    OnboardingChecklist(onboarding_submitted=True),
+                )
+            ),
+        )
+        app = _make_app(monkeypatch)
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX, api_base_url="https://api.test"
+        )
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/integrations/chatwoot",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={
+                "base_url": "https://app.chatwoot.com",
+                "account_id": "5",
+                "api_access_token": "tok",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["webhook_registered"] is True
+        cw.create_webhook.assert_not_awaited()
+
+    def test_connect_chatwoot_without_api_base_url_skips_webhook(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.core.config import get_settings
+        from apps.api.db.models import OnboardingChecklist
+
+        cw = MagicMock()
+        cw.validate = AsyncMock(return_value={"id": 5, "name": "Marea"})
+        cw.list_webhooks = AsyncMock()
+        cw.create_webhook = AsyncMock()
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.ChatwootClient", MagicMock(return_value=cw)
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.upsert_integration",
+            AsyncMock(return_value=_make_integration("helpdesk", "chatwoot")),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle",
+            AsyncMock(
+                return_value=(
+                    make_tenant(agent_lifecycle_state="discovery"),
+                    OnboardingChecklist(onboarding_submitted=True),
+                )
+            ),
+        )
+        app = _make_app(monkeypatch)
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX, api_base_url=None
+        )
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/integrations/chatwoot",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={
+                "base_url": "https://app.chatwoot.com",
+                "account_id": "5",
+                "api_access_token": "tok",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["webhook_registered"] is False
+        cw.create_webhook.assert_not_awaited()
+        cw.list_webhooks.assert_not_awaited()
+
+    def test_connect_chatwoot_non_numeric_account_returns_422(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.core.config import get_settings
+
+        cw = MagicMock()
+        cw.validate = AsyncMock()
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.ChatwootClient", MagicMock(return_value=cw)
+        )
+        app = _make_app(monkeypatch)
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX, api_base_url="https://api.test"
+        )
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/integrations/chatwoot",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={
+                "base_url": "https://app.chatwoot.com",
+                "account_id": "not-a-number",
+                "api_access_token": "tok",
+            },
+        )
+
+        assert resp.status_code == 422
+        cw.validate.assert_not_awaited()
 
 
 class TestTenantKnowledgeSubmissionsEndpoints:
