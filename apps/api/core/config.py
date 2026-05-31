@@ -84,6 +84,11 @@ class Settings(BaseSettings):
         ..., description="HMAC shared secret para validar webhooks entrantes"
     )
 
+    # URL pública de la API. Se usa para construir el target de webhooks salientes
+    # que registramos en el helpdesk del cliente (ej. {api_base_url}/webhooks/chatwoot).
+    # Sin esto, la conexión de Chatwoot no auto-registra el webhook entrante.
+    api_base_url: str | None = None
+
     # --- Auth (Supabase JWT) ---
     # Supabase usa ES256 (ECDSA) en proyectos nuevos — se valida con JWKS público.
     # supabase_jwt_secret sólo se usa en proyectos legacy que aún tienen HS256.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from apps.api.integrations.shopify import ShopifyClient
 
 DOMAIN = "myshop.myshopify.com"
@@ -237,3 +238,36 @@ class TestAuth:
             await ShopifyClient("myshop.myshopify.com/", TOKEN).get_orders_by_email("x@x.com")
         url = mock_client.get.call_args[0][0]
         assert "myshop.myshopify.com//" not in url
+
+
+# ----------------------------------------------------------------
+# Validación de credenciales
+# ----------------------------------------------------------------
+
+
+class TestValidate:
+    async def test_returns_shop_on_success(self) -> None:
+        mock_cm, mock_client = _mock_httpx({"shop": {"name": "Marea", "email": "ops@marea.io"}})
+        with patch("apps.api.integrations.shopify.httpx.AsyncClient", return_value=mock_cm):
+            shop = await ShopifyClient(DOMAIN, TOKEN).validate()
+        assert shop["name"] == "Marea"
+        url = mock_client.get.call_args[0][0]
+        assert "/shop.json" in url
+
+    async def test_raises_on_invalid_credentials(self) -> None:
+        import httpx
+
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock(
+            side_effect=httpx.HTTPStatusError(
+                "401", request=MagicMock(), response=MagicMock()
+            )
+        )
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=resp)
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+        with patch("apps.api.integrations.shopify.httpx.AsyncClient", return_value=mock_cm):
+            with pytest.raises(httpx.HTTPStatusError):
+                await ShopifyClient(DOMAIN, "bad").validate()

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
@@ -19,6 +19,23 @@ from apps.api.integrations.chatwoot import (
     verify_chatwoot_signature,
 )
 from apps.api.integrations.registry import IntegrationRegistry
+
+
+def _mock_httpx(json_data: object) -> tuple[MagicMock, AsyncMock]:
+    """Devuelve (mock_cm, mock_client) con response.json() → json_data."""
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = json_data
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=resp)
+    mock_client.post = AsyncMock(return_value=resp)
+
+    mock_cm = MagicMock()
+    mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_cm.__aexit__ = AsyncMock(return_value=False)
+    return mock_cm, mock_client
+
 
 # ---------------------------------------------------------------------------
 # Registry
@@ -94,6 +111,45 @@ class TestChatwootClient:
     def test_headers_include_token(self) -> None:
         client = ChatwootClient("https://x.com", "mytoken", 1)
         assert client._headers()["api_access_token"] == "mytoken"
+
+    @pytest.mark.asyncio
+    async def test_validate_returns_account(self) -> None:
+        mock_cm, mock_client = _mock_httpx({"id": 5, "name": "Marea"})
+        with patch("apps.api.integrations.chatwoot.httpx.AsyncClient", return_value=mock_cm):
+            account = await ChatwootClient("https://app.chatwoot.com", "tok", 5).validate()
+        assert account["name"] == "Marea"
+        assert mock_client.get.call_args[0][0] == (
+            "https://app.chatwoot.com/api/v1/accounts/5"
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_webhooks_unwraps_payload(self) -> None:
+        mock_cm, _ = _mock_httpx({"payload": [{"id": 1, "url": "https://a/webhooks/chatwoot"}]})
+        with patch("apps.api.integrations.chatwoot.httpx.AsyncClient", return_value=mock_cm):
+            hooks = await ChatwootClient("https://app.chatwoot.com", "tok", 5).list_webhooks()
+        assert hooks == [{"id": 1, "url": "https://a/webhooks/chatwoot"}]
+
+    @pytest.mark.asyncio
+    async def test_list_webhooks_accepts_flat_list(self) -> None:
+        mock_cm, _ = _mock_httpx([{"id": 2, "url": "https://b/webhooks/chatwoot"}])
+        with patch("apps.api.integrations.chatwoot.httpx.AsyncClient", return_value=mock_cm):
+            hooks = await ChatwootClient("https://app.chatwoot.com", "tok", 5).list_webhooks()
+        assert hooks[0]["id"] == 2
+
+    @pytest.mark.asyncio
+    async def test_create_webhook_posts_url_and_subscriptions(self) -> None:
+        mock_cm, mock_client = _mock_httpx({"id": 9, "url": "https://api/webhooks/chatwoot"})
+        with patch("apps.api.integrations.chatwoot.httpx.AsyncClient", return_value=mock_cm):
+            await ChatwootClient("https://app.chatwoot.com", "tok", 5).create_webhook(
+                "https://api/webhooks/chatwoot", ["message_created"]
+            )
+        url = mock_client.post.call_args[0][0]
+        assert url == "https://app.chatwoot.com/api/v1/accounts/5/webhooks"
+        body = mock_client.post.call_args.kwargs["json"]
+        assert body == {
+            "url": "https://api/webhooks/chatwoot",
+            "subscriptions": ["message_created"],
+        }
 
 
 # ---------------------------------------------------------------------------

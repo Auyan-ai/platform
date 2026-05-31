@@ -36,6 +36,24 @@ class ShopifyClient:
         }
 
     # ----------------------------------------------------------------
+    # Validación de credenciales
+    # ----------------------------------------------------------------
+
+    async def validate(self) -> dict[str, Any]:
+        """Verifica domain + token contra la tienda. Devuelve el objeto `shop`.
+
+        Lanza httpx.HTTPStatusError si las credenciales son inválidas (401/403/404).
+        """
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self._base_url}/shop.json",
+                headers=self._headers(),
+                timeout=10,
+            )
+            response.raise_for_status()
+            return response.json()["shop"]  # type: ignore[no-any-return]
+
+    # ----------------------------------------------------------------
     # Orders
     # ----------------------------------------------------------------
 

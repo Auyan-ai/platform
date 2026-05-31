@@ -62,6 +62,50 @@ export interface TenantKnowledgeSubmission {
   updated_at: string | null
 }
 
+export interface OnboardingChecklist {
+  onboarding_submitted: boolean
+  has_commerce_integration: boolean
+  has_helpdesk_integration: boolean
+  has_knowledge: boolean
+}
+
+export interface OnboardingChecklistResponse extends OnboardingChecklist {
+  is_complete: boolean
+  agent_lifecycle_state: string
+}
+
+export interface TenantIntegrationStatus {
+  kind: 'helpdesk' | 'commerce' | 'channel' | 'llm'
+  provider: string
+  is_active: boolean
+  is_primary_for_kind: boolean
+  config: Record<string, unknown>
+  enabled_at: string | null
+}
+
+export interface TenantIntegrationsOverview {
+  integrations: TenantIntegrationStatus[]
+  checklist: OnboardingChecklistResponse
+}
+
+export interface ConnectShopifyPayload {
+  domain: string
+  token: string
+}
+
+export interface ConnectChatwootPayload {
+  base_url: string
+  account_id: string
+  api_access_token: string
+  escalation_team_id?: string | null
+}
+
+export interface ConnectIntegrationResponse {
+  integration: TenantIntegrationStatus
+  checklist: OnboardingChecklistResponse
+  webhook_registered: boolean | null
+}
+
 export interface TenantInsightTimelinePoint {
   date: string
   conversations: number
@@ -315,6 +359,97 @@ export function useSubmitTenantOnboarding(tenantId: string) {
   })
 }
 
+export function useTenantOnboardingChecklist(tenantId: string) {
+  return useQuery({
+    queryKey: queryKeys.tenants.onboardingChecklist(tenantId),
+    queryFn: async () => {
+      const token = await getToken()
+      return tenantContextFetch<OnboardingChecklistResponse>(
+        token,
+        tenantId,
+        '/tenants/me/onboarding/checklist',
+      )
+    },
+    staleTime: 10_000,
+  })
+}
+
+export function useTenantIntegrations(tenantId: string) {
+  return useQuery({
+    queryKey: queryKeys.tenants.integrations(tenantId),
+    queryFn: async () => {
+      const token = await getToken()
+      return tenantContextFetch<TenantIntegrationsOverview>(
+        token,
+        tenantId,
+        '/tenants/me/integrations',
+      )
+    },
+    staleTime: 10_000,
+  })
+}
+
+export function useConnectShopify(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: ConnectShopifyPayload) => {
+      const token = await getToken()
+      return tenantContextFetch<ConnectIntegrationResponse>(
+        token,
+        tenantId,
+        '/tenants/me/integrations/shopify',
+        { method: 'POST', body: JSON.stringify(payload) },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.integrations(tenantId) })
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.onboardingChecklist(tenantId) })
+    },
+  })
+}
+
+/**
+ * Devuelve la URL de autorización OAuth para el proveedor indicado.
+ * El endpoint `/oauth/{provider}/authorize?format=json` requiere Bearer auth,
+ * por eso lo hacemos vía fetch — no como `<a href>`. El frontend hace
+ * window.location.href con el resultado.
+ */
+export async function fetchOAuthAuthorizeUrl(
+  provider: 'gorgias' | 'zendesk',
+  params: Record<string, string>,
+): Promise<string> {
+  const token = await getToken()
+  const query = new URLSearchParams({ ...params, format: 'json' }).toString()
+  const resp = await fetch(`${API_URL}/oauth/${provider}/authorize?${query}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: resp.statusText }))
+    throw new Error(err.detail ?? `HTTP ${resp.status}`)
+  }
+  const body = (await resp.json()) as { authorize_url: string }
+  return body.authorize_url
+}
+
+export function useConnectChatwoot(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: ConnectChatwootPayload) => {
+      const token = await getToken()
+      return tenantContextFetch<ConnectIntegrationResponse>(
+        token,
+        tenantId,
+        '/tenants/me/integrations/chatwoot',
+        { method: 'POST', body: JSON.stringify(payload) },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.integrations(tenantId) })
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.onboardingChecklist(tenantId) })
+    },
+  })
+}
+
 export function useTenantKnowledgeSubmissions(
   tenantId: string,
   status?: KnowledgeSubmissionStatus,
@@ -369,6 +504,8 @@ export function useCreateTenantKnowledgeSubmission(tenantId: string) {
       qc.invalidateQueries({
         queryKey: queryKeys.tenants.kbSubmissions(tenantId, 'pending_review'),
       })
+      // El backend reevalúa lifecycle al crear la KB — refresca el checklist.
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.onboardingChecklist(tenantId) })
     },
   })
 }

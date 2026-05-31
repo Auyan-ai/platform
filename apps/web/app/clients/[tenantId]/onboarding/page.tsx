@@ -24,7 +24,11 @@ export default async function ClientOnboardingPage({ params }: Props) {
     // Layout handles auth and tenant isolation; keep the form accessible if this read fails.
   }
 
-  if (lifecycleState !== 'initial') redirect(`/clients/${tenantId}/overview`)
+  // El wizard vive durante 'initial' (pre-invite) y 'discovery' (el cliente lo completa).
+  // Provisioning crea el tenant en 'discovery', así que ese es el caso real.
+  if (lifecycleState !== 'initial' && lifecycleState !== 'discovery') {
+    redirect(`/clients/${tenantId}/overview`)
+  }
 
   return (
     <div className="space-y-6">

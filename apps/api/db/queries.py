@@ -38,6 +38,7 @@ from apps.api.db.models import (
     Message,
     MessageDirection,
     MessageRole,
+    OnboardingChecklist,
     OutboundEmailJob,
     OutboundEmailJobStatus,
     OutboundEmailTemplate,
@@ -3631,15 +3632,49 @@ async def submit_tenant_onboarding(
         tenant_id,
         edited_by,
     )
-    await conn.execute(
+    return _tenant_onboarding_from_row(row)
+
+
+async def compute_onboarding_checklist(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+) -> OnboardingChecklist:
+    """Evalúa las cuatro condiciones que gatean discovery → building.
+
+    'KB con contenido' = ≥1 submission no borrada; el CHECK de la tabla ya
+    garantiza que cada submission tiene contenido o URL.
+    """
+    row = await conn.fetchrow(
         """
-        UPDATE tenants
-           SET agent_lifecycle_state = 'building'::agent_lifecycle_state
-         WHERE id = $1
+        SELECT
+          COALESCE(
+            (SELECT submitted_at IS NOT NULL
+               FROM tenant_onboarding WHERE tenant_id = $1),
+            FALSE
+          ) AS onboarding_submitted,
+          EXISTS(
+            SELECT 1 FROM tenant_integrations
+             WHERE tenant_id = $1 AND kind = 'commerce'
+               AND is_active AND deleted_at IS NULL
+          ) AS has_commerce,
+          EXISTS(
+            SELECT 1 FROM tenant_integrations
+             WHERE tenant_id = $1 AND kind = 'helpdesk'
+               AND is_active AND deleted_at IS NULL
+          ) AS has_helpdesk,
+          EXISTS(
+            SELECT 1 FROM tenant_knowledge_submissions
+             WHERE tenant_id = $1 AND deleted_at IS NULL
+          ) AS has_knowledge
         """,
         tenant_id,
     )
-    return _tenant_onboarding_from_row(row)
+    return OnboardingChecklist(
+        onboarding_submitted=row["onboarding_submitted"],
+        has_commerce_integration=row["has_commerce"],
+        has_helpdesk_integration=row["has_helpdesk"],
+        has_knowledge=row["has_knowledge"],
+    )
 
 
 async def update_tenant_lifecycle_state(

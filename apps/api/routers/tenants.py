@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import datetime
+import json
+import logging
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -10,10 +12,11 @@ import httpx
 from apps.api.core.config import get_settings
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id, require_role
 from apps.api.db.client import bootstrap_connection, tenant_scope
-from apps.api.db.models import ChannelType
+from apps.api.db.models import ChannelType, OnboardingChecklist
 from apps.api.db.queries import (
     approve_tenant_knowledge_submission_with_document,
     approve_weekly_report,
+    compute_onboarding_checklist,
     create_or_refresh_weekly_report_draft,
     create_outbound_email_template,
     create_tenant_knowledge_submission,
@@ -30,6 +33,7 @@ from apps.api.db.queries import (
     get_weekly_report,
     list_admin_review_queue,
     list_all_tenants,
+    list_integrations_for_tenant,
     list_outbound_email_jobs,
     list_outbound_email_templates,
     list_tenant_knowledge_submissions,
@@ -42,9 +46,16 @@ from apps.api.db.queries import (
     update_outbound_email_template,
     update_tenant_lifecycle_state,
     update_weekly_report_draft,
+    upsert_integration,
     upsert_tenant_facts,
     upsert_tenant_onboarding,
     upsert_tenant_playbook,
+)
+from apps.api.integrations.chatwoot import ChatwootClient
+from apps.api.integrations.shopify import ShopifyClient
+from apps.api.services.integrations_crypto import (
+    encrypt_credentials,
+    get_integration_crypto_key,
 )
 from apps.api.services.knowledge_ingestion import chunk_text_for_kb, embed_kb_chunks
 from apps.api.services.tenant_provisioning import (
@@ -54,6 +65,7 @@ from apps.api.services.tenant_provisioning import (
     provision_tenant,
 )
 from apps.api.services.tenants import (
+    evaluate_and_advance_lifecycle,
     get_tenant,
     get_tenant_config,
     get_tenant_insights,
@@ -61,6 +73,8 @@ from apps.api.services.tenants import (
 )
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
@@ -224,6 +238,49 @@ class TenantOnboardingUpdate(BaseModel):
     current_step: int = Field(default=1, ge=1, le=9)
     completed_steps: list[int] = Field(default_factory=list)
     step_data: dict[str, Any] = Field(default_factory=dict)
+
+
+class OnboardingChecklistResponse(BaseModel):
+    onboarding_submitted: bool
+    has_commerce_integration: bool
+    has_helpdesk_integration: bool
+    has_knowledge: bool
+    complete: bool
+    agent_lifecycle_state: str
+
+
+class IntegrationStatusResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    kind: str
+    provider: str
+    is_active: bool
+    is_primary_for_kind: bool
+    config: dict[str, Any] = Field(default_factory=dict)
+    enabled_at: datetime.datetime | None = None
+
+
+class IntegrationsOverviewResponse(BaseModel):
+    integrations: list[IntegrationStatusResponse]
+    checklist: OnboardingChecklistResponse
+
+
+class ConnectShopifyRequest(BaseModel):
+    domain: str = Field(min_length=1, max_length=255)
+    token: str = Field(min_length=1, max_length=255)
+
+
+class ConnectChatwootRequest(BaseModel):
+    base_url: str = Field(min_length=1, max_length=255)
+    account_id: str = Field(min_length=1, max_length=64)
+    api_access_token: str = Field(min_length=1, max_length=255)
+    escalation_team_id: str | None = Field(default=None, max_length=64)
+
+
+class ConnectIntegrationResponse(BaseModel):
+    integration: IntegrationStatusResponse
+    checklist: OnboardingChecklistResponse
+    webhook_registered: bool | None = None
 
 
 class TenantLifecycleUpdate(BaseModel):
@@ -1069,10 +1126,25 @@ async def update_my_tenant_onboarding(
     return TenantOnboardingResponse.model_validate(onboarding)
 
 
+@router.get(
+    "/me/onboarding/checklist",
+    response_model=OnboardingChecklistResponse,
+    summary="Estado del checklist que gatea discovery → building",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def get_my_onboarding_checklist(
+    tenant_id: TenantIdDep,
+) -> OnboardingChecklistResponse:
+    async with tenant_scope(tenant_id) as conn:
+        checklist = await compute_onboarding_checklist(conn, tenant_id)
+        tenant = await get_tenant(conn, tenant_id)
+    return _checklist_response(checklist, tenant.agent_lifecycle_state)
+
+
 @router.post(
     "/me/onboarding/submit",
     response_model=TenantOnboardingResponse,
-    summary="Confirma onboarding inicial y mueve el agente a Building",
+    summary="Confirma onboarding inicial; pasa a Building si el checklist está completo",
     dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
 )
 async def submit_my_tenant_onboarding(
@@ -1081,27 +1153,240 @@ async def submit_my_tenant_onboarding(
     auth: AuthDep,
 ) -> TenantOnboardingResponse:
     async with tenant_scope(tenant_id) as conn:
-        tenant = await get_tenant(conn, tenant_id)
         onboarding = await submit_tenant_onboarding(
             conn,
             tenant_id=tenant_id,
             edited_by=auth.user_id,
         )
+        tenant, checklist = await evaluate_and_advance_lifecycle(conn, tenant_id)
 
+    advanced = tenant.agent_lifecycle_state == "building"
     email_sender = getattr(request.app.state, "email_sender", None)
     if email_sender is not None:
-        email_sender.send_email(
-            to=auth.email,
-            subject=f"Auyan recibió el onboarding de {tenant.name}",
-            text_body=(
+        if advanced:
+            body = (
                 f"Recibimos el onboarding de {tenant.name}.\n\n"
                 "El agente pasa a fase Building. El siguiente paso de Auyan es revisar "
                 "la información, preparar el playbook y configurar los primeros AOPs."
-            ),
+            )
+        else:
+            faltan = []
+            if not checklist.has_commerce_integration:
+                faltan.append("conectar tu tienda (Shopify)")
+            if not checklist.has_helpdesk_integration:
+                faltan.append("conectar tu helpdesk")
+            if not checklist.has_knowledge:
+                faltan.append("aportar al menos un documento o URL de conocimiento")
+            body = (
+                f"Recibimos el onboarding de {tenant.name}.\n\n"
+                "Para que el agente pase a fase Building todavía falta: "
+                + "; ".join(faltan)
+                + ".\n\nPuedes completarlo desde el portal cuando quieras."
+            )
+        email_sender.send_email(
+            to=auth.email,
+            subject=f"Auyan recibió el onboarding de {tenant.name}",
+            text_body=body,
             tag="tenant-onboarding-submitted",
         )
 
     return TenantOnboardingResponse.model_validate(onboarding)
+
+
+# ----------------------------------------------------------------
+# Integraciones del tenant (conexión self-service durante onboarding)
+# ----------------------------------------------------------------
+
+# El handler entrante sólo procesa message_created + incoming, así que ese es
+# el único evento que necesitamos suscribir en Chatwoot.
+_CHATWOOT_WEBHOOK_SUBSCRIPTIONS = ["message_created"]
+
+
+def _checklist_response(
+    checklist: OnboardingChecklist, agent_lifecycle_state: str
+) -> OnboardingChecklistResponse:
+    return OnboardingChecklistResponse(
+        onboarding_submitted=checklist.onboarding_submitted,
+        has_commerce_integration=checklist.has_commerce_integration,
+        has_helpdesk_integration=checklist.has_helpdesk_integration,
+        has_knowledge=checklist.has_knowledge,
+        complete=checklist.complete,
+        agent_lifecycle_state=agent_lifecycle_state,
+    )
+
+
+def _normalize_shopify_domain(raw: str) -> str:
+    """Quita esquema y barras para dejar el myshopify domain limpio."""
+    domain = raw.strip().removeprefix("https://").removeprefix("http://")
+    return domain.strip("/")
+
+
+def _crypto_key(settings: SettingsDep) -> bytes:
+    try:
+        return get_integration_crypto_key(settings)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503, detail="Cifrado de integraciones no configurado"
+        ) from exc
+
+
+@router.get(
+    "/me/integrations",
+    response_model=IntegrationsOverviewResponse,
+    summary="Estado de las integraciones del tenant + checklist de onboarding",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def get_my_integrations(tenant_id: TenantIdDep) -> IntegrationsOverviewResponse:
+    async with tenant_scope(tenant_id) as conn:
+        rows = await list_integrations_for_tenant(conn, tenant_id=tenant_id)
+        checklist = await compute_onboarding_checklist(conn, tenant_id)
+        tenant = await get_tenant(conn, tenant_id)
+    return IntegrationsOverviewResponse(
+        integrations=[IntegrationStatusResponse.model_validate(r) for r in rows],
+        checklist=_checklist_response(checklist, tenant.agent_lifecycle_state),
+    )
+
+
+@router.post(
+    "/me/integrations/shopify",
+    response_model=ConnectIntegrationResponse,
+    summary="Conecta la tienda Shopify del tenant (valida, cifra y guarda)",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def connect_shopify(
+    body: ConnectShopifyRequest,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+    settings: SettingsDep,
+) -> ConnectIntegrationResponse:
+    domain = _normalize_shopify_domain(body.domain)
+    try:
+        shop = await ShopifyClient(domain, body.token).validate()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="No pudimos validar las credenciales de Shopify (dominio o token inválidos)",
+        ) from exc
+
+    key = _crypto_key(settings)
+    encrypted = encrypt_credentials(
+        json.dumps({"domain": domain, "token": body.token}).encode(), key
+    )
+    config: dict[str, Any] = {
+        "shop_name": shop.get("name"),
+        "shop_email": shop.get("email"),
+        "verified_at": datetime.datetime.now(datetime.UTC).isoformat(),
+    }
+
+    async with tenant_scope(tenant_id) as conn:
+        integration = await upsert_integration(
+            conn,
+            tenant_id=tenant_id,
+            kind="commerce",
+            provider="shopify",
+            credentials_encrypted=encrypted,
+            config=config,
+            is_active=True,
+            is_primary_for_kind=True,
+            enabled_by=auth.user_id,
+        )
+        tenant, checklist = await evaluate_and_advance_lifecycle(conn, tenant_id)
+
+    return ConnectIntegrationResponse(
+        integration=IntegrationStatusResponse.model_validate(integration),
+        checklist=_checklist_response(checklist, tenant.agent_lifecycle_state),
+    )
+
+
+@router.post(
+    "/me/integrations/chatwoot",
+    response_model=ConnectIntegrationResponse,
+    summary="Conecta el helpdesk Chatwoot del tenant (valida, registra webhook, cifra y guarda)",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def connect_chatwoot(
+    body: ConnectChatwootRequest,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+    settings: SettingsDep,
+) -> ConnectIntegrationResponse:
+    base_url = body.base_url.strip().rstrip("/")
+    try:
+        account_id = int(body.account_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail="account_id de Chatwoot debe ser numérico"
+        ) from exc
+
+    client = ChatwootClient(
+        base_url=base_url, api_access_token=body.api_access_token, account_id=account_id
+    )
+    try:
+        account = await client.validate()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="No pudimos validar las credenciales de Chatwoot (token o account inválidos)",
+        ) from exc
+
+    webhook_registered = await _ensure_chatwoot_webhook(client, settings)
+
+    key = _crypto_key(settings)
+    encrypted = encrypt_credentials(
+        json.dumps({"api_access_token": body.api_access_token}).encode(), key
+    )
+    config: dict[str, Any] = {
+        "base_url": base_url,
+        "account_id": body.account_id,
+        "account_name": account.get("name"),
+        "webhook_registered": webhook_registered,
+        "verified_at": datetime.datetime.now(datetime.UTC).isoformat(),
+    }
+    if body.escalation_team_id:
+        config["escalation_team_id"] = body.escalation_team_id
+
+    async with tenant_scope(tenant_id) as conn:
+        integration = await upsert_integration(
+            conn,
+            tenant_id=tenant_id,
+            kind="helpdesk",
+            provider="chatwoot",
+            credentials_encrypted=encrypted,
+            config=config,
+            is_active=True,
+            is_primary_for_kind=True,
+            enabled_by=auth.user_id,
+        )
+        tenant, checklist = await evaluate_and_advance_lifecycle(conn, tenant_id)
+
+    return ConnectIntegrationResponse(
+        integration=IntegrationStatusResponse.model_validate(integration),
+        checklist=_checklist_response(checklist, tenant.agent_lifecycle_state),
+        webhook_registered=webhook_registered,
+    )
+
+
+async def _ensure_chatwoot_webhook(
+    client: ChatwootClient, settings: SettingsDep
+) -> bool:
+    """Registra el webhook entrante de Auyan en Chatwoot, sin duplicar.
+
+    Devuelve False (sin fallar la conexión) si no hay api_base_url configurado
+    o si Chatwoot rechaza el alta — el cliente puede pegar la URL a mano luego.
+    """
+    api_base = getattr(settings, "api_base_url", None)
+    if not api_base:
+        return False
+    target = f"{api_base.rstrip('/')}/webhooks/chatwoot"
+    try:
+        existing = await client.list_webhooks()
+        if any(hook.get("url") == target for hook in existing):
+            return True
+        await client.create_webhook(target, _CHATWOOT_WEBHOOK_SUBSCRIPTIONS)
+        return True
+    except httpx.HTTPStatusError:
+        logger.warning("No se pudo registrar el webhook de Chatwoot automáticamente")
+        return False
 
 
 @router.put(
@@ -1167,6 +1452,10 @@ async def create_my_kb_submission(
             metadata=body.metadata,
             submitted_by=auth.user_id,
         )
+        # Reevaluar el checklist — añadir KB puede completar el último gate
+        # discovery→building. Ignoramos el resultado: la UI re-fetchea
+        # /me/onboarding/checklist o /me/integrations para refrescar el estado.
+        await evaluate_and_advance_lifecycle(conn, tenant_id)
     return TenantKnowledgeSubmissionResponse.model_validate(submission)
 
 

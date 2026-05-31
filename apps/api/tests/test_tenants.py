@@ -11,6 +11,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
+import httpx
 import jwt
 import pytest
 from apps.api.core.errors import register_exception_handlers
@@ -47,6 +48,8 @@ class FakeAuthSettings:
     budget_usd_daily: float = 10.0
     embedding_model: str = "text-embedding-3-small"
     llm_max_retries: int = 1
+    integrations_secret_key: str | None = None
+    api_base_url: str | None = None
 
     @property
     def supabase_jwt_secret(self) -> _SecretWrap:
@@ -1027,10 +1030,10 @@ class TestTenantOnboardingEndpoints:
         assert upsert_mock.await_args.kwargs["completed_steps"] == [1, 2, 9]
         assert upsert_mock.await_args.kwargs["edited_by"] == USER_ID
 
-    def test_submit_onboarding_moves_to_building_and_sends_email(
+    def test_submit_onboarding_advances_to_building_when_checklist_complete(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from apps.api.db.models import TenantOnboarding
+        from apps.api.db.models import OnboardingChecklist, TenantOnboarding
 
         onboarding = TenantOnboarding(
             tenant_id=TENANT_ID,
@@ -1039,8 +1042,19 @@ class TestTenantOnboardingEndpoints:
             submitted_at=datetime.now(UTC),
         )
         submit_mock = AsyncMock(return_value=onboarding)
-        monkeypatch.setattr("apps.api.routers.tenants.get_tenant", AsyncMock(return_value=make_tenant()))
+        checklist = OnboardingChecklist(
+            onboarding_submitted=True,
+            has_commerce_integration=True,
+            has_helpdesk_integration=True,
+            has_knowledge=True,
+        )
+        advance_mock = AsyncMock(
+            return_value=(make_tenant(agent_lifecycle_state="building"), checklist)
+        )
         monkeypatch.setattr("apps.api.routers.tenants.submit_tenant_onboarding", submit_mock)
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle", advance_mock
+        )
         app = _make_app(monkeypatch)
         app.state.email_sender = MagicMock()
         client = TestClient(app)
@@ -1054,6 +1068,390 @@ class TestTenantOnboardingEndpoints:
         assert resp.json()["submitted_at"] is not None
         assert submit_mock.await_args.kwargs["edited_by"] == USER_ID
         app.state.email_sender.send_email.assert_called_once()
+        body = app.state.email_sender.send_email.call_args.kwargs["text_body"]
+        assert "El agente pasa a fase Building" in body
+
+    def test_submit_onboarding_stays_discovery_when_checklist_incomplete(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import OnboardingChecklist, TenantOnboarding
+
+        onboarding = TenantOnboarding(
+            tenant_id=TENANT_ID,
+            current_step=9,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9],
+            submitted_at=datetime.now(UTC),
+        )
+        checklist = OnboardingChecklist(
+            onboarding_submitted=True,
+            has_commerce_integration=False,
+            has_helpdesk_integration=False,
+            has_knowledge=False,
+        )
+        advance_mock = AsyncMock(
+            return_value=(make_tenant(agent_lifecycle_state="discovery"), checklist)
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.submit_tenant_onboarding",
+            AsyncMock(return_value=onboarding),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle", advance_mock
+        )
+        app = _make_app(monkeypatch)
+        app.state.email_sender = MagicMock()
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/onboarding/submit",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        body = app.state.email_sender.send_email.call_args.kwargs["text_body"]
+        assert "El agente pasa a fase Building" not in body
+        assert "todavía falta" in body
+        assert "Shopify" in body
+        assert "helpdesk" in body
+
+    def test_get_onboarding_checklist_returns_status(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import OnboardingChecklist
+
+        checklist = OnboardingChecklist(
+            onboarding_submitted=True,
+            has_commerce_integration=True,
+            has_helpdesk_integration=False,
+            has_knowledge=True,
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.compute_onboarding_checklist",
+            AsyncMock(return_value=checklist),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant",
+            AsyncMock(return_value=make_tenant(agent_lifecycle_state="discovery")),
+        )
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get(
+            "/tenants/me/onboarding/checklist",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["complete"] is False
+        assert data["has_helpdesk_integration"] is False
+        assert data["agent_lifecycle_state"] == "discovery"
+
+
+_CRYPTO_KEY_HEX = "00" * 32
+
+
+def _make_integration(kind: str, provider: str) -> Any:
+    from apps.api.db.models import TenantIntegration
+
+    return TenantIntegration(
+        id=UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+        tenant_id=TENANT_ID,
+        kind=kind,
+        provider=provider,
+        config={"verified_at": "2026-05-31T00:00:00+00:00"},
+        is_active=True,
+        is_primary_for_kind=True,
+    )
+
+
+def _http_error() -> httpx.HTTPStatusError:
+    return httpx.HTTPStatusError("401", request=MagicMock(), response=MagicMock())
+
+
+class TestTenantIntegrationsEndpoints:
+    def test_get_integrations_returns_status_and_checklist(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import OnboardingChecklist
+
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.list_integrations_for_tenant",
+            AsyncMock(return_value=[_make_integration("commerce", "shopify")]),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.compute_onboarding_checklist",
+            AsyncMock(
+                return_value=OnboardingChecklist(
+                    onboarding_submitted=True, has_commerce_integration=True
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant",
+            AsyncMock(return_value=make_tenant(agent_lifecycle_state="discovery")),
+        )
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.get(
+            "/tenants/me/integrations",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["integrations"][0]["provider"] == "shopify"
+        assert data["checklist"]["has_commerce_integration"] is True
+
+    def test_connect_shopify_validates_normalizes_and_advances(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.core.config import get_settings
+        from apps.api.db.models import OnboardingChecklist
+
+        fake_client = MagicMock()
+        fake_client.validate = AsyncMock(
+            return_value={"name": "Marea", "email": "ops@marea.io"}
+        )
+        sc_factory = MagicMock(return_value=fake_client)
+        monkeypatch.setattr("apps.api.routers.tenants.ShopifyClient", sc_factory)
+        upsert_mock = AsyncMock(return_value=_make_integration("commerce", "shopify"))
+        monkeypatch.setattr("apps.api.routers.tenants.upsert_integration", upsert_mock)
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle",
+            AsyncMock(
+                return_value=(
+                    make_tenant(agent_lifecycle_state="discovery"),
+                    OnboardingChecklist(
+                        onboarding_submitted=True, has_commerce_integration=True
+                    ),
+                )
+            ),
+        )
+        app = _make_app(monkeypatch)
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX
+        )
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/integrations/shopify",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={"domain": "https://marea.myshopify.com/", "token": "shpat_x"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["integration"]["provider"] == "shopify"
+        assert data["checklist"]["has_commerce_integration"] is True
+        # Dominio normalizado (sin esquema ni barra) al construir el cliente.
+        assert sc_factory.call_args.args[0] == "marea.myshopify.com"
+        assert upsert_mock.await_args.kwargs["kind"] == "commerce"
+        assert upsert_mock.await_args.kwargs["is_primary_for_kind"] is True
+
+    def test_connect_shopify_invalid_credentials_returns_422(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.core.config import get_settings
+
+        fake_client = MagicMock()
+        fake_client.validate = AsyncMock(side_effect=_http_error())
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.ShopifyClient", MagicMock(return_value=fake_client)
+        )
+        app = _make_app(monkeypatch)
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX
+        )
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/integrations/shopify",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={"domain": "marea.myshopify.com", "token": "bad"},
+        )
+
+        assert resp.status_code == 422
+
+    def test_connect_chatwoot_registers_webhook_and_advances(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.core.config import get_settings
+        from apps.api.db.models import OnboardingChecklist
+
+        cw = MagicMock()
+        cw.validate = AsyncMock(return_value={"id": 5, "name": "Marea"})
+        cw.list_webhooks = AsyncMock(return_value=[])
+        cw.create_webhook = AsyncMock(return_value={"id": 9})
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.ChatwootClient", MagicMock(return_value=cw)
+        )
+        upsert_mock = AsyncMock(return_value=_make_integration("helpdesk", "chatwoot"))
+        monkeypatch.setattr("apps.api.routers.tenants.upsert_integration", upsert_mock)
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle",
+            AsyncMock(
+                return_value=(
+                    make_tenant(agent_lifecycle_state="building"),
+                    OnboardingChecklist(
+                        onboarding_submitted=True,
+                        has_commerce_integration=True,
+                        has_helpdesk_integration=True,
+                        has_knowledge=True,
+                    ),
+                )
+            ),
+        )
+        app = _make_app(monkeypatch)
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX, api_base_url="https://api.test"
+        )
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/integrations/chatwoot",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={
+                "base_url": "https://app.chatwoot.com/",
+                "account_id": "5",
+                "api_access_token": "tok",
+            },
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["webhook_registered"] is True
+        assert data["checklist"]["complete"] is True
+        cw.create_webhook.assert_awaited_once()
+        assert cw.create_webhook.await_args.args[0] == "https://api.test/webhooks/chatwoot"
+        assert cw.create_webhook.await_args.args[1] == ["message_created"]
+        assert upsert_mock.await_args.kwargs["kind"] == "helpdesk"
+        assert upsert_mock.await_args.kwargs["config"]["webhook_registered"] is True
+
+    def test_connect_chatwoot_skips_duplicate_webhook(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.core.config import get_settings
+        from apps.api.db.models import OnboardingChecklist
+
+        cw = MagicMock()
+        cw.validate = AsyncMock(return_value={"id": 5, "name": "Marea"})
+        cw.list_webhooks = AsyncMock(
+            return_value=[{"url": "https://api.test/webhooks/chatwoot"}]
+        )
+        cw.create_webhook = AsyncMock()
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.ChatwootClient", MagicMock(return_value=cw)
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.upsert_integration",
+            AsyncMock(return_value=_make_integration("helpdesk", "chatwoot")),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle",
+            AsyncMock(
+                return_value=(
+                    make_tenant(agent_lifecycle_state="discovery"),
+                    OnboardingChecklist(onboarding_submitted=True),
+                )
+            ),
+        )
+        app = _make_app(monkeypatch)
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX, api_base_url="https://api.test"
+        )
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/integrations/chatwoot",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={
+                "base_url": "https://app.chatwoot.com",
+                "account_id": "5",
+                "api_access_token": "tok",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["webhook_registered"] is True
+        cw.create_webhook.assert_not_awaited()
+
+    def test_connect_chatwoot_without_api_base_url_skips_webhook(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.core.config import get_settings
+        from apps.api.db.models import OnboardingChecklist
+
+        cw = MagicMock()
+        cw.validate = AsyncMock(return_value={"id": 5, "name": "Marea"})
+        cw.list_webhooks = AsyncMock()
+        cw.create_webhook = AsyncMock()
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.ChatwootClient", MagicMock(return_value=cw)
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.upsert_integration",
+            AsyncMock(return_value=_make_integration("helpdesk", "chatwoot")),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle",
+            AsyncMock(
+                return_value=(
+                    make_tenant(agent_lifecycle_state="discovery"),
+                    OnboardingChecklist(onboarding_submitted=True),
+                )
+            ),
+        )
+        app = _make_app(monkeypatch)
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX, api_base_url=None
+        )
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/integrations/chatwoot",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={
+                "base_url": "https://app.chatwoot.com",
+                "account_id": "5",
+                "api_access_token": "tok",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["webhook_registered"] is False
+        cw.create_webhook.assert_not_awaited()
+        cw.list_webhooks.assert_not_awaited()
+
+    def test_connect_chatwoot_non_numeric_account_returns_422(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.core.config import get_settings
+
+        cw = MagicMock()
+        cw.validate = AsyncMock()
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.ChatwootClient", MagicMock(return_value=cw)
+        )
+        app = _make_app(monkeypatch)
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX, api_base_url="https://api.test"
+        )
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/integrations/chatwoot",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={
+                "base_url": "https://app.chatwoot.com",
+                "account_id": "not-a-number",
+                "api_access_token": "tok",
+            },
+        )
+
+        assert resp.status_code == 422
+        cw.validate.assert_not_awaited()
 
 
 class TestTenantKnowledgeSubmissionsEndpoints:
@@ -1099,8 +1497,24 @@ class TestTenantKnowledgeSubmissionsEndpoints:
             status="pending_review",
             submitted_by=USER_ID,
         )
+        from apps.api.db.models import OnboardingChecklist
+
         create_mock = AsyncMock(return_value=submission)
+        advance_mock = AsyncMock(
+            return_value=(
+                make_tenant(agent_lifecycle_state="discovery"),
+                OnboardingChecklist(
+                    onboarding_submitted=False,
+                    has_commerce_integration=False,
+                    has_helpdesk_integration=False,
+                    has_knowledge=True,
+                ),
+            )
+        )
         monkeypatch.setattr("apps.api.routers.tenants.create_tenant_knowledge_submission", create_mock)
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle", advance_mock
+        )
         app = _make_app(monkeypatch)
         client = TestClient(app)
 
@@ -1118,6 +1532,7 @@ class TestTenantKnowledgeSubmissionsEndpoints:
         assert resp.status_code == 201
         assert resp.json()["status"] == "pending_review"
         assert create_mock.await_args.kwargs["submitted_by"] == USER_ID
+        advance_mock.assert_awaited_once()
 
     def test_create_kb_submission_requires_content_or_url(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1132,6 +1547,60 @@ class TestTenantKnowledgeSubmissionsEndpoints:
         )
 
         assert resp.status_code == 422
+
+    def test_create_kb_submission_advances_lifecycle_when_checklist_complete(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Si la KB es el último gate pendiente, evaluate_and_advance_lifecycle
+        debe correr y reportar el avance a building."""
+        from apps.api.db.models import OnboardingChecklist, TenantKnowledgeSubmission
+
+        submission = TenantKnowledgeSubmission(
+            id=UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            tenant_id=TENANT_ID,
+            title="FAQ envíos",
+            source_type="url",
+            source_url="https://acme.test/envios",
+            content="Los pedidos tardan 24-48 horas hábiles.",
+            status="pending_review",
+            submitted_by=USER_ID,
+        )
+        advance_mock = AsyncMock(
+            return_value=(
+                make_tenant(agent_lifecycle_state="building"),
+                OnboardingChecklist(
+                    onboarding_submitted=True,
+                    has_commerce_integration=True,
+                    has_helpdesk_integration=True,
+                    has_knowledge=True,
+                ),
+            )
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.create_tenant_knowledge_submission",
+            AsyncMock(return_value=submission),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle", advance_mock
+        )
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/kb-submissions",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={
+                "title": "FAQ envíos",
+                "source_type": "url",
+                "source_url": "https://acme.test/envios",
+                "content": "Los pedidos tardan 24-48 horas hábiles.",
+            },
+        )
+
+        assert resp.status_code == 201
+        advance_mock.assert_awaited_once()
+        # El segundo argumento posicional debe ser el tenant_id
+        assert advance_mock.await_args.args[1] == TENANT_ID
 
     def test_reject_kb_submission_marks_reviewed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from apps.api.db.models import TenantKnowledgeSubmission
@@ -1210,3 +1679,95 @@ class TestTenantKnowledgeSubmissionsEndpoints:
         assert resp.json()["status"] == "approved"
         assert approve_mock.await_args.kwargs["reviewed_by"] == USER_ID
         assert approve_mock.await_args.kwargs["chunks"][0][1] == [0.1] * 1536
+
+
+class TestEvaluateAndAdvanceLifecycle:
+    """Tests del service: discovery → building gateado por checklist."""
+
+    async def test_advances_to_building_when_complete(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import OnboardingChecklist
+        from apps.api.services import tenants as svc
+
+        checklist = OnboardingChecklist(
+            onboarding_submitted=True,
+            has_commerce_integration=True,
+            has_helpdesk_integration=True,
+            has_knowledge=True,
+        )
+        monkeypatch.setattr(
+            svc, "compute_onboarding_checklist", AsyncMock(return_value=checklist)
+        )
+        monkeypatch.setattr(
+            svc,
+            "get_tenant_by_id",
+            AsyncMock(return_value=make_tenant(agent_lifecycle_state="discovery")),
+        )
+        update_mock = AsyncMock(
+            return_value=make_tenant(agent_lifecycle_state="building")
+        )
+        monkeypatch.setattr(svc, "update_tenant_lifecycle_state", update_mock)
+
+        tenant, result = await svc.evaluate_and_advance_lifecycle(AsyncMock(), TENANT_ID)
+
+        assert tenant.agent_lifecycle_state == "building"
+        assert result.complete is True
+        assert update_mock.await_args.args[2] == "building"
+
+    async def test_stays_discovery_when_incomplete(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import OnboardingChecklist
+        from apps.api.services import tenants as svc
+
+        checklist = OnboardingChecklist(
+            onboarding_submitted=True,
+            has_commerce_integration=True,
+            has_helpdesk_integration=False,
+            has_knowledge=True,
+        )
+        monkeypatch.setattr(
+            svc, "compute_onboarding_checklist", AsyncMock(return_value=checklist)
+        )
+        monkeypatch.setattr(
+            svc,
+            "get_tenant_by_id",
+            AsyncMock(return_value=make_tenant(agent_lifecycle_state="discovery")),
+        )
+        update_mock = AsyncMock()
+        monkeypatch.setattr(svc, "update_tenant_lifecycle_state", update_mock)
+
+        tenant, result = await svc.evaluate_and_advance_lifecycle(AsyncMock(), TENANT_ID)
+
+        assert tenant.agent_lifecycle_state == "discovery"
+        assert result.complete is False
+        update_mock.assert_not_awaited()
+
+    async def test_does_not_touch_building_state(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import OnboardingChecklist
+        from apps.api.services import tenants as svc
+
+        checklist = OnboardingChecklist(
+            onboarding_submitted=True,
+            has_commerce_integration=True,
+            has_helpdesk_integration=True,
+            has_knowledge=True,
+        )
+        monkeypatch.setattr(
+            svc, "compute_onboarding_checklist", AsyncMock(return_value=checklist)
+        )
+        monkeypatch.setattr(
+            svc,
+            "get_tenant_by_id",
+            AsyncMock(return_value=make_tenant(agent_lifecycle_state="building")),
+        )
+        update_mock = AsyncMock()
+        monkeypatch.setattr(svc, "update_tenant_lifecycle_state", update_mock)
+
+        tenant, _ = await svc.evaluate_and_advance_lifecycle(AsyncMock(), TENANT_ID)
+
+        assert tenant.agent_lifecycle_state == "building"
+        update_mock.assert_not_awaited()
