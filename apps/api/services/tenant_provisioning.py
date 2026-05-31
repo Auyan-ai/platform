@@ -22,7 +22,6 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import httpx
-
 from apps.api.core.config import Settings
 from apps.api.db.models import PlanTier, Tenant
 

@@ -6,6 +6,7 @@ import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
+import httpx
 from apps.api.core.config import get_settings
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id, require_role
 from apps.api.db.client import bootstrap_connection, tenant_scope
@@ -60,8 +61,6 @@ from apps.api.services.tenants import (
 )
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-import httpx
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 
