@@ -15,6 +15,9 @@ export const queryKeys = {
     playbook: (tenantId: string) => ['tenants', tenantId, 'playbook'] as const,
     facts: (tenantId: string) => ['tenants', tenantId, 'facts'] as const,
     onboarding: (tenantId: string) => ['tenants', tenantId, 'onboarding'] as const,
+    onboardingChecklist: (tenantId: string) =>
+      ['tenants', tenantId, 'onboarding', 'checklist'] as const,
+    integrations: (tenantId: string) => ['tenants', tenantId, 'integrations'] as const,
     kbSubmissions: (tenantId: string, status?: string) =>
       ['tenants', tenantId, 'kb-submissions', status ?? 'all'] as const,
     weeklyReports: (tenantId: string, status?: string) =>

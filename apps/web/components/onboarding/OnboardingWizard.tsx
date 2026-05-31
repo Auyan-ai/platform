@@ -6,6 +6,7 @@ import {
   useSaveTenantOnboarding,
   useSubmitTenantOnboarding,
   useTenantOnboarding,
+  useTenantOnboardingChecklist,
 } from '@/lib/api/hooks/tenant-context'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -14,6 +15,10 @@ import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
+import { ChatwootConnectStep } from './ChatwootConnectStep'
+import { KbUploadStep } from './KbUploadStep'
+import { OnboardingChecklistBanner } from './OnboardingChecklistBanner'
+import { ShopifyConnectStep } from './ShopifyConnectStep'
 
 type Field = {
   key: string
@@ -63,32 +68,18 @@ const STEPS: Array<{ id: number; title: string; fields: Field[] }> = [
   },
   {
     id: 4,
-    title: 'Shopify',
-    fields: [
-      { key: 'shopify_domain', label: 'Dominio Shopify', placeholder: 'tienda.myshopify.com' },
-      { key: 'shopify_contact', label: 'Responsable técnico', placeholder: 'Nombre y email' },
-    ],
+    title: 'Conexión Shopify',
+    fields: [],
   },
   {
     id: 5,
-    title: 'Helpdesk',
-    fields: [
-      { key: 'helpdesk_provider', label: 'Proveedor', placeholder: 'Gorgias, Zendesk o Chatwoot' },
-      { key: 'helpdesk_admin', label: 'Admin del helpdesk', placeholder: 'Nombre y email' },
-      { key: 'escalation_team', label: 'Equipo de escalado', placeholder: 'CX, postventa, logística' },
-    ],
+    title: 'Conexión helpdesk (Chatwoot)',
+    fields: [],
   },
   {
     id: 6,
-    title: 'Información inicial',
-    fields: [
-      {
-        key: 'source_materials',
-        label: 'URLs, PDFs o emails históricos',
-        placeholder: 'Pega enlaces o describe los documentos que vas a subir en la siguiente fase',
-        kind: 'textarea',
-      },
-    ],
+    title: 'Knowledge base inicial',
+    fields: [],
   },
   {
     id: 7,
@@ -137,6 +128,7 @@ function normalizeStepData(data: Record<string, unknown>): StepData {
 
 export function OnboardingWizard({ tenantId }: { tenantId: string }) {
   const { data, error, isLoading, isError } = useTenantOnboarding(tenantId)
+  const checklistQuery = useTenantOnboardingChecklist(tenantId)
   const saveMutation = useSaveTenantOnboarding(tenantId)
   const submitMutation = useSubmitTenantOnboarding(tenantId)
   const [step, setStep] = useState(1)
@@ -156,8 +148,13 @@ export function OnboardingWizard({ tenantId }: { tenantId: string }) {
       const hasValue = item.fields.some((field) => Boolean(values[field.key]))
       if (hasValue) completed.add(item.id)
     }
+    // Steps 4/5/6 ya no tienen fields — su completitud viene del checklist real.
+    const checklist = checklistQuery.data
+    if (checklist?.has_commerce_integration) completed.add(4)
+    if (checklist?.has_helpdesk_integration) completed.add(5)
+    if (checklist?.has_knowledge) completed.add(6)
     return [...completed].sort((a, b) => a - b)
-  }, [data?.completed_steps, stepData])
+  }, [data?.completed_steps, stepData, checklistQuery.data])
 
   const activeStep = STEPS[step - 1]
   const activeValues = stepData[String(step)] ?? {}
@@ -271,40 +268,52 @@ export function OnboardingWizard({ tenantId }: { tenantId: string }) {
           </div>
         </div>
 
+        <div className="mt-5">
+          <OnboardingChecklistBanner tenantId={tenantId} />
+        </div>
+
         <div className="mt-6 grid gap-4">
-          {activeStep.fields.map((field) => (
-            <div key={field.key}>
-              <Label htmlFor={field.key}>{field.label}</Label>
-              {field.kind === 'textarea' ? (
-                <Textarea
-                  id={field.key}
-                  value={String(activeValues[field.key] ?? '')}
-                  placeholder={field.placeholder}
-                  onChange={(event) => updateField(field, event.target.value)}
-                  className="mt-1.5 min-h-28"
-                />
-              ) : field.kind === 'checkbox' ? (
-                <label className="mt-2 flex items-center gap-2 text-sm text-foreground-body">
-                  <input
+          {step === 4 ? (
+            <ShopifyConnectStep tenantId={tenantId} />
+          ) : step === 5 ? (
+            <ChatwootConnectStep tenantId={tenantId} />
+          ) : step === 6 ? (
+            <KbUploadStep tenantId={tenantId} />
+          ) : (
+            activeStep.fields.map((field) => (
+              <div key={field.key}>
+                <Label htmlFor={field.key}>{field.label}</Label>
+                {field.kind === 'textarea' ? (
+                  <Textarea
                     id={field.key}
-                    type="checkbox"
-                    checked={Boolean(activeValues[field.key])}
-                    onChange={(event) => updateField(field, event.target.checked)}
-                    className="size-4 rounded border-border accent-[var(--accent)]"
+                    value={String(activeValues[field.key] ?? '')}
+                    placeholder={field.placeholder}
+                    onChange={(event) => updateField(field, event.target.value)}
+                    className="mt-1.5 min-h-28"
                   />
-                  Confirmado
-                </label>
-              ) : (
-                <Input
-                  id={field.key}
-                  value={String(activeValues[field.key] ?? '')}
-                  placeholder={field.placeholder}
-                  onChange={(event) => updateField(field, event.target.value)}
-                  className="mt-1.5"
-                />
-              )}
-            </div>
-          ))}
+                ) : field.kind === 'checkbox' ? (
+                  <label className="mt-2 flex items-center gap-2 text-sm text-foreground-body">
+                    <input
+                      id={field.key}
+                      type="checkbox"
+                      checked={Boolean(activeValues[field.key])}
+                      onChange={(event) => updateField(field, event.target.checked)}
+                      className="size-4 rounded border-border accent-[var(--accent)]"
+                    />
+                    Confirmado
+                  </label>
+                ) : (
+                  <Input
+                    id={field.key}
+                    value={String(activeValues[field.key] ?? '')}
+                    placeholder={field.placeholder}
+                    onChange={(event) => updateField(field, event.target.value)}
+                    className="mt-1.5"
+                  />
+                )}
+              </div>
+            ))
+          )}
         </div>
 
         <div className="mt-8 flex items-center justify-between border-t border-border-subtle pt-4">
