@@ -37,8 +37,8 @@ from apps.api.core.security import AuthContext, get_auth_context
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import upsert_integration
 from apps.api.services.integrations_crypto import encrypt_credentials, get_integration_crypto_key
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.responses import JSONResponse, RedirectResponse
 
 router = APIRouter(prefix="/oauth/gorgias", tags=["oauth"])
 
@@ -96,7 +96,6 @@ def _verify_state(state: str, secret: str) -> tuple[str, str]:
 
 @router.get(
     "/authorize",
-    status_code=status.HTTP_302_FOUND,
     summary="Inicia el flujo OAuth de Gorgias para un tenant",
 )
 async def gorgias_authorize(
@@ -104,7 +103,8 @@ async def gorgias_authorize(
     domain: str,
     auth: AuthDep,
     settings: SettingsDep,
-) -> RedirectResponse:
+    format: str = "redirect",
+) -> Response:
     """Redirige al usuario a Gorgias para autorizar la integración.
 
     Requiere estar autenticado como super_admin o como tenant_admin del tenant indicado.
@@ -137,6 +137,10 @@ async def gorgias_authorize(
         f"https://{domain}.gorgias.com/oauth/authorize?"
         + urllib.parse.urlencode(params)
     )
+    # format=json devuelve la URL para que el frontend navegue. El 302 directo
+    # no funciona desde un fetch con Authorization Bearer + CORS.
+    if format == "json":
+        return JSONResponse({"authorize_url": authorize_url})
     return RedirectResponse(url=authorize_url, status_code=status.HTTP_302_FOUND)
 
 

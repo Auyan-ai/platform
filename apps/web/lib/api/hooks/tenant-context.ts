@@ -408,6 +408,29 @@ export function useConnectShopify(tenantId: string) {
   })
 }
 
+/**
+ * Devuelve la URL de autorización OAuth para el proveedor indicado.
+ * El endpoint `/oauth/{provider}/authorize?format=json` requiere Bearer auth,
+ * por eso lo hacemos vía fetch — no como `<a href>`. El frontend hace
+ * window.location.href con el resultado.
+ */
+export async function fetchOAuthAuthorizeUrl(
+  provider: 'gorgias' | 'zendesk',
+  params: Record<string, string>,
+): Promise<string> {
+  const token = await getToken()
+  const query = new URLSearchParams({ ...params, format: 'json' }).toString()
+  const resp = await fetch(`${API_URL}/oauth/${provider}/authorize?${query}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: resp.statusText }))
+    throw new Error(err.detail ?? `HTTP ${resp.status}`)
+  }
+  const body = (await resp.json()) as { authorize_url: string }
+  return body.authorize_url
+}
+
 export function useConnectChatwoot(tenantId: string) {
   const qc = useQueryClient()
   return useMutation({

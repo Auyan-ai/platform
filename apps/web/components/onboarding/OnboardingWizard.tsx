@@ -15,7 +15,7 @@ import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { ChatwootConnectStep } from './ChatwootConnectStep'
+import { HelpdeskConnectStep } from './HelpdeskConnectStep'
 import { KbUploadStep } from './KbUploadStep'
 import { OnboardingChecklistBanner } from './OnboardingChecklistBanner'
 import { ShopifyConnectStep } from './ShopifyConnectStep'
@@ -73,7 +73,7 @@ const STEPS: Array<{ id: number; title: string; fields: Field[] }> = [
   },
   {
     id: 5,
-    title: 'Conexión helpdesk (Chatwoot)',
+    title: 'Conexión helpdesk',
     fields: [],
   },
   {
@@ -276,7 +276,7 @@ export function OnboardingWizard({ tenantId }: { tenantId: string }) {
           {step === 4 ? (
             <ShopifyConnectStep tenantId={tenantId} />
           ) : step === 5 ? (
-            <ChatwootConnectStep tenantId={tenantId} />
+            <HelpdeskConnectStep tenantId={tenantId} />
           ) : step === 6 ? (
             <KbUploadStep tenantId={tenantId} />
           ) : (

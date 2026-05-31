@@ -141,6 +141,29 @@ class TestAuthorizeEndpoint:
         )
         assert resp.status_code == 503
 
+    def test_format_json_returns_authorize_url(self) -> None:
+        """Con ?format=json el endpoint devuelve {authorize_url} en lugar de 302.
+        Lo usa el wizard del cliente: fetch con Bearer no puede seguir un 302 a otro dominio."""
+        mock_auth = MagicMock()
+        mock_auth.role = "super_admin"
+        mock_auth.tenant_id = None
+
+        client = _make_app(_make_settings(), mock_auth)
+        resp = client.get(
+            "/oauth/gorgias/authorize",
+            params={
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "domain": "mitienda",
+                "format": "json",
+            },
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "authorize_url" in body
+        assert "mitienda.gorgias.com/oauth/authorize" in body["authorize_url"]
+        assert "client_id=client_id_test" in body["authorize_url"]
+
     def test_tenant_admin_cannot_connect_other_tenant(self) -> None:
         from uuid import UUID
 
