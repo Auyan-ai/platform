@@ -38,8 +38,9 @@ export function ClientSidebar({
   userEmail,
 }: ClientSidebarProps) {
   const pathname = usePathname()
+  const onboardingActive = lifecycleState === 'initial' || lifecycleState === 'discovery'
   const navItems = NAV_ITEMS.filter(
-    (item) => item.section !== 'onboarding' || lifecycleState === 'initial',
+    (item) => item.section !== 'onboarding' || onboardingActive,
   )
 
   return (

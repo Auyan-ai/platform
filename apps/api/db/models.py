@@ -417,6 +417,25 @@ class TenantOnboarding(_BaseModel):
     updated_at: datetime | None = None
 
 
+class OnboardingChecklist(_BaseModel):
+    """Condiciones para la transición automática discovery → building.
+    El agente pasa a Building sólo cuando las cuatro se cumplen."""
+
+    onboarding_submitted: bool = False
+    has_commerce_integration: bool = False
+    has_helpdesk_integration: bool = False
+    has_knowledge: bool = False
+
+    @property
+    def complete(self) -> bool:
+        return (
+            self.onboarding_submitted
+            and self.has_commerce_integration
+            and self.has_helpdesk_integration
+            and self.has_knowledge
+        )
+
+
 # ─── Tenant Knowledge Submissions (Bloque 1, Sub-PR 1.4) ────────────────────
 
 

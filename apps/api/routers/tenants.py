@@ -14,6 +14,7 @@ from apps.api.db.models import ChannelType
 from apps.api.db.queries import (
     approve_tenant_knowledge_submission_with_document,
     approve_weekly_report,
+    compute_onboarding_checklist,
     create_or_refresh_weekly_report_draft,
     create_outbound_email_template,
     create_tenant_knowledge_submission,
@@ -54,6 +55,7 @@ from apps.api.services.tenant_provisioning import (
     provision_tenant,
 )
 from apps.api.services.tenants import (
+    evaluate_and_advance_lifecycle,
     get_tenant,
     get_tenant_config,
     get_tenant_insights,
@@ -224,6 +226,15 @@ class TenantOnboardingUpdate(BaseModel):
     current_step: int = Field(default=1, ge=1, le=9)
     completed_steps: list[int] = Field(default_factory=list)
     step_data: dict[str, Any] = Field(default_factory=dict)
+
+
+class OnboardingChecklistResponse(BaseModel):
+    onboarding_submitted: bool
+    has_commerce_integration: bool
+    has_helpdesk_integration: bool
+    has_knowledge: bool
+    complete: bool
+    agent_lifecycle_state: str
 
 
 class TenantLifecycleUpdate(BaseModel):
@@ -1069,10 +1080,32 @@ async def update_my_tenant_onboarding(
     return TenantOnboardingResponse.model_validate(onboarding)
 
 
+@router.get(
+    "/me/onboarding/checklist",
+    response_model=OnboardingChecklistResponse,
+    summary="Estado del checklist que gatea discovery → building",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def get_my_onboarding_checklist(
+    tenant_id: TenantIdDep,
+) -> OnboardingChecklistResponse:
+    async with tenant_scope(tenant_id) as conn:
+        checklist = await compute_onboarding_checklist(conn, tenant_id)
+        tenant = await get_tenant(conn, tenant_id)
+    return OnboardingChecklistResponse(
+        onboarding_submitted=checklist.onboarding_submitted,
+        has_commerce_integration=checklist.has_commerce_integration,
+        has_helpdesk_integration=checklist.has_helpdesk_integration,
+        has_knowledge=checklist.has_knowledge,
+        complete=checklist.complete,
+        agent_lifecycle_state=tenant.agent_lifecycle_state,
+    )
+
+
 @router.post(
     "/me/onboarding/submit",
     response_model=TenantOnboardingResponse,
-    summary="Confirma onboarding inicial y mueve el agente a Building",
+    summary="Confirma onboarding inicial; pasa a Building si el checklist está completo",
     dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
 )
 async def submit_my_tenant_onboarding(
@@ -1081,23 +1114,40 @@ async def submit_my_tenant_onboarding(
     auth: AuthDep,
 ) -> TenantOnboardingResponse:
     async with tenant_scope(tenant_id) as conn:
-        tenant = await get_tenant(conn, tenant_id)
         onboarding = await submit_tenant_onboarding(
             conn,
             tenant_id=tenant_id,
             edited_by=auth.user_id,
         )
+        tenant, checklist = await evaluate_and_advance_lifecycle(conn, tenant_id)
 
+    advanced = tenant.agent_lifecycle_state == "building"
     email_sender = getattr(request.app.state, "email_sender", None)
     if email_sender is not None:
-        email_sender.send_email(
-            to=auth.email,
-            subject=f"Auyan recibió el onboarding de {tenant.name}",
-            text_body=(
+        if advanced:
+            body = (
                 f"Recibimos el onboarding de {tenant.name}.\n\n"
                 "El agente pasa a fase Building. El siguiente paso de Auyan es revisar "
                 "la información, preparar el playbook y configurar los primeros AOPs."
-            ),
+            )
+        else:
+            faltan = []
+            if not checklist.has_commerce_integration:
+                faltan.append("conectar tu tienda (Shopify)")
+            if not checklist.has_helpdesk_integration:
+                faltan.append("conectar tu helpdesk")
+            if not checklist.has_knowledge:
+                faltan.append("aportar al menos un documento o URL de conocimiento")
+            body = (
+                f"Recibimos el onboarding de {tenant.name}.\n\n"
+                "Para que el agente pase a fase Building todavía falta: "
+                + "; ".join(faltan)
+                + ".\n\nPuedes completarlo desde el portal cuando quieras."
+            )
+        email_sender.send_email(
+            to=auth.email,
+            subject=f"Auyan recibió el onboarding de {tenant.name}",
+            text_body=body,
             tag="tenant-onboarding-submitted",
         )
 
