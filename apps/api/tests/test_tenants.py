@@ -1497,8 +1497,24 @@ class TestTenantKnowledgeSubmissionsEndpoints:
             status="pending_review",
             submitted_by=USER_ID,
         )
+        from apps.api.db.models import OnboardingChecklist
+
         create_mock = AsyncMock(return_value=submission)
+        advance_mock = AsyncMock(
+            return_value=(
+                make_tenant(agent_lifecycle_state="discovery"),
+                OnboardingChecklist(
+                    onboarding_submitted=False,
+                    has_commerce_integration=False,
+                    has_helpdesk_integration=False,
+                    has_knowledge=True,
+                ),
+            )
+        )
         monkeypatch.setattr("apps.api.routers.tenants.create_tenant_knowledge_submission", create_mock)
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle", advance_mock
+        )
         app = _make_app(monkeypatch)
         client = TestClient(app)
 
@@ -1516,6 +1532,7 @@ class TestTenantKnowledgeSubmissionsEndpoints:
         assert resp.status_code == 201
         assert resp.json()["status"] == "pending_review"
         assert create_mock.await_args.kwargs["submitted_by"] == USER_ID
+        advance_mock.assert_awaited_once()
 
     def test_create_kb_submission_requires_content_or_url(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1530,6 +1547,60 @@ class TestTenantKnowledgeSubmissionsEndpoints:
         )
 
         assert resp.status_code == 422
+
+    def test_create_kb_submission_advances_lifecycle_when_checklist_complete(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Si la KB es el último gate pendiente, evaluate_and_advance_lifecycle
+        debe correr y reportar el avance a building."""
+        from apps.api.db.models import OnboardingChecklist, TenantKnowledgeSubmission
+
+        submission = TenantKnowledgeSubmission(
+            id=UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            tenant_id=TENANT_ID,
+            title="FAQ envíos",
+            source_type="url",
+            source_url="https://acme.test/envios",
+            content="Los pedidos tardan 24-48 horas hábiles.",
+            status="pending_review",
+            submitted_by=USER_ID,
+        )
+        advance_mock = AsyncMock(
+            return_value=(
+                make_tenant(agent_lifecycle_state="building"),
+                OnboardingChecklist(
+                    onboarding_submitted=True,
+                    has_commerce_integration=True,
+                    has_helpdesk_integration=True,
+                    has_knowledge=True,
+                ),
+            )
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.create_tenant_knowledge_submission",
+            AsyncMock(return_value=submission),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle", advance_mock
+        )
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/kb-submissions",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={
+                "title": "FAQ envíos",
+                "source_type": "url",
+                "source_url": "https://acme.test/envios",
+                "content": "Los pedidos tardan 24-48 horas hábiles.",
+            },
+        )
+
+        assert resp.status_code == 201
+        advance_mock.assert_awaited_once()
+        # El segundo argumento posicional debe ser el tenant_id
+        assert advance_mock.await_args.args[1] == TENANT_ID
 
     def test_reject_kb_submission_marks_reviewed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from apps.api.db.models import TenantKnowledgeSubmission

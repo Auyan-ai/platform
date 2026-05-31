@@ -1452,6 +1452,10 @@ async def create_my_kb_submission(
             metadata=body.metadata,
             submitted_by=auth.user_id,
         )
+        # Reevaluar el checklist — añadir KB puede completar el último gate
+        # discovery→building. Ignoramos el resultado: la UI re-fetchea
+        # /me/onboarding/checklist o /me/integrations para refrescar el estado.
+        await evaluate_and_advance_lifecycle(conn, tenant_id)
     return TenantKnowledgeSubmissionResponse.model_validate(submission)
 
 
