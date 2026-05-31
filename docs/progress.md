@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-05-30 (sesión 55 — ✅ **smoke test e2e de Chatwoot PASÓ**: mensaje real desde el widget → agente respondió en Chatwoot + dashboard interno → AOP `consulta_envio` → skill Shopify L1 con datos reales del pedido #1003 → traza en LangSmith correlacionada con Supabase. Customer Discovery sigue como foco estratégico en sesión paralela; la regla dura de "no tocar el agente hasta 3 mensajes de descubrimiento" se mantiene — esto fue verificación, no cambio de comportamiento del agente)._
+_Última actualización: 2026-05-31 (sesión 56 — **Fase 1 del sistema de onboarding productizado** mergeada vía [PR #137](https://github.com/Auyan-ai/platform/pull/137). Plan completo end-to-end cerrado vía /grill-me en `docs/onboarding-system-plan.md`. Provisioning verificado en staging: tenant **Marea Studio** creado desde la UI nueva "Nuevo cliente", lifecycle `initial→discovery`, invite generado con JWT válido. Magic link en sí queda **pendiente de validación visual** porque (a) Supabase staging tenía Site URL=`localhost:3000` y mandó el redirect al vacío, y (b) tras consumir el primer link, se golpeó el rate limit del built-in email de Supabase — reintentar mañana tras esperar 1h y arreglar Site URL. Customer Discovery sigue siendo el foco estratégico paralelo)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
 
@@ -19,8 +19,9 @@ _Última actualización: 2026-05-30 (sesión 55 — ✅ **smoke test e2e de Chat
 | Bloque 0 | 0.1–0.10 completados. 0.11 reencuadrado como Agent Verification Staging. |
 | Bloque 1 | 1.0–1.9 completados y archivados. 1.10 billing manual tiene runbook, pero depende de inputs externos por cliente. |
 | Staging DB | Migraciones de Bloque 1 aplicadas; ya no bloquean la validación. |
-| Siguiente paso | **Customer Discovery** sigue como foco estratégico (sesión paralela). En el track técnico: smoke test e2e de Chatwoot ✅ hecho → siguiente micro-paso es la corrida **simulator 25/25** contra Lunaria staging. |
-| Reciente en develop | #131 recalibró pricing (billing-manual + master-context), #132 configuró agent skills, #133 Chatwoot HMAC + simulator reseed, #134 sincronizado. **Local sin pushear:** limpieza de CLAUDE.md (refs a `docs/agents/` eliminados). |
+| Siguiente paso | **Customer Discovery** sigue como foco estratégico (sesión paralela). En el track técnico: validar magic link visual de Fase 1 (espera rate limit + fix Site URL) → arrancar **Fase 2** del onboarding (portal del cliente con doc upload + Shopify token paste + helpdesk OAuth). Corrida simulator 25/25 queda relegada. |
+| Reciente en develop | #131 recalibró pricing, #132 agent skills, #133 Chatwoot HMAC + simulator reseed, #134/#135 docs, #136 guardrail anti-invención, **#137 provisioning productizado (Fase 1)**. |
+| Sistema de onboarding | Plan completo cerrado vía /grill-me: ver `docs/onboarding-system-plan.md`. Fase 1 ✅ mergeada (provisioning + magic link + UI). Fases 2-4 pendientes (portal cliente, Shopify content import + starter AOPs, lifecycle gates). |
 | Chatwoot staging | ✅ Integración real registrada en Lunaria (cuenta `Purigu`, `account_id 167723`) + webhook → `/webhooks/chatwoot`. ✅ **Smoke test e2e PASÓ** (conv `99386d3b`): consulta de pedido #1003 resuelta con skill Shopify L1 sobre datos reales, traza en LangSmith. |
 
 ---
@@ -40,6 +41,33 @@ Plan completo en [`docs/customer-discovery.md`](customer-discovery.md): reencuad
 **En marcha (otro chat):** construir `docs/discovery-targets.md` con 10 marcas reales (no inventar datos) usando herramientas €0 (Store Leads, Wappalyzer, view-source, Trustpilot, LinkedIn).
 
 **Seguridad:** repo `Auyan-ai/platform` ahora **privado** (antes público con docs de estrategia expuestos, 0 forks). `.gitignore` no borra historia ya commiteada — privado es el fix limpio.
+
+---
+
+## Sistema de onboarding productizado — Fase 1 cerrada
+
+**Plan completo:** [`docs/onboarding-system-plan.md`](onboarding-system-plan.md) (cerrado vía /grill-me sesión 56). Modelo: managed por invitación (no signup público), 4 fases, dogfood en tienda Shopify real (Marea Studio).
+
+**Fase 1 — Provisioning (mergeado [PR #137](https://github.com/Auyan-ai/platform/pull/137)):**
+
+- Migración `plan_tier` (`founding`/`standard`/`trial`) — semilla para futuro tier trial diferido.
+- Service `tenant_provisioning` que usa `supabase_service_role_key` (antes sin uso) → invite vía Supabase Admin + crea `tenants` + `public.users` + `tenant_onboarding` + `tenant_assignment` en transacción + lifecycle `initial→discovery`.
+- Endpoint `POST /tenants` (super_admin only) + UI "Nuevo cliente" en dashboard (botón en `ReviewQueueHome`).
+- 11 tests nuevos (5 service + 6 endpoint). 865 tests pasan, sin regresiones.
+- Verificado en staging: tenant **Marea Studio** (`marea-studio`) creado desde la UI, lifecycle `discovery`, invite generado con JWT real. Plumbing funciona.
+
+**Pendiente Fase 1 (mañana, 2026-06-01):**
+
+1. Fix **Supabase staging Site URL** = `https://auyan-web-staging.up.railway.app` + Redirect URLs.
+2. Esperar 1h por rate limit del built-in email Supabase (~4/h).
+3. "Send magic link" desde Authentication → Users → kennyrmv@gmail.com.
+4. Validar visualmente: click → portal de onboarding del tenant Marea Studio carga bien.
+
+**Próximas fases (planificadas):**
+
+- **Fase 2:** portal del cliente — wizard extendido con doc upload (reuso `pending_review`), Shopify token paste, Chatwoot token + auto-webhook, OAuth buttons Gorgias/Zendesk. Lifecycle auto `discovery→building` por checklist.
+- **Fase 3:** Shopify content auto-import (pages/blogs/articles → markdown → `pending_review`) + starter pack AOPs e-commerce ES clonado al provisionar.
+- **Fase 4:** dogfood end-to-end completo en Marea Studio + simulator 25/25.
 
 ---
 
@@ -144,7 +172,8 @@ Pendiente futuro, sólo cuando haga falta más granularidad:
 | Chatwoot Cloud | ✅ **Smoke test e2e PASÓ** (conv `99386d3b`, 2026-05-30). Cadena verificada: widget → webhook `200` → HMAC de #133 validada contra Chatwoot real → AOP `consulta_envio` → `shopify.get_order_status` (L1, success, 493ms) sobre el pedido real #1003 → respuesta en Chatwoot + dashboard → 4 runs `agent_conversation` en LangSmith con tokens/coste, correlacionadas a Supabase por tags `tenant`/`channel:chatwoot`. Integración registrada vía `configure_staging_integrations.py` (cuenta `Purigu`, `account_id 167723`). ⚠️ **Gota operativa:** las credenciales deben cifrarse con la `INTEGRATIONS_SECRET_KEY` de staging — registrar siempre vía `railway run ... configure_staging_integrations`, no en local (si no → `InvalidTag`/500 al desencriptar en el server). |
 | Gorgias OAuth app | Sigue pendiente; se implementará después de Chatwoot. |
 | Zendesk OAuth app | Sigue pendiente; se implementará después de Chatwoot. |
-| Postmark | Falta `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL` y verificar dominio `auyan.ai`. |
+| Postmark | Falta `POSTMARK_API_TOKEN`, `POSTMARK_FROM_EMAIL` y **dominio `auyan.ai` aún no comprado** → DKIM/SPF bloqueado. Workaround Sender Signature con single email se descartó por estética (invite saliendo desde `kennyrmv@gmail.com`). Esperar a tener dominio para hacer setup completo + plug como SMTP de Supabase (saca rate limit del built-in). |
+| Supabase Auth staging | Pendiente: **Site URL** = `https://auyan-web-staging.up.railway.app` (hoy apunta a `localhost:3000`, rompe magic links). + añadir a Redirect URLs. Bloquea validación visual del magic link de Fase 1. |
 | Weekly Reports cron | Falta setear `DATABASE_URL` en GitHub Actions para el workflow programado. |
 
 ---
