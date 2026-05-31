@@ -443,9 +443,9 @@ async def list_tenants_admin() -> list[TenantResponse]:
 )
 async def create_tenant(
     payload: CreateTenantRequest,
-    auth: Annotated[AuthContext, Depends(get_auth_context)],
+    auth: AuthDep,
+    settings: SettingsDep,
 ) -> CreateTenantResponse:
-    settings = get_settings()
     async with bootstrap_connection() as conn:
         internal_user = await get_internal_user_by_auth_id(conn, auth.user_id)
         if internal_user is None:
