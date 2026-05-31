@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { fetchCurrentUser } from '@/lib/api/users'
@@ -15,6 +15,57 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+
+  // Magic link / invite: Supabase devuelve la sesión en el hash de la URL
+  // (#access_token=...&refresh_token=...). El server nunca ve el fragment, así que
+  // hay que establecerla en el cliente para que escriba las cookies que lee el layout.
+  useEffect(() => {
+    const hash = window.location.hash.slice(1)
+    if (!hash) return
+    const params = new URLSearchParams(hash)
+
+    const errorDescription = params.get('error_description')
+    if (errorDescription) {
+      setError(errorDescription)
+      window.history.replaceState(null, '', window.location.pathname)
+      return
+    }
+
+    const accessToken = params.get('access_token')
+    const refreshToken = params.get('refresh_token')
+    if (!accessToken || !refreshToken) return
+
+    setLoading(true)
+    const supabase = createClient()
+    supabase.auth
+      .setSession({ access_token: accessToken, refresh_token: refreshToken })
+      .then(async ({ error: sessionError }) => {
+        window.history.replaceState(null, '', window.location.pathname)
+        if (sessionError) {
+          setError(sessionError.message)
+          setLoading(false)
+          return
+        }
+        await routeByRole(accessToken)
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function routeByRole(token: string) {
+    try {
+      const user = await Promise.race([
+        fetchCurrentUser(token),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+      ])
+      if (user?.role === 'tenant_admin' && user.tenant_id) {
+        router.push(`/clients/${user.tenant_id}/overview`)
+        return
+      }
+    } catch {
+      // silently fall through to dashboard
+    }
+    router.push('/')
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -35,18 +86,8 @@ export default function LoginPage() {
 
     const token = data.session?.access_token
     if (token) {
-      try {
-        const user = await Promise.race([
-          fetchCurrentUser(token),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
-        ])
-        if (user?.role === 'tenant_admin' && user.tenant_id) {
-          router.push(`/clients/${user.tenant_id}/overview`)
-          return
-        }
-      } catch {
-        // silently fall through to dashboard
-      }
+      await routeByRole(token)
+      return
     }
 
     router.push('/')
