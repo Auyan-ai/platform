@@ -1,8 +1,8 @@
 # DESIGN.md — Sistema de diseño Auyan
 
 > Fuente única de verdad del sistema de diseño visual.
-> Versión: 1.2 (Bloque 1, Sub-PRs 1.1/1.2 — Mercury light dashboard shell)
-> Última actualización: 2026-05-28
+> Versión: 1.3 (regla semántica de border-radius — §6.1)
+> Última actualización: 2026-05-31
 
 ---
 
@@ -269,14 +269,32 @@ La landing decide sus propios containers y grids dentro de cada módulo de Acete
 
 ### 6.1 Border radius
 
+**Tokens base**
+
 ```
 --radius-xs:  4px    /* badges, chips pequeños */
---radius-sm:  6px    /* buttons, inputs */
+--radius-sm:  6px    /* inputs, selects, textareas, buttons ghost/link */
 --radius-md:  8px    /* cards, panels */
 --radius-lg:  12px   /* paneles grandes, modales */
 --radius-xl:  16px   /* hero panels (raro) */
---radius-full: 9999px /* avatars, pills */
+--radius-full: 9999px /* avatars + buttons primarios/secundarios/outline/destructive */
 ```
+
+**Regla semántica (v1.3, decidida 2026-05-31).** No usamos un radius único para todos los elementos. Aplicamos por tipo de interacción:
+
+| Elemento | Radius | Razón |
+|---|---|---|
+| Buttons `primary`, `secondary`, `outline`, `destructive` | `radius-full` (pill) | Son tappable directly. Ángulos agudos activan amígdala (procesamiento de miedo); redondos transmiten friendly/safer. Para un producto donde el cliente confía su CX a una IA, transmitir confianza importa. |
+| Buttons `ghost`, `link` | `radius-sm` (6px) | Utilitarios, menos prominentes. Pill llamaría más atención que el primary y rompería jerarquía. |
+| Inputs, selects, textareas | `radius-sm` (6px) | Densidad cómoda sin ser juguetones. Acompañan al texto, no compiten. |
+| Cards, panels, sections | `radius-md` (8px) o `radius-lg` (12px) | Vistos de lejos. Moderados, no llaman atención por sí mismos. |
+| Modales, dialogs | `radius-lg` (12px) | Elementos elevados, merecen un toque más blando. |
+| Badges, chips | `radius-xs` (4px) o `radius-full` | XS para badges de estado; full para chips de filtro tipo pill. |
+| Avatars | `radius-full` | Estándar. |
+
+**Por qué este sistema (referencia tendencia 2026):** la industria está moviéndose desde "un solo radius para todo" hacia sistemas semánticos basados en cómo el usuario interactúa con cada elemento. Elementos tappable se redondean más que elementos contemplativos. iOS hace esto desde hace años (buttons pill, cards moderados). En B2B SaaS 2026 lo siguen Sierra, Anthropic, OpenAI. Linear es la excepción (pill toda la UI). Para Auyan, el wedge es "managed AI premium con guiño amable" — pill en botones acompaña ese tono.
+
+**Anti-patrón:** mezclar `rounded-lg` con `rounded-full` en el mismo button por inconsistencia visual. Si dudas, leé esta tabla.
 
 ### 6.2 Bordes
 

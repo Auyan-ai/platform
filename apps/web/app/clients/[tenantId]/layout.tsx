@@ -43,6 +43,12 @@ export default async function ClientsLayout({ children, params }: Props) {
     // fallback: mostramos el tenant_id como nombre
   }
 
+  // Tenant_admin con lifecycle initial/discovery → forzamos onboarding portal.
+  // El portal mismo redirige de vuelta al dashboard cuando el lifecycle pasa a building+.
+  if (lifecycleState === 'initial' || lifecycleState === 'discovery') {
+    redirect('/onboarding')
+  }
+
   return (
     <div data-density="relaxed" data-theme="mercury" className="min-h-screen bg-background">
       <ClientSidebar
