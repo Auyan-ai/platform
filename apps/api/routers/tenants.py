@@ -1194,6 +1194,28 @@ async def submit_my_tenant_onboarding(
         )
         tenant, checklist = await evaluate_and_advance_lifecycle(conn, tenant_id)
 
+        sd = onboarding.step_data
+        await upsert_tenant_playbook(
+            conn,
+            tenant_id=tenant_id,
+            brand_voice=str(sd.get("voice_traits") or ""),
+            escalation_notes=str(sd.get("forbidden_phrases") or ""),
+            agent_instructions=str(sd.get("launch_notes") or ""),
+            edited_by=auth.user_id,
+        )
+        _facts_keys = (
+            "business_hours", "support_email", "support_phone",
+            "return_window_days", "company_name", "website_url", "primary_contact",
+        )
+        facts_data = {k: sd[k] for k in _facts_keys if sd.get(k) is not None}
+        if facts_data:
+            await upsert_tenant_facts(
+                conn,
+                tenant_id=tenant_id,
+                data=facts_data,
+                edited_by=auth.user_id,
+            )
+
     advanced = tenant.agent_lifecycle_state == "building"
     email_sender = getattr(request.app.state, "email_sender", None)
     if email_sender is not None:
