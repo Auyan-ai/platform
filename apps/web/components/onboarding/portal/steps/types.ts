@@ -11,5 +11,8 @@ export interface StepProps {
   onContinue: () => void
   onBack?: () => void
   onSkip?: () => void
+  /** Jump directo a un step específico (1..9). Útil para "Ir al paso 4" desde
+   *  un gate faltante en Step9. */
+  onGoToStep?: (step: number) => void
   tenantId: string
 }

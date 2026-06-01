@@ -159,6 +159,12 @@ export function OnboardingPortal({ tenantId, userEmail, dashboardUrl }: Onboardi
     )
   }
 
+  function handleGoToStep(target: number) {
+    if (target < 1 || target > TOTAL_STEPS) return
+    setShowWelcomeBack(false)
+    setStep(target)
+  }
+
   const stepProps = {
     values,
     onChange: handleChange,
@@ -167,6 +173,7 @@ export function OnboardingPortal({ tenantId, userEmail, dashboardUrl }: Onboardi
     // "Anterior" no se renderice. Si la posición es >1, sí pasamos handleBack.
     onBack: step > 1 ? handleBack : undefined,
     onSkip: handleContinue,
+    onGoToStep: handleGoToStep,
     tenantId,
   }
 

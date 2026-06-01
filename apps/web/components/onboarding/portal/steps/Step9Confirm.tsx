@@ -1,9 +1,10 @@
 'use client'
 
-import { CheckCircle2, Circle } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Circle } from 'lucide-react'
 import { WizardCenteredLayout } from '../WizardLayouts'
 import { WizardStepHeader } from '../WizardStepHeader'
 import { WizardStepActions } from '../WizardStepActions'
+import { Button } from '@/components/ui/button'
 import {
   useTenantOnboarding,
   useTenantOnboardingChecklist,
@@ -11,30 +12,43 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import type { StepProps } from './types'
 
-export function Step9Confirm({ tenantId, values, onChange, onContinue, onBack }: StepProps) {
+export function Step9Confirm({
+  tenantId,
+  values,
+  onChange,
+  onContinue,
+  onBack,
+  onGoToStep,
+}: StepProps) {
   const onboardingQuery = useTenantOnboarding(tenantId)
   const checklistQuery = useTenantOnboardingChecklist(tenantId)
   const checklist = checklistQuery.data
   const isSubmitted = Boolean(onboardingQuery.data?.submitted_at)
 
-  // Items "gateables" del checklist (los 4 que bloquean discovery → building).
-  // onboarding_submitted no se lista porque es justo lo que el cliente está
-  // haciendo en este step.
-  const gates: Array<{ done: boolean; label: string; help?: string }> = [
+  // Gates del checklist con jump directo al step responsable.
+  const gates: Array<{
+    done: boolean
+    label: string
+    targetStep: number
+    targetLabel: string
+  }> = [
     {
       done: checklist?.has_commerce_integration ?? false,
       label: 'Comercio conectado',
-      help: 'Volver al paso 4 para conectar Shopify',
+      targetStep: 4,
+      targetLabel: 'Ir al paso 4 · Shopify',
     },
     {
       done: checklist?.has_helpdesk_integration ?? false,
       label: 'Helpdesk conectado',
-      help: 'Volver al paso 5 para conectar Chatwoot, Gorgias o Zendesk',
+      targetStep: 5,
+      targetLabel: 'Ir al paso 5 · Helpdesk',
     },
     {
       done: checklist?.has_knowledge ?? false,
       label: 'Knowledge base inicial',
-      help: 'Volver al paso 6 para subir al menos un documento',
+      targetStep: 6,
+      targetLabel: 'Ir al paso 6 · KB',
     },
   ]
 
@@ -50,30 +64,45 @@ export function Step9Confirm({ tenantId, values, onChange, onContinue, onBack }:
           title="Onboarding enviado · faltan gates"
           subtitle="Recibimos tu onboarding. Para que el agente arranque (lifecycle Building) falta completar:"
         />
-        <div className="mb-6 grid gap-2 rounded-md border border-warning bg-warning-subtle p-4">
+        <div className="mb-6 grid gap-3 rounded-md border border-warning bg-warning-subtle p-4">
           {gates.map((g) => (
-            <div key={g.label} className="flex items-start gap-3 text-sm">
-              {g.done ? (
-                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
-              ) : (
-                <Circle className="mt-0.5 size-4 shrink-0 text-foreground-muted" />
-              )}
-              <div>
-                <div className={g.done ? 'text-foreground' : 'text-foreground'}>
-                  {g.label}
-                </div>
-                {!g.done && g.help && (
-                  <div className="text-xs text-foreground-muted">{g.help}</div>
+            <div key={g.label} className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 text-sm">
+                {g.done ? (
+                  <CheckCircle2 className="size-4 shrink-0 text-success" />
+                ) : (
+                  <Circle className="size-4 shrink-0 text-foreground-muted" />
                 )}
+                <span className="text-foreground">{g.label}</span>
               </div>
+              {!g.done && onGoToStep && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onGoToStep(g.targetStep)}
+                >
+                  {g.targetLabel}
+                </Button>
+              )}
             </div>
           ))}
         </div>
         <p className="text-sm text-foreground-muted">
-          Completa los gates faltantes y volvemos a evaluar automáticamente. Si
-          quieres seguir luego, cierra esta pestaña y vuelve cuando puedas — tu
-          progreso queda guardado.
+          Completa los gates faltantes y volvemos a evaluar automáticamente.
+          Tu progreso queda guardado si cierras la pestaña.
         </p>
+        {onBack && (
+          <div className="mt-6 flex justify-start">
+            <button
+              type="button"
+              onClick={onBack}
+              className="inline-flex items-center gap-1 rounded-sm px-2 py-1.5 text-xs text-foreground-muted transition-colors hover:bg-surface-muted hover:text-foreground-body"
+            >
+              <ArrowLeft className="size-3" />
+              Anterior
+            </button>
+          </div>
+        )}
       </WizardCenteredLayout>
     )
   }
