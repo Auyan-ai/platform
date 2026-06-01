@@ -139,9 +139,16 @@ export function OnboardingPortal({ tenantId, userEmail, dashboardUrl }: Onboardi
       setSaveError(message)
       return
     }
-    // Tras submit, el server reevalúa lifecycle. Si pasa a building, el useEffect de arriba
-    // redirige al dashboard. Si no, queda en discovery con el banner del checklist.
-    router.replace(dashboardUrl)
+    // El submit reevalúa lifecycle server-side. Si pasa a 'building', el
+    // useEffect de lifecycle redirige automáticamente al dashboard. Si sigue
+    // en 'discovery' (algún gate del checklist falta), nos quedamos en step 9
+    // y Step9Confirm muestra qué gates faltan + el badge "Enviado".
+    //
+    // NO hacemos router.replace aquí porque:
+    //   1. Si lifecycle aún es 'discovery', el clients/[id]/layout redirige
+    //      de vuelta a /onboarding → parpadeo visible.
+    //   2. El cliente no entiende por qué no avanza si simplemente lo botamos
+    //      al dashboard sin feedback.
   }
 
   if (isLoading) {

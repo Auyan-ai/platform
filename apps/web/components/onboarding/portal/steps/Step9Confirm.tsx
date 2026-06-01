@@ -1,43 +1,104 @@
 'use client'
 
-import { CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, Circle } from 'lucide-react'
 import { WizardCenteredLayout } from '../WizardLayouts'
 import { WizardStepHeader } from '../WizardStepHeader'
 import { WizardStepActions } from '../WizardStepActions'
-import { useTenantOnboardingChecklist } from '@/lib/api/hooks/tenant-context'
+import {
+  useTenantOnboarding,
+  useTenantOnboardingChecklist,
+} from '@/lib/api/hooks/tenant-context'
 import { Textarea } from '@/components/ui/textarea'
 import type { StepProps } from './types'
 
 export function Step9Confirm({ tenantId, values, onChange, onContinue }: StepProps) {
+  const onboardingQuery = useTenantOnboarding(tenantId)
   const checklistQuery = useTenantOnboardingChecklist(tenantId)
   const checklist = checklistQuery.data
+  const isSubmitted = Boolean(onboardingQuery.data?.submitted_at)
 
-  const items: Array<{ done: boolean; label: string }> = [
-    { done: checklist?.has_commerce_integration ?? false, label: 'Comercio conectado' },
-    { done: checklist?.has_helpdesk_integration ?? false, label: 'Helpdesk conectado' },
-    { done: checklist?.has_knowledge ?? false, label: 'Knowledge base inicial' },
+  // Items "gateables" del checklist (los 4 que bloquean discovery → building).
+  // onboarding_submitted no se lista porque es justo lo que el cliente está
+  // haciendo en este step.
+  const gates: Array<{ done: boolean; label: string; help?: string }> = [
+    {
+      done: checklist?.has_commerce_integration ?? false,
+      label: 'Comercio conectado',
+      help: 'Volver al paso 4 para conectar Shopify',
+    },
+    {
+      done: checklist?.has_helpdesk_integration ?? false,
+      label: 'Helpdesk conectado',
+      help: 'Volver al paso 5 para conectar Chatwoot, Gorgias o Zendesk',
+    },
+    {
+      done: checklist?.has_knowledge ?? false,
+      label: 'Knowledge base inicial',
+      help: 'Volver al paso 6 para subir al menos un documento',
+    },
   ]
+
+  const allDone = gates.every((g) => g.done)
+
+  // Después de enviar: si el lifecycle ya pasó a building, el portal redirige
+  // automáticamente al dashboard. Si NO, es porque algún gate falta — mostramos
+  // qué hacer.
+  if (isSubmitted && !allDone) {
+    return (
+      <WizardCenteredLayout>
+        <WizardStepHeader
+          title="Onboarding enviado · faltan gates"
+          subtitle="Recibimos tu onboarding. Para que el agente arranque (lifecycle Building) falta completar:"
+        />
+        <div className="mb-6 grid gap-2 rounded-md border border-warning bg-warning-subtle p-4">
+          {gates.map((g) => (
+            <div key={g.label} className="flex items-start gap-3 text-sm">
+              {g.done ? (
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+              ) : (
+                <Circle className="mt-0.5 size-4 shrink-0 text-foreground-muted" />
+              )}
+              <div>
+                <div className={g.done ? 'text-foreground' : 'text-foreground'}>
+                  {g.label}
+                </div>
+                {!g.done && g.help && (
+                  <div className="text-xs text-foreground-muted">{g.help}</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="text-sm text-foreground-muted">
+          Completa los gates faltantes y volvemos a evaluar automáticamente. Si
+          quieres seguir luego, cierra esta pestaña y vuelve cuando puedas — tu
+          progreso queda guardado.
+        </p>
+      </WizardCenteredLayout>
+    )
+  }
 
   return (
     <WizardCenteredLayout>
       <WizardStepHeader
-        title="Listo para enviar"
-        subtitle="Auyan recibe tu onboarding y AIDE coordina contigo el arranque del agente."
+        title={isSubmitted ? 'Onboarding enviado' : 'Listo para enviar'}
+        subtitle={
+          isSubmitted
+            ? 'Auyan recibió tu onboarding. Si el checklist está completo, el agente entra en Building automáticamente.'
+            : 'Auyan recibe tu onboarding y AIDE coordina contigo el arranque del agente.'
+        }
       />
 
       <div className="mb-6 grid gap-2 rounded-md border border-border-subtle bg-surface-muted p-4">
-        {items.map((item) => (
-          <div
-            key={item.label}
-            className="flex items-center gap-2 text-sm text-foreground-body"
-          >
-            {item.done ? (
+        {gates.map((g) => (
+          <div key={g.label} className="flex items-center gap-2 text-sm text-foreground-body">
+            {g.done ? (
               <CheckCircle2 className="size-4 text-success" />
             ) : (
-              <span className="size-4 rounded-full border border-border-strong" />
+              <Circle className="size-4 text-foreground-muted" />
             )}
-            <span className={item.done ? 'text-foreground' : 'text-foreground-muted'}>
-              {item.label}
+            <span className={g.done ? 'text-foreground' : 'text-foreground-muted'}>
+              {g.label}
             </span>
           </div>
         ))}
@@ -59,7 +120,9 @@ export function Step9Confirm({ tenantId, values, onChange, onContinue }: StepPro
         />
       </div>
 
-      <WizardStepActions onContinue={onContinue} continueLabel="Enviar onboarding" />
+      {!isSubmitted && (
+        <WizardStepActions onContinue={onContinue} continueLabel="Enviar onboarding" />
+      )}
     </WizardCenteredLayout>
   )
 }
