@@ -674,10 +674,6 @@ async def resolve_escalation(
 # ============================================================
 
 
-def _embedding_to_pg_vector(embedding: list[float]) -> str:
-    return "[" + ",".join(str(x) for x in embedding) + "]"
-
-
 async def search_knowledge_chunks(
     conn: asyncpg.Connection,
     tenant_id: UUID,
@@ -742,6 +738,13 @@ async def create_knowledge_document_with_chunks(
         content,
         metadata,  # el codec del pool serializa a jsonb (no json.dumps manual)
     )
+    # NOTA: pasamos `embedding` (lista Python) directamente. El pool tiene
+    # `register_vector(conn)` en _init_connection (apps/api/db/client.py) que
+    # registra el codec pgvector — asyncpg encoda la lista al tipo `vector`
+    # automáticamente. Convertirlo manualmente a string con
+    # _embedding_to_pg_vector rompe con el codec: asyncpg intenta convertir
+    # el string a float, falla con DataError ("could not convert string to
+    # float: '[0.1,...]'"). El _embedding_to_pg_vector es legacy pre-codec.
     rows = [
         (
             uuid4(),
@@ -749,7 +752,7 @@ async def create_knowledge_document_with_chunks(
             document_id,
             index,
             chunk_content,
-            _embedding_to_pg_vector(embedding),
+            embedding,
             len(chunk_content.split()),
         )
         for index, (chunk_content, embedding) in enumerate(chunks)

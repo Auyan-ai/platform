@@ -31,7 +31,7 @@ from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.graph import build_graph
 from apps.api.agents.service import AgentService
 from apps.api.core.config import get_settings
-from apps.api.core.errors import register_exception_handlers
+from apps.api.core.errors import UnhandledExceptionMiddleware, register_exception_handlers
 from apps.api.db.client import close_pool, init_pool
 from apps.api.integrations.anthropic_client import build_anthropic_client
 from apps.api.integrations.langfuse_client import build_langfuse_client
@@ -151,6 +151,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Auyan API", version="0.1.0", lifespan=lifespan)
 register_exception_handlers(app)
+
+# Middleware order matters (Starlette aplica last-added como outermost):
+#   1. UnhandledExceptionMiddleware (añadido PRIMERO → innermost): captura
+#      cualquier Exception no controlada y devuelve JSONResponse 500.
+#   2. CORSMiddleware (añadido SEGUNDO → outermost): envuelve TODO,
+#      incluyendo las responses 500 del middleware anterior.
+#
+# Sin este orden, una excepción Python no controlada genera un 500 sin
+# header Access-Control-Allow-Origin → browser lo bloquea como "CORS not
+# allowed", enmascarando el bug real. Ver core/errors.py docstring de
+# UnhandledExceptionMiddleware para el racional completo.
+app.add_middleware(UnhandledExceptionMiddleware)
 
 _settings = get_settings()
 app.add_middleware(
