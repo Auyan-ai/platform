@@ -24,6 +24,15 @@ const LIFECYCLE_LABELS: Record<string, string> = {
   churned: 'Churned',
 }
 
+const AGENT_PROGRESS_PHASES = [
+  'initial',
+  'discovery',
+  'building',
+  'shadow',
+  'ramping',
+  'active',
+] as const
+
 function firstNarrativeLine(report: WeeklyReport | null) {
   if (!report?.narrative.trim()) return 'Aún no hay headline disponible para esta semana.'
   return (
@@ -82,6 +91,77 @@ function ActivityHeatmap({ tenantId }: { tenantId: string }) {
   )
 }
 
+function AgentLifecycleProgress({
+  lifecycle,
+  isLoading,
+}: {
+  lifecycle: string
+  isLoading: boolean
+}) {
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-foreground-muted">Fase del agente</p>
+        <Skeleton className="h-6 w-64" />
+      </div>
+    )
+  }
+
+  if (lifecycle === 'active') {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-foreground-muted">Estado del agente</p>
+        <Badge variant="default">Active</Badge>
+      </div>
+    )
+  }
+
+  if (!AGENT_PROGRESS_PHASES.includes(lifecycle as (typeof AGENT_PROGRESS_PHASES)[number])) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-foreground-muted">Estado del agente</p>
+        <Badge variant="secondary">{LIFECYCLE_LABELS[lifecycle] ?? lifecycle}</Badge>
+      </div>
+    )
+  }
+
+  const currentIndex = AGENT_PROGRESS_PHASES.indexOf(
+    lifecycle as (typeof AGENT_PROGRESS_PHASES)[number],
+  )
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-foreground-muted">Fase del agente</p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {AGENT_PROGRESS_PHASES.map((phase, index) => {
+          const isCurrent = phase === lifecycle
+          const isComplete = index < currentIndex
+
+          return (
+            <Badge
+              key={phase}
+              variant={isCurrent ? 'default' : 'muted'}
+              aria-current={isCurrent ? 'step' : undefined}
+              className={cn(
+                !isCurrent && 'font-normal',
+                isComplete && 'gap-1 text-foreground-body',
+              )}
+            >
+              {isComplete && (
+                <CheckCircle2
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0 text-foreground-muted"
+                />
+              )}
+              {LIFECYCLE_LABELS[phase]}
+            </Badge>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function ClientHomeSummary({ tenantId }: { tenantId: string }) {
   const tenant = useMyTenant()
   const metrics = useMetrics(tenantId)
@@ -90,7 +170,6 @@ export function ClientHomeSummary({ tenantId }: { tenantId: string }) {
 
   const latestReport = reports.data?.[0] ?? null
   const lifecycle = tenant.data?.agent_lifecycle_state ?? 'initial'
-  const lifecycleLabel = LIFECYCLE_LABELS[lifecycle] ?? lifecycle
   const pendingApprovals = approvals.data?.approvals.length ?? 0
   const escalated = metrics.data?.by_status.escalated ?? 0
   const activeConversations =
@@ -102,12 +181,7 @@ export function ClientHomeSummary({ tenantId }: { tenantId: string }) {
       <Card className="p-(--density-card-p)">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <Badge variant={lifecycle === 'active' ? 'success' : 'default'}>
-                {tenant.isLoading ? 'Cargando' : lifecycleLabel}
-              </Badge>
-              <span className="text-xs text-foreground-muted">fase del agente</span>
-            </div>
+            <AgentLifecycleProgress lifecycle={lifecycle} isLoading={tenant.isLoading} />
             <h1 className="mt-4 text-2xl font-semibold text-foreground">Home</h1>
             <p className="mt-1 max-w-2xl text-sm text-foreground-muted">
               KPIs, actividad y reporte semanal del soporte IA de tu cuenta.
