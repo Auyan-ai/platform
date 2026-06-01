@@ -18,6 +18,7 @@ from apps.api.db.queries import (
 )
 from apps.api.db.queries import get_tenant_insights as _get_tenant_insights
 from apps.api.db.queries import get_tenant_metrics as _get_tenant_metrics
+from apps.api.db.queries import get_tenant_resolution_series as _get_tenant_resolution_series
 
 if TYPE_CHECKING:
     import asyncpg
@@ -59,6 +60,7 @@ async def get_tenant_config(
 
 async def get_tenant_metrics(conn: asyncpg.Connection, tenant_id: UUID) -> dict[str, object]:
     counts = await _get_tenant_metrics(conn, tenant_id)
+    raw_series = await _get_tenant_resolution_series(conn, tenant_id)
     total = int(counts["total"])
     resolved = int(counts["resolved_count"]) + int(counts["closed_count"])
     escalated = int(counts["escalated_count"])
@@ -75,6 +77,53 @@ async def get_tenant_metrics(conn: asyncpg.Connection, tenant_id: UUID) -> dict[
         },
         "resolution_rate": resolution_rate,
         "escalation_rate": escalation_rate,
+        "resolution_windows": [
+            _build_resolution_window("30d", "Últimos 30 días", "day", raw_series["30d"]),
+            _build_resolution_window("7d", "Últimos 7 días", "day", raw_series["7d"]),
+            _build_resolution_window("24h", "Último día", "hour", raw_series["24h"]),
+        ],
+    }
+
+
+def _build_resolution_window(
+    key: str,
+    label: str,
+    granularity: str,
+    points: list[dict[str, object]],
+) -> dict[str, object]:
+    total_conversations = sum(int(point["conversations"]) for point in points)
+    total_resolved = sum(int(point["resolved"]) for point in points)
+    total_escalated = sum(int(point["escalated"]) for point in points)
+
+    decorated_points = []
+    for point in points:
+        conversations = int(point["conversations"])
+        resolved = int(point["resolved"])
+        escalated = int(point["escalated"])
+        decorated_points.append(
+            {
+                **point,
+                "resolution_rate": round(resolved / conversations, 4) if conversations > 0 else 0.0,
+                "escalation_rate": round(escalated / conversations, 4)
+                if conversations > 0
+                else 0.0,
+            }
+        )
+
+    return {
+        "key": key,
+        "label": label,
+        "granularity": granularity,
+        "total": total_conversations,
+        "resolved": total_resolved,
+        "escalated": total_escalated,
+        "resolution_rate": round(total_resolved / total_conversations, 4)
+        if total_conversations > 0
+        else 0.0,
+        "escalation_rate": round(total_escalated / total_conversations, 4)
+        if total_conversations > 0
+        else 0.0,
+        "points": decorated_points,
     }
 
 

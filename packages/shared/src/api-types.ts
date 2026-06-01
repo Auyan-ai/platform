@@ -2256,6 +2256,44 @@ export interface components {
             resolution_rate: number;
             /** Escalation Rate */
             escalation_rate: number;
+            /** Resolution Windows */
+            resolution_windows: components["schemas"]["TenantResolutionWindow"][];
+        };
+        /** TenantResolutionSeriesPoint */
+        TenantResolutionSeriesPoint: {
+            /** Bucket */
+            bucket: string;
+            /** Conversations */
+            conversations: number;
+            /** Resolved */
+            resolved: number;
+            /** Escalated */
+            escalated: number;
+            /** Resolution Rate */
+            resolution_rate: number;
+            /** Escalation Rate */
+            escalation_rate: number;
+        };
+        /** TenantResolutionWindow */
+        TenantResolutionWindow: {
+            /** Key */
+            key: "30d" | "7d" | "24h";
+            /** Label */
+            label: string;
+            /** Granularity */
+            granularity: "day" | "hour";
+            /** Total */
+            total: number;
+            /** Resolved */
+            resolved: number;
+            /** Escalated */
+            escalated: number;
+            /** Resolution Rate */
+            resolution_rate: number;
+            /** Escalation Rate */
+            escalation_rate: number;
+            /** Points */
+            points: components["schemas"]["TenantResolutionSeriesPoint"][];
         };
         /** TenantOnboardingResponse */
         TenantOnboardingResponse: {
