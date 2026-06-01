@@ -89,6 +89,28 @@ _SAMPLE_METRICS = {
     "by_status": {"open": 20, "pending": 10, "escalated": 5, "resolved": 50, "closed": 15},
     "resolution_rate": 0.65,
     "escalation_rate": 0.05,
+    "resolution_windows": [
+        {
+            "key": "30d",
+            "label": "Últimos 30 días",
+            "granularity": "day",
+            "total": 10,
+            "resolved": 7,
+            "escalated": 1,
+            "resolution_rate": 0.7,
+            "escalation_rate": 0.1,
+            "points": [
+                {
+                    "bucket": "2026-05-31",
+                    "conversations": 10,
+                    "resolved": 7,
+                    "escalated": 1,
+                    "resolution_rate": 0.7,
+                    "escalation_rate": 0.1,
+                }
+            ],
+        }
+    ],
 }
 
 
@@ -111,6 +133,8 @@ class TestGetMyTenantMetrics:
         assert body["by_status"]["escalated"] == 5
         assert body["resolution_rate"] == 0.65
         assert body["escalation_rate"] == 0.05
+        assert body["resolution_windows"][0]["key"] == "30d"
+        assert body["resolution_windows"][0]["points"][0]["resolved"] == 7
 
     def test_unauthenticated_returns_401(self, monkeypatch: pytest.MonkeyPatch) -> None:
         app = _make_app(monkeypatch)
@@ -131,11 +155,29 @@ class TestGetMyTenantMetrics:
             "resolved_count": 4,
             "closed_count": 2,
         }
+        series = {
+            "30d": [{"bucket": "2026-05-31", "conversations": 10, "resolved": 6, "escalated": 1}],
+            "7d": [{"bucket": "2026-05-31", "conversations": 4, "resolved": 2, "escalated": 1}],
+            "24h": [
+                {
+                    "bucket": "2026-05-31 10:00:00+00",
+                    "conversations": 2,
+                    "resolved": 1,
+                    "escalated": 0,
+                }
+            ],
+        }
 
         async def _run() -> None:
-            with patch(
-                "apps.api.services.tenants._get_tenant_metrics",
-                new=AsyncMock(return_value=counts),
+            with (
+                patch(
+                    "apps.api.services.tenants._get_tenant_metrics",
+                    new=AsyncMock(return_value=counts),
+                ),
+                patch(
+                    "apps.api.services.tenants._get_tenant_resolution_series",
+                    new=AsyncMock(return_value=series),
+                ),
             ):
                 from apps.api.services.tenants import get_tenant_metrics
 
@@ -147,5 +189,7 @@ class TestGetMyTenantMetrics:
             assert result["resolution_rate"] == 0.6
             # escalated = 1 → 1/10 = 0.1
             assert result["escalation_rate"] == 0.1
+            assert result["resolution_windows"][0]["resolved"] == 6  # type: ignore[index]
+            assert result["resolution_windows"][2]["granularity"] == "hour"  # type: ignore[index]
 
         asyncio.run(_run())

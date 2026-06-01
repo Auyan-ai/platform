@@ -147,11 +147,33 @@ class ConversationStatusCounts(BaseModel):
     closed: int
 
 
+class TenantResolutionSeriesPoint(BaseModel):
+    bucket: str
+    conversations: int
+    resolved: int
+    escalated: int
+    resolution_rate: float
+    escalation_rate: float
+
+
+class TenantResolutionWindow(BaseModel):
+    key: Literal["30d", "7d", "24h"]
+    label: str
+    granularity: Literal["day", "hour"]
+    total: int
+    resolved: int
+    escalated: int
+    resolution_rate: float
+    escalation_rate: float
+    points: list[TenantResolutionSeriesPoint]
+
+
 class TenantMetricsResponse(BaseModel):
     total: int
     by_status: ConversationStatusCounts
     resolution_rate: float
     escalation_rate: float
+    resolution_windows: list[TenantResolutionWindow]
 
 
 class TenantInsightTimelinePoint(BaseModel):
@@ -602,6 +624,7 @@ async def get_my_tenant_metrics(tenant_id: TenantIdDep) -> TenantMetricsResponse
         by_status=ConversationStatusCounts(**data["by_status"]),  # type: ignore[arg-type]
         resolution_rate=data["resolution_rate"],  # type: ignore[arg-type]
         escalation_rate=data["escalation_rate"],  # type: ignore[arg-type]
+        resolution_windows=data["resolution_windows"],  # type: ignore[arg-type]
     )
 
 

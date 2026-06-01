@@ -794,6 +794,147 @@ async def get_tenant_metrics(
     return dict(row)
 
 
+async def get_tenant_resolution_series(
+    conn: asyncpg.Connection, tenant_id: UUID
+) -> dict[str, list[dict[str, Any]]]:
+    """Series de resolución/escalación para el dashboard del cliente."""
+
+    daily_rows = await conn.fetch(
+        """
+        WITH windows(key, bucket_count) AS (
+          VALUES ('30d'::text, 30), ('7d'::text, 7)
+        ),
+        buckets AS (
+          SELECT
+            w.key,
+            gs.bucket::date AS bucket
+          FROM windows w
+          CROSS JOIN LATERAL generate_series(
+            CURRENT_DATE - (w.bucket_count - 1) * INTERVAL '1 day',
+            CURRENT_DATE,
+            INTERVAL '1 day'
+          ) AS gs(bucket)
+        ),
+        created_counts AS (
+          SELECT
+            b.key,
+            c.created_at::date AS bucket,
+            COUNT(*)::int AS conversations
+          FROM conversations c
+          JOIN buckets b ON c.created_at::date = b.bucket
+          WHERE c.tenant_id = $1 AND c.deleted_at IS NULL
+          GROUP BY b.key, c.created_at::date
+        ),
+        resolved_counts AS (
+          SELECT
+            b.key,
+            c.updated_at::date AS bucket,
+            COUNT(*)::int AS resolved
+          FROM conversations c
+          JOIN buckets b ON c.updated_at::date = b.bucket
+          WHERE c.tenant_id = $1
+            AND c.deleted_at IS NULL
+            AND c.status IN ('resolved', 'closed')
+          GROUP BY b.key, c.updated_at::date
+        ),
+        escalated_counts AS (
+          SELECT
+            b.key,
+            e.created_at::date AS bucket,
+            COUNT(*)::int AS escalated
+          FROM escalations e
+          JOIN buckets b ON e.created_at::date = b.bucket
+          WHERE e.tenant_id = $1 AND e.deleted_at IS NULL
+          GROUP BY b.key, e.created_at::date
+        )
+        SELECT
+          b.key,
+          b.bucket::text AS bucket,
+          COALESCE(cc.conversations, 0)::int AS conversations,
+          COALESCE(rc.resolved, 0)::int AS resolved,
+          COALESCE(ec.escalated, 0)::int AS escalated
+        FROM buckets b
+        LEFT JOIN created_counts cc ON cc.key = b.key AND cc.bucket = b.bucket
+        LEFT JOIN resolved_counts rc ON rc.key = b.key AND rc.bucket = b.bucket
+        LEFT JOIN escalated_counts ec ON ec.key = b.key AND ec.bucket = b.bucket
+        ORDER BY b.key, b.bucket
+        """,
+        tenant_id,
+    )
+
+    hourly_rows = await conn.fetch(
+        """
+        WITH buckets AS (
+          SELECT gs.bucket AS bucket
+          FROM generate_series(
+            date_trunc('hour', NOW()) - INTERVAL '23 hours',
+            date_trunc('hour', NOW()),
+            INTERVAL '1 hour'
+          ) AS gs(bucket)
+        ),
+        created_counts AS (
+          SELECT
+            b.bucket,
+            COUNT(*)::int AS conversations
+          FROM conversations c
+          JOIN buckets b
+            ON c.created_at >= b.bucket
+           AND c.created_at < b.bucket + INTERVAL '1 hour'
+          WHERE c.tenant_id = $1 AND c.deleted_at IS NULL
+          GROUP BY b.bucket
+        ),
+        resolved_counts AS (
+          SELECT
+            b.bucket,
+            COUNT(*)::int AS resolved
+          FROM conversations c
+          JOIN buckets b
+            ON c.updated_at >= b.bucket
+           AND c.updated_at < b.bucket + INTERVAL '1 hour'
+          WHERE c.tenant_id = $1
+            AND c.deleted_at IS NULL
+            AND c.status IN ('resolved', 'closed')
+          GROUP BY b.bucket
+        ),
+        escalated_counts AS (
+          SELECT
+            b.bucket,
+            COUNT(*)::int AS escalated
+          FROM escalations e
+          JOIN buckets b
+            ON e.created_at >= b.bucket
+           AND e.created_at < b.bucket + INTERVAL '1 hour'
+          WHERE e.tenant_id = $1 AND e.deleted_at IS NULL
+          GROUP BY b.bucket
+        )
+        SELECT
+          '24h'::text AS key,
+          b.bucket::text AS bucket,
+          COALESCE(cc.conversations, 0)::int AS conversations,
+          COALESCE(rc.resolved, 0)::int AS resolved,
+          COALESCE(ec.escalated, 0)::int AS escalated
+        FROM buckets b
+        LEFT JOIN created_counts cc ON cc.bucket = b.bucket
+        LEFT JOIN resolved_counts rc ON rc.bucket = b.bucket
+        LEFT JOIN escalated_counts ec ON ec.bucket = b.bucket
+        ORDER BY b.bucket
+        """,
+        tenant_id,
+    )
+
+    result: dict[str, list[dict[str, Any]]] = {"30d": [], "7d": [], "24h": []}
+    for row in [*daily_rows, *hourly_rows]:
+        result[str(row["key"])].append(
+            {
+                "bucket": row["bucket"],
+                "conversations": int(row["conversations"]),
+                "resolved": int(row["resolved"]),
+                "escalated": int(row["escalated"]),
+            }
+        )
+    return result
+
+
 async def get_tenant_insights(
     conn: asyncpg.Connection, tenant_id: UUID, days: int = 14
 ) -> dict[str, Any]:
