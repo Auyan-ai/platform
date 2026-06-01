@@ -459,6 +459,7 @@ class TenantKnowledgeSubmission(_BaseModel):
     processed_document_id: UUID | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    deleted_at: datetime | None = None
 
 
 # ─── Weekly Reports (Bloque 1, Sub-PR 1.5) ──────────────────────────────────
