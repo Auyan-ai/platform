@@ -688,7 +688,7 @@ Verificación sesión 44: ruff limpio, suite API 1013/1013 verde, `pnpm --filter
 
 ### 1.6 — Dashboard cliente 7 secciones MVP ✅
 
-Implementado en cinco PRs pequeños, verificados y mergeados secuencialmente:
+Implementado en cinco PRs pequeños, verificados y mergeados secuencialmente; luego recibió un polish visual menor:
 
 | PR | Qué se hizo |
 |---|---|
@@ -697,11 +697,13 @@ Implementado en cinco PRs pequeños, verificados y mergeados secuencialmente:
 | [#111](https://github.com/Auyan-ai/platform/pull/111) | Endpoint `/tenants/me/insights` + Explorer cliente con heatmap, donut de intents, breakdowns y drill-down con reasoning panel. |
 | [#112](https://github.com/Auyan-ai/platform/pull/112) | Knowledge Base consolidada con drop-zone, `tenant_facts` y estado de procesamiento/revisión. |
 | [#113](https://github.com/Auyan-ai/platform/pull/113) | Onboarding auto-hide al salir de fase `initial` y redirect de acceso directo. |
+| [#152](https://github.com/Auyan-ai/platform/pull/152) | Home cliente: lifecycle phase pasa de badge ambiguo a stepper compacto con fase actual en cobalto, fases completadas con icono outline estilo sidebar y estado final `Active` colapsado. |
 
 Diseño:
 
 - Sidebar cliente queda alineada a `auyan-master-context.md`: Home/Insights/Reportes/Knowledge Base/Aprobaciones/Onboarding/Configuración.
 - `Conversaciones` pasa a `Insights`; las URLs antiguas redirigen y el drill-down mantiene lectura con PII masked.
+- Lifecycle en Home usa el acento cobalto de `docs/DESIGN.md`; no usa verde para `Active` ni tacha/elimina fases anteriores.
 - AI Data Assistant, Facturación y visualizaciones avanzadas siguen fuera del MVP y pertenecen a Bloque 2.
 - Configuración es read-only para cliente: integraciones conectadas, branding operativo y perfil AIDE.
 
