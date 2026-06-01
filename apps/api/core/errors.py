@@ -15,9 +15,13 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from fastapi import FastAPI, Request
+    from starlette.responses import Response
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +124,66 @@ async def _domain_exception_handler(request: Request, exc: Exception) -> JSONRes
     )
 
 
+class UnhandledExceptionMiddleware(BaseHTTPMiddleware):
+    """Captura cualquier excepción no manejada y devuelve JSONResponse 500.
+
+    POR QUÉ NO ES UN exception_handler: en Starlette/FastAPI, el handler
+    registrado vía `app.add_exception_handler(Exception, ...)` SÍ captura la
+    excepción, pero su respuesta NO pasa por la pipeline de middleware de
+    salida — específicamente NO pasa por CORSMiddleware. Resultado: el 500
+    sale sin header `Access-Control-Allow-Origin` y el browser lo bloquea
+    como "not allowed by access-control-allow-origin", enmascarando el bug
+    real de Python. (Bug observado N veces en el dogfood: KB 500,
+    onboarding 500, Shopify 500, etc.)
+
+    Solución correcta: middleware custom que envuelve TODO. Cuando se monta
+    DESPUÉS añadiendo CORSMiddleware (que queda como outermost), la
+    respuesta del catch-all pasa por CORS → headers correctos al browser.
+
+    Orden en main.py (importa muchísimo):
+        app.add_middleware(UnhandledExceptionMiddleware)  # innermost
+        app.add_middleware(CORSMiddleware, ...)           # outermost — añade CORS
+                                                          # a TODA respuesta, incluso 500
+    """
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        try:
+            return await call_next(request)
+        except Exception as exc:
+            # Re-raise DomainError para que su handler dedicado lo procese
+            # (códigos 401/403/404/409/422/429 con shapes específicos).
+            if isinstance(exc, DomainError):
+                raise
+            logger.exception(
+                "unhandled_exception path=%s method=%s",
+                request.url.path,
+                request.method,
+                exc_info=exc,
+            )
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": "internal_server_error",
+                    "detail": (
+                        f"{type(exc).__name__}: {exc!s}"
+                        if request.app.debug
+                        else "internal_server_error"
+                    ),
+                },
+            )
+
+
 def register_exception_handlers(app: FastAPI) -> None:
-    """Registra el handler global de DomainError. Llamar una vez en startup."""
+    """Registra los handlers globales de excepción. Llamar una vez en startup.
+
+    - DomainError: errores de negocio con status_code definido (401, 403, 404, 409, 422, 429).
+
+    NOTA sobre el catch-all de Exception: NO está aquí porque `add_exception_handler`
+    bypassea el middleware CORS. Para 500s la solución correcta es montar el
+    `UnhandledExceptionMiddleware` en main.py (ver docstring del middleware).
+    """
     app.add_exception_handler(DomainError, _domain_exception_handler)

@@ -80,8 +80,83 @@ class TestExceptionHandler:
         assert resp.json() == {"error": "custom_forbidden_code", "detail": "no podés"}
 
     def test_unhandled_exception_passes_through(self) -> None:
-        # Las que no son DomainError siguen el flujo default de FastAPI (500).
-        # TestClient propaga la excepción salvo que se diga lo contrario.
+        # Sin UnhandledExceptionMiddleware montado, las non-DomainError siguen
+        # el flujo default de FastAPI (500). El middleware se monta en main.py,
+        # no en register_exception_handlers — los tests específicos de ese
+        # comportamiento están en TestUnhandledExceptionMiddleware abajo.
         client = TestClient(self._make_app(), raise_server_exceptions=False)
         resp = client.get("/raise/unhandled")
         assert resp.status_code == 500
+
+
+class TestUnhandledExceptionMiddleware:
+    """Regression test del bug "500 enmascarado como CORS error".
+
+    Observado N veces en el dogfood: una excepción Python no controlada
+    (Pydantic ValidationError, asyncpg CheckViolationError, RuntimeError, etc.)
+    sale como 500 pero SIN header Access-Control-Allow-Origin → browser
+    bloquea con "not allowed by access-control-allow-origin", enmascarando
+    el bug real.
+
+    Causa: `app.add_exception_handler(Exception, ...)` SÍ captura, pero su
+    respuesta NO pasa por la pipeline de middleware de salida. CORS bypasea.
+    Fix: middleware custom (BaseHTTPMiddleware) que se ejecuta DENTRO del
+    stack y cuya respuesta SÍ pasa por CORSMiddleware al salir.
+    """
+
+    def test_500_response_includes_cors_headers(self) -> None:
+        from apps.api.core.errors import UnhandledExceptionMiddleware
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app = FastAPI()
+        register_exception_handlers(app)
+        # Orden CRÍTICO: middleware catch-all PRIMERO (innermost), CORS
+        # DESPUÉS (outermost). Así el response del catch-all pasa por CORS.
+        app.add_middleware(UnhandledExceptionMiddleware)
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["https://app.example.com"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+        @app.get("/explode")
+        async def _explode() -> None:
+            raise RuntimeError("simulated upstream failure")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/explode", headers={"Origin": "https://app.example.com"})
+
+        assert resp.status_code == 500
+        # Sin UnhandledExceptionMiddleware, este header sería None → browser
+        # bloquea con "CORS not allowed" enmascarando el RuntimeError real.
+        assert resp.headers.get("access-control-allow-origin") == "https://app.example.com"
+        body = resp.json()
+        assert body["error"] == "internal_server_error"
+
+    def test_domain_error_still_uses_its_handler(self) -> None:
+        """El middleware re-raise DomainError para que su handler dedicado
+        siga procesándolo con shapes y status codes específicos (no genérico 500)."""
+        from apps.api.core.errors import UnhandledExceptionMiddleware
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app = FastAPI()
+        register_exception_handlers(app)
+        app.add_middleware(UnhandledExceptionMiddleware)
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["https://app.example.com"],
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+        @app.get("/notfound")
+        async def _notfound() -> None:
+            raise NotFoundError("X no existe", code="x_not_found")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/notfound", headers={"Origin": "https://app.example.com"})
+
+        assert resp.status_code == 404
+        assert resp.json() == {"error": "x_not_found", "detail": "X no existe"}
+        assert resp.headers.get("access-control-allow-origin") == "https://app.example.com"
