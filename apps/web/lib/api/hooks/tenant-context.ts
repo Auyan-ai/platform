@@ -4,7 +4,19 @@ import { getToken } from '@/lib/api/get-token'
 import { queryKeys } from '@/lib/api/query-keys'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+// NEXT_PUBLIC_API_URL se inlinea en build time (ver apps/web/Dockerfile).
+// Si llegara vacía al cliente, fetches harían "Load failed" silencioso por
+// mixed-content (http://localhost:8000 desde una página https). Mejor fallar
+// explícitamente que dejar al cliente con un error inútil.
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? ''
+
+if (typeof window !== 'undefined' && !API_URL) {
+  console.error(
+    '[auyan] NEXT_PUBLIC_API_URL no se inyectó en el bundle. ' +
+      'El frontend no podrá llamar al API. ' +
+      'Revisa el Dockerfile (ARG/ENV) y las Variables de Railway.',
+  )
+}
 
 export interface TenantPlaybook {
   tenant_id: string
@@ -242,15 +254,30 @@ async function tenantContextFetch<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
-  const resp = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'X-Tenant-Id': tenantId,
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  })
+  if (!API_URL) {
+    throw new Error(
+      'NEXT_PUBLIC_API_URL no está configurada. Revisa el deploy de Railway.',
+    )
+  }
+  const url = `${API_URL}${path}`
+  let resp: Response
+  try {
+    resp = await fetch(url, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Tenant-Id': tenantId,
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+    })
+  } catch (err) {
+    // fetch throw = network / CORS / mixed-content. Mensaje claro para debugging.
+    console.error('[auyan] fetch error', { url, method: options?.method ?? 'GET', err })
+    throw new Error(
+      `No se pudo contactar el API (${options?.method ?? 'GET'} ${path}). Revisa DevTools → Network para el detalle.`,
+    )
+  }
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: resp.statusText }))
     throw new Error(err.detail ?? `HTTP ${resp.status}`)
