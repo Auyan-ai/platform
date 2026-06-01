@@ -740,7 +740,7 @@ async def create_knowledge_document_with_chunks(
         title,
         source,
         content,
-        json.dumps(metadata),
+        metadata,  # el codec del pool serializa a jsonb (no json.dumps manual)
     )
     rows = [
         (
@@ -3548,13 +3548,10 @@ async def upsert_tenant_facts(
         RETURNING *
         """,
         tenant_id,
-        json.dumps(data),
+        data,  # el codec del pool serializa a jsonb (no json.dumps manual)
         edited_by,
     )
-    d = dict(row)
-    if isinstance(d.get("data"), str):
-        d["data"] = json.loads(d["data"])
-    return TenantFacts(**d)
+    return TenantFacts(**dict(row))
 
 
 # ============================================================
@@ -3782,7 +3779,7 @@ async def create_tenant_knowledge_submission(
         original_filename,
         content,
         notes,
-        json.dumps(metadata or {}),
+        metadata or {},  # el codec del pool serializa a jsonb (no json.dumps manual)
         submitted_by,
     )
     return _tenant_knowledge_submission_from_row(row)
@@ -4148,7 +4145,7 @@ async def create_or_refresh_weekly_report_draft(
         week_end,
         subject,
         recipient_email,
-        json.dumps(metrics),
+        metrics,  # el codec del pool serializa a jsonb (no json.dumps manual)
         narrative,
         created_by,
     )
@@ -4394,7 +4391,7 @@ async def create_outbound_email_template(
         subject_template,
         text_body_template,
         html_body_template,
-        json.dumps(variables),
+        variables,  # el codec del pool serializa a jsonb (no json.dumps manual)
         is_active,
         created_by,
     )
@@ -4439,7 +4436,7 @@ async def update_outbound_email_template(
         subject_template,
         text_body_template,
         html_body_template,
-        json.dumps(variables),
+        variables,  # el codec del pool serializa a jsonb (no json.dumps manual)
         is_active,
         updated_by,
     )
@@ -4531,7 +4528,7 @@ async def enqueue_outbound_email_job(
         text_body,
         html_body,
         tag,
-        json.dumps(payload),
+        payload,  # el codec del pool serializa a jsonb (no json.dumps manual)
         max_attempts,
         requested_by,
         idempotency_key,
