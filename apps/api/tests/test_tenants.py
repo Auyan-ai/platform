@@ -1137,17 +1137,12 @@ class TestTenantOnboardingEndpoints:
     ) -> None:
         from apps.api.db.models import OnboardingChecklist, TenantOnboarding
 
+        # step_data usa estructura anidada por número de paso (igual que el portal)
         step_data = {
-            "voice_traits": "Amable y cercano",
-            "forbidden_phrases": "No decir 'no puedo'",
-            "launch_notes": "Priorizar devoluciones",
-            "business_hours": "L-V 9:00-18:00",
-            "support_email": "hola@marea.test",
-            "support_phone": "+34 910 000 001",
-            "return_window_days": "30",
-            "company_name": "Marea Studio",
-            "website_url": "https://marea.test",
-            "primary_contact": "Ana Gómez",
+            "1": {"company_name": "Marea Studio", "website_url": "https://marea.test", "primary_contact": "Ana Gómez"},
+            "2": {"voice_traits": "Amable y cercano", "forbidden_phrases": "No decir 'no puedo'"},
+            "3": {"business_hours": "L-V 9:00-18:00", "support_email": "hola@marea.test", "support_phone": "+34 910 000 001", "return_window_days": "30"},
+            "9": {"launch_notes": "Priorizar devoluciones"},
         }
         onboarding = TenantOnboarding(
             tenant_id=TENANT_ID,

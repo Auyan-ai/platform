@@ -1194,20 +1194,30 @@ async def submit_my_tenant_onboarding(
         )
         tenant, checklist = await evaluate_and_advance_lifecycle(conn, tenant_id)
 
+        # step_data tiene estructura {"1": {...step1...}, "2": {...step2...}, ...}
         sd = onboarding.step_data
+        step1 = sd.get("1") or {}
+        step2 = sd.get("2") or {}
+        step3 = sd.get("3") or {}
+        step9 = sd.get("9") or {}
         await upsert_tenant_playbook(
             conn,
             tenant_id=tenant_id,
-            brand_voice=str(sd.get("voice_traits") or ""),
-            escalation_notes=str(sd.get("forbidden_phrases") or ""),
-            agent_instructions=str(sd.get("launch_notes") or ""),
+            brand_voice=str(step2.get("voice_traits") or ""),
+            escalation_notes=str(step2.get("forbidden_phrases") or ""),
+            agent_instructions=str(step9.get("launch_notes") or ""),
             edited_by=auth.user_id,
         )
-        _facts_keys = (
-            "business_hours", "support_email", "support_phone",
-            "return_window_days", "company_name", "website_url", "primary_contact",
-        )
-        facts_data = {k: sd[k] for k in _facts_keys if sd.get(k) is not None}
+        _facts_candidates = {
+            "company_name": step1.get("company_name"),
+            "website_url": step1.get("website_url"),
+            "primary_contact": step1.get("primary_contact"),
+            "business_hours": step3.get("business_hours"),
+            "support_email": step3.get("support_email"),
+            "support_phone": step3.get("support_phone"),
+            "return_window_days": step3.get("return_window_days"),
+        }
+        facts_data = {k: v for k, v in _facts_candidates.items() if v is not None}
         if facts_data:
             await upsert_tenant_facts(
                 conn,

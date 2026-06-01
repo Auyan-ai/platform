@@ -22,11 +22,11 @@ from dotenv import load_dotenv
 _ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(_ENV_FILE)
 
-_PLAYBOOK_KEYS = ("voice_traits", "forbidden_phrases", "launch_notes")
-_FACTS_KEYS = (
-    "business_hours", "support_email", "support_phone",
-    "return_window_days", "company_name", "website_url", "primary_contact",
-)
+# step_data tiene estructura {"1": {...}, "2": {...}, ...} igual que el portal
+_STEP_VOICE = "2"
+_STEP_FACTS_BASICS = "1"
+_STEP_FACTS_CONTACT = "3"
+_STEP_LAUNCH = "9"
 
 
 async def backfill(tenant_id: UUID | None, dry_run: bool) -> None:
@@ -46,11 +46,24 @@ async def backfill(tenant_id: UUID | None, dry_run: bool) -> None:
             tid = row["tenant_id"]
             raw = row["step_data"]
             sd: dict = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            step1 = sd.get(_STEP_FACTS_BASICS) or {}
+            step2 = sd.get(_STEP_VOICE) or {}
+            step3 = sd.get(_STEP_FACTS_CONTACT) or {}
+            step9 = sd.get(_STEP_LAUNCH) or {}
 
-            brand_voice = str(sd.get("voice_traits") or "")
-            escalation_notes = str(sd.get("forbidden_phrases") or "")
-            agent_instructions = str(sd.get("launch_notes") or "")
-            facts_data = {k: sd[k] for k in _FACTS_KEYS if sd.get(k) is not None}
+            brand_voice = str(step2.get("voice_traits") or "")
+            escalation_notes = str(step2.get("forbidden_phrases") or "")
+            agent_instructions = str(step9.get("launch_notes") or "")
+            facts_candidates = {
+                "company_name": step1.get("company_name"),
+                "website_url": step1.get("website_url"),
+                "primary_contact": step1.get("primary_contact"),
+                "business_hours": step3.get("business_hours"),
+                "support_email": step3.get("support_email"),
+                "support_phone": step3.get("support_phone"),
+                "return_window_days": step3.get("return_window_days"),
+            }
+            facts_data = {k: v for k, v in facts_candidates.items() if v is not None}
 
             print(f"\n--- Tenant {tid} ---")
             print(f"  brand_voice:       {brand_voice!r}")
