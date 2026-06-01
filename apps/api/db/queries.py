@@ -3589,11 +3589,16 @@ async def upsert_tenant_onboarding(
     step_data: dict[str, Any],
     edited_by: UUID | None = None,
 ) -> TenantOnboarding:
+    # NO json.dumps() aquí: el pool registra un type codec para jsonb que
+    # llama json.dumps automáticamente (ver apps/api/db/client.py:_init_connection).
+    # Si encodamos manualmente, asyncpg lo encoda DE NUEVO y termina guardando
+    # un JSON string "[1]" en lugar de un array [1], violando el check
+    # constraint jsonb_typeof(completed_steps) = 'array'.
     row = await conn.fetchrow(
         """
         INSERT INTO tenant_onboarding
           (tenant_id, current_step, completed_steps, step_data, last_edited_by)
-        VALUES ($1, $2, $3::jsonb, $4::jsonb, $5)
+        VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (tenant_id) DO UPDATE SET
           current_step    = EXCLUDED.current_step,
           completed_steps = EXCLUDED.completed_steps,
@@ -3603,8 +3608,8 @@ async def upsert_tenant_onboarding(
         """,
         tenant_id,
         current_step,
-        json.dumps(completed_steps),
-        json.dumps(step_data),
+        completed_steps,
+        step_data,
         edited_by,
     )
     return _tenant_onboarding_from_row(row)
