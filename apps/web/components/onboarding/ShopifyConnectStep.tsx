@@ -23,18 +23,23 @@ export function ShopifyConnectStep({ tenantId }: { tenantId: string }) {
   const existing = findShopify(integrationsQuery.data?.integrations)
 
   const [domain, setDomain] = useState('')
-  const [token, setToken] = useState('')
+  const [clientId, setClientId] = useState('')
+  const [clientSecret, setClientSecret] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   async function submit() {
     setError(null)
-    if (!domain.trim() || !token.trim()) {
-      setError('Dominio y token son obligatorios.')
+    if (!domain.trim() || !clientId.trim() || !clientSecret.trim()) {
+      setError('Dominio, Client ID y Client Secret son obligatorios.')
       return
     }
     try {
-      await connectMutation.mutateAsync({ domain: domain.trim(), token: token.trim() })
-      setToken('')
+      await connectMutation.mutateAsync({
+        domain: domain.trim(),
+        client_id: clientId.trim(),
+        client_secret: clientSecret.trim(),
+      })
+      setClientSecret('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo conectar Shopify.')
     }
@@ -43,16 +48,18 @@ export function ShopifyConnectStep({ tenantId }: { tenantId: string }) {
   return (
     <div className="grid gap-5">
       <p className="text-sm text-foreground-muted">
-        Conecta la API de administración de tu tienda Shopify. Necesitas un{' '}
+        Conecta la API de administración de tu tienda Shopify. Desde el 1 de enero 2026
+        las apps se crean en el{' '}
         <a
-          href="https://help.shopify.com/en/manual/apps/app-types/custom-apps"
+          href="https://shopify.dev/dashboard"
           target="_blank"
           rel="noopener noreferrer"
           className="text-accent underline"
         >
-          Custom App
+          Shopify Dev Dashboard
         </a>{' '}
-        con scopes de lectura para orders, products, customers y policies.
+        y usan Client ID + Client Secret (OAuth Client Credentials, token rotación
+        automática cada 24h).
       </p>
 
       {existing && (
@@ -61,7 +68,7 @@ export function ShopifyConnectStep({ tenantId }: { tenantId: string }) {
           <div>
             <p className="font-medium">Shopify conectado</p>
             <p className="text-xs opacity-80">
-              Dominio: {String(existing.config.domain ?? '—')}. Puedes reemplazar el token
+              Dominio: {String(existing.config.domain ?? '—')}. Puedes reemplazar el secret
               re-enviando el formulario.
             </p>
           </div>
@@ -80,13 +87,23 @@ export function ShopifyConnectStep({ tenantId }: { tenantId: string }) {
           />
         </div>
         <div>
-          <Label htmlFor="shopify-token">Admin API access token</Label>
+          <Label htmlFor="shopify-client-id">Client ID</Label>
           <Input
-            id="shopify-token"
+            id="shopify-client-id"
+            value={clientId}
+            placeholder="abc123..."
+            onChange={(e) => setClientId(e.target.value)}
+            className="mt-1.5"
+          />
+        </div>
+        <div>
+          <Label htmlFor="shopify-client-secret">Client Secret</Label>
+          <Input
+            id="shopify-client-secret"
             type="password"
-            value={token}
-            placeholder="shpat_..."
-            onChange={(e) => setToken(e.target.value)}
+            value={clientSecret}
+            placeholder="shpss_..."
+            onChange={(e) => setClientSecret(e.target.value)}
             className="mt-1.5"
           />
           <p className="mt-1 text-xs text-foreground-muted">
@@ -102,7 +119,7 @@ export function ShopifyConnectStep({ tenantId }: { tenantId: string }) {
       <div>
         <Button onClick={submit} disabled={connectMutation.isPending}>
           <Plug className="size-4" />
-          {connectMutation.isPending ? 'Conectando...' : existing ? 'Reemplazar token' : 'Conectar Shopify'}
+          {connectMutation.isPending ? 'Conectando...' : existing ? 'Reemplazar secret' : 'Conectar Shopify'}
         </Button>
       </div>
     </div>

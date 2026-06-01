@@ -40,18 +40,23 @@ export function Step4Shopify({ tenantId, onContinue, onSkip }: StepProps) {
   const existing = findShopify(integrationsQuery.data?.integrations)
 
   const [domain, setDomain] = useState('')
-  const [token, setToken] = useState('')
+  const [clientId, setClientId] = useState('')
+  const [clientSecret, setClientSecret] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   async function connect() {
     setError(null)
-    if (!domain.trim() || !token.trim()) {
-      setError('Dominio y token son obligatorios.')
+    if (!domain.trim() || !clientId.trim() || !clientSecret.trim()) {
+      setError('Domain, Client ID y Client Secret son obligatorios.')
       return
     }
     try {
-      await connectMutation.mutateAsync({ domain: domain.trim(), token: token.trim() })
-      setToken('')
+      await connectMutation.mutateAsync({
+        domain: domain.trim(),
+        client_id: clientId.trim(),
+        client_secret: clientSecret.trim(),
+      })
+      setClientSecret('')
       onContinue()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo conectar Shopify.')
@@ -86,37 +91,51 @@ export function Step4Shopify({ tenantId, onContinue, onSkip }: StepProps) {
 
       <details className="mt-6 rounded-md bg-surface-muted px-3 py-2 text-[13px] text-foreground-body">
         <summary className="cursor-pointer text-foreground-muted">
-          ¿De dónde saco el Admin API access token?
+          ¿De dónde saco Client ID y Client Secret?
         </summary>
+        <p className="mt-2 text-foreground-muted">
+          Desde el 1 de enero de 2026, Shopify deprecó los Custom Apps con token
+          permanente. Las apps nuevas se crean en el <strong>Dev Dashboard</strong>{' '}
+          y usan OAuth Client Credentials (token de 24h, refrescado automáticamente).
+        </p>
         <ol className="mt-2 list-decimal space-y-1 pl-5 text-foreground-muted">
           <li>
-            En tu Shopify Admin: <strong>Settings → Apps and sales channels → Develop apps</strong>.
+            Entra en{' '}
+            <a
+              href="https://shopify.dev/dashboard"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-accent hover:underline"
+            >
+              shopify.dev/dashboard
+            </a>{' '}
+            (o desde tu Shopify admin: Settings → Apps → Develop apps → Build apps).
           </li>
           <li>
-            Haz click en <strong>Create an app</strong> (o selecciona una existente). Nombre:{' '}
-            <code className="rounded-xs bg-surface px-1 py-0.5">Auyan</code>.
+            Crea una nueva app, nómbrala <code className="rounded-xs bg-surface px-1 py-0.5">Auyan</code>.
           </li>
           <li>
-            Pestaña <strong>Configuration → Admin API access scopes</strong>. Activa:{' '}
+            En <strong>Configuration → Admin API access scopes</strong> activa:{' '}
             <code className="rounded-xs bg-surface px-1 py-0.5">read_orders</code>,{' '}
             <code className="rounded-xs bg-surface px-1 py-0.5">read_products</code>,{' '}
             <code className="rounded-xs bg-surface px-1 py-0.5">read_customers</code>,{' '}
             <code className="rounded-xs bg-surface px-1 py-0.5">read_content</code>.
           </li>
           <li>
-            Pestaña <strong>API credentials → Install app</strong>. Aparece el{' '}
-            <strong>Admin API access token</strong> que empieza con{' '}
-            <code className="rounded-xs bg-surface px-1 py-0.5">shpat_</code>. Cópialo{' '}
-            <strong>una sola vez</strong> y pégalo abajo.
+            Instala la app en tu tienda (botón <strong>Install</strong> en el Dev Dashboard).
+          </li>
+          <li>
+            En la sección <strong>Configuration → Client credentials</strong> aparecen{' '}
+            <strong>Client ID</strong> y <strong>Client Secret</strong>. Cópialos abajo.
           </li>
         </ol>
         <a
-          href="https://help.shopify.com/en/manual/apps/app-types/custom-apps"
+          href="https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/client-credentials-grant"
           target="_blank"
           rel="noopener noreferrer"
           className="mt-2 inline-block text-accent hover:underline"
         >
-          Documentación oficial de Shopify ↗
+          Doc oficial: Client Credentials Grant ↗
         </a>
       </details>
 
@@ -128,11 +147,17 @@ export function Step4Shopify({ tenantId, onContinue, onSkip }: StepProps) {
           onChange={(e) => setDomain(e.target.value)}
         />
         <WizardInput
-          label="Admin API access token"
+          label="Client ID"
+          placeholder="abc123..."
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+        />
+        <WizardInput
+          label="Client Secret"
           type="password"
-          placeholder="shpat_..."
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
+          placeholder="shpss_..."
+          value={clientSecret}
+          onChange={(e) => setClientSecret(e.target.value)}
         />
       </div>
 

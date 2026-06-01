@@ -1,16 +1,24 @@
 """Cliente HTTP para la Admin REST API de Shopify.
 
-Expone dos capas:
-- `ShopifyClient`: cliente HTTP con estado (domain + token en __init__).
-- `ShopifyAdapter`: adapter stateless registrado en IntegrationRegistry. Recibe
-  IntegrationContext por llamada — habilita multi-tenant real (un adapter, N tiendas).
+Expone tres capas:
+- `exchange_client_credentials`: OAuth 2.0 Client Credentials Grant (server-to-server).
+  Shopify deprecó los Custom Apps legacy con `shpat_` token permanente el 1-ene-2026.
+  El flow nuevo: app creada en Dev Dashboard → merchant copia client_id+client_secret
+  → Auyan los intercambia por access_token de 24h.
+- `ShopifyClient`: cliente HTTP con estado (domain + access_token corto en __init__).
+- `ShopifyAdapter`: adapter stateless. Recibe IntegrationContext por llamada con
+  access_token ya válido. Quien construye el ctx (router connect, agente) es el
+  responsable de refrescar el token via `ensure_shopify_access_token` antes.
 """
 
 from __future__ import annotations
 
+import datetime as _dt
 import logging
 from typing import Any
+from uuid import UUID
 
+import asyncpg
 import httpx
 from apps.api.integrations.base import CommerceProvider, IntegrationContext
 from apps.api.integrations.registry import IntegrationRegistry
@@ -18,6 +26,98 @@ from apps.api.integrations.registry import IntegrationRegistry
 logger = logging.getLogger(__name__)
 
 _API_VERSION = "2024-10"
+# Refrescamos el access_token 5min antes de que expire para evitar race conditions
+# entre "valido" en el check y "expirado" al hacer la llamada real a Shopify.
+_TOKEN_REFRESH_BUFFER_SECONDS = 300
+
+
+async def exchange_client_credentials(
+    *,
+    shop_domain: str,
+    client_id: str,
+    client_secret: str,
+) -> tuple[str, int]:
+    """OAuth 2.0 Client Credentials Grant contra Shopify.
+
+    POST https://{shop}.myshopify.com/admin/oauth/access_token
+    Body: client_id + client_secret + grant_type=client_credentials
+    Returns: (access_token, expires_in_seconds). Shopify devuelve tokens de 24h
+    (86400s) pero respetamos `expires_in` por si Shopify lo cambia.
+
+    Doc: https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/client-credentials-grant
+    """
+    url = f"https://{shop_domain.rstrip('/')}/admin/oauth/access_token"
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            url,
+            json={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "grant_type": "client_credentials",
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+    return str(data["access_token"]), int(data.get("expires_in", 86400))
+
+
+async def ensure_shopify_access_token(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    domain: str,
+    client_id: str,
+    client_secret: str,
+    cached_access_token: str | None,
+    cached_token_expires_at: _dt.datetime | None,
+) -> tuple[str, _dt.datetime]:
+    """Devuelve un access_token válido. Refresca + persiste si caducó.
+
+    Mira el token cacheado en `tenant_integrations.config`. Si vigente con margen
+    (>5min), lo devuelve. Si expirado o falta, hace Client Credentials Grant,
+    persiste el nuevo en `config`, y lo devuelve.
+
+    Returns: (access_token, expires_at_utc).
+    """
+    now = _dt.datetime.now(_dt.UTC)
+    if cached_access_token and cached_token_expires_at:
+        seconds_left = (cached_token_expires_at - now).total_seconds()
+        if seconds_left > _TOKEN_REFRESH_BUFFER_SECONDS:
+            return cached_access_token, cached_token_expires_at
+
+    new_token, expires_in = await exchange_client_credentials(
+        shop_domain=domain,
+        client_id=client_id,
+        client_secret=client_secret,
+    )
+    new_expires_at = now + _dt.timedelta(seconds=expires_in)
+
+    # Merge en config jsonb (no sobrescribir otros campos como shop_name).
+    await conn.execute(
+        """
+        UPDATE tenant_integrations
+           SET config = config || jsonb_build_object(
+                 'cached_access_token', $1::text,
+                 'cached_token_expires_at', $2::text
+               )
+         WHERE tenant_id = $3
+           AND kind = 'commerce'
+           AND provider = 'shopify'
+           AND is_active = true
+           AND deleted_at IS NULL
+        """,
+        new_token,
+        new_expires_at.isoformat(),
+        tenant_id,
+    )
+    logger.info(
+        "shopify.token_refreshed tenant_id=%s expires_at=%s",
+        tenant_id,
+        new_expires_at.isoformat(),
+    )
+    return new_token, new_expires_at
 
 
 class ShopifyClient:
@@ -340,12 +440,26 @@ class ShopifyClient:
 class ShopifyAdapter:
     """CommerceProvider stateless para Shopify.
 
-    Crea un ShopifyClient por llamada a partir de las credenciales en IntegrationContext.
-    Credentials esperadas: {"domain": "...", "token": "shpat_..."}.
+    Crea un ShopifyClient por llamada con un access_token YA VÁLIDO. Quien construye
+    el IntegrationContext (router connect, build_skill_context del agente) debe llamar
+    `ensure_shopify_access_token` antes — el adapter no refresca; eso requeriría conn
+    + lógica que ensucia los 10+ métodos del adapter.
+
+    Credentials esperadas:
+        - domain: shop.myshopify.com
+        - access_token: token válido (24h max), obtenido vía Client Credentials Grant
+
+    Compatibilidad legacy: si viene 'token' en lugar de 'access_token' (Custom App
+    legacy pre-2026), se acepta. Esos tenants se migran al nuevo flow cuando
+    re-conectan vía el wizard.
     """
 
     def _client(self, ctx: IntegrationContext) -> ShopifyClient:
-        return ShopifyClient(ctx.credentials["domain"], ctx.credentials["token"])
+        creds = ctx.credentials
+        token = creds.get("access_token") or creds.get("token")
+        if not token:
+            raise ValueError("shopify credentials missing access_token / token")
+        return ShopifyClient(creds["domain"], token)
 
     # ── CommerceProvider protocol ──────────────────────────────────────────────
 
