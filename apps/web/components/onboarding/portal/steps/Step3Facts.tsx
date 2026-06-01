@@ -6,7 +6,7 @@ import { WizardStepHeader } from '../WizardStepHeader'
 import { WizardStepActions } from '../WizardStepActions'
 import type { StepProps } from './types'
 
-export function Step3Facts({ values, onChange, onContinue }: StepProps) {
+export function Step3Facts({ values, onChange, onContinue, onBack }: StepProps) {
   return (
     <WizardSplitLayout>
       <WizardStepHeader
@@ -39,7 +39,7 @@ export function Step3Facts({ values, onChange, onContinue }: StepProps) {
           onChange={(e) => onChange('return_window_days', e.target.value)}
         />
       </div>
-      <WizardStepActions onContinue={onContinue} />
+      <WizardStepActions onContinue={onContinue} onBack={onBack} />
     </WizardSplitLayout>
   )
 }

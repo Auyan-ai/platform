@@ -1,12 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckCircle2, FileText } from 'lucide-react'
+import { CheckCircle2, FileText, Plus } from 'lucide-react'
 import { WizardSplitLayout } from '../WizardLayouts'
 import { WizardInput } from '../WizardInput'
 import { WizardStepHeader } from '../WizardStepHeader'
 import { WizardStepActions } from '../WizardStepActions'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import {
   useCreateTenantKnowledgeSubmission,
@@ -21,7 +22,7 @@ const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger
   rejected: 'danger',
 }
 
-export function Step6Kb({ tenantId, onContinue, onSkip }: StepProps) {
+export function Step6Kb({ tenantId, onContinue, onSkip, onBack }: StepProps) {
   const submissionsQuery = useTenantKnowledgeSubmissions(tenantId)
   const createMutation = useCreateTenantKnowledgeSubmission(tenantId)
 
@@ -33,15 +34,18 @@ export function Step6Kb({ tenantId, onContinue, onSkip }: StepProps) {
 
   const hasSubmissions = (submissionsQuery.data?.length ?? 0) > 0
 
-  async function submit() {
+  /** Devuelve true si el envío se guardó (o no había nada que enviar). False = bloqueo. */
+  async function submitCurrent(): Promise<boolean> {
     setError(null)
+    const hasAnyInput = title.trim() || content.trim() || sourceUrl.trim()
+    if (!hasAnyInput) return true // nada que enviar, no es error
     if (!title.trim()) {
-      setError('Falta el título.')
-      return
+      setError('Falta el título del documento.')
+      return false
     }
     if (!content.trim() && !sourceUrl.trim()) {
-      setError('Pega un texto o una URL con el contenido.')
-      return
+      setError('Pega el texto del documento o una URL.')
+      return false
     }
     try {
       await createMutation.mutateAsync({
@@ -55,9 +59,28 @@ export function Step6Kb({ tenantId, onContinue, onSkip }: StepProps) {
       setTitle('')
       setSourceUrl('')
       setContent('')
+      return true
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear el envío.')
+      return false
     }
+  }
+
+  /** Click directo en el botón "Enviar documento". */
+  async function handleSubmitDocument() {
+    // submitCurrent ya valida que hay título + contenido. Si no, error visible.
+    if (!title.trim() && !content.trim() && !sourceUrl.trim()) {
+      setError('Llena al menos título + contenido.')
+      return
+    }
+    await submitCurrent()
+  }
+
+  /** Click en "Continuar": si hay datos sin enviar, los manda primero, luego avanza. */
+  async function handleContinue() {
+    const ok = await submitCurrent()
+    if (!ok) return
+    onContinue()
   }
 
   return (
@@ -133,15 +156,20 @@ export function Step6Kb({ tenantId, onContinue, onSkip }: StepProps) {
 
       {error && <p className="mt-3 text-sm text-danger-foreground">{error}</p>}
 
-      <div className="mt-4 flex items-center justify-end gap-3">
-        <button
-          type="button"
-          onClick={submit}
+      <div className="mt-4 flex items-center justify-end">
+        <Button
+          variant={hasSubmissions ? 'ghost' : 'primary'}
+          size="sm"
+          onClick={handleSubmitDocument}
           disabled={createMutation.isPending}
-          className="rounded-sm px-2 py-1.5 text-xs text-foreground-muted transition-colors hover:bg-surface-muted hover:text-foreground-body disabled:opacity-50"
         >
-          {createMutation.isPending ? 'Enviando...' : '+ Añadir otro documento'}
-        </button>
+          <Plus className="size-4" />
+          {createMutation.isPending
+            ? 'Enviando...'
+            : hasSubmissions
+              ? 'Añadir otro documento'
+              : 'Enviar documento'}
+        </Button>
       </div>
 
       {hasSubmissions && (
@@ -167,10 +195,11 @@ export function Step6Kb({ tenantId, onContinue, onSkip }: StepProps) {
       )}
 
       <WizardStepActions
-        onContinue={onContinue}
+        onContinue={handleContinue}
+        onBack={onBack}
         onSkip={hasSubmissions ? undefined : onSkip}
         continueLabel="Continuar"
-        continueDisabled={!hasSubmissions && createMutation.isPending}
+        continueLoading={createMutation.isPending}
       />
     </WizardSplitLayout>
   )

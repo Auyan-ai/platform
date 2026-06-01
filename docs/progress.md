@@ -131,7 +131,8 @@ Spike sugerido:
 | Deuda | Severidad | Notas |
 |---|---|---|
 | Step 7 (Legal) pide aceptar DPA + Términos + GDPR sin links a documentos reales | media | El cliente acepta cláusulas que no puede leer. Bloquea cumplimiento real. Crear `apps/web/app/(public)/legal/{dpa,terms,privacy}/page.tsx` con contenido legal + linkearlos desde los checkboxes del step. |
-| Step 9 (Confirmación) deuda: si el lifecycle no avanza a `building` al darle "Enviar", el cliente queda atascado sin saber qué falta | media | El portal debe mostrar el checklist remanente con CTAs a cada step incompleto. Hoy parpadea y no redirige porque el server-side layout vuelve a mandar a `/onboarding`. |
+| Step 9 (Confirmación) deuda: si el lifecycle no avanza a `building` al darle "Enviar", el cliente queda atascado sin saber qué falta | media | El portal debe mostrar el checklist remanente con CTAs a cada step incompleto. Hoy parpadea y no redirige porque el server-side layout vuelve a mandar a `/onboarding`. (Resuelto en PR #147.) |
+| Step 6 (KB) solo acepta texto pegado o URL | **alta** | Cliente real tiene FAQs en PDF, políticas en Word, screenshots de procesos, hojas Excel, notas en `.md`. Hoy debe copy-paste manual. Implementar upload de: PDF, DOCX, DOC, TXT, MD, RTF, PNG/JPG/WebP (vision para extracción), XLSX/CSV (tablas). Pipeline: upload a Supabase Storage → worker extrae texto (Anthropic Files API o textract según tipo) → crea `tenant_knowledge_submission` con `original_filename` + `metadata.extracted_from` → flujo de aprobación normal. Cap por archivo (10 MB) + total por tenant (configurable). |
 | Imágenes laterales KREA pendientes (steps 4, 5, 6, 8) | baja | Mientras tanto se ve un placeholder dashed. No bloquea funcionalidad. Prompts ya documentados en gstack/designs/. |
 
 ### Bloque 0.11 — Agent Verification Staging

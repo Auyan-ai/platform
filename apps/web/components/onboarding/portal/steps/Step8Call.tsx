@@ -7,7 +7,7 @@ import { WizardStepActions } from '../WizardStepActions'
 import { Textarea } from '@/components/ui/textarea'
 import type { StepProps } from './types'
 
-export function Step8Call({ values, onChange, onContinue, onSkip }: StepProps) {
+export function Step8Call({ values, onChange, onContinue, onSkip, onBack }: StepProps) {
   return (
     <WizardSplitLayout>
       <WizardStepHeader
@@ -37,7 +37,7 @@ export function Step8Call({ values, onChange, onContinue, onSkip }: StepProps) {
           />
         </div>
       </div>
-      <WizardStepActions onContinue={onContinue} onSkip={onSkip} />
+      <WizardStepActions onContinue={onContinue} onBack={onBack} onSkip={onSkip} />
     </WizardSplitLayout>
   )
 }

@@ -6,7 +6,7 @@ import { WizardStepActions } from '../WizardStepActions'
 import { Textarea } from '@/components/ui/textarea'
 import type { StepProps } from './types'
 
-export function Step2Voice({ values, onChange, onContinue }: StepProps) {
+export function Step2Voice({ values, onChange, onContinue, onBack }: StepProps) {
   return (
     <WizardSplitLayout>
       <WizardStepHeader
@@ -45,7 +45,7 @@ export function Step2Voice({ values, onChange, onContinue }: StepProps) {
           />
         </div>
       </div>
-      <WizardStepActions onContinue={onContinue} />
+      <WizardStepActions onContinue={onContinue} onBack={onBack} />
     </WizardSplitLayout>
   )
 }

@@ -34,7 +34,7 @@ function findShopify(
   return integrations?.find((i) => i.kind === 'commerce' && i.provider === 'shopify' && i.is_active)
 }
 
-export function Step4Shopify({ tenantId, onContinue, onSkip }: StepProps) {
+export function Step4Shopify({ tenantId, onContinue, onSkip, onBack }: StepProps) {
   const integrationsQuery = useTenantIntegrations(tenantId)
   const connectMutation = useConnectShopify(tenantId)
   const existing = findShopify(integrationsQuery.data?.integrations)
@@ -165,6 +165,7 @@ export function Step4Shopify({ tenantId, onContinue, onSkip }: StepProps) {
 
       <WizardStepActions
         onContinue={connect}
+        onBack={onBack}
         onSkip={onSkip}
         continueLabel={existing ? 'Continuar' : 'Conectar Shopify'}
         continueLoading={connectMutation.isPending}

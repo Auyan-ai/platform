@@ -163,7 +163,9 @@ export function OnboardingPortal({ tenantId, userEmail, dashboardUrl }: Onboardi
     values,
     onChange: handleChange,
     onContinue: handleContinue,
-    onBack: handleBack,
+    // En step 1 no hay paso anterior — no pasamos onBack para que el botón
+    // "Anterior" no se renderice. Si la posición es >1, sí pasamos handleBack.
+    onBack: step > 1 ? handleBack : undefined,
     onSkip: handleContinue,
     tenantId,
   }

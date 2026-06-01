@@ -11,7 +11,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import type { StepProps } from './types'
 
-export function Step9Confirm({ tenantId, values, onChange, onContinue }: StepProps) {
+export function Step9Confirm({ tenantId, values, onChange, onContinue, onBack }: StepProps) {
   const onboardingQuery = useTenantOnboarding(tenantId)
   const checklistQuery = useTenantOnboardingChecklist(tenantId)
   const checklist = checklistQuery.data
@@ -121,7 +121,11 @@ export function Step9Confirm({ tenantId, values, onChange, onContinue }: StepPro
       </div>
 
       {!isSubmitted && (
-        <WizardStepActions onContinue={onContinue} continueLabel="Enviar onboarding" />
+        <WizardStepActions
+          onContinue={onContinue}
+          onBack={onBack}
+          continueLabel="Enviar onboarding"
+        />
       )}
     </WizardCenteredLayout>
   )

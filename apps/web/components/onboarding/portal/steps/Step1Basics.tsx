@@ -9,7 +9,7 @@ import type { StepProps } from './types'
 
 const TICKET_RANGES = ['1.000 - 3.000', '3.000 - 10.000', '10.000 - 30.000', '+30.000']
 
-export function Step1Basics({ values, onChange, onContinue }: StepProps) {
+export function Step1Basics({ values, onChange, onContinue, onBack }: StepProps) {
   const [errors, setErrors] = useState<string | null>(null)
 
   function handleContinue() {
@@ -75,7 +75,7 @@ export function Step1Basics({ values, onChange, onContinue }: StepProps) {
         </div>
       </div>
       {errors && <p className="mt-3 text-sm text-danger-foreground">{errors}</p>}
-      <WizardStepActions onContinue={handleContinue} />
+      <WizardStepActions onContinue={handleContinue} onBack={onBack} />
     </WizardCenteredLayout>
   )
 }
