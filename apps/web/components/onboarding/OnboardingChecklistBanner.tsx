@@ -43,7 +43,7 @@ export function OnboardingChecklistBanner({ tenantId }: { tenantId: string }) {
             Checklist discovery → building
           </span>
           <Badge variant={lifecycle.variant}>{lifecycle.label}</Badge>
-          {data.is_complete && <Badge variant="success">Listo para AIDE</Badge>}
+          {data.complete && <Badge variant="success">Listo para AIDE</Badge>}
         </div>
       </div>
       <ul className="mt-3 grid gap-1.5 sm:grid-cols-2">

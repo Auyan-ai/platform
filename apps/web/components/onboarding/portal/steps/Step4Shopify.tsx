@@ -84,15 +84,53 @@ export function Step4Shopify({ tenantId, onContinue, onSkip }: StepProps) {
         ))}
       </div>
 
-      <div className="mt-7 grid gap-2">
+      <details className="mt-6 rounded-md bg-surface-muted px-3 py-2 text-[13px] text-foreground-body">
+        <summary className="cursor-pointer text-foreground-muted">
+          ¿De dónde saco el Admin API access token?
+        </summary>
+        <ol className="mt-2 list-decimal space-y-1 pl-5 text-foreground-muted">
+          <li>
+            En tu Shopify Admin: <strong>Settings → Apps and sales channels → Develop apps</strong>.
+          </li>
+          <li>
+            Haz click en <strong>Create an app</strong> (o selecciona una existente). Nombre:{' '}
+            <code className="rounded-xs bg-surface px-1 py-0.5">Auyan</code>.
+          </li>
+          <li>
+            Pestaña <strong>Configuration → Admin API access scopes</strong>. Activa:{' '}
+            <code className="rounded-xs bg-surface px-1 py-0.5">read_orders</code>,{' '}
+            <code className="rounded-xs bg-surface px-1 py-0.5">read_products</code>,{' '}
+            <code className="rounded-xs bg-surface px-1 py-0.5">read_customers</code>,{' '}
+            <code className="rounded-xs bg-surface px-1 py-0.5">read_content</code>.
+          </li>
+          <li>
+            Pestaña <strong>API credentials → Install app</strong>. Aparece el{' '}
+            <strong>Admin API access token</strong> que empieza con{' '}
+            <code className="rounded-xs bg-surface px-1 py-0.5">shpat_</code>. Cópialo{' '}
+            <strong>una sola vez</strong> y pégalo abajo.
+          </li>
+        </ol>
+        <a
+          href="https://help.shopify.com/en/manual/apps/app-types/custom-apps"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 inline-block text-accent hover:underline"
+        >
+          Documentación oficial de Shopify ↗
+        </a>
+      </details>
+
+      <div className="mt-4 grid gap-2">
         <WizardInput
+          label="Dominio Shopify"
           placeholder="mareastudio.myshopify.com"
           value={domain}
           onChange={(e) => setDomain(e.target.value)}
         />
         <WizardInput
+          label="Admin API access token"
           type="password"
-          placeholder="Admin API access token (shpat_...)"
+          placeholder="shpat_..."
           value={token}
           onChange={(e) => setToken(e.target.value)}
         />

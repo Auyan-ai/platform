@@ -70,7 +70,7 @@ export interface OnboardingChecklist {
 }
 
 export interface OnboardingChecklistResponse extends OnboardingChecklist {
-  is_complete: boolean
+  complete: boolean
   agent_lifecycle_state: string
 }
 
@@ -319,7 +319,9 @@ export function useTenantOnboarding(tenantId: string) {
       const token = await getToken()
       return tenantContextFetch<TenantOnboarding>(token, tenantId, '/tenants/me/onboarding')
     },
-    staleTime: 30_000,
+    // staleTime 0: necesitamos que al volver a abrir la pestaña veamos el current_step
+    // real, no la versión cacheada — el portal usa esto para resume-where-left-off.
+    staleTime: 0,
   })
 }
 
