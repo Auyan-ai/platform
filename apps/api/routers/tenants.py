@@ -52,7 +52,10 @@ from apps.api.db.queries import (
     upsert_tenant_playbook,
 )
 from apps.api.integrations.chatwoot import ChatwootClient
-from apps.api.integrations.shopify import ShopifyClient
+from apps.api.integrations.shopify import (
+    ShopifyClient,
+    exchange_client_credentials,
+)
 from apps.api.services.integrations_crypto import (
     encrypt_credentials,
     get_integration_crypto_key,
@@ -266,8 +269,16 @@ class IntegrationsOverviewResponse(BaseModel):
 
 
 class ConnectShopifyRequest(BaseModel):
+    """Credentials del Custom App creado en Shopify Dev Dashboard.
+
+    Shopify deprecó los Custom Apps legacy con `shpat_` permanente el 1-ene-2026.
+    El flow nuevo: merchant crea app en Dev Dashboard, instala en su tienda, y
+    copia Client ID + Client Secret. Auyan los intercambia por access_token de 24h.
+    """
+
     domain: str = Field(min_length=1, max_length=255)
-    token: str = Field(min_length=1, max_length=255)
+    client_id: str = Field(min_length=1, max_length=255)
+    client_secret: str = Field(min_length=1, max_length=255)
 
 
 class ConnectChatwootRequest(BaseModel):
@@ -1259,23 +1270,63 @@ async def connect_shopify(
     auth: AuthDep,
     settings: SettingsDep,
 ) -> ConnectIntegrationResponse:
+    """Valida client_id + client_secret vía OAuth Client Credentials Grant, persiste.
+
+    Shopify 2026: el merchant crea una app en Dev Dashboard, la instala, copia
+    Client ID + Client Secret. Aquí los intercambiamos por un access_token de 24h.
+    Guardamos client_id + client_secret cifrados (long-lived), y el access_token
+    en config (short-lived, refrescado on-demand por `ensure_shopify_access_token`).
+    """
     domain = _normalize_shopify_domain(body.domain)
+
+    # 1) Validar credentials con Shopify (OAuth Client Credentials Grant).
     try:
-        shop = await ShopifyClient(domain, body.token).validate()
+        access_token, expires_in = await exchange_client_credentials(
+            shop_domain=domain,
+            client_id=body.client_id,
+            client_secret=body.client_secret,
+        )
     except httpx.HTTPStatusError as exc:
         raise HTTPException(
             status_code=422,
-            detail="No pudimos validar las credenciales de Shopify (dominio o token inválidos)",
+            detail=(
+                "No pudimos validar las credenciales de Shopify "
+                "(Client ID o Client Secret inválidos)"
+            ),
         ) from exc
+
+    # 2) Llamada de verificación para obtener shop name/email + asegurar que el
+    # access_token funciona contra Admin API.
+    try:
+        shop = await ShopifyClient(domain, access_token).validate()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Credentials válidas pero el access_token no tiene permisos sobre la tienda",
+        ) from exc
+
+    now = datetime.datetime.now(datetime.UTC)
+    expires_at = now + datetime.timedelta(seconds=expires_in)
 
     key = _crypto_key(settings)
     encrypted = encrypt_credentials(
-        json.dumps({"domain": domain, "token": body.token}).encode(), key
+        json.dumps(
+            {
+                "domain": domain,
+                "client_id": body.client_id,
+                "client_secret": body.client_secret,
+            }
+        ).encode(),
+        key,
     )
     config: dict[str, Any] = {
         "shop_name": shop.get("name"),
         "shop_email": shop.get("email"),
-        "verified_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        "verified_at": now.isoformat(),
+        # Cache inicial del access_token. ensure_shopify_access_token() lo refresca
+        # cuando faltan menos de 5min para expirar.
+        "cached_access_token": access_token,
+        "cached_token_expires_at": expires_at.isoformat(),
     }
 
     async with tenant_scope(tenant_id) as conn:

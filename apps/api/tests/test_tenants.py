@@ -1207,8 +1207,16 @@ class TestTenantIntegrationsEndpoints:
     def test_connect_shopify_validates_normalizes_and_advances(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Happy path Shopify 2026: client_id + client_secret → OAuth Client Credentials
+        Grant → access_token de 24h → validate contra Admin API → persist."""
         from apps.api.core.config import get_settings
         from apps.api.db.models import OnboardingChecklist
+
+        # exchange_client_credentials devuelve (access_token, expires_in_seconds).
+        exchange_mock = AsyncMock(return_value=("shpat_dynamic_xyz", 86400))
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.exchange_client_credentials", exchange_mock
+        )
 
         fake_client = MagicMock()
         fake_client.validate = AsyncMock(
@@ -1238,27 +1246,39 @@ class TestTenantIntegrationsEndpoints:
         resp = client.post(
             "/tenants/me/integrations/shopify",
             headers={"Authorization": f"Bearer {_make_jwt()}"},
-            json={"domain": "https://marea.myshopify.com/", "token": "shpat_x"},
+            json={
+                "domain": "https://marea.myshopify.com/",
+                "client_id": "abc123",
+                "client_secret": "shpss_secret",
+            },
         )
 
         assert resp.status_code == 200
         data = resp.json()
         assert data["integration"]["provider"] == "shopify"
         assert data["checklist"]["has_commerce_integration"] is True
-        # Dominio normalizado (sin esquema ni barra) al construir el cliente.
-        assert sc_factory.call_args.args[0] == "marea.myshopify.com"
+        # Dominio normalizado al hacer Client Credentials Grant.
+        assert exchange_mock.await_args.kwargs["shop_domain"] == "marea.myshopify.com"
+        assert exchange_mock.await_args.kwargs["client_id"] == "abc123"
+        # ShopifyClient se construye con el access_token devuelto por OAuth (24h),
+        # no con el client_secret.
+        assert sc_factory.call_args.args == ("marea.myshopify.com", "shpat_dynamic_xyz")
         assert upsert_mock.await_args.kwargs["kind"] == "commerce"
         assert upsert_mock.await_args.kwargs["is_primary_for_kind"] is True
+        # El config persistido incluye el cached_access_token + expires_at.
+        cfg = upsert_mock.await_args.kwargs["config"]
+        assert cfg["cached_access_token"] == "shpat_dynamic_xyz"
+        assert "cached_token_expires_at" in cfg
 
     def test_connect_shopify_invalid_credentials_returns_422(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Si exchange_client_credentials falla (client_id/secret inválidos) → 422."""
         from apps.api.core.config import get_settings
 
-        fake_client = MagicMock()
-        fake_client.validate = AsyncMock(side_effect=_http_error())
         monkeypatch.setattr(
-            "apps.api.routers.tenants.ShopifyClient", MagicMock(return_value=fake_client)
+            "apps.api.routers.tenants.exchange_client_credentials",
+            AsyncMock(side_effect=_http_error()),
         )
         app = _make_app(monkeypatch)
         app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
@@ -1269,7 +1289,11 @@ class TestTenantIntegrationsEndpoints:
         resp = client.post(
             "/tenants/me/integrations/shopify",
             headers={"Authorization": f"Bearer {_make_jwt()}"},
-            json={"domain": "marea.myshopify.com", "token": "bad"},
+            json={
+                "domain": "marea.myshopify.com",
+                "client_id": "bad",
+                "client_secret": "bad",
+            },
         )
 
         assert resp.status_code == 422

@@ -123,12 +123,16 @@ class TestAdapterMethods:
         inst.cancel_order.assert_awaited_once_with(1, reason="fraud", email=False, refund=True)
 
     @pytest.mark.asyncio
-    async def test_missing_credentials_raises_keyerror(self) -> None:
-        """Si las creds están mal armadas, falla al construir el cliente — no en silencio."""
+    async def test_missing_credentials_raises_error(self) -> None:
+        """Si las creds están mal armadas, falla al construir el cliente — no en silencio.
+
+        Sin access_token/token → ValueError; sin domain → KeyError. Ambos válidos,
+        lo importante es que falle ruidosamente para que se vea en logs.
+        """
         ctx_bad = IntegrationContext(
             tenant_id=UUID("44444444-4444-4444-4444-444444444444"),
-            credentials={},  # sin domain ni token
+            credentials={},
         )
         adapter = ShopifyAdapter()
-        with pytest.raises(KeyError):
+        with pytest.raises((KeyError, ValueError)):
             await adapter.get_order(ctx_bad, "1")

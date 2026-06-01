@@ -102,7 +102,8 @@ export interface TenantIntegrationsOverview {
 
 export interface ConnectShopifyPayload {
   domain: string
-  token: string
+  client_id: string
+  client_secret: string
 }
 
 export interface ConnectChatwootPayload {
