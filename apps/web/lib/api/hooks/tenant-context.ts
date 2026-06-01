@@ -385,6 +385,10 @@ export function useSubmitTenantOnboarding(tenantId: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.tenants.onboarding(tenantId) })
+      // El submit reevalúa lifecycle server-side. Invalidamos el checklist para
+      // que el OnboardingPortal vea el lifecycle actualizado y redirija al
+      // dashboard si pasó a 'building'.
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.onboardingChecklist(tenantId) })
     },
   })
 }

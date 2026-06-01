@@ -126,6 +126,14 @@ Spike sugerido:
 
 ## Pendientes vivos
 
+### Deuda — Onboarding portal (Fase 2)
+
+| Deuda | Severidad | Notas |
+|---|---|---|
+| Step 7 (Legal) pide aceptar DPA + Términos + GDPR sin links a documentos reales | media | El cliente acepta cláusulas que no puede leer. Bloquea cumplimiento real. Crear `apps/web/app/(public)/legal/{dpa,terms,privacy}/page.tsx` con contenido legal + linkearlos desde los checkboxes del step. |
+| Step 9 (Confirmación) deuda: si el lifecycle no avanza a `building` al darle "Enviar", el cliente queda atascado sin saber qué falta | media | El portal debe mostrar el checklist remanente con CTAs a cada step incompleto. Hoy parpadea y no redirige porque el server-side layout vuelve a mandar a `/onboarding`. |
+| Imágenes laterales KREA pendientes (steps 4, 5, 6, 8) | baja | Mientras tanto se ve un placeholder dashed. No bloquea funcionalidad. Prompts ya documentados en gstack/designs/. |
+
 ### Bloque 0.11 — Agent Verification Staging
 
 Objetivo: verificar que el agente funciona correctamente en condiciones cercanas a vida real, sin depender de datos inventados y con LangSmith como fuente primaria de observabilidad.
