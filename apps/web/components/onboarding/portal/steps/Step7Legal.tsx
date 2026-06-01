@@ -12,7 +12,7 @@ const LEGAL_ITEMS: Array<{ key: string; label: string }> = [
   { key: 'gdpr_confirmed', label: 'Confirmo el consentimiento GDPR para procesamiento de datos de mis clientes.' },
 ]
 
-export function Step7Legal({ values, onChange, onContinue }: StepProps) {
+export function Step7Legal({ values, onChange, onContinue, onBack }: StepProps) {
   const [error, setError] = useState<string | null>(null)
 
   function handleContinue() {
@@ -48,7 +48,7 @@ export function Step7Legal({ values, onChange, onContinue }: StepProps) {
         ))}
       </div>
       {error && <p className="mt-3 text-sm text-danger-foreground">{error}</p>}
-      <WizardStepActions onContinue={handleContinue} />
+      <WizardStepActions onContinue={handleContinue} onBack={onBack} />
     </WizardCenteredLayout>
   )
 }

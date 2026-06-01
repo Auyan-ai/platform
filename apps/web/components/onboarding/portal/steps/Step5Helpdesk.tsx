@@ -1,11 +1,10 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckCircle2, ExternalLink } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ExternalLink } from 'lucide-react'
 import { WizardSplitLayout } from '../WizardLayouts'
 import { WizardInput } from '../WizardInput'
 import { WizardStepHeader } from '../WizardStepHeader'
-import { WizardStepActions } from '../WizardStepActions'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import {
@@ -169,7 +168,7 @@ function OAuthPane({
   )
 }
 
-export function Step5Helpdesk({ tenantId, onContinue, onSkip }: StepProps) {
+export function Step5Helpdesk({ tenantId, onContinue, onSkip, onBack }: StepProps) {
   return (
     <WizardSplitLayout>
       <WizardStepHeader
@@ -211,8 +210,20 @@ export function Step5Helpdesk({ tenantId, onContinue, onSkip }: StepProps) {
         </TabsContent>
       </Tabs>
 
-      {onSkip && (
-        <div className="mt-4 flex justify-end">
+      <div className="mt-4 flex items-center justify-between gap-4">
+        <div>
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="inline-flex items-center gap-1 rounded-sm px-2 py-1.5 text-xs text-foreground-muted transition-colors hover:bg-surface-muted hover:text-foreground-body"
+            >
+              <ArrowLeft className="size-3" />
+              Anterior
+            </button>
+          )}
+        </div>
+        {onSkip && (
           <button
             type="button"
             onClick={onSkip}
@@ -220,8 +231,8 @@ export function Step5Helpdesk({ tenantId, onContinue, onSkip }: StepProps) {
           >
             Skip por ahora
           </button>
-        </div>
-      )}
+        )}
+      </div>
     </WizardSplitLayout>
   )
 }

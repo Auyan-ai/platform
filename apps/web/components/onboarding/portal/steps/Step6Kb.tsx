@@ -22,7 +22,7 @@ const STATUS_VARIANT: Record<string, 'default' | 'success' | 'warning' | 'danger
   rejected: 'danger',
 }
 
-export function Step6Kb({ tenantId, onContinue, onSkip }: StepProps) {
+export function Step6Kb({ tenantId, onContinue, onSkip, onBack }: StepProps) {
   const submissionsQuery = useTenantKnowledgeSubmissions(tenantId)
   const createMutation = useCreateTenantKnowledgeSubmission(tenantId)
 
@@ -196,6 +196,7 @@ export function Step6Kb({ tenantId, onContinue, onSkip }: StepProps) {
 
       <WizardStepActions
         onContinue={handleContinue}
+        onBack={onBack}
         onSkip={hasSubmissions ? undefined : onSkip}
         continueLabel="Continuar"
         continueLoading={createMutation.isPending}
