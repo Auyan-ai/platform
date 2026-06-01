@@ -50,6 +50,7 @@ export function OnboardingPortal({ tenantId, userEmail, dashboardUrl }: Onboardi
   const [step, setStep] = useState(1)
   const [stepData, setStepData] = useState<StepData>({})
   const [showWelcomeBack, setShowWelcomeBack] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const initialized = useRef(false)
 
   // Resume-where-left-off: cuando llega el onboarding del server, arranca en current_step.
@@ -93,7 +94,11 @@ export function OnboardingPortal({ tenantId, userEmail, dashboardUrl }: Onboardi
     }))
   }
 
-  async function persist(targetStep: number, nextData: StepData) {
+  /**
+   * Persiste el progreso. Devuelve true si tuvo éxito.
+   * No silencia errores — el cliente necesita saber si su input se perdió.
+   */
+  async function persist(targetStep: number, nextData: StepData): Promise<boolean> {
     const nextCompleted = [...new Set([...completedSteps, step])].sort((a, b) => a - b)
     try {
       await saveMutation.mutateAsync({
@@ -101,16 +106,21 @@ export function OnboardingPortal({ tenantId, userEmail, dashboardUrl }: Onboardi
         completed_steps: nextCompleted,
         step_data: nextData,
       })
-    } catch {
-      // Silenciamos errores de save intermedios — el usuario puede continuar y el server reintenta
-      // al próximo paso. Errores fatales aparecerían en el submit final.
+      setSaveError(null)
+      return true
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error guardando progreso'
+      console.error('[onboarding] save failed', err)
+      setSaveError(message)
+      return false
     }
   }
 
   async function handleContinue() {
     const next = Math.min(TOTAL_STEPS, step + 1)
+    const ok = await persist(next, stepData)
+    if (!ok) return // No avances si el save falló — el cliente vería el banner de error.
     setShowWelcomeBack(false)
-    await persist(next, stepData)
     setStep(next)
   }
 
@@ -119,8 +129,16 @@ export function OnboardingPortal({ tenantId, userEmail, dashboardUrl }: Onboardi
   }
 
   async function handleSubmit() {
-    await persist(TOTAL_STEPS, stepData)
-    await submitMutation.mutateAsync()
+    const ok = await persist(TOTAL_STEPS, stepData)
+    if (!ok) return
+    try {
+      await submitMutation.mutateAsync()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Error enviando onboarding'
+      console.error('[onboarding] submit failed', err)
+      setSaveError(message)
+      return
+    }
     // Tras submit, el server reevalúa lifecycle. Si pasa a building, el useEffect de arriba
     // redirige al dashboard. Si no, queda en discovery con el banner del checklist.
     router.replace(dashboardUrl)
@@ -154,6 +172,13 @@ export function OnboardingPortal({ tenantId, userEmail, dashboardUrl }: Onboardi
         <div className="mx-auto mt-2 max-w-[640px] px-8">
           <div className="rounded-md border border-accent-subtle bg-accent-subtle px-4 py-2.5 text-sm text-accent-foreground">
             ↩ Bienvenido de vuelta. Continuamos donde lo dejaste: paso {step} de {TOTAL_STEPS}.
+          </div>
+        </div>
+      )}
+      {saveError && (
+        <div className="mx-auto mt-2 max-w-[640px] px-8">
+          <div className="rounded-md border border-danger bg-danger-subtle px-4 py-2.5 text-sm text-danger-foreground">
+            ⚠ No se guardó tu progreso: {saveError}. Reintenta antes de cerrar la pestaña.
           </div>
         </div>
       )}
