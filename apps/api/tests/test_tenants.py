@@ -1030,6 +1030,30 @@ class TestTenantOnboardingEndpoints:
         assert upsert_mock.await_args.kwargs["completed_steps"] == [1, 2, 9]
         assert upsert_mock.await_args.kwargs["edited_by"] == USER_ID
 
+    def _patch_submit_dependencies(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        onboarding: Any,
+        lifecycle_state: str,
+        checklist: Any,
+    ) -> tuple[AsyncMock, AsyncMock, AsyncMock, AsyncMock]:
+        from apps.api.db.models import TenantFacts, TenantPlaybook
+
+        submit_mock = AsyncMock(return_value=onboarding)
+        advance_mock = AsyncMock(
+            return_value=(make_tenant(agent_lifecycle_state=lifecycle_state), checklist)
+        )
+        playbook_mock = AsyncMock(return_value=TenantPlaybook(tenant_id=TENANT_ID))
+        facts_mock = AsyncMock(return_value=TenantFacts(tenant_id=TENANT_ID))
+        monkeypatch.setattr("apps.api.routers.tenants.submit_tenant_onboarding", submit_mock)
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle", advance_mock
+        )
+        monkeypatch.setattr("apps.api.routers.tenants.upsert_tenant_playbook", playbook_mock)
+        monkeypatch.setattr("apps.api.routers.tenants.upsert_tenant_facts", facts_mock)
+        return submit_mock, advance_mock, playbook_mock, facts_mock
+
     def test_submit_onboarding_advances_to_building_when_checklist_complete(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1041,19 +1065,17 @@ class TestTenantOnboardingEndpoints:
             completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9],
             submitted_at=datetime.now(UTC),
         )
-        submit_mock = AsyncMock(return_value=onboarding)
         checklist = OnboardingChecklist(
             onboarding_submitted=True,
             has_commerce_integration=True,
             has_helpdesk_integration=True,
             has_knowledge=True,
         )
-        advance_mock = AsyncMock(
-            return_value=(make_tenant(agent_lifecycle_state="building"), checklist)
-        )
-        monkeypatch.setattr("apps.api.routers.tenants.submit_tenant_onboarding", submit_mock)
-        monkeypatch.setattr(
-            "apps.api.routers.tenants.evaluate_and_advance_lifecycle", advance_mock
+        submit_mock, _, _, _ = self._patch_submit_dependencies(
+            monkeypatch,
+            onboarding=onboarding,
+            lifecycle_state="building",
+            checklist=checklist,
         )
         app = _make_app(monkeypatch)
         app.state.email_sender = MagicMock()
@@ -1088,15 +1110,11 @@ class TestTenantOnboardingEndpoints:
             has_helpdesk_integration=False,
             has_knowledge=False,
         )
-        advance_mock = AsyncMock(
-            return_value=(make_tenant(agent_lifecycle_state="discovery"), checklist)
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.tenants.submit_tenant_onboarding",
-            AsyncMock(return_value=onboarding),
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.tenants.evaluate_and_advance_lifecycle", advance_mock
+        self._patch_submit_dependencies(
+            monkeypatch,
+            onboarding=onboarding,
+            lifecycle_state="discovery",
+            checklist=checklist,
         )
         app = _make_app(monkeypatch)
         app.state.email_sender = MagicMock()
@@ -1113,6 +1131,102 @@ class TestTenantOnboardingEndpoints:
         assert "todavía falta" in body
         assert "Shopify" in body
         assert "helpdesk" in body
+
+    def test_submit_onboarding_propagates_step_data_to_playbook_and_facts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import OnboardingChecklist, TenantOnboarding
+
+        # step_data usa estructura anidada por número de paso (igual que el portal)
+        step_data = {
+            "1": {"company_name": "Marea Studio", "website_url": "https://marea.test", "primary_contact": "Ana Gómez"},
+            "2": {"voice_traits": "Amable y cercano", "forbidden_phrases": "No decir 'no puedo'"},
+            "3": {"business_hours": "L-V 9:00-18:00", "support_email": "hola@marea.test", "support_phone": "+34 910 000 001", "return_window_days": "30"},
+            "9": {"launch_notes": "Priorizar devoluciones"},
+        }
+        onboarding = TenantOnboarding(
+            tenant_id=TENANT_ID,
+            current_step=9,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9],
+            submitted_at=datetime.now(UTC),
+            step_data=step_data,
+        )
+        checklist = OnboardingChecklist(
+            onboarding_submitted=True,
+            has_commerce_integration=True,
+            has_helpdesk_integration=True,
+            has_knowledge=True,
+        )
+        _, _, playbook_mock, facts_mock = self._patch_submit_dependencies(
+            monkeypatch,
+            onboarding=onboarding,
+            lifecycle_state="building",
+            checklist=checklist,
+        )
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/onboarding/submit",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        playbook_mock.assert_awaited_once()
+        call_kwargs = playbook_mock.call_args.kwargs
+        assert call_kwargs["brand_voice"] == "Amable y cercano"
+        assert call_kwargs["escalation_notes"] == "No decir 'no puedo'"
+        assert call_kwargs["agent_instructions"] == "Priorizar devoluciones"
+
+        facts_mock.assert_awaited_once()
+        facts_data = facts_mock.call_args.kwargs["data"]
+        assert facts_data["business_hours"] == "L-V 9:00-18:00"
+        assert facts_data["support_email"] == "hola@marea.test"
+        assert facts_data["support_phone"] == "+34 910 000 001"
+        assert facts_data["return_window_days"] == "30"
+        assert facts_data["company_name"] == "Marea Studio"
+        assert facts_data["website_url"] == "https://marea.test"
+        assert facts_data["primary_contact"] == "Ana Gómez"
+
+    def test_submit_onboarding_skips_facts_upsert_when_step_data_empty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import OnboardingChecklist, TenantOnboarding
+
+        onboarding = TenantOnboarding(
+            tenant_id=TENANT_ID,
+            current_step=9,
+            completed_steps=[1, 2, 3, 4, 5, 6, 7, 8, 9],
+            submitted_at=datetime.now(UTC),
+            step_data={},
+        )
+        checklist = OnboardingChecklist(
+            onboarding_submitted=True,
+            has_commerce_integration=True,
+            has_helpdesk_integration=True,
+            has_knowledge=True,
+        )
+        _, _, playbook_mock, facts_mock = self._patch_submit_dependencies(
+            monkeypatch,
+            onboarding=onboarding,
+            lifecycle_state="building",
+            checklist=checklist,
+        )
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+
+        resp = client.post(
+            "/tenants/me/onboarding/submit",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        playbook_mock.assert_awaited_once()
+        call_kwargs = playbook_mock.call_args.kwargs
+        assert call_kwargs["brand_voice"] == ""
+        assert call_kwargs["escalation_notes"] == ""
+        assert call_kwargs["agent_instructions"] == ""
+        facts_mock.assert_not_awaited()
 
     def test_get_onboarding_checklist_returns_status(
         self, monkeypatch: pytest.MonkeyPatch
