@@ -688,7 +688,7 @@ Verificación sesión 44: ruff limpio, suite API 1013/1013 verde, `pnpm --filter
 
 ### 1.6 — Dashboard cliente 7 secciones MVP ✅
 
-Implementado en cinco PRs pequeños, verificados y mergeados secuencialmente; luego recibió un polish visual menor:
+Implementado en cinco PRs pequeños, verificados y mergeados secuencialmente; luego recibió mejoras menores en Home cliente:
 
 | PR | Qué se hizo |
 |---|---|
@@ -698,16 +698,18 @@ Implementado en cinco PRs pequeños, verificados y mergeados secuencialmente; lu
 | [#112](https://github.com/Auyan-ai/platform/pull/112) | Knowledge Base consolidada con drop-zone, `tenant_facts` y estado de procesamiento/revisión. |
 | [#113](https://github.com/Auyan-ai/platform/pull/113) | Onboarding auto-hide al salir de fase `initial` y redirect de acceso directo. |
 | [#152](https://github.com/Auyan-ai/platform/pull/152) | Home cliente: lifecycle phase pasa de badge ambiguo a stepper compacto con fase actual en cobalto, fases completadas con icono outline estilo sidebar y estado final `Active` colapsado. |
+| [#154](https://github.com/Auyan-ai/platform/pull/154) | Home cliente: `Resolución IA` deja de ser mock estático y pasa a usar series por ventana (30d, 7d, 24h), tooltip por bucket y selector temporal minimalista. |
 
 Diseño:
 
 - Sidebar cliente queda alineada a `auyan-master-context.md`: Home/Insights/Reportes/Knowledge Base/Aprobaciones/Onboarding/Configuración.
 - `Conversaciones` pasa a `Insights`; las URLs antiguas redirigen y el drill-down mantiene lectura con PII masked.
 - Lifecycle en Home usa el acento cobalto de `docs/DESIGN.md`; no usa verde para `Active` ni tacha/elimina fases anteriores.
+- `Resolución IA` usa cobalto sólo para la serie principal, warning para escalación, fondo blanco y selector temporal neutro.
 - AI Data Assistant, Facturación y visualizaciones avanzadas siguen fuera del MVP y pertenecen a Bloque 2.
 - Configuración es read-only para cliente: integraciones conectadas, branding operativo y perfil AIDE.
 
-Verificación sesión 45: typecheck web verde, `pnpm build:web` verde y CI verde en PRs #109–#113. Para #111 además `poetry run ruff check` y `pytest tests/test_tenants.py` verdes.
+Verificación sesión 45: typecheck web verde, `pnpm build:web` verde y CI verde en PRs #109–#113. Para #111 además `poetry run ruff check` y `pytest tests/test_tenants.py` verdes. Para #154: ruff focal, tests de métricas 3/3, Biome focal, typecheck web, build web y `git diff --check` verdes.
 
 ### 1.7 — Dashboard super_admin Home/Review Queue ✅
 
