@@ -57,7 +57,7 @@ export function Sidebar({ userEmail, collapsed, onCollapsedChange }: SidebarProp
       <div
         className={cn(
           'flex h-14 items-center px-3 transition-[gap,padding] duration-200',
-          expanded ? 'gap-2' : 'justify-center px-2',
+          expanded ? 'gap-2 px-4' : 'justify-center px-2',
         )}
       >
         <span
