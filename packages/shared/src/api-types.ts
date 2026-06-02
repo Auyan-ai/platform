@@ -1475,7 +1475,7 @@ export interface components {
              * Channel
              * @enum {string}
              */
-            channel: "email" | "chat" | "widget" | "whatsapp" | "instagram" | "zendesk" | "intercom" | "chatwoot";
+            channel: "email" | "chat" | "widget" | "whatsapp" | "instagram" | "zendesk" | "gorgias" | "intercom" | "chatwoot";
             /** External Id */
             external_id: string | null;
             /** Subject */
@@ -2092,7 +2092,7 @@ export interface components {
             /** Escalation Threshold */
             escalation_threshold: number;
             /** Active Channels */
-            active_channels: ("email" | "chat" | "widget" | "whatsapp" | "instagram" | "zendesk" | "intercom" | "chatwoot")[];
+            active_channels: ("email" | "chat" | "widget" | "whatsapp" | "instagram" | "zendesk" | "gorgias" | "intercom" | "chatwoot")[];
             /** Branding */
             branding: {
                 [key: string]: unknown;

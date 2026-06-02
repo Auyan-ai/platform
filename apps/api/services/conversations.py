@@ -23,6 +23,8 @@ from apps.api.db.queries import (
 if TYPE_CHECKING:
     import asyncpg
 
+_CLOSED_CONVERSATION_STATUSES = {"closed", "closed_abandoned", "resolved"}
+
 
 async def list_tenant_conversations(
     conn: asyncpg.Connection,
@@ -112,12 +114,22 @@ async def close_conversation(
     conn: asyncpg.Connection,
     tenant_id: UUID,
     conversation_id: UUID,
-) -> None:
+) -> Conversation:
+    conv = await get_closable_conversation(conn, tenant_id, conversation_id)
+    await update_conversation_status(conn, tenant_id, conversation_id, "closed")
+    return conv.model_copy(update={"status": "closed"})
+
+
+async def get_closable_conversation(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+) -> Conversation:
     conv = await get_conversation(conn, tenant_id, conversation_id)
     if conv is None:
         raise NotFoundError(
             f"conversation {conversation_id} not found", code="conversation_not_found"
         )
-    if conv.status == "closed":
+    if conv.status in _CLOSED_CONVERSATION_STATUSES:
         raise ConflictError("conversation is already closed", code="already_closed")
-    await update_conversation_status(conn, tenant_id, conversation_id, "closed")
+    return conv

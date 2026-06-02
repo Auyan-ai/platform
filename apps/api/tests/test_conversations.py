@@ -12,7 +12,12 @@ from uuid import UUID
 
 import jwt
 import pytest
-from apps.api.core.errors import ConflictError, NotFoundError, register_exception_handlers
+from apps.api.core.errors import (
+    ConflictError,
+    ExternalIntegrationError,
+    NotFoundError,
+    register_exception_handlers,
+)
 from apps.api.core.security import UserRecord, reset_user_cache
 from apps.api.routers.conversations import router as conversations_router
 from apps.api.tests.conftest import (
@@ -253,6 +258,15 @@ class TestClose:
         async def _fake_close(conn: Any, tenant_id: UUID, conversation_id: UUID) -> None:
             return None
 
+        external_close = AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            "apps.api.routers.conversations.get_closable_conversation",
+            AsyncMock(return_value=make_conversation()),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.conversations.close_external_helpdesk_ticket",
+            external_close,
+        )
         monkeypatch.setattr("apps.api.routers.conversations.close_conversation", _fake_close)
         app = _make_app(monkeypatch)
         client = TestClient(app)
@@ -261,12 +275,16 @@ class TestClose:
             headers={"Authorization": f"Bearer {_make_jwt()}"},
         )
         assert resp.status_code == 204
+        external_close.assert_awaited_once()
 
     def test_already_closed_returns_409(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        async def _fake_close(conn: Any, tenant_id: UUID, conversation_id: UUID) -> None:
+        async def _fake_get_closable(conn: Any, tenant_id: UUID, conversation_id: UUID) -> None:
             raise ConflictError("already closed", code="already_closed")
 
-        monkeypatch.setattr("apps.api.routers.conversations.close_conversation", _fake_close)
+        monkeypatch.setattr(
+            "apps.api.routers.conversations.get_closable_conversation",
+            _fake_get_closable,
+        )
         app = _make_app(monkeypatch)
         client = TestClient(app)
         resp = client.post(
@@ -275,3 +293,40 @@ class TestClose:
         )
         assert resp.status_code == 409
         assert resp.json()["error"] == "already_closed"
+
+    def test_external_failure_returns_502_before_internal_close(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        close_internal = AsyncMock()
+        monkeypatch.setattr(
+            "apps.api.routers.conversations.get_closable_conversation",
+            AsyncMock(
+                return_value=make_conversation(
+                    channel="zendesk",
+                    external_id="123",
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.conversations.close_external_helpdesk_ticket",
+            AsyncMock(
+                side_effect=ExternalIntegrationError(
+                    "zendesk failed",
+                    code="external_helpdesk_close_failed",
+                )
+            ),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.conversations.close_conversation",
+            close_internal,
+        )
+        app = _make_app(monkeypatch)
+        client = TestClient(app)
+        resp = client.post(
+            f"/conversations/{CONVERSATION_ID}/close",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+        assert resp.status_code == 502
+        assert resp.json()["error"] == "external_helpdesk_close_failed"
+        close_internal.assert_not_awaited()

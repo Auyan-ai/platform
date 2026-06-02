@@ -18,6 +18,7 @@ export type ChannelType =
   | 'whatsapp'
   | 'instagram'
   | 'zendesk'
+  | 'gorgias'
   | 'intercom'
   | 'chatwoot'
 export type UserRole = 'super_admin' | 'tenant_admin'

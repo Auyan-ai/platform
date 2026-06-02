@@ -113,6 +113,19 @@ class TestChatwootClient:
         assert client._headers()["api_access_token"] == "mytoken"
 
     @pytest.mark.asyncio
+    async def test_update_status_uses_toggle_status_endpoint(self) -> None:
+        mock_cm, mock_client = _mock_httpx({})
+        with patch("apps.api.integrations.chatwoot.httpx.AsyncClient", return_value=mock_cm):
+            await ChatwootClient("https://app.chatwoot.com", "tok", 7).update_status(
+                42, "resolved"
+            )
+
+        assert mock_client.post.call_args[0][0] == (
+            "https://app.chatwoot.com/api/v1/accounts/7/conversations/42/toggle_status"
+        )
+        assert mock_client.post.call_args.kwargs["json"] == {"status": "resolved"}
+
+    @pytest.mark.asyncio
     async def test_validate_returns_account(self) -> None:
         mock_cm, mock_client = _mock_httpx({"id": 5, "name": "Marea"})
         with patch("apps.api.integrations.chatwoot.httpx.AsyncClient", return_value=mock_cm):

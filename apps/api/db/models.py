@@ -21,7 +21,15 @@ ConversationStatus = Literal[
 ]
 EscalationStatus = Literal["pending", "claimed", "resolved"]
 ChannelType = Literal[
-    "email", "chat", "widget", "whatsapp", "instagram", "zendesk", "intercom", "chatwoot"
+    "email",
+    "chat",
+    "widget",
+    "whatsapp",
+    "instagram",
+    "zendesk",
+    "gorgias",
+    "intercom",
+    "chatwoot",
 ]
 UserRole = Literal["super_admin", "tenant_admin"]
 AgentLifecycleState = Literal[

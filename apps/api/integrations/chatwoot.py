@@ -151,8 +151,8 @@ class ChatwootClient:
     async def update_status(self, conversation_id: int, status: str) -> None:
         """Cambia el status de la conversación (open, resolved, pending)."""
         async with httpx.AsyncClient() as client:
-            response = await client.patch(
-                self._url(f"/conversations/{conversation_id}/update"),
+            response = await client.post(
+                self._url(f"/conversations/{conversation_id}/toggle_status"),
                 headers=self._headers(),
                 json={"status": status},
                 timeout=10,

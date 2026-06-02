@@ -39,6 +39,7 @@ const CHANNEL_LABELS: Record<ChannelType, string> = {
   whatsapp: 'WhatsApp',
   instagram: 'Instagram',
   zendesk: 'Zendesk',
+  gorgias: 'Gorgias',
   intercom: 'Intercom',
   chatwoot: 'Chatwoot',
 }
