@@ -1,8 +1,28 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-06-02 (sesión 58 — **Fix propagación step\_data → playbook/facts** mergeado vía [PR #156](https://github.com/Auyan-ai/platform/pull/156). El submit del onboarding ahora hace upsert de `tenant_playbook` (voice\_traits→brand\_voice, forbidden\_phrases→escalation\_notes, launch\_notes→agent\_instructions) y `tenant_facts` (campos de steps 1 y 3). Bug raíz: `step_data` es anidado por número de paso `{"1":{...},"2":{...}}`, no plano. Marea Studio en staging ya tiene playbook+facts populados (backfill aplicado). Prerequisito del dogfood E2E completado. Próximo: sesión Opus para definir AOPs canónicos de Auyan e-commerce ES)._
+_Última actualización: 2026-06-02 (sesión 59 — **AOPs canónicos + fixes de grafo**. (1) Diseñados y verificados uno a uno los 8 AOPs por defecto de e-commerce ES en [`docs/aop-canonical-design.md`](aop-canonical-design.md). (2) **PR #1 [#163](https://github.com/Auyan-ai/platform/pull/163) MERGEADO**: provisioning copy-on-create — cada tenant nace con sus 8 AOPs + permisos (L1/L2 auto, L3 con approval) vía hook en `provision_tenant`; `aops/canonical.py` es la fuente de verdad + `scripts/seed_canonical_aops.py` para backfill. (3) Fixes de grafo (PR #2): [#164](https://github.com/Auyan-ai/platform/pull/164) (cablear `confidence_threshold` + `require_supervision` por-AOP, antes muertos; guard anti prompt-injection) y [#165](https://github.com/Auyan-ai/platform/pull/165) (fecha/hora TZ-aware del tenant + dep `tzdata`) — **AMBOS ABIERTOS, esperan review/merge**. (4) **Backfill aplicado en staging**: Marea Studio (8 nuevos) y Lunaria (6 nuevos + returns/default actualizados a canónico, `consulta_envio` viejo desactivado) — los 8 canónicos activos + 11 permisos en ambos. PENDIENTE: **Fix #5 intent-switch en sesión nueva** — ver sección abajo)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
+
+---
+
+## 🎯 Próxima sesión — Fix #5: intent-switch continuity-aware
+
+**Modelo:** Opus (toca el routing core). **Branch:** nueva desde `develop` **después de mergear #164 + #165**.
+
+**Contexto:** PR #2 (fixes de grafo) cerró 4 de 5 (#164 + #165). Falta el #5, el más delicado — reescribe `select_aop`. Se dejó para sesión nueva con contexto fresco.
+
+**El problema (verificado):** el grafo NO usa checkpointer y `process_inbound` arma el state desde cero cada mensaje → `aop_slug` nace vacío → el clasificador corre cada turno pero **CIEGO** (no sabe qué AOP venía del turno anterior; solo ve los últimos 3 mensajes). Riesgo: **flapping mid-procedimiento** en respuestas cortas/ambiguas ("el azul", "12345"). Las señales `aop_locked_until_turn`/`aop_completed_signal`/`pending_intent` son scaffolding inerte (no hay persistencia entre turnos).
+
+**El fix (Approach 1, aprobado por Kenny):**
+1. `select_aop` carga el AOP del turno anterior desde `intent_classifier_runs` (última fila de la conversación — sin migración nueva).
+2. Lo pasa al prompt del clasificador (continuidad: "venías en X; mantén salvo pivote claro").
+3. Histéresis en código: si el nuevo intent ≠ previo y `confidence < ~0.70` (switch_threshold) → mantener el previo (anti-flapping). **Cuidado:** la continuidad debe ganar sobre el fallback a `default`.
+4. **Diferir** la pregunta de desambiguación (refuerzo UX; la continuidad ya hace seguro el split returns/refunds).
+
+**Diseño completo:** `docs/aop-canonical-design.md` (secciones "HALLAZGO CRÍTICO" + "Fixes de grafo").
+
+**También diferido** (capa opcional del fix de fecha #4): `days_since_order` calculado en código para que el LLM no reste fechas.
 
 ---
 
