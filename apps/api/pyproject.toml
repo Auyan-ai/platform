@@ -43,6 +43,7 @@ python-dotenv = "^1.0.0"
 pyjwt = {extras = ["crypto"], version = "^2.10.0"}
 cryptography = ">=44.0"
 cachetools = "^5.5.0"
+tzdata = "^2026.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.0"

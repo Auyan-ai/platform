@@ -20,6 +20,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
@@ -37,6 +38,31 @@ from pydantic import ValidationError
 logger = logging.getLogger(__name__)
 
 DECIDE_TOOL_NAME: str = RESPOND_OR_ESCALATE_TOOL["name"]
+
+# Zona horaria por defecto del vertical e-commerce ES. Cada tenant puede sobrescribirla
+# en tenant_facts["timezone"].
+_DEFAULT_TENANT_TZ = "Europe/Madrid"
+
+
+def _tenant_now_str(tenant_facts: dict | None) -> str:
+    """Fecha y hora ACTUAL en la zona horaria de la tienda (tenant_facts['timezone'],
+    default Europe/Madrid), con hora + etiqueta de zona.
+
+    Reemplaza el viejo `datetime.now(UTC).date()`: en UTC, cerca de medianoche el 'hoy'
+    se desplazaba un día para tiendas ES → off-by-one en ventanas de devolución. Si la
+    zona es inválida cae a Europe/Madrid; si falta la tzdata del sistema, a UTC.
+    """
+    tz_name = (tenant_facts or {}).get("timezone") or _DEFAULT_TENANT_TZ
+    try:
+        tz = ZoneInfo(tz_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        tz_name = _DEFAULT_TENANT_TZ
+        try:
+            tz = ZoneInfo(_DEFAULT_TENANT_TZ)
+        except ZoneInfoNotFoundError:
+            tz_name, tz = "UTC", UTC
+    now = datetime.now(tz)
+    return f"{now.strftime('%Y-%m-%d %H:%M')} ({tz_name})"
 
 
 def _append_tool_result_blocks(
@@ -174,7 +200,7 @@ def make_reason_node(
         system_prompt = build_system_prompt(
             state["system_prompt"],
             state.get("retrieved_chunks", []),
-            current_date=datetime.now(UTC).date().isoformat(),
+            current_date=_tenant_now_str(state.get("tenant_facts")),
         )
         messages = build_message_history(state["conversation_history"])
         messages = _append_tool_result_blocks(messages, state.get("tool_results", []))
