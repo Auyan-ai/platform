@@ -271,3 +271,66 @@ class TestValidate:
         with patch("apps.api.integrations.shopify.httpx.AsyncClient", return_value=mock_cm):
             with pytest.raises(httpx.HTTPStatusError):
                 await ShopifyClient(DOMAIN, "bad").validate()
+
+
+class TestEnsureShopifyAccessToken:
+    """Cache EN MEMORIA del access_token corto — nunca se persiste en DB."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):  # type: ignore[no-untyped-def]
+        from apps.api.integrations import shopify
+
+        shopify._token_cache.clear()
+        yield
+        shopify._token_cache.clear()
+
+    async def test_exchanges_and_caches_in_memory(self) -> None:
+        from uuid import uuid4
+
+        from apps.api.integrations.shopify import ensure_shopify_access_token
+
+        tid = uuid4()
+        exch = AsyncMock(return_value=("shpat_abc", 86400))
+        with patch("apps.api.integrations.shopify.exchange_client_credentials", exch):
+            t1, _ = await ensure_shopify_access_token(
+                tenant_id=tid, domain="x.myshopify.com", client_id="c", client_secret="s"
+            )
+            t2, _ = await ensure_shopify_access_token(
+                tenant_id=tid, domain="x.myshopify.com", client_id="c", client_secret="s"
+            )
+
+        # La segunda llamada sale del cache en memoria, sin re-exchange.
+        assert t1 == t2 == "shpat_abc"
+        exch.assert_awaited_once()
+
+    async def test_refreshes_when_cached_token_expired(self) -> None:
+        import datetime as dt
+        from uuid import uuid4
+
+        from apps.api.integrations import shopify
+        from apps.api.integrations.shopify import ensure_shopify_access_token
+
+        tid = uuid4()
+        past = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=1)
+        shopify._token_cache_set(tid, "shpat_old", past)
+
+        exch = AsyncMock(return_value=("shpat_new", 86400))
+        with patch("apps.api.integrations.shopify.exchange_client_credentials", exch):
+            token, _ = await ensure_shopify_access_token(
+                tenant_id=tid, domain="x.myshopify.com", client_id="c", client_secret="s"
+            )
+
+        assert token == "shpat_new"
+        exch.assert_awaited_once()
+
+    def test_cache_is_bounded_by_maxsize(self) -> None:
+        import datetime as dt
+        from uuid import uuid4
+
+        from apps.api.integrations import shopify
+
+        future = dt.datetime.now(dt.UTC) + dt.timedelta(hours=1)
+        for _ in range(shopify._TOKEN_CACHE_MAXSIZE + 50):
+            shopify._token_cache_set(uuid4(), "shpat_x", future)
+
+        assert len(shopify._token_cache) == shopify._TOKEN_CACHE_MAXSIZE

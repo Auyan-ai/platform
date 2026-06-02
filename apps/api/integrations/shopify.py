@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
+from collections import OrderedDict
 from typing import Any
 from uuid import UUID
 
-import asyncpg
 import httpx
 from apps.api.integrations.base import CommerceProvider, IntegrationContext
 from apps.api.integrations.registry import IntegrationRegistry
@@ -29,6 +29,28 @@ _API_VERSION = "2024-10"
 # Refrescamos el access_token 5min antes de que expire para evitar race conditions
 # entre "valido" en el check y "expirado" al hacer la llamada real a Shopify.
 _TOKEN_REFRESH_BUFFER_SECONDS = 300
+
+# Cache EN MEMORIA del access_token corto (24h) por tenant. A propósito NO se persiste
+# en DB: el token es una credencial viva y guardarlo en `tenant_integrations.config` en
+# claro rompía el cifrado en reposo. En memoria sólo vive en el proceso; cada worker
+# re-deriva como mucho 1 vez por ventana del token. Acotado con maxsize (ver
+# [[feedback_caches_bounded]]): nunca un dict sin tope.
+_TOKEN_CACHE_MAXSIZE = 1024
+_token_cache: OrderedDict[UUID, tuple[str, _dt.datetime]] = OrderedDict()
+
+
+def _token_cache_get(tenant_id: UUID) -> tuple[str, _dt.datetime] | None:
+    entry = _token_cache.get(tenant_id)
+    if entry is not None:
+        _token_cache.move_to_end(tenant_id)
+    return entry
+
+
+def _token_cache_set(tenant_id: UUID, token: str, expires_at: _dt.datetime) -> None:
+    _token_cache[tenant_id] = (token, expires_at)
+    _token_cache.move_to_end(tenant_id)
+    while len(_token_cache) > _TOKEN_CACHE_MAXSIZE:
+        _token_cache.popitem(last=False)
 
 
 async def exchange_client_credentials(
@@ -64,28 +86,27 @@ async def exchange_client_credentials(
 
 
 async def ensure_shopify_access_token(
-    conn: asyncpg.Connection,
     *,
     tenant_id: UUID,
     domain: str,
     client_id: str,
     client_secret: str,
-    cached_access_token: str | None,
-    cached_token_expires_at: _dt.datetime | None,
 ) -> tuple[str, _dt.datetime]:
-    """Devuelve un access_token válido. Refresca + persiste si caducó.
+    """Devuelve un access_token válido, usando un cache EN MEMORIA por tenant.
 
-    Mira el token cacheado en `tenant_integrations.config`. Si vigente con margen
-    (>5min), lo devuelve. Si expirado o falta, hace Client Credentials Grant,
-    persiste el nuevo en `config`, y lo devuelve.
+    Si el token cacheado está vigente con margen (>5min), lo devuelve. Si expiró o
+    falta, hace Client Credentials Grant, lo guarda en memoria y lo devuelve. El token
+    NUNCA se persiste en DB (es una credencial viva): sólo los secretos durables
+    (client_id/secret) viven cifrados en `credentials_encrypted`.
 
     Returns: (access_token, expires_at_utc).
     """
     now = _dt.datetime.now(_dt.UTC)
-    if cached_access_token and cached_token_expires_at:
-        seconds_left = (cached_token_expires_at - now).total_seconds()
-        if seconds_left > _TOKEN_REFRESH_BUFFER_SECONDS:
-            return cached_access_token, cached_token_expires_at
+    cached = _token_cache_get(tenant_id)
+    if cached is not None:
+        token, expires_at = cached
+        if (expires_at - now).total_seconds() > _TOKEN_REFRESH_BUFFER_SECONDS:
+            return token, expires_at
 
     new_token, expires_in = await exchange_client_credentials(
         shop_domain=domain,
@@ -93,25 +114,7 @@ async def ensure_shopify_access_token(
         client_secret=client_secret,
     )
     new_expires_at = now + _dt.timedelta(seconds=expires_in)
-
-    # Merge en config jsonb (no sobrescribir otros campos como shop_name).
-    await conn.execute(
-        """
-        UPDATE tenant_integrations
-           SET config = config || jsonb_build_object(
-                 'cached_access_token', $1::text,
-                 'cached_token_expires_at', $2::text
-               )
-         WHERE tenant_id = $3
-           AND kind = 'commerce'
-           AND provider = 'shopify'
-           AND is_active = true
-           AND deleted_at IS NULL
-        """,
-        new_token,
-        new_expires_at.isoformat(),
-        tenant_id,
-    )
+    _token_cache_set(tenant_id, new_token, new_expires_at)
     logger.info(
         "shopify.token_refreshed tenant_id=%s expires_at=%s",
         tenant_id,
