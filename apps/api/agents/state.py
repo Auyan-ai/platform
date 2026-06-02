@@ -99,12 +99,8 @@ class AgentState(TypedDict, total=False):
     # Usada por reason para emitir step_entered/step_completed.
     aop_steps: list[dict]
 
-    # Control de persistencia del AOP entre turnos.
-    # aop_locked_until_turn: nº de turno hasta el que el AOP está locked (Sprint 9+).
-    # aop_completed_signal: el flujo del AOP terminó, reclasificar en el próximo turno.
-    # pending_intent: slug del intent alternativo detectado por el clasificador.
-    aop_locked_until_turn: int
-    aop_completed_signal: bool
+    # pending_intent: slug del intent alternativo detectado por el clasificador
+    # (multi-intent en un mismo mensaje). Reservado para desambiguación futura.
     pending_intent: str
 
     # Propagados desde el AOP compilado por select_aop (PR graph-fixes).

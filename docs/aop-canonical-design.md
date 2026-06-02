@@ -20,7 +20,7 @@
 ### 2. La solución
 - [x] El set canónico de AOPs (cuáles, granularidad, por qué) — 8 procedimentales
 - [x] Postura de write-actions en los defaults (L1/L2 auto, L3 approval; super_admin gradúa)
-- [ ] Wiring de los campos por-AOP (threshold, supervision) + intent-switch
+- [x] Wiring de los campos por-AOP (threshold, supervision) + intent-switch — *#164 (threshold/supervision) + Fix #5 (intent-switch continuity-aware), sesión 60*
 - [ ] Cómo se provisiona el set a un tenant nuevo (no script manual)
 
 ### 3. El contexto amplio

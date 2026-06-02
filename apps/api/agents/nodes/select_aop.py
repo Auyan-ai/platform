@@ -1,14 +1,23 @@
 """Nodo: select_aop — clasifica el intent del cliente y selecciona el AOP apropiado.
 
 Flujo:
-1. Si el AOP ya está seleccionado y locked, devuelve {} (sin reclasificar).
-2. Carga el catálogo de AOPs activos del tenant desde DB (con cache).
-3. Si el catálogo está vacío (tenant sin AOPs), devuelve {} — degradación elegante
+1. Carga el catálogo de AOPs activos del tenant desde DB (con cache) + el AOP del
+   turno anterior desde intent_classifier_runs (continuidad entre turnos).
+2. Si el catálogo está vacío (tenant sin AOPs), devuelve {} — degradación elegante
    al sistema de prompts legacy.
-4. Llama a Haiku con tool forzado para clasificar intent → top-2 candidatos.
-5. Si confidence < intent_min_confidence, usa AOP 'default'.
-6. Carga el AOP seleccionado, lo compila (sin KB — reason lo añadirá), actualiza state.
-7. Persiste la ejecución en intent_classifier_runs para auditoría.
+3. Llama a Haiku con tool forzado para clasificar intent → top-2 candidatos,
+   informándole del AOP previo para que juzgue continuidad vs. pivote.
+4. Routing continuity-aware con histéresis (ver _resolve_aop_slug):
+   - mismo AOP que el previo → continúa.
+   - saliendo de 'default' → basta intent_min_confidence.
+   - cambio a otro AOP → exige intent_switch_threshold (anti-flapping).
+   - primer turno → fallback a 'default' si confidence baja.
+5. Carga el AOP seleccionado, lo compila (sin KB — reason lo añadirá), actualiza state.
+6. Persiste la ejecución en intent_classifier_runs para auditoría.
+
+El grafo no usa checkpointer: el state se arma desde cero cada turno, así que el AOP
+previo se recupera de DB, no del state. Por eso el clasificador corre cada turno, pero
+informado del contexto previo (no ciego).
 """
 
 from __future__ import annotations
@@ -24,7 +33,10 @@ from apps.api.agents.state import AgentState
 from apps.api.aops.compiler import compile_aop, load_active_aops, load_aop
 from apps.api.db.client import tenant_scope
 from apps.api.db.models import TenantConfiguration
-from apps.api.db.queries import insert_intent_classifier_run
+from apps.api.db.queries import (
+    get_last_intent_for_conversation,
+    insert_intent_classifier_run,
+)
 from apps.api.integrations.anthropic_client import call_claude_with_tools
 from pydantic import BaseModel, Field
 
@@ -80,6 +92,11 @@ y seleccionar el procedimiento (AOP) más apropiado del catálogo disponible.
 Reglas:
 - Sé conservador: si no hay evidencia clara de cuál AOP aplica, usa el slug "default".
 - Considera el historial para detectar si el cliente cambió de tema.
+- Si se indica un "Procedimiento del turno anterior", trátalo como el contexto activo:
+  mantenlo salvo que el mensaje muestre un cambio de tema claro. Si el cliente continúa o
+  profundiza el mismo tema, devuelve ESE mismo slug con confianza alta. Solo cambia de
+  procedimiento (y dale confianza alta) cuando el pivote sea inequívoco; ante mensajes
+  cortos o ambiguos, prefiere mantener el procedimiento previo con confianza moderada.
 - Si el mensaje contiene múltiples intents distintos, márcalo con ambiguity_detected=true.
 - NO inventes slugs que no estén en el catálogo.
 """
@@ -103,30 +120,47 @@ class _ClassifierOutput(BaseModel):
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 
-def _should_reclassify(state: AgentState) -> bool:
-    """True si hay que correr el clasificador en este turno.
+def _resolve_aop_slug(
+    *,
+    primary_slug: str,
+    primary_confidence: float,
+    previous_slug: str | None,
+    valid_slugs: set[str],
+    min_confidence: float,
+    switch_threshold: float,
+) -> str:
+    """Decide el AOP final aplicando continuidad + histéresis anti-flapping.
 
-    Reglas para Sprint 7:
-    - Sin AOP previo (primer turno) → clasificar.
-    - AOP locked hasta cierto turno → no clasificar.
-    - AOP marcado como completado → clasificar.
-    - Cualquier otro caso → no reclasificar (mantener AOP del turno anterior).
+    - Primer turno (sin previo válido): fallback a 'default' si confidence < min o slug inválido.
+    - Continuidad: si el clasificador devuelve el mismo AOP previo, se mantiene.
+    - Salir de 'default': basta min_confidence (default no es un procedimiento con hilo
+      que proteger, así que aclarar el intent no debe penalizarse).
+    - Cambiar entre AOPs reales: exige switch_threshold (≥ min). Por debajo, gana la
+      continuidad y se mantiene el AOP previo → evita flapping mid-procedimiento en
+      mensajes cortos/ambiguos ("el azul", "12345").
     """
-    if not state.get("aop_slug"):
-        return True
+    slug_is_valid = primary_slug in valid_slugs
 
-    if state.get("aop_completed_signal"):
-        return True
+    # Primer turno o el AOP previo ya no está activo → lógica de fallback original.
+    if previous_slug is None or previous_slug not in valid_slugs:
+        if primary_confidence < min_confidence or not slug_is_valid:
+            return "default"
+        return primary_slug
 
-    locked_until = state.get("aop_locked_until_turn")
-    if locked_until:
-        history = state.get("conversation_history") or []
-        current_turn = sum(1 for m in history if m.get("role") == "customer")
-        if current_turn < locked_until:
-            return False
-        return True  # lock expiró → reclasificar
+    # Mismo AOP que el previo → continuidad, se mantiene aunque la confianza sea baja.
+    if primary_slug == previous_slug:
+        return previous_slug
 
-    return False
+    # Saliendo de 'default': basta la confianza mínima normal.
+    if previous_slug == "default" and slug_is_valid and primary_confidence >= min_confidence:
+        return primary_slug
+
+    # Cambio entre AOPs reales: solo si el pivote es confiable.
+    if slug_is_valid and primary_confidence >= switch_threshold:
+        return primary_slug
+
+    # Anti-flapping: confianza insuficiente para cambiar → mantener el previo.
+    return previous_slug
 
 
 def _format_history(messages: list[dict]) -> str:
@@ -158,9 +192,6 @@ def make_select_aop_node(
 ) -> Callable[[AgentState], Awaitable[dict]]:
     @guarded(name="select_aop")
     async def _node(state: AgentState) -> dict:
-        if not _should_reclassify(state):
-            return {}
-
         tenant_id = UUID(state["tenant_id"])
 
         # Modo simulación con AOP forzado: carga el AOP directamente, sin llamar al
@@ -203,9 +234,12 @@ def make_select_aop_node(
         inbound = state.get("inbound_message_content", "")
         history = state.get("conversation_history") or []
 
-        # ── 1. Cargar catálogo de AOPs activos ───────────────────────────
+        # ── 1. Cargar catálogo de AOPs activos + AOP del turno anterior ──
         async with tenant_scope(tenant_id) as conn:
             active_aops = await load_active_aops(conn, tenant_id)
+            previous_slug = await get_last_intent_for_conversation(
+                conn, tenant_id, conversation_id
+            )
 
         if not active_aops:
             logger.info(
@@ -229,6 +263,7 @@ def make_select_aop_node(
         catalog_json = json.dumps(catalog, indent=2, ensure_ascii=False)
         user_message = (
             f"Catálogo de procedimientos disponibles:\n{catalog_json}\n\n"
+            f"Procedimiento del turno anterior: {previous_slug or '(ninguno)'}\n\n"
             f"Mensaje del cliente:\n{inbound}\n\n"
             f"Historial reciente:\n{_format_history(history)}"
         )
@@ -262,27 +297,29 @@ def make_select_aop_node(
         else:
             parsed = _ClassifierOutput.model_validate(tool_block.input)
 
-        primary_slug = parsed.primary.slug
+        classified_slug = parsed.primary.slug
         primary_confidence = parsed.primary.confidence
         alt = parsed.alternative
 
-        # ── 4. Fallback a 'default' si confidence baja ───────────────────
-        min_conf = deps.settings.intent_min_confidence
-        if primary_confidence < min_conf or primary_slug not in {a.slug for a in active_aops}:
-            if primary_confidence < min_conf:
-                logger.info(
-                    "select_aop.low_confidence tenant_id=%s slug=%s conf=%.2f — default",
-                    tenant_id,
-                    primary_slug,
-                    primary_confidence,
-                )
-            else:
-                logger.warning(
-                    "select_aop.unknown_slug tenant_id=%s slug=%s — using default",
-                    tenant_id,
-                    primary_slug,
-                )
-            primary_slug = "default"
+        # ── 4. Routing continuity-aware con histéresis anti-flapping ─────
+        primary_slug = _resolve_aop_slug(
+            primary_slug=classified_slug,
+            primary_confidence=primary_confidence,
+            previous_slug=previous_slug,
+            valid_slugs={a.slug for a in active_aops},
+            min_confidence=deps.settings.intent_min_confidence,
+            switch_threshold=deps.settings.intent_switch_threshold,
+        )
+        if primary_slug != classified_slug:
+            logger.info(
+                "select_aop.routing tenant_id=%s classified=%s conf=%.2f previous=%s "
+                "→ chosen=%s",
+                tenant_id,
+                classified_slug,
+                primary_confidence,
+                previous_slug,
+                primary_slug,
+            )
 
         # ── 5. Cargar AOP seleccionado y compilar ────────────────────────
         async with tenant_scope(tenant_id) as conn:
@@ -306,8 +343,10 @@ def make_select_aop_node(
             )
 
             # ── 6. Persistir ejecución del clasificador ──────────────────
+            # was_reclassification: hubo un AOP en un turno previo de esta conversación
+            # (no es el primer turno). El state no persiste, así que se infiere de DB.
             turn_number = _turn_number(state)
-            was_reclassification = bool(state.get("aop_slug"))
+            was_reclassification = previous_slug is not None
             await insert_intent_classifier_run(
                 conn,
                 tenant_id=tenant_id,

@@ -132,6 +132,10 @@ class Settings(BaseSettings):
     # --- Intent classifier (Sprint 7+) ---
     # Confidence mínima para usar el AOP seleccionado. Por debajo, se usa 'default'.
     intent_min_confidence: float = 0.60
+    # Confidence mínima para CAMBIAR de AOP cuando ya hay uno activo del turno anterior.
+    # Histéresis anti-flapping: por debajo de esto, la continuidad gana y se mantiene el
+    # AOP previo (salvo que se venga de 'default', donde basta intent_min_confidence).
+    intent_switch_threshold: float = 0.70
     # Modelo para el clasificador de intent. Haiku: rápido y barato para clasificación.
     intent_classifier_model: str = "claude-haiku-4-5-20251001"
 

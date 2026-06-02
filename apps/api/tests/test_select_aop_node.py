@@ -1,4 +1,4 @@
-"""Tests del nodo select_aop (Sprint 7.3/7.4)."""
+"""Tests del nodo select_aop (Sprint 7.3/7.4 + Fix #5 intent-switch continuity-aware)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from uuid import UUID
 import pytest
 from apps.api.agents.nodes.select_aop import (
     _format_history,
-    _should_reclassify,
+    _resolve_aop_slug,
     _turn_number,
     make_select_aop_node,
 )
@@ -110,43 +110,76 @@ def _make_fake_tenant_scope(conn: Any = None) -> Any:
     return _scope
 
 
-# ─── _should_reclassify ──────────────────────────────────────────────────────
+def _patch_previous(slug: str | None) -> Any:
+    """Parchea el AOP previo cargado desde DB (get_last_intent_for_conversation)."""
+    return patch(
+        "apps.api.agents.nodes.select_aop.get_last_intent_for_conversation",
+        new=AsyncMock(return_value=slug),
+    )
 
 
-def test_should_reclassify_first_turn_no_aop_slug() -> None:
-    assert _should_reclassify({}) is True
+# ─── _resolve_aop_slug (histéresis pura, sin DB ni LLM) ──────────────────────
+
+VALID = {"returns", "refunds", "default"}
 
 
-def test_should_reclassify_first_turn_empty_slug() -> None:
-    assert _should_reclassify({"aop_slug": ""}) is True
+def _resolve(primary: str, conf: float, previous: str | None) -> str:
+    return _resolve_aop_slug(
+        primary_slug=primary,
+        primary_confidence=conf,
+        previous_slug=previous,
+        valid_slugs=VALID,
+        min_confidence=0.60,
+        switch_threshold=0.70,
+    )
 
 
-def test_should_reclassify_false_when_aop_already_set() -> None:
-    assert _should_reclassify({"aop_slug": "consulta_envio"}) is False
+def test_resolve_first_turn_high_confidence_uses_primary() -> None:
+    assert _resolve("returns", 0.90, None) == "returns"
 
 
-def test_should_reclassify_true_when_completed_signal() -> None:
-    assert _should_reclassify({"aop_slug": "consulta_envio", "aop_completed_signal": True}) is True
+def test_resolve_first_turn_low_confidence_falls_back_to_default() -> None:
+    assert _resolve("returns", 0.40, None) == "default"
 
 
-def test_should_reclassify_false_when_locked() -> None:
-    history = [{"role": "customer", "content": "msg"}]
-    state = {
-        "aop_slug": "cancelacion",
-        "aop_locked_until_turn": 3,
-        "conversation_history": history,
-    }
-    assert _should_reclassify(state) is False
+def test_resolve_first_turn_unknown_slug_falls_back_to_default() -> None:
+    assert _resolve("inventado", 0.95, None) == "default"
 
 
-def test_should_reclassify_true_when_lock_expired() -> None:
-    history = [{"role": "customer"}, {"role": "customer"}, {"role": "customer"}]
-    state = {
-        "aop_slug": "cancelacion",
-        "aop_locked_until_turn": 2,
-        "conversation_history": history,
-    }
-    assert _should_reclassify(state) is True
+def test_resolve_continuity_same_slug_keeps_even_low_confidence() -> None:
+    # Mismo AOP que el previo → continuidad, aunque la confianza sea baja.
+    assert _resolve("returns", 0.30, "returns") == "returns"
+
+
+def test_resolve_switch_below_threshold_keeps_previous() -> None:
+    # returns→refunds con conf 0.62 (< switch 0.70) → anti-flapping, mantiene returns.
+    assert _resolve("refunds", 0.62, "returns") == "returns"
+
+
+def test_resolve_switch_above_threshold_pivots() -> None:
+    # Pivote confiable (>= 0.70) → cambia de AOP.
+    assert _resolve("refunds", 0.85, "returns") == "refunds"
+
+
+def test_resolve_exit_default_only_needs_min_confidence() -> None:
+    # Saliendo de 'default': basta min_confidence (0.60), no el switch_threshold.
+    assert _resolve("returns", 0.65, "default") == "returns"
+
+
+def test_resolve_stay_default_when_below_min_confidence() -> None:
+    # Desde default pero aún por debajo de min → se queda en default.
+    assert _resolve("returns", 0.45, "default") == "default"
+
+
+def test_resolve_previous_not_in_catalog_treated_as_first_turn() -> None:
+    # El AOP previo ya no está activo → lógica de primer turno (fallback a default).
+    assert _resolve("returns", 0.40, "aop_desactivado") == "default"
+    assert _resolve("returns", 0.90, "aop_desactivado") == "returns"
+
+
+def test_resolve_switch_to_unknown_slug_keeps_previous() -> None:
+    # El clasificador devuelve un slug inválido con alta conf → mantiene el previo.
+    assert _resolve("inventado", 0.95, "returns") == "returns"
 
 
 # ─── _format_history ─────────────────────────────────────────────────────────
@@ -217,27 +250,13 @@ def fake_deps(fake_anthropic: AsyncMock, fake_openai: AsyncMock, fake_settings: 
 
 
 @pytest.mark.asyncio
-async def test_select_aop_no_reclassify_when_locked(fake_deps: Any) -> None:
-    """Si el AOP está locked, el nodo devuelve {} sin tocar la DB ni llamar a LLM."""
-    node = make_select_aop_node(fake_deps)
-    state = {
-        **BASE_STATE,
-        "aop_slug": "cancelacion",
-        "aop_locked_until_turn": 5,
-        "conversation_history": [{"role": "customer", "content": "x"}],
-    }
-    result = await node(state)
-    assert result == {}
-    fake_deps.anthropic.messages.create.assert_not_called()
-
-
-@pytest.mark.asyncio
 async def test_select_aop_returns_empty_when_no_aops(fake_deps: Any) -> None:
     """Sin AOPs configurados, el nodo es un no-op (degradación elegante)."""
     node = make_select_aop_node(fake_deps)
     fake_conn = AsyncMock()
 
     with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
+         _patch_previous(None), \
          patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[]):
         result = await node(BASE_STATE)
 
@@ -254,6 +273,7 @@ async def test_select_aop_happy_path(fake_deps: Any) -> None:
     )
 
     with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
+         _patch_previous(None), \
          patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
          patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO), \
          patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
@@ -269,7 +289,7 @@ async def test_select_aop_happy_path(fake_deps: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_select_aop_falls_back_to_default_on_low_confidence(fake_deps: Any) -> None:
-    """Confidence < intent_min_confidence → selecciona el AOP 'default'."""
+    """Primer turno, confidence < intent_min_confidence → selecciona el AOP 'default'."""
     node = make_select_aop_node(fake_deps)
     fake_conn = AsyncMock()
     fake_deps.anthropic.messages.create = AsyncMock(
@@ -277,6 +297,7 @@ async def test_select_aop_falls_back_to_default_on_low_confidence(fake_deps: Any
     )
 
     with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
+         _patch_previous(None), \
          patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
          patch("apps.api.agents.nodes.select_aop.load_aop", return_value=DEFAULT_AOP) as mock_load, \
          patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
@@ -290,7 +311,7 @@ async def test_select_aop_falls_back_to_default_on_low_confidence(fake_deps: Any
 
 @pytest.mark.asyncio
 async def test_select_aop_falls_back_when_slug_not_in_catalog(fake_deps: Any) -> None:
-    """El clasificador devuelve un slug que no está en el catálogo → fallback a default."""
+    """Primer turno, slug fuera del catálogo → fallback a default."""
     node = make_select_aop_node(fake_deps)
     fake_conn = AsyncMock()
     fake_deps.anthropic.messages.create = AsyncMock(
@@ -298,12 +319,55 @@ async def test_select_aop_falls_back_when_slug_not_in_catalog(fake_deps: Any) ->
     )
 
     with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
+         _patch_previous(None), \
          patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
          patch("apps.api.agents.nodes.select_aop.load_aop", return_value=DEFAULT_AOP), \
          patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
         result = await node(BASE_STATE)
 
     assert result["aop_slug"] == "default"
+
+
+@pytest.mark.asyncio
+async def test_select_aop_continuity_keeps_previous_on_weak_switch(fake_deps: Any) -> None:
+    """El cliente venía en consulta_envio; el clasificador propone default con conf baja
+    (mensaje corto/ambiguo) → la continuidad gana y se mantiene consulta_envio."""
+    node = make_select_aop_node(fake_deps)
+    fake_conn = AsyncMock()
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_classifier_response("default", 0.50)
+    )
+
+    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
+         _patch_previous("consulta_envio"), \
+         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
+         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO) as mock_load, \
+         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+        result = await node(BASE_STATE)
+
+    # Se carga el AOP previo (consulta_envio), no el clasificado (default).
+    assert mock_load.call_args[0][2] == "consulta_envio"
+    assert result["aop_slug"] == "consulta_envio"
+
+
+@pytest.mark.asyncio
+async def test_select_aop_pivots_on_confident_switch(fake_deps: Any) -> None:
+    """Venía en default; el clasificador propone consulta_envio con conf >= min → cambia."""
+    node = make_select_aop_node(fake_deps)
+    fake_conn = AsyncMock()
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_classifier_response("consulta_envio", 0.66)
+    )
+
+    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
+         _patch_previous("default"), \
+         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
+         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO) as mock_load, \
+         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+        result = await node(BASE_STATE)
+
+    assert mock_load.call_args[0][2] == "consulta_envio"
+    assert result["aop_slug"] == "consulta_envio"
 
 
 @pytest.mark.asyncio
@@ -316,6 +380,7 @@ async def test_select_aop_returns_empty_when_default_aop_missing(fake_deps: Any)
     )
 
     with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
+         _patch_previous(None), \
          patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO]), \
          patch("apps.api.agents.nodes.select_aop.load_aop", return_value=None), \
          patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
@@ -326,7 +391,7 @@ async def test_select_aop_returns_empty_when_default_aop_missing(fake_deps: Any)
 
 @pytest.mark.asyncio
 async def test_select_aop_persists_classifier_run(fake_deps: Any) -> None:
-    """Se persiste el classifier run en DB."""
+    """Se persiste el classifier run en DB; primer turno → was_reclassification=False."""
     node = make_select_aop_node(fake_deps)
     fake_conn = AsyncMock()
     fake_deps.anthropic.messages.create = AsyncMock(
@@ -334,6 +399,7 @@ async def test_select_aop_persists_classifier_run(fake_deps: Any) -> None:
     )
 
     with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
+         _patch_previous(None), \
          patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
          patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO), \
          patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run") as mock_persist:
@@ -349,24 +415,20 @@ async def test_select_aop_persists_classifier_run(fake_deps: Any) -> None:
 
 @pytest.mark.asyncio
 async def test_select_aop_marks_reclassification_on_second_turn(fake_deps: Any) -> None:
-    """En el segundo turno, was_reclassification=True."""
+    """Si hay un AOP previo en DB, was_reclassification=True."""
     node = make_select_aop_node(fake_deps)
     fake_conn = AsyncMock()
     fake_deps.anthropic.messages.create = AsyncMock(
         return_value=_make_classifier_response("consulta_envio", 0.88)
     )
-    state = {
-        **BASE_STATE,
-        "aop_slug": "default",
-        "aop_completed_signal": True,
-    }
 
     with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
+         _patch_previous("default"), \
          patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
          patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO), \
          patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run") as mock_persist:
         mock_persist.return_value = AsyncMock()
-        await node(state)
+        await node(BASE_STATE)
 
     kwargs = mock_persist.call_args[1]
     assert kwargs["was_reclassification"] is True
@@ -386,6 +448,7 @@ async def test_select_aop_detects_ambiguity(fake_deps: Any) -> None:
     )
 
     with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
+         _patch_previous(None), \
          patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
          patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO), \
          patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
@@ -408,6 +471,7 @@ async def test_select_aop_no_pending_intent_when_alt_low_confidence(fake_deps: A
     )
 
     with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
+         _patch_previous(None), \
          patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
          patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO), \
          patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
