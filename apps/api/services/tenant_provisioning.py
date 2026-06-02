@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import httpx
+from apps.api.aops.canonical import provision_canonical_aops
 from apps.api.core.config import Settings
 from apps.api.db.models import PlanTier, Tenant
 
@@ -123,6 +124,13 @@ async def provision_tenant(
             tenant_id,
             request.creator_internal_user_id,
         )
+
+        # Copy-on-create: cada tenant nace con su propia copia de los 8 AOPs canónicos
+        # + permisos default (L1/L2 auto, L3 approval). Dentro de la misma transacción
+        # → atómico: si algo falla, no queda un tenant a medio provisionar.
+        # created_by=None: el creador es un internal_user, y aop_versions.created_by
+        # referencia users(id); None evita una violación de FK.
+        await provision_canonical_aops(conn, tenant_id, created_by=None)
 
     return ProvisionResult(
         tenant=tenant,

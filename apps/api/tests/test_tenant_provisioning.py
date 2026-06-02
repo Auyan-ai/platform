@@ -84,8 +84,13 @@ def _make_http(transport: httpx.MockTransport) -> httpx.AsyncClient:
 
 class TestProvisionService:
     @pytest.mark.asyncio
-    async def test_happy_path_invites_new_user(self) -> None:
+    async def test_happy_path_invites_new_user(self, monkeypatch: pytest.MonkeyPatch) -> None:
         conn = _make_conn(slug_taken=False)
+        # El seeding de los AOPs canónicos se prueba aparte (test_canonical_aops); aquí no-op.
+        monkeypatch.setattr(
+            "apps.api.services.tenant_provisioning.provision_canonical_aops",
+            AsyncMock(return_value={"created": 8, "updated": 0, "skipped": 0, "tool_permissions": 11}),
+        )
 
         async def _handler(request: httpx.Request) -> httpx.Response:
             assert request.url.path == "/auth/v1/invite"
@@ -126,8 +131,12 @@ class TestProvisionService:
         conn.execute.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_email_exists_falls_back_to_find_and_magic_link(self) -> None:
+    async def test_email_exists_falls_back_to_find_and_magic_link(self, monkeypatch: pytest.MonkeyPatch) -> None:
         conn = _make_conn(slug_taken=False)
+        monkeypatch.setattr(
+            "apps.api.services.tenant_provisioning.provision_canonical_aops",
+            AsyncMock(return_value={"created": 8, "updated": 0, "skipped": 0, "tool_permissions": 11}),
+        )
         calls: list[str] = []
 
         async def _handler(request: httpx.Request) -> httpx.Response:
