@@ -64,8 +64,8 @@ class TestBuildSystemPrompt:
 
     def test_current_date_injected(self) -> None:
         base = "Eres el agente de Acme."
-        out = build_system_prompt(base, [], current_date="2026-05-25")
-        assert "Fecha actual: 2026-05-25" in out
+        out = build_system_prompt(base, [], current_date="2026-05-25 14:30 (Europe/Madrid)")
+        assert "Fecha y hora actual (zona horaria de la tienda): 2026-05-25 14:30 (Europe/Madrid)" in out
         assert base in out
 
     def test_current_date_none_no_injection(self) -> None:

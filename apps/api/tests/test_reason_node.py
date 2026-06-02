@@ -29,6 +29,34 @@ def _base_state() -> dict:
     }
 
 
+def test_tenant_now_str_uses_tenant_timezone() -> None:
+    import re
+
+    from apps.api.agents.nodes.reason import _tenant_now_str
+
+    out = _tenant_now_str({"timezone": "Europe/Madrid"})
+    assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2} \(Europe/Madrid\)$", out)
+
+
+def test_tenant_now_str_respects_other_valid_tz() -> None:
+    from apps.api.agents.nodes.reason import _tenant_now_str
+
+    assert "(America/Caracas)" in _tenant_now_str({"timezone": "America/Caracas"})
+
+
+def test_tenant_now_str_defaults_when_missing() -> None:
+    from apps.api.agents.nodes.reason import _tenant_now_str
+
+    assert "(Europe/Madrid)" in _tenant_now_str(None)
+    assert "(Europe/Madrid)" in _tenant_now_str({})
+
+
+def test_tenant_now_str_invalid_tz_falls_back_to_default() -> None:
+    from apps.api.agents.nodes.reason import _tenant_now_str
+
+    assert "(Europe/Madrid)" in _tenant_now_str({"timezone": "Mars/Phobos"})
+
+
 @pytest.mark.asyncio
 async def test_respond_happy_path(fake_deps, make_anthropic_response, monkeypatch) -> None:
     fake_response = make_anthropic_response(

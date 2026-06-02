@@ -35,9 +35,10 @@ def build_system_prompt(
     base = base_prompt
     if current_date:
         base = (
-            f"Fecha actual: {current_date}. Úsala como 'hoy' para cualquier cálculo de "
-            "fechas: días transcurridos desde la fecha de un pedido (`created_at`), "
-            "ventanas de devolución, plazos. NUNCA asumas otra fecha ni confíes en la "
+            f"Fecha y hora actual (zona horaria de la tienda): {current_date}. Úsala como "
+            "'ahora' para cualquier cálculo de fechas: días transcurridos desde la fecha de "
+            "un pedido (`created_at`), ventanas de devolución, plazos. Convierte `created_at` "
+            "a esta zona antes de comparar. NUNCA asumas otra fecha/zona ni confíes en la "
             "estimación del cliente sobre cuánto tiempo ha pasado.\n\n"
             f"{base_prompt}"
         )
