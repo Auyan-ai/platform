@@ -6,6 +6,7 @@ import type { components } from '@auyan/shared/api-types'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { getTenantSectionFromPath } from './nav-items'
 
 type TenantResponse = components['schemas']['TenantResponse']
 
@@ -15,7 +16,16 @@ const STATUS_DOT: Record<string, string> = {
   suspended: 'bg-danger',
 }
 
-export function TenantSwitcher({ activeTenantId }: { activeTenantId: string | null }) {
+interface TenantSwitcherProps {
+  activeTenantId: string | null
+  expanded?: boolean
+}
+
+function tenantInitial(name?: string) {
+  return name?.trim().charAt(0).toUpperCase() || 'T'
+}
+
+export function TenantSwitcher({ activeTenantId, expanded = true }: TenantSwitcherProps) {
   const [open, setOpen] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
@@ -25,10 +35,7 @@ export function TenantSwitcher({ activeTenantId }: { activeTenantId: string | nu
 
   function selectTenant(tenant: TenantResponse) {
     setOpen(false)
-    const section =
-      pathname.match(
-        /\/tenants\/[^/]+\/(conversations|escalations|approvals|playbook|knowledge|reports|emails|aops|proposals|simulator)/,
-      )?.[1] ?? 'conversations'
+    const section = getTenantSectionFromPath(pathname)
     router.push(`/tenants/${tenant.id}/${section}`)
   }
 
@@ -37,19 +44,43 @@ export function TenantSwitcher({ activeTenantId }: { activeTenantId: string | nu
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-left hover:bg-surface-muted transition-colors"
+        className={cn(
+          'flex h-9 w-full items-center rounded-sm text-left text-sm transition-colors hover:bg-border-subtle',
+          expanded ? 'gap-2 px-2' : 'justify-center px-0',
+        )}
+        title={expanded ? undefined : (active?.name ?? 'Selecciona tenant')}
       >
-        <span className="flex-1 truncate font-medium text-foreground-body">
+        <span
+          className={cn(
+            'grid size-6 shrink-0 place-items-center rounded-sm bg-surface text-[11px] font-semibold text-foreground-body ring-1 ring-border-subtle',
+            active?.status === 'active' && 'text-success-foreground',
+          )}
+        >
+          {isLoading ? '...' : tenantInitial(active?.name)}
+        </span>
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate font-medium text-foreground-body transition-[opacity,transform] duration-200',
+            expanded ? 'opacity-100' : 'pointer-events-none w-0 opacity-0',
+          )}
+        >
           {isLoading ? '…' : (active?.name ?? 'Selecciona tenant')}
         </span>
-        {open ? (
-          <ChevronUp className="size-3.5 text-foreground-subtle" />
-        ) : (
-          <ChevronDown className="size-3.5 text-foreground-subtle" />
-        )}
+        <span
+          className={cn(
+            'transition-[opacity,transform] duration-200',
+            expanded ? 'opacity-100' : 'pointer-events-none w-0 opacity-0',
+          )}
+        >
+          {open ? (
+            <ChevronUp className="size-3.5 text-foreground-subtle" />
+          ) : (
+            <ChevronDown className="size-3.5 text-foreground-subtle" />
+          )}
+        </span>
       </button>
 
-      {open && tenants && (
+      {open && expanded && tenants && (
         <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-md border border-border bg-surface-elevated shadow-sm overflow-hidden">
           {tenants.map((t) => (
             <button

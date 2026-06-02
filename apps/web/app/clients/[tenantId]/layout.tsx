@@ -58,7 +58,41 @@ export default async function ClientsLayout({ children, params }: Props) {
         userEmail={user.email}
       />
       <div className="ml-[200px] min-h-screen">
-        <AppTopbar actionLabel="Solicitar revisión" />
+        <AppTopbar
+          placeholder="Buscar secciones del cliente..."
+          quickLinks={[
+            {
+              label: 'Home',
+              href: `/clients/${user.tenant_id}/overview`,
+              description: 'Resumen del cliente',
+            },
+            {
+              label: 'Insights',
+              href: `/clients/${user.tenant_id}/insights`,
+              description: 'Conversaciones y métricas',
+            },
+            {
+              label: 'Reportes',
+              href: `/clients/${user.tenant_id}/reports`,
+              description: 'Reportes semanales',
+            },
+            {
+              label: 'Knowledge Base',
+              href: `/clients/${user.tenant_id}/knowledge`,
+              description: 'Documentos y fuentes',
+            },
+            {
+              label: 'Aprobaciones',
+              href: `/clients/${user.tenant_id}/approvals`,
+              description: 'Acciones pendientes',
+            },
+            {
+              label: 'Configuración',
+              href: `/clients/${user.tenant_id}/settings`,
+              description: 'Preferencias del cliente',
+            },
+          ]}
+        />
         <main className="px-8 pb-10 pt-16">
           <div className="mx-auto max-w-6xl">{children}</div>
         </main>
