@@ -169,7 +169,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
                 "Qué artículo(s) quiere devolver y el motivo",
             ],
             "guardrails": [
-                "Confirma elegibilidad con la política REAL (get_shop_policies / tenant_facts), nunca con un plazo asumido.",
+                "Confirma elegibilidad con la política REAL (KB inyectada / tenant_facts / get_shop_policies), nunca con un plazo asumido.",
                 "Fuera del plazo de la tienda → no inicies la devolución: explícalo con empatía y escala si insiste.",
                 "Productos excluidos por la política (digitales/perecederos) no admiten devolución.",
                 "No inicies start_return hasta tener artículo y motivo confirmados por el cliente.",
@@ -187,7 +187,9 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             "## Procedimiento: devolución\n"
             "Objetivo: ayudar a devolver un producto elegible, según la política real de la tienda.\n\n"
             "1. Identifica el pedido: nº → get_order_status; email → get_order_by_email.\n"
-            "2. Consulta get_shop_policies (plazo, condiciones, exclusiones). Es la fuente de verdad — no asumas plazos.\n"
+            "2. Determina plazo, condiciones y exclusiones desde la política REAL, en este orden de fuentes:\n"
+            "   el contexto de la KB inyectado (si lo hay), `tenant_facts` (p.ej. plazo de devolución) y `get_shop_policies`.\n"
+            "   No asumas un plazo que no esté en NINGUNA de esas fuentes; si falta en todas, dilo y escala.\n"
             "3. Elegibilidad: compara created_at con el plazo usando la fecha y hora actual de la tienda.\n"
             "   - Elegible → continúa.\n"
             "   - Fuera de plazo / excluido → explícalo con empatía, no inicies, escala si insiste.\n"
@@ -232,6 +234,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
                 "El reembolso por una DEVOLUCIÓN se emite tras recibir y verificar el producto: eso es returns, no aquí. No prometas reembolso inmediato por devolver algo.",
                 "refund_partial solo para casos DIRECTOS sin devolución (sobrecobro, ajuste de precio acordado). Importe y moneda salen del pedido, nunca inventados.",
                 "El reembolso queda pendiente de aprobación; no afirmes que ya se hizo.",
+                "Plazos/condiciones de reembolso: respóndelos con la política REAL (KB inyectada / tenant_facts / get_shop_policies). No escales una pregunta de política si el dato está en esas fuentes; escala solo si falta en todas.",
                 "Daño/no-recibido/disputa/importe alto/reembolso total → escala, no lo fuerces.",
                 "Comprueba que no exista ya un reembolso para ese pedido antes de iniciar otro.",
             ],
@@ -247,12 +250,14 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
         "body": (
             "## Procedimiento: reembolso\n"
             "Objetivo: estado de reembolsos + reembolsos DIRECTOS sin devolución; el resto, escalar o reconducir.\n\n"
-            "1. ¿Pregunta por el ESTADO de un reembolso? → get_order_status (revisa los refunds del pedido) e informa.\n"
-            "2. ¿Sobrecobro o ajuste de precio claro y dentro de política (SIN devolver producto)? → refund_partial\n"
+            "1. ¿Pregunta GENERAL por plazos/condiciones de reembolso (sin un pedido concreto)? → responde con la\n"
+            "   política real: KB inyectada / tenant_facts / get_shop_policies. Si ninguna lo cubre, dilo y escala.\n"
+            "2. ¿Pregunta por el ESTADO de un reembolso? → get_order_status (revisa los refunds del pedido) e informa.\n"
+            "3. ¿Sobrecobro o ajuste de precio claro y dentro de política (SIN devolver producto)? → refund_partial\n"
             "   (order_id, amount, currency del pedido). Queda en aprobación; informa.\n"
-            "3. ¿Quiere el dinero por DEVOLVER un producto? → es returns: el reembolso se emite tras recibir y\n"
+            "4. ¿Quiere el dinero por DEVOLVER un producto? → es returns: el reembolso se emite tras recibir y\n"
             "   verificar el artículo. Reconduce (el grafo reclasifica).\n"
-            "4. Daño/no-recibido → complaint. Disputa, importe alto o reembolso total → escala con resumen."
+            "5. Daño/no-recibido → complaint. Disputa, importe alto o reembolso total → escala con resumen."
         ),
     },
     {
@@ -297,7 +302,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             "1. Identifica el producto (nombre/variante/SKU). Si es ambiguo, pídelo.\n"
             "2. get_product_info para disponibilidad, specs, precio.\n"
             "3. Responde solo con lo que devuelve la skill; el stock puede cambiar.\n"
-            "4. Garantía/condiciones → get_shop_policies.\n"
+            "4. Garantía/condiciones → política real: KB inyectada / tenant_facts / get_shop_policies.\n"
             "5. Si no existe o la ficha no cubre la duda → dilo y escala."
         ),
     },
