@@ -40,7 +40,7 @@ const STEPS: Array<{ id: number; title: string; fields: Field[] }> = [
   },
   {
     id: 2,
-    title: 'Brand voice',
+    title: 'Voz de marca',
     fields: [
       {
         key: 'voice_traits',
@@ -78,7 +78,7 @@ const STEPS: Array<{ id: number; title: string; fields: Field[] }> = [
   },
   {
     id: 6,
-    title: 'Knowledge base inicial',
+    title: 'Base de conocimiento inicial',
     fields: [],
   },
   {
@@ -92,9 +92,13 @@ const STEPS: Array<{ id: number; title: string; fields: Field[] }> = [
   },
   {
     id: 8,
-    title: 'Call AIDE',
+    title: 'Llamada de arranque',
     fields: [
-      { key: 'call_preference', label: 'Preferencia de llamada', placeholder: 'Mañanas, tardes, días' },
+      {
+        key: 'call_preference',
+        label: 'Preferencia de llamada',
+        placeholder: 'Mañanas, tardes, días',
+      },
       { key: 'call_notes', label: 'Temas para la llamada', kind: 'textarea' },
     ],
   },
@@ -105,7 +109,7 @@ const STEPS: Array<{ id: number; title: string; fields: Field[] }> = [
       {
         key: 'launch_notes',
         label: 'Notas finales',
-        placeholder: 'Algo que Auyan deba saber antes de empezar Building',
+        placeholder: 'Algo que Auyan deba saber antes de empezar la construcción del agente',
         kind: 'textarea',
       },
     ],
@@ -119,9 +123,7 @@ function normalizeStepData(data: Record<string, unknown>): StepData {
   return Object.fromEntries(
     Object.entries(data).map(([key, value]) => [
       key,
-      value && typeof value === 'object' && !Array.isArray(value)
-        ? (value as StepValues)
-        : {},
+      value && typeof value === 'object' && !Array.isArray(value) ? (value as StepValues) : {},
     ]),
   )
 }
@@ -257,7 +259,9 @@ export function OnboardingWizard({ tenantId }: { tenantId: string }) {
             <h2 className="mt-1 text-xl font-semibold text-foreground">{activeStep.title}</h2>
           </div>
           <div className="flex items-center gap-2">
-            {saveState === 'saved' && <span className="text-xs text-success-foreground">Guardado</span>}
+            {saveState === 'saved' && (
+              <span className="text-xs text-success-foreground">Guardado</span>
+            )}
             {saveState === 'error' && (
               <span className="text-xs text-danger-foreground">No se pudo guardar</span>
             )}

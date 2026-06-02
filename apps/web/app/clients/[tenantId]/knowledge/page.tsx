@@ -11,11 +11,11 @@ export default async function ClientKnowledgePage({ params }: Props) {
     <div className="space-y-6">
       <div>
         <p className="text-xs font-medium uppercase tracking-wider text-foreground-muted">
-          Knowledge base
+          Base de conocimiento
         </p>
-        <h1 className="mt-1 text-2xl font-semibold text-foreground">Conocimiento</h1>
+        <h1 className="mt-1 text-2xl font-semibold text-foreground">Base de conocimiento</h1>
         <p className="mt-1 max-w-2xl text-sm text-foreground-muted">
-          Envía contenido para que Auyan lo revise antes de incorporarlo al agente.
+          Envía documentos y fuentes para que Auyan los revise antes de incorporarlos al agente.
         </p>
       </div>
 
