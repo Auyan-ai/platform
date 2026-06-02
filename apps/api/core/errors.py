@@ -101,6 +101,13 @@ class BudgetExceededError(DomainError):
         self.retry_after = retry_after
 
 
+class ExternalIntegrationError(DomainError):
+    """Falló una operación contra una integración externa del tenant."""
+
+    code = "external_integration_failed"
+    status_code = 502
+
+
 # ----------------------------------------------------------------
 # Handler registration
 # ----------------------------------------------------------------

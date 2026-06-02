@@ -6,16 +6,19 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
+from apps.api.core.config import Settings, get_settings
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
 from apps.api.db.client import tenant_scope
 from apps.api.db.models import ChannelType, ConversationStatus, EscalationStatus, MessageRole
 from apps.api.services.conversations import (
     close_conversation,
     escalate_conversation,
+    get_closable_conversation,
     get_conversation_detail,
     list_tenant_conversations,
     reply_to_conversation,
 )
+from apps.api.services.helpdesk_closure import close_external_helpdesk_ticket
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,6 +27,7 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 AuthDep = Annotated[AuthContext, Depends(get_auth_context)]
 TenantIdDep = Annotated[UUID, Depends(get_tenant_id)]
+SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
 # ----------------------------------------------------------------
@@ -187,7 +191,17 @@ async def escalate(
 async def close(
     conversation_id: UUID,
     tenant_id: TenantIdDep,
+    settings: SettingsDep,
 ) -> Response:
+    async with tenant_scope(tenant_id) as conn:
+        conversation = await get_closable_conversation(conn, tenant_id, conversation_id)
+
+    await close_external_helpdesk_ticket(
+        tenant_id=tenant_id,
+        conversation=conversation,
+        settings=settings,
+    )
+
     async with tenant_scope(tenant_id) as conn:
         await close_conversation(conn, tenant_id, conversation_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
