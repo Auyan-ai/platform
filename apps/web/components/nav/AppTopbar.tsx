@@ -1,7 +1,6 @@
 'use client'
 
-import { Button } from '@/components/ui/button'
-import { ArrowRight, Search, Sparkles } from 'lucide-react'
+import { ArrowRight, Search } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -13,8 +12,6 @@ export interface QuickLink {
 }
 
 interface AppTopbarProps {
-  actionHref?: string
-  actionLabel?: string
   placeholder?: string
   quickLinks?: QuickLink[]
 }
@@ -24,12 +21,7 @@ function matchesLink(link: QuickLink, query: string) {
   return value.includes(query.toLowerCase())
 }
 
-export function AppTopbar({
-  actionHref,
-  actionLabel,
-  placeholder = 'Buscar...',
-  quickLinks = [],
-}: AppTopbarProps) {
+export function AppTopbar({ placeholder = 'Buscar...', quickLinks = [] }: AppTopbarProps) {
   const router = useRouter()
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -149,15 +141,6 @@ export function AppTopbar({
           </div>
         )}
       </div>
-
-      {actionHref && actionLabel && (
-        <Button asChild variant="secondary" size="sm" className="shrink-0">
-          <Link href={actionHref}>
-            <Sparkles className="size-4" />
-            {actionLabel}
-          </Link>
-        </Button>
-      )}
     </header>
   )
 }
