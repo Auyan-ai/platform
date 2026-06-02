@@ -18,9 +18,32 @@ interface SidebarProps {
 export function Sidebar({ userEmail, collapsed, onCollapsedChange }: SidebarProps) {
   const pathname = usePathname()
   const [hovered, setHovered] = useState(false)
+  const [suppressHoverPreview, setSuppressHoverPreview] = useState(false)
   const tenantMatch = pathname.match(/\/tenants\/([^/]+)/)
   const activeTenantId = tenantMatch?.[1] ?? null
-  const expanded = !collapsed || hovered
+  const expanded = !collapsed || (hovered && !suppressHoverPreview)
+
+  function handlePointerEnter() {
+    if (!suppressHoverPreview) {
+      setHovered(true)
+    }
+  }
+
+  function handlePointerLeave() {
+    setHovered(false)
+    setSuppressHoverPreview(false)
+  }
+
+  function toggleCollapsed() {
+    const nextCollapsed = !collapsed
+    if (nextCollapsed) {
+      setHovered(false)
+      setSuppressHoverPreview(true)
+    } else {
+      setSuppressHoverPreview(false)
+    }
+    onCollapsedChange(nextCollapsed)
+  }
 
   return (
     <aside
@@ -28,8 +51,8 @@ export function Sidebar({ userEmail, collapsed, onCollapsedChange }: SidebarProp
         'fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border bg-surface-muted transition-[width] duration-200 ease-out',
         expanded ? 'w-[236px]' : 'w-[60px]',
       )}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseEnter={handlePointerEnter}
+      onMouseLeave={handlePointerLeave}
     >
       <div
         className={cn(
@@ -39,15 +62,17 @@ export function Sidebar({ userEmail, collapsed, onCollapsedChange }: SidebarProp
       >
         <span
           className={cn(
-            'min-w-0 flex-1 truncate text-sm font-semibold tracking-tight text-foreground transition-[opacity,transform] duration-200',
-            expanded ? 'opacity-100' : 'pointer-events-none opacity-0',
+            'truncate text-sm font-semibold tracking-tight text-foreground transition-[opacity,width] duration-200',
+            expanded
+              ? 'min-w-0 flex-1 opacity-100'
+              : 'pointer-events-none w-0 flex-none overflow-hidden opacity-0',
           )}
         >
           Auyan
         </span>
         <button
           type="button"
-          onClick={() => onCollapsedChange(!collapsed)}
+          onClick={toggleCollapsed}
           className="grid size-8 shrink-0 place-items-center rounded-sm text-foreground-muted transition-colors hover:bg-border-subtle hover:text-foreground"
           aria-label={collapsed ? 'Expandir navegación' : 'Replegar navegación'}
           title={collapsed ? 'Expandir navegación' : 'Replegar navegación'}
@@ -59,8 +84,8 @@ export function Sidebar({ userEmail, collapsed, onCollapsedChange }: SidebarProp
       <div className="px-2 pb-2">
         <p
           className={cn(
-            'mb-1 px-2 text-[11px] font-medium uppercase tracking-wider text-foreground-muted transition-[height,opacity] duration-200',
-            expanded ? 'h-4 opacity-100' : 'h-0 overflow-hidden opacity-0',
+            'px-2 text-[11px] font-medium uppercase tracking-wider text-foreground-muted transition-[height,margin,opacity] duration-200',
+            expanded ? 'mb-1 h-4 opacity-100' : 'mb-0 h-0 overflow-hidden opacity-0',
           )}
         >
           Tenant
@@ -74,8 +99,8 @@ export function Sidebar({ userEmail, collapsed, onCollapsedChange }: SidebarProp
             <div key={group.label} className={cn(expanded ? 'mt-3 first:mt-1' : 'mt-2')}>
               <p
                 className={cn(
-                  'px-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-foreground-muted transition-[height,opacity] duration-200',
-                  expanded ? 'h-6 opacity-100' : 'h-0 overflow-hidden opacity-0',
+                  'px-2 text-[10px] font-medium uppercase tracking-normal text-foreground-subtle transition-[height,opacity,padding] duration-200',
+                  expanded ? 'h-5 pb-0.5 opacity-100' : 'h-0 overflow-hidden pb-0 opacity-0',
                 )}
               >
                 {group.label}

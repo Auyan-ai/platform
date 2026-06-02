@@ -101,8 +101,10 @@ export function SidebarAccountMenu({ email, expanded }: SidebarAccountMenuProps)
         </span>
         <span
           className={cn(
-            'min-w-0 flex-1 truncate text-left transition-[opacity,transform] duration-200',
-            expanded ? 'opacity-100' : 'pointer-events-none opacity-0',
+            'truncate text-left transition-[opacity,width] duration-200',
+            expanded
+              ? 'min-w-0 flex-1 opacity-100'
+              : 'pointer-events-none w-0 flex-none overflow-hidden opacity-0',
           )}
           title={email}
         >
@@ -112,7 +114,7 @@ export function SidebarAccountMenu({ email, expanded }: SidebarAccountMenuProps)
           className={cn(
             'size-3.5 shrink-0 text-foreground-subtle transition-[opacity,transform] duration-200',
             open && 'rotate-180',
-            expanded ? 'opacity-100' : 'opacity-0',
+            expanded ? 'opacity-100' : 'w-0 opacity-0',
           )}
         />
       </button>
