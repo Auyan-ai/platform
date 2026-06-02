@@ -31,13 +31,18 @@ function Donut({ items }: { items: TenantInsightBreakdownItem[] }) {
   if (grandTotal === 0) {
     return (
       <div className="grid size-36 place-items-center rounded-full border border-border-subtle bg-surface-muted text-xs text-foreground-muted">
-        Sin intents
+        Sin motivos
       </div>
     )
   }
 
   return (
-    <svg viewBox="0 0 42 42" className="size-36 -rotate-90" role="img" aria-label="Top intents">
+    <svg
+      viewBox="0 0 42 42"
+      className="size-36 -rotate-90"
+      role="img"
+      aria-label="Motivos principales"
+    >
       <circle
         cx="21"
         cy="21"
@@ -138,12 +143,22 @@ export function ClientInsightsExplorer({ tenantId }: { tenantId: string }) {
 
   return (
     <div className="space-y-6">
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wider text-foreground-muted">
+          Actividad
+        </p>
+        <h1 className="mt-1 text-2xl font-semibold text-foreground">Insights</h1>
+        <p className="mt-1 max-w-2xl text-sm text-foreground-muted">
+          Conversaciones, canales y motivos más frecuentes de los últimos 14 días.
+        </p>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
         <Card className="p-(--density-card-p)">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <Activity className="size-4 text-accent-foreground" />
-              <h2 className="text-sm font-semibold text-foreground">Heatmap timeline</h2>
+              <h2 className="text-sm font-semibold text-foreground">Actividad por día</h2>
             </div>
             <span className="text-xs text-foreground-muted">últimos 14 días</span>
           </div>
@@ -161,7 +176,7 @@ export function ClientInsightsExplorer({ tenantId }: { tenantId: string }) {
         <Card className="p-(--density-card-p)">
           <div className="mb-4 flex items-center gap-2">
             <CircleDotDashed className="size-4 text-accent-foreground" />
-            <h2 className="text-sm font-semibold text-foreground">Top intents</h2>
+            <h2 className="text-sm font-semibold text-foreground">Motivos principales</h2>
           </div>
           {isLoading ? (
             <Skeleton className="h-36" />

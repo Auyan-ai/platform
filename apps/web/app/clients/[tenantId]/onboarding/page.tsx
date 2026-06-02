@@ -36,9 +36,10 @@ export default async function ClientOnboardingPage({ params }: Props) {
         <p className="text-xs font-medium uppercase tracking-wider text-foreground-muted">
           Activación
         </p>
-        <h1 className="mt-1 text-2xl font-semibold text-foreground">Onboarding</h1>
+        <h1 className="mt-1 text-2xl font-semibold text-foreground">Puesta en marcha</h1>
         <p className="mt-1 max-w-2xl text-sm text-foreground-muted">
-          Completa la información inicial para que Auyan prepare el agente y pase a Building.
+          Completa la información inicial para que Auyan prepare el agente y empiece la fase de
+          construcción.
         </p>
       </div>
 

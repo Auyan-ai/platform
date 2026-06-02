@@ -6,22 +6,32 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
-const ITEMS: Array<{ key: 'onboarding_submitted' | 'has_commerce_integration' | 'has_helpdesk_integration' | 'has_knowledge'; label: string }> = [
-  { key: 'onboarding_submitted', label: 'Onboarding enviado' },
+const ITEMS: Array<{
+  key:
+    | 'onboarding_submitted'
+    | 'has_commerce_integration'
+    | 'has_helpdesk_integration'
+    | 'has_knowledge'
+  label: string
+}> = [
+  { key: 'onboarding_submitted', label: 'Información inicial enviada' },
   { key: 'has_commerce_integration', label: 'Conexión comercio (Shopify)' },
   { key: 'has_helpdesk_integration', label: 'Conexión helpdesk (Chatwoot)' },
-  { key: 'has_knowledge', label: 'Knowledge base inicial' },
+  { key: 'has_knowledge', label: 'Base de conocimiento inicial' },
 ]
 
-const LIFECYCLE_LABELS: Record<string, { label: string; variant: 'default' | 'success' | 'warning' | 'secondary' }> = {
-  initial: { label: 'Initial', variant: 'secondary' },
-  discovery: { label: 'Discovery', variant: 'warning' },
-  building: { label: 'Building', variant: 'default' },
-  shadow: { label: 'Shadow', variant: 'default' },
-  ramping: { label: 'Ramping', variant: 'default' },
-  active: { label: 'Active', variant: 'success' },
-  paused: { label: 'Paused', variant: 'secondary' },
-  churned: { label: 'Churned', variant: 'secondary' },
+const LIFECYCLE_LABELS: Record<
+  string,
+  { label: string; variant: 'default' | 'success' | 'warning' | 'secondary' }
+> = {
+  initial: { label: 'Inicial', variant: 'secondary' },
+  discovery: { label: 'Preparación', variant: 'warning' },
+  building: { label: 'Construcción', variant: 'default' },
+  shadow: { label: 'Modo shadow', variant: 'default' },
+  ramping: { label: 'Rampa', variant: 'default' },
+  active: { label: 'Activo', variant: 'success' },
+  paused: { label: 'Pausado', variant: 'secondary' },
+  churned: { label: 'Cerrado', variant: 'secondary' },
 }
 
 export function OnboardingChecklistBanner({ tenantId }: { tenantId: string }) {
@@ -40,10 +50,10 @@ export function OnboardingChecklistBanner({ tenantId }: { tenantId: string }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium uppercase tracking-wider text-foreground-muted">
-            Checklist discovery → building
+            Checklist de activación
           </span>
           <Badge variant={lifecycle.variant}>{lifecycle.label}</Badge>
-          {data.complete && <Badge variant="success">Listo para AIDE</Badge>}
+          {data.complete && <Badge variant="success">Listo para revisión</Badge>}
         </div>
       </div>
       <ul className="mt-3 grid gap-1.5 sm:grid-cols-2">

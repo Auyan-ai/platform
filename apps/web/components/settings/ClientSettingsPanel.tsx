@@ -63,7 +63,7 @@ export function ClientSettingsPanel() {
   const aideName = textFromExtra(
     extra,
     ['assigned_aide_name', 'aide_name'],
-    'AIDE asignado por Auyan',
+    'Contacto asignado por Auyan',
   )
   const aideEmail = textFromExtra(
     extra,
@@ -119,7 +119,7 @@ export function ClientSettingsPanel() {
           <div className="grid size-8 place-items-center rounded-md bg-surface-muted">
             <UserRoundCheck className="size-4 text-foreground-muted" />
           </div>
-          <h2 className="text-sm font-semibold text-foreground">AIDE asignado</h2>
+          <h2 className="text-sm font-semibold text-foreground">Contacto asignado</h2>
         </div>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <Field label="Responsable" value={aideName} />

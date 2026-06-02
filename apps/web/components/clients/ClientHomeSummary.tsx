@@ -14,14 +14,14 @@ import { AlertTriangle, ArrowRight, CheckCircle2, FileBarChart2, Radio } from 'l
 import Link from 'next/link'
 
 const LIFECYCLE_LABELS: Record<string, string> = {
-  initial: 'Initial',
-  discovery: 'Discovery',
-  building: 'Building',
-  shadow: 'Shadow',
-  ramping: 'Ramping',
-  active: 'Active',
-  paused: 'Paused',
-  churned: 'Churned',
+  initial: 'Inicial',
+  discovery: 'Preparación',
+  building: 'Construcción',
+  shadow: 'Modo shadow',
+  ramping: 'Rampa',
+  active: 'Activo',
+  paused: 'Pausado',
+  churned: 'Cerrado',
 }
 
 const AGENT_PROGRESS_PHASES = [
@@ -79,7 +79,7 @@ function ActivityHeatmap({ tenantId }: { tenantId: string }) {
                 intensity >= 0.34 && intensity < 0.67 && 'bg-accent/60',
                 intensity >= 0.67 && 'bg-accent',
               )}
-              title={`${day.request_count} requests · ${day.date}`}
+              title={`${day.request_count} solicitudes · ${day.date}`}
             />
             <p className="text-center text-[10px] tabular-nums text-foreground-muted">
               {formatDate(day.date)}
@@ -111,7 +111,7 @@ function AgentLifecycleProgress({
     return (
       <div className="space-y-2">
         <p className="text-xs font-medium text-foreground-muted">Estado del agente</p>
-        <Badge variant="default">Active</Badge>
+        <Badge variant="default">Activo</Badge>
       </div>
     )
   }
@@ -182,9 +182,9 @@ export function ClientHomeSummary({ tenantId }: { tenantId: string }) {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <AgentLifecycleProgress lifecycle={lifecycle} isLoading={tenant.isLoading} />
-            <h1 className="mt-4 text-2xl font-semibold text-foreground">Home</h1>
+            <h1 className="mt-4 text-2xl font-semibold text-foreground">Resumen</h1>
             <p className="mt-1 max-w-2xl text-sm text-foreground-muted">
-              KPIs, actividad y reporte semanal del soporte IA de tu cuenta.
+              Estado del agente, actividad reciente y reportes de tu cuenta.
             </p>
           </div>
 

@@ -1,5 +1,4 @@
-import { ClientSidebar } from '@/components/clients/ClientSidebar'
-import { AppTopbar } from '@/components/nav/AppTopbar'
+import { ClientDashboardShell } from '@/components/clients/ClientDashboardShell'
 import { apiClient } from '@/lib/api/client'
 import { fetchCurrentUser } from '@/lib/api/users'
 import { createClient } from '@/lib/supabase/server'
@@ -50,53 +49,15 @@ export default async function ClientsLayout({ children, params }: Props) {
   }
 
   return (
-    <div data-density="relaxed" data-theme="mercury" className="min-h-screen bg-background">
-      <ClientSidebar
+    <div data-density="compact" data-theme="mercury" className="min-h-screen bg-background">
+      <ClientDashboardShell
         tenantId={user.tenant_id}
         tenantName={tenantName}
         lifecycleState={lifecycleState}
         userEmail={user.email}
-      />
-      <div className="ml-[200px] min-h-screen">
-        <AppTopbar
-          placeholder="Buscar secciones del cliente..."
-          quickLinks={[
-            {
-              label: 'Home',
-              href: `/clients/${user.tenant_id}/overview`,
-              description: 'Resumen del cliente',
-            },
-            {
-              label: 'Insights',
-              href: `/clients/${user.tenant_id}/insights`,
-              description: 'Conversaciones y métricas',
-            },
-            {
-              label: 'Reportes',
-              href: `/clients/${user.tenant_id}/reports`,
-              description: 'Reportes semanales',
-            },
-            {
-              label: 'Knowledge Base',
-              href: `/clients/${user.tenant_id}/knowledge`,
-              description: 'Documentos y fuentes',
-            },
-            {
-              label: 'Aprobaciones',
-              href: `/clients/${user.tenant_id}/approvals`,
-              description: 'Acciones pendientes',
-            },
-            {
-              label: 'Configuración',
-              href: `/clients/${user.tenant_id}/settings`,
-              description: 'Preferencias del cliente',
-            },
-          ]}
-        />
-        <main className="px-8 pb-10 pt-16">
-          <div className="mx-auto max-w-6xl">{children}</div>
-        </main>
-      </div>
+      >
+        {children}
+      </ClientDashboardShell>
     </div>
   )
 }
