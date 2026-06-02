@@ -782,3 +782,37 @@ Migraciones confirmadas como desbloqueadas:
 | `20260528000001_add_tenant_knowledge_submissions.sql` | `tenant_knowledge_submissions` + cola KB |
 | `20260528000002_add_weekly_reports.sql` | `weekly_reports` + flujo `draft/pending_review/approved/sent/failed` |
 | `20260528000003_add_outbound_email_queue.sql` | `outbound_email_templates` + `outbound_email_jobs` |
+
+---
+
+## Sesión 59 — Bug suelto: cierre externo de tickets helpdesk ✅
+
+Implementado en [PR #157](https://github.com/Auyan-ai/platform/pull/157).
+
+Contexto:
+
+- Este trabajo fue una mejora puntual fuera del plan activo de `progress.md`.
+- El agente y los operadores podían responder, escalar y cerrar internamente, pero el ticket externo en Zendesk/Gorgias/Chatwoot podía quedar abierto.
+- No se tocó el grafo, AOPs ni la decisión automática `respond/resolve/escalate`; eso queda para una sesión separada.
+
+Qué se hizo:
+
+- `POST /conversations/{conversation_id}/close` ahora intenta sincronizar el cierre externo antes de marcar la conversación interna como `closed`.
+- Mapeo de estados externo:
+  - Zendesk → `solved`
+  - Gorgias → `closed`
+  - Chatwoot → `resolved`
+- Si el cierre externo falla, el API devuelve `502` con `external_helpdesk_close_failed` y no finge cierre interno exitoso.
+- Chatwoot pasa a usar el endpoint oficial `toggle_status` para resolver conversaciones.
+- Se añadió `gorgias` como `ChannelType` real en backend/shared/web y migración Supabase `20260602000001_add_gorgias_channel.sql`, porque Gorgias ya tenía OAuth/webhook/adapter pero no podía persistirse como canal de conversación.
+
+Verificación:
+
+- `poetry run pytest` → 1117 tests verdes.
+- `pnpm typecheck` verde.
+- `poetry run ruff check` focal verde.
+
+Notas:
+
+- La migración debe aplicarse manualmente en Supabase/Railway siguiendo la regla del proyecto: Railway despliega código pero no aplica SQL.
+- Queda fuera de este PR la decisión automática del agente sobre cuándo cerrar/resolver un ticket.
