@@ -177,6 +177,11 @@ def needs_supervision(state: AgentState) -> bool:
     if state.get("supervisor_retried"):
         return False
 
+    # Supervisión pedida por el AOP compilado (require_supervision=true), propagada por
+    # select_aop. Activa el supervisor también en respuestas/flujos sin tool L2/L3.
+    if state.get("aop_require_supervision"):
+        return True
+
     # Revisar require_supervision en el config del AOP (via tenant_config.extra o system_prompt)
     tenant_config = state.get("tenant_config") or {}
     extra = tenant_config.get("extra") or {}

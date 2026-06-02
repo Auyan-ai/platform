@@ -82,6 +82,33 @@ async def test_threshold_override_low_confidence_respond_to_escalate(
 
 
 @pytest.mark.asyncio
+async def test_per_aop_confidence_threshold_overrides_tenant(
+    fake_deps, make_anthropic_response, monkeypatch
+) -> None:
+    """El umbral por-AOP (más estricto) manda sobre el escalation_threshold global."""
+    fake_response = make_anthropic_response(
+        {
+            "decision": "respond",
+            "confidence": 0.75,  # ≥ tenant 0.70 (respondería) pero < AOP 0.78 (escala)
+            "response_text": "respuesta tentativa",
+        }
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        AsyncMock(return_value=fake_response),
+    )
+    node = make_reason_node(fake_deps)
+
+    state = _base_state()
+    state["aop_confidence_threshold"] = 0.78
+    out = await node(state)
+
+    assert out["decision"] == "escalate"
+    assert out["agent_response"] is None
+    assert "0.78" in (out["escalation_reason"] or "")
+
+
+@pytest.mark.asyncio
 async def test_threshold_does_not_override_explicit_escalate(
     fake_deps, make_anthropic_response, monkeypatch
 ) -> None:
