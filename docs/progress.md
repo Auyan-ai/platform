@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-06-02 (sesión 60 — **Fix #5 intent-switch continuity-aware**. `select_aop` ya no reclasifica ciego: carga el AOP del turno anterior desde `intent_classifier_runs` (sin migración ni checkpointer), se lo pasa al clasificador (continuidad a nivel prompt) y aplica histéresis determinista en `_resolve_aop_slug` (nuevo `intent_switch_threshold=0.70`): continuidad / salir-de-default-fácil (basta `min_confidence`) / pivote-confiable / anti-flapping. Borrado el scaffolding muerto (`_should_reclassify`, `aop_locked_until_turn`, `aop_completed_signal`). Suite **1143 verde** (matriz de histéresis + integración). [PR #167](https://github.com/Auyan-ai/platform/pull/167) **MERGEADO**. Cierra los 5/5 fixes de grafo del 10/10. **Dogfood E2E sobre Marea (verificado en vivo: Fix #5 multi-turno + returns/refunds + order_status #1181)** → destapó 4 hallazgos: #168 (política KB/facts) y #169 (token Shopify en claro) **MERGEADOS**; provisioning sin config/prompt base y plazo devolución recepción-vs-created_at quedan como chips. Siguiente: Chatwoot real. Ver sección "Dogfood E2E Marea" abajo._
+_Última actualización: 2026-06-02 (sesión 60 — **Fix #5 intent-switch continuity-aware**. `select_aop` ya no reclasifica ciego: carga el AOP del turno anterior desde `intent_classifier_runs` (sin migración ni checkpointer), se lo pasa al clasificador (continuidad a nivel prompt) y aplica histéresis determinista en `_resolve_aop_slug` (nuevo `intent_switch_threshold=0.70`): continuidad / salir-de-default-fácil (basta `min_confidence`) / pivote-confiable / anti-flapping. Borrado el scaffolding muerto (`_should_reclassify`, `aop_locked_until_turn`, `aop_completed_signal`). Suite **1143 verde** (matriz de histéresis + integración). [PR #167](https://github.com/Auyan-ai/platform/pull/167) **MERGEADO**. Cierra los 5/5 fixes de grafo del 10/10. **Dogfood E2E sobre Marea (verificado en vivo: Fix #5 multi-turno + returns/refunds + order_status #1181)** → destapó 4 hallazgos: #168 (política KB/facts) y #169 (token Shopify en claro) **MERGEADOS**; **Chatwoot real E2E verificado** (widget → tenant correcto → skill → respuesta de vuelta). Quedan 4 chips (provisioning, plazo devolución, guard de colisión account_id, sync de cierre por inactividad). PRs #167/#168/#169 MERGEADOS; #170 (progress) pendiente. Ver sección "Dogfood E2E Marea" abajo._
 > _Sesión 59 — **AOPs canónicos + fixes de grafo**. (1) Diseñados y verificados uno a uno los 8 AOPs por defecto de e-commerce ES en [`docs/aop-canonical-design.md`](aop-canonical-design.md). (2) **PR #1 [#163](https://github.com/Auyan-ai/platform/pull/163) MERGEADO**: provisioning copy-on-create — cada tenant nace con sus 8 AOPs + permisos (L1/L2 auto, L3 con approval) vía hook en `provision_tenant`; `aops/canonical.py` es la fuente de verdad + `scripts/seed_canonical_aops.py` para backfill. (3) Fixes de grafo (PR #2): [#164](https://github.com/Auyan-ai/platform/pull/164) (cablear `confidence_threshold` + `require_supervision` por-AOP, antes muertos; guard anti prompt-injection) y [#165](https://github.com/Auyan-ai/platform/pull/165) (fecha/hora TZ-aware del tenant + dep `tzdata`) — **AMBOS ABIERTOS, esperan review/merge**. (4) **Backfill aplicado en staging**: Marea Studio (8 nuevos) y Lunaria (6 nuevos + returns/default actualizados a canónico, `consulta_envio` viejo desactivado) — los 8 canónicos activos + 11 permisos en ambos. PENDIENTE: **Fix #5 intent-switch en sesión nueva** — ver sección abajo)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
@@ -32,9 +32,9 @@ _Última actualización: 2026-06-02 (sesión 60 — **Fix #5 intent-switch conti
 
 ---
 
-## 🐕 Dogfood E2E Marea (sesión 60) — en curso
+## 🐕 Dogfood E2E Marea (sesión 60) — webhook + Chatwoot verificados ✅
 
-Se cambió el target del dogfood de Lunaria → **Marea Studio** (`683246c2-10ce-4f6c-a299-5053f32f8c01`, slug `marea-studio`) por estar completa (KB con 8 chunks+embeddings, facts, 8 AOPs canónicos, Shopify + Chatwoot con credenciales, 11 tool permissions). Canal: webhook `/webhooks/inbound` primero (hecho), **Chatwoot real pendiente**.
+Se cambió el target del dogfood de Lunaria → **Marea Studio** (`683246c2-10ce-4f6c-a299-5053f32f8c01`, slug `marea-studio`) por estar completa (KB con 8 chunks+embeddings, facts, 8 AOPs canónicos, Shopify + Chatwoot con credenciales, 11 tool permissions). Canales verificados en vivo: webhook `/webhooks/inbound` ✅ y **Chatwoot real ✅**.
 
 **✅ Fix #5 verificado en vivo (multi-turno por webhook):**
 
@@ -48,6 +48,8 @@ Routing continuity-aware funcionando: pivotes confiables limpios (≥ switch_thr
 
 **✅ order_status E2E sobre pedido real (#1181):** routing `order_status` 0.98 → skill `shopify.get_order_status` **L1 · success · 392ms** sobre datos reales de la tienda de Marea (Pagado, en preparación, Camiseta Oversize Caqui/S ×2, 81,90 €, "3 días" calculado por el `days_since_order` TZ-aware del fix #4). `decision: respond`, sin invención, trazado en `skill_audit_log`.
 
+**✅ Chatwoot real E2E (cadena completa):** mensaje de cliente desde el widget web (conv `da217559`) → webhook `/webhooks/chatwoot` → tenant **marea-studio** (0 mal enrutadas a Lunaria) → `order_status` 0.95 → `get_order_status` L1 success 256ms sobre #1181 → **respuesta posteada de vuelta en el widget** (confirmado visualmente por Kenny). Trazado con `langfuse_trace_id` + coste. Página de prueba del widget: `apps/api/scripts/chatwoot_widget_test.html` (websiteToken del Website Inbox de Purigu; **sin commitear** aún). El grafo funcionó perfecto en ambos canales.
+
 **Hallazgo 1 — bug de provisioning (chip abierto):** el onboarding por portal (PR #137) **no crea `tenant_configurations` ni el prompt base `tenant_prompts`** → todo tenant nuevo falla con `tenant_config_missing` / `no_active_system_prompt` en el primer mensaje, y la página de Configuración del dashboard muestra "No se pudo cargar la configuración". Marea es el primer tenant del flujo productizado, por eso salió. **Workaround:** ambas filas insertadas a mano en Marea (staging) para desbloquear. **Fix de raíz pendiente:** crear ambas en `tenant_provisioning` (transacción) + test + backfill.
 
 **Hallazgo 2 — política anclada solo en get_shop_policies ([PR #168](https://github.com/Auyan-ai/platform/pull/168) ✅ MERGEADO):** returns/refunds escalaban aunque la política estaba en KB/facts, porque el body canónico decía "get_shop_policies es la fuente de verdad". Arreglado: política en capas (KB / facts / get_shop_policies) en returns/refunds/product_info. Re-seed `--update` a Marea (AOPs v2) → **verificado en vivo**: returns responde "30 días", refunds responde el timing, sin escalar ni inventar. **Pendiente:** re-seed `--update` a Lunaria.
@@ -56,11 +58,25 @@ Routing continuity-aware funcionando: pivotes confiables limpios (≥ switch_thr
 
 **Hallazgo 4 — plazo de devolución recepción vs created_at (chip abierto):** la KB de Marea dice "30 días desde la recepción" pero el AOP `returns` calcula desde `created_at` (fecha de pedido) → más estricto que la política real. Alinear el cálculo + el dato en facts.
 
+**Hallazgo 5 — colisión de `account_id` en webhook Chatwoot (resuelto en dato + chip de código):** marea-studio y lunaria tenían el MISMO `account_id 167723` (Purigu) activo; `get_integration_by_chatwoot_account` resuelve con `LIMIT 1` sin unicidad → enrutamiento a tenant arbitrario (riesgo cross-tenant). **Resuelto el dato:** soft-delete del Chatwoot de Lunaria (Kenny decidió que Marea use esa cuenta). **Chip abierto:** índice único `(provider, account_id)` para integraciones activas + detección de colisión fail-closed en código.
+
+**Hallazgo 6 — cierre por inactividad no sincroniza al helpdesk (chip abierto):** `close_external_helpdesk_ticket` (empuja `resolved` a Chatwoot) solo se llama desde el cierre MANUAL; el cierre por inactividad (`cleanup` → `closed_abandoned`) marca cerrado en DB pero **no** sincroniza el estado al helpdesk → conversación abandonada queda `open` en Chatwoot. Además, verificar que el nudge realmente se **entrega** al helpdesk (hoy solo se inserta en DB). NOTA de diseño: el agente NO cierra al detectar "gracias" (correcto/estándar); el cierre es por timeout (cleanup, 48h Chatwoot default) o manual.
+
 **Entregables extra:** 4 políticas de Shopify de Marea (devoluciones, envíos, privacidad, términos) redactadas 1:1 con la KB/facts, listas para pegar en Shopify → Configuración → Políticas (privacy/terms con placeholders de razón social/NIF/domicilio).
 
-**Chips abiertos:** Hallazgo 1 (provisioning) y Hallazgo 4 (plazo devolución).
+**Chips abiertos (4):** H1 provisioning (config + prompt base), H4 plazo devolución (recepción vs created_at), H5 guard de colisión `account_id` en webhook helpdesk, H6 sync de cierre por inactividad → helpdesk + entrega de nudge.
 
-**Pendiente del dogfood:** **Chatwoot real** (cadena completa, lo dispara Kenny desde el widget de Marea); order_change / complaint con pedido real.
+**Pendiente del dogfood:** order_change / complaint con pedido real (los flujos L3 con approval). Chatwoot real ✅ y order_status/returns/refunds ✅ ya cubiertos.
+
+### 🌅 Arranque de mañana (sesión 61)
+- **Modelo:** Sonnet (los pendientes son fixes acotados; sube a Opus solo si toca rediseño).
+- **Estado:** Fix #5 + canónicos + token + Chatwoot **cerrados y verificados en vivo**. PRs #167/#168/#169 MERGEADOS; **#170 (este progress.md) pendiente de merge**.
+- **Opciones para retomar, por prioridad sugerida:**
+  1. Bajar los **4 chips** a PRs (empezar por H1 provisioning — bloquea a todo cliente nuevo del portal; es el más impactante).
+  2. Re-seed `--update` de los AOPs canónicos a **Lunaria** (quedó pendiente del #168).
+  3. Cerrar el dogfood con **order_change / complaint** (flujos L3 con approval) usando un pedido real de Marea.
+  4. Commitear `apps/api/scripts/chatwoot_widget_test.html` si se quiere versionar la herramienta de prueba.
+- **Operativo:** el server HTTP `:8899` (widget de prueba) se levantó en background esta sesión — relanzarlo con `python3 -m http.server 8899` desde `apps/api/scripts/` cuando se necesite.
 
 ---
 
