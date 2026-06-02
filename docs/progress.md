@@ -1,6 +1,6 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-06-02 (sesión 60 — **Fix #5 intent-switch continuity-aware**. `select_aop` ya no reclasifica ciego: carga el AOP del turno anterior desde `intent_classifier_runs` (sin migración ni checkpointer), se lo pasa al clasificador (continuidad a nivel prompt) y aplica histéresis determinista en `_resolve_aop_slug` (nuevo `intent_switch_threshold=0.70`): continuidad / salir-de-default-fácil (basta `min_confidence`) / pivote-confiable / anti-flapping. Borrado el scaffolding muerto (`_should_reclassify`, `aop_locked_until_turn`, `aop_completed_signal`). Suite **1143 verde** (matriz de histéresis + integración). Rama `fix/intent-switch-continuity` → PR contra develop. Cierra los 5/5 fixes de grafo del 10/10._
+_Última actualización: 2026-06-02 (sesión 60 — **Fix #5 intent-switch continuity-aware**. `select_aop` ya no reclasifica ciego: carga el AOP del turno anterior desde `intent_classifier_runs` (sin migración ni checkpointer), se lo pasa al clasificador (continuidad a nivel prompt) y aplica histéresis determinista en `_resolve_aop_slug` (nuevo `intent_switch_threshold=0.70`): continuidad / salir-de-default-fácil (basta `min_confidence`) / pivote-confiable / anti-flapping. Borrado el scaffolding muerto (`_should_reclassify`, `aop_locked_until_turn`, `aop_completed_signal`). Suite **1143 verde** (matriz de histéresis + integración). [PR #167](https://github.com/Auyan-ai/platform/pull/167) **MERGEADO**. Cierra los 5/5 fixes de grafo del 10/10. **Dogfood E2E sobre Marea (verificado en vivo)** + 2 hallazgos nuevos → ver sección "Dogfood E2E Marea" abajo._
 > _Sesión 59 — **AOPs canónicos + fixes de grafo**. (1) Diseñados y verificados uno a uno los 8 AOPs por defecto de e-commerce ES en [`docs/aop-canonical-design.md`](aop-canonical-design.md). (2) **PR #1 [#163](https://github.com/Auyan-ai/platform/pull/163) MERGEADO**: provisioning copy-on-create — cada tenant nace con sus 8 AOPs + permisos (L1/L2 auto, L3 con approval) vía hook en `provision_tenant`; `aops/canonical.py` es la fuente de verdad + `scripts/seed_canonical_aops.py` para backfill. (3) Fixes de grafo (PR #2): [#164](https://github.com/Auyan-ai/platform/pull/164) (cablear `confidence_threshold` + `require_supervision` por-AOP, antes muertos; guard anti prompt-injection) y [#165](https://github.com/Auyan-ai/platform/pull/165) (fecha/hora TZ-aware del tenant + dep `tzdata`) — **AMBOS ABIERTOS, esperan review/merge**. (4) **Backfill aplicado en staging**: Marea Studio (8 nuevos) y Lunaria (6 nuevos + returns/default actualizados a canónico, `consulta_envio` viejo desactivado) — los 8 canónicos activos + 11 permisos en ambos. PENDIENTE: **Fix #5 intent-switch en sesión nueva** — ver sección abajo)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
@@ -29,6 +29,28 @@ _Última actualización: 2026-06-02 (sesión 60 — **Fix #5 intent-switch conti
 **Diferido** (capa opcional del fix de fecha #4): `days_since_order` calculado en código para que el LLM no reste fechas.
 
 **Próximo paso técnico:** mergear este PR → con los 8 AOPs canónicos + 5/5 fixes de grafo listos, queda desbloqueado el dogfood E2E con la "tienda ligera" de Lunaria (correr la 25/25 con judge — ver Bloque 0.11).
+
+---
+
+## 🐕 Dogfood E2E Marea (sesión 60) — en curso
+
+Se cambió el target del dogfood de Lunaria → **Marea Studio** (`683246c2-10ce-4f6c-a299-5053f32f8c01`, slug `marea-studio`) por estar completa (KB con 8 chunks+embeddings, facts, 8 AOPs canónicos, Shopify + Chatwoot con credenciales, 11 tool permissions). Canal: webhook `/webhooks/inbound` primero (hecho), **Chatwoot real pendiente**.
+
+**✅ Fix #5 verificado en vivo (multi-turno por webhook):**
+
+| Turn | Mensaje | AOP | Conf | reclasif. |
+|---|---|---|---|---|
+| 1 | envíos | `shipping_info` | 0.95 | f |
+| 2 | "devolver una camiseta" | `returns` | 0.95 | t |
+| 3 | "¿cuándo recupero el dinero?" | `refunds` | 0.85 | t |
+
+Routing continuity-aware funcionando: pivotes confiables limpios (≥ switch_threshold), `was_reclassification` correcto, sin flapping.
+
+**Hallazgo 1 — bug de provisioning (chip creado, PR aparte):** el onboarding por portal (PR #137) **no crea `tenant_configurations` ni el prompt base `tenant_prompts`** → todo tenant nuevo falla con `tenant_config_missing` / `no_active_system_prompt` en el primer mensaje, y la página de Configuración del dashboard muestra "No se pudo cargar la configuración". Marea es el primer tenant del flujo productizado, por eso salió. **Workaround:** ambas filas insertadas a mano en Marea (staging) para desbloquear. **Fix de raíz pendiente:** crear ambas en `tenant_provisioning` (transacción) + test + backfill.
+
+**Hallazgo 2 — política anclada solo en get_shop_policies ([PR #168](https://github.com/Auyan-ai/platform/pull/168)):** returns/refunds escalaban aunque la política estaba en KB/facts, porque el body canónico decía "get_shop_policies es la fuente de verdad". Arreglado: política en capas (KB / facts / get_shop_policies) en returns/refunds/product_info. Re-seed `--update` a Marea (AOPs v2) → **verificado en vivo**: returns responde "30 días", refunds responde el timing, sin escalar ni inventar. **Pendiente:** re-seed `--update` a Lunaria tras merge.
+
+**Pendiente del dogfood:** Chatwoot real (cadena completa); order_status / order_change / complaint con un pedido real de la tienda de Marea.
 
 ---
 
