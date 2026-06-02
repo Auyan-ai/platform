@@ -88,35 +88,22 @@ def make_load_tenant_context_node(
                 creds = json.loads(decrypt_credentials(commerce_encrypted, key).decode())
                 config_jsonb = commerce_integration.config or {}
 
-                # Shopify 2026 flow: si hay client_id/client_secret, refrescar el
-                # access_token cacheado antes de pasar al adapter. El adapter
-                # espera 'access_token' (no client_id/secret) en creds.
+                # Shopify 2026 flow: si hay client_id/client_secret, resolver el
+                # access_token corto (cache en memoria, no en DB) antes de pasar al
+                # adapter. El adapter espera 'access_token' (no client_id/secret).
                 if (
                     commerce_integration.provider == "shopify"
                     and creds.get("client_id")
                     and creds.get("client_secret")
                 ):
-                    import datetime as _dt
-
                     from apps.api.integrations.shopify import ensure_shopify_access_token
 
-                    cached_token = config_jsonb.get("cached_access_token")
-                    expires_str = config_jsonb.get("cached_token_expires_at")
-                    expires_at = (
-                        _dt.datetime.fromisoformat(expires_str) if expires_str else None
+                    access_token, _new_expires = await ensure_shopify_access_token(
+                        tenant_id=tenant_id,
+                        domain=creds["domain"],
+                        client_id=creds["client_id"],
+                        client_secret=creds["client_secret"],
                     )
-                    # Necesitamos una nueva conexión para escribir el refresh — el
-                    # tenant_scope anterior ya se cerró. Abrimos uno nuevo.
-                    async with tenant_scope(tenant_id) as refresh_conn:
-                        access_token, _new_expires = await ensure_shopify_access_token(
-                            refresh_conn,
-                            tenant_id=tenant_id,
-                            domain=creds["domain"],
-                            client_id=creds["client_id"],
-                            client_secret=creds["client_secret"],
-                            cached_access_token=cached_token,
-                            cached_token_expires_at=expires_at,
-                        )
                     # Reemplazamos creds: el adapter no necesita client_id/secret.
                     creds = {"domain": creds["domain"], "access_token": access_token}
 

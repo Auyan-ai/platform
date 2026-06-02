@@ -1379,10 +1379,12 @@ class TestTenantIntegrationsEndpoints:
         assert sc_factory.call_args.args == ("marea.myshopify.com", "shpat_dynamic_xyz")
         assert upsert_mock.await_args.kwargs["kind"] == "commerce"
         assert upsert_mock.await_args.kwargs["is_primary_for_kind"] is True
-        # El config persistido incluye el cached_access_token + expires_at.
+        # El config persistido NO guarda el access_token (credencial viva): el token
+        # corto se resuelve on-demand con cache en memoria, no en DB en claro.
         cfg = upsert_mock.await_args.kwargs["config"]
-        assert cfg["cached_access_token"] == "shpat_dynamic_xyz"
-        assert "cached_token_expires_at" in cfg
+        assert "cached_access_token" not in cfg
+        assert "cached_token_expires_at" not in cfg
+        assert cfg["shop_name"] == "Marea"
 
     def test_connect_shopify_invalid_credentials_returns_422(
         self, monkeypatch: pytest.MonkeyPatch

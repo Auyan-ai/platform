@@ -1336,7 +1336,7 @@ async def connect_shopify(
 
     # 1) Validar credentials con Shopify (OAuth Client Credentials Grant).
     try:
-        access_token, expires_in = await exchange_client_credentials(
+        access_token, _expires_in = await exchange_client_credentials(
             shop_domain=domain,
             client_id=body.client_id,
             client_secret=body.client_secret,
@@ -1361,7 +1361,6 @@ async def connect_shopify(
         ) from exc
 
     now = datetime.datetime.now(datetime.UTC)
-    expires_at = now + datetime.timedelta(seconds=expires_in)
 
     key = _crypto_key(settings)
     encrypted = encrypt_credentials(
@@ -1374,14 +1373,14 @@ async def connect_shopify(
         ).encode(),
         key,
     )
+    # NO cacheamos el access_token aquí: es una credencial viva y guardarla en config
+    # (claro) rompía el cifrado en reposo. El access_token corto se resuelve on-demand
+    # con cache en memoria (ensure_shopify_access_token). En DB sólo van los secretos
+    # durables, cifrados en credentials_encrypted.
     config: dict[str, Any] = {
         "shop_name": shop.get("name"),
         "shop_email": shop.get("email"),
         "verified_at": now.isoformat(),
-        # Cache inicial del access_token. ensure_shopify_access_token() lo refresca
-        # cuando faltan menos de 5min para expirar.
-        "cached_access_token": access_token,
-        "cached_token_expires_at": expires_at.isoformat(),
     }
 
     async with tenant_scope(tenant_id) as conn:
