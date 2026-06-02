@@ -60,16 +60,20 @@ export function TenantSwitcher({ activeTenantId, expanded = true }: TenantSwitch
         </span>
         <span
           className={cn(
-            'min-w-0 flex-1 truncate font-medium text-foreground-body transition-[opacity,transform] duration-200',
-            expanded ? 'opacity-100' : 'pointer-events-none w-0 opacity-0',
+            'truncate font-medium text-foreground-body transition-[opacity,width] duration-200',
+            expanded
+              ? 'min-w-0 flex-1 opacity-100'
+              : 'pointer-events-none w-0 flex-none overflow-hidden opacity-0',
           )}
         >
           {isLoading ? '…' : (active?.name ?? 'Selecciona tenant')}
         </span>
         <span
           className={cn(
-            'transition-[opacity,transform] duration-200',
-            expanded ? 'opacity-100' : 'pointer-events-none w-0 opacity-0',
+            'transition-[opacity,width] duration-200',
+            expanded
+              ? 'opacity-100'
+              : 'pointer-events-none w-0 flex-none overflow-hidden opacity-0',
           )}
         >
           {open ? (
