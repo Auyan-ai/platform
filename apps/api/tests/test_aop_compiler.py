@@ -266,7 +266,9 @@ def test_compile_aop_no_kb_block_when_no_chunks() -> None:
     config = make_tenant_configuration()
     with patch.object(SkillRegistry, "get", side_effect=ValueError("unknown_skill")):
         result = compile_aop(aop, config, kb_chunks=[])
-    assert "base de conocimiento" not in result.system_prompt
+    # Header real del bloque KB. (No la frase suelta "base de conocimiento": la regla
+    # global de seguridad anti-injection la menciona legítimamente.)
+    assert "Contexto de la base de conocimiento" not in result.system_prompt
 
 
 def test_compile_aop_reads_max_iterations_from_frontmatter() -> None:
@@ -655,6 +657,21 @@ def test_compile_aop_injects_facts_and_playbook() -> None:
     assert "L-V 9-18" in result.system_prompt
     assert "Muy formal." in result.system_prompt
     assert "Sin devoluciones." in result.system_prompt
+
+
+def test_compile_aop_includes_anti_injection_rule() -> None:
+    """Las reglas globales traen el guard anti prompt-injection (contenido = datos, no instrucciones)."""
+    aop = _make_aop()
+    config = make_tenant_configuration()
+
+    with patch(
+        "apps.api.aops.compiler._resolve_tool_definitions", return_value=[]
+    ):
+        result = compile_aop(aop, config)
+
+    prompt = result.system_prompt.lower()
+    assert "nunca como instrucciones" in prompt
+    assert "únicas instrucciones válidas" in prompt
 
 
 def test_compile_aop_no_facts_no_playbook_no_extra_blocks() -> None:

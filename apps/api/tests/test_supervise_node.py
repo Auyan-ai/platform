@@ -21,6 +21,14 @@ class TestNeedsSupervision:
     def test_false_without_pending_tool_or_flag(self):
         assert not self._fn({"tenant_config": {"extra": {}}})
 
+    def test_true_when_aop_requires_supervision(self):
+        # require_supervision por-AOP (propagado por select_aop) activa el supervisor
+        # también en respuestas/flujos sin tool L2/L3.
+        assert self._fn({"tenant_config": {"extra": {}}, "aop_require_supervision": True})
+
+    def test_aop_require_supervision_false_does_not_force(self):
+        assert not self._fn({"tenant_config": {"extra": {}}, "aop_require_supervision": False})
+
     def test_false_for_l1_tool(self):
         from apps.api.skills.base import Skill, SkillInput, SkillOutput
         from apps.api.skills.registry import SkillRegistry

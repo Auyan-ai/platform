@@ -124,7 +124,14 @@ def _handle_decide_tool(
     decision = parsed.decision
     escalation_reason: str | None = parsed.escalation_reason
     agent_response: str | None = parsed.response_text
-    threshold = float(state["tenant_config"]["escalation_threshold"])
+    # Umbral por-AOP si está presente (lo propaga select_aop desde el AOP compilado);
+    # si no hay AOP activo, cae al umbral global del tenant.
+    aop_threshold = state.get("aop_confidence_threshold")
+    threshold = (
+        float(aop_threshold)
+        if aop_threshold is not None
+        else float(state["tenant_config"]["escalation_threshold"])
+    )
 
     if decision == "respond" and parsed.confidence < threshold:
         decision = "escalate"

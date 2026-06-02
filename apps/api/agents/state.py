@@ -107,6 +107,13 @@ class AgentState(TypedDict, total=False):
     aop_completed_signal: bool
     pending_intent: str
 
+    # Propagados desde el AOP compilado por select_aop (PR graph-fixes).
+    # aop_confidence_threshold: umbral para escalar la RESPUESTA, por-AOP. reason lo usa
+    #   en vez de tenant_config.escalation_threshold cuando hay un AOP activo.
+    # aop_require_supervision: el AOP pide supervisar la respuesta (no solo por tier de tool).
+    aop_confidence_threshold: float
+    aop_require_supervision: bool
+
     # --- Tool Permissions (Sprint 10) ---
     # Mapa slug → {is_enabled: bool, human_approval_required: bool, threshold_override: float|None}
     # Cargado por load_tenant_context desde tenant_tool_permissions.
