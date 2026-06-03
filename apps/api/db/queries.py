@@ -12,10 +12,12 @@ Reglas:
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
+from apps.api.core.errors import ConflictError
 from apps.api.db.models import (
     AgentReasoningEvent,
     AopVersion,
@@ -73,6 +75,8 @@ from apps.api.db.models import (
 
 if TYPE_CHECKING:
     import asyncpg
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -2594,6 +2598,41 @@ def _row_to_integration(row: Any) -> TenantIntegration:
     return TenantIntegration(**{k: row[k] for k in TenantIntegration.model_fields})
 
 
+def _single_integration_or_collision(
+    rows: list[Any],
+    *,
+    provider: str,
+    lookup: str,
+    value: str,
+) -> TenantIntegration | None:
+    """Resuelve un lookup cross-tenant a UNA integración, o falla cerrado.
+
+    Las funciones `get_integration_by_*` resuelven el tenant de un webhook entrante
+    por un identificador externo (account_id / subdomain / domain). Si ese
+    identificador apunta a más de una integración activa, el routing es ambiguo:
+    responder enrutaría al tenant equivocado (fuga cross-tenant). En ese caso
+    NO adivinamos — logueamos la colisión y lanzamos ConflictError (fail-closed).
+
+    El índice único parcial en tenant_integrations es la red de seguridad a nivel
+    DB; este guard cubre el caso de que el índice aún no exista (migración no
+    aplicada) o se haya caído.
+    """
+    if len(rows) > 1:
+        tenant_ids = sorted({str(r["tenant_id"]) for r in rows})
+        logger.error(
+            "integration_routing_collision provider=%s %s=%s tenants=%s — fail-closed",
+            provider,
+            lookup,
+            value,
+            tenant_ids,
+        )
+        raise ConflictError(
+            "Routing ambiguo: el identificador apunta a múltiples integraciones activas.",
+            code="integration_routing_collision",
+        )
+    return _row_to_integration(rows[0]) if rows else None
+
+
 async def get_active_integration(
     conn: asyncpg.Connection,
     *,
@@ -2787,7 +2826,7 @@ async def get_integration_by_chatwoot_account(
     Debe llamarse con bootstrap_connection() porque no tiene tenant_scope.
     El account_id vive en config->>'account_id' (no está cifrado).
     """
-    row = await conn.fetchrow(
+    rows = await conn.fetch(
         """
         SELECT id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
                enabled_at, enabled_by, created_at, updated_at
@@ -2797,11 +2836,13 @@ async def get_integration_by_chatwoot_account(
            AND config->>'account_id' = $1
            AND deleted_at IS NULL
            AND is_active = TRUE
-         LIMIT 1
+         LIMIT 2
         """,
         account_id,
     )
-    return _row_to_integration(row) if row else None
+    return _single_integration_or_collision(
+        rows, provider="chatwoot", lookup="account_id", value=account_id
+    )
 
 
 async def get_integration_by_zendesk_subdomain(
@@ -2814,7 +2855,7 @@ async def get_integration_by_zendesk_subdomain(
     Debe llamarse con bootstrap_connection() porque no tiene tenant_scope.
     El subdomain vive en config->>'subdomain' (no está cifrado).
     """
-    row = await conn.fetchrow(
+    rows = await conn.fetch(
         """
         SELECT id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
                enabled_at, enabled_by, created_at, updated_at
@@ -2824,11 +2865,13 @@ async def get_integration_by_zendesk_subdomain(
            AND config->>'subdomain' = $1
            AND deleted_at IS NULL
            AND is_active = TRUE
-         LIMIT 1
+         LIMIT 2
         """,
         subdomain,
     )
-    return _row_to_integration(row) if row else None
+    return _single_integration_or_collision(
+        rows, provider="zendesk", lookup="subdomain", value=subdomain
+    )
 
 
 # ============================================================
@@ -3127,7 +3170,7 @@ async def get_integration_by_gorgias_domain(
     Debe llamarse con bootstrap_connection() porque no tiene tenant_scope.
     El domain vive en config->>'domain' (no está cifrado).
     """
-    row = await conn.fetchrow(
+    rows = await conn.fetch(
         """
         SELECT id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
                enabled_at, enabled_by, created_at, updated_at
@@ -3137,11 +3180,13 @@ async def get_integration_by_gorgias_domain(
            AND config->>'domain' = $1
            AND deleted_at IS NULL
            AND is_active = TRUE
-         LIMIT 1
+         LIMIT 2
         """,
         domain,
     )
-    return _row_to_integration(row) if row else None
+    return _single_integration_or_collision(
+        rows, provider="gorgias", lookup="domain", value=domain
+    )
 
 
 # ============================================================
