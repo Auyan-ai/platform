@@ -287,6 +287,11 @@ class TestApproveAction:
         # El mensaje 'agent_human' lleva autor (constraint messages_human_has_author).
         assert insert_message_mock.await_args.kwargs["role"] == "agent_human"
         assert insert_message_mock.await_args.kwargs["author_user_id"] == USER_ID
+        # Bug D: mensaje al cliente limpio (plantilla, sin agent_deps → sin LLM),
+        # nunca el slug interno ni el dict crudo del output.
+        content = insert_message_mock.await_args.kwargs["content"]
+        assert content == "Hemos cancelado tu pedido."
+        assert "shopify." not in content and "order_id" not in content
 
 
 # ----------------------------------------------------------------
