@@ -118,9 +118,44 @@ class TestAdapterMethods:
         adapter = ShopifyAdapter()
         with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             inst = MockClient.return_value
+            # Sin pedido por ese 'name' → 1 se trata como id interno (sin resolver).
+            inst.get_order_by_name = AsyncMock(return_value=None)
             inst.cancel_order = AsyncMock(return_value={"id": 1})
             await adapter.cancel_order(_CTX, 1, reason="fraud", email=False, refund=True)
         inst.cancel_order.assert_awaited_once_with(1, reason="fraud", email=False, refund=True)
+
+    @pytest.mark.asyncio
+    async def test_mutation_resolves_visible_number_to_internal_id(self) -> None:
+        """El número visible del pedido (1181) se resuelve al order_id interno
+        (7133866033432) antes de mutar. Regresión del 404 del dogfood: las skills
+        de mutación pegaban contra /orders/1181.json en vez del id interno."""
+        adapter = ShopifyAdapter()
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
+            inst = MockClient.return_value
+            inst.get_order_by_name = AsyncMock(return_value={"id": 7133866033432})
+            inst.update_shipping_address = AsyncMock(return_value={"id": 7133866033432})
+            await adapter.update_shipping_address(
+                _CTX,
+                1181,
+                address1="Calle Jose Hierro 18",
+                city="San Sebastián de los Reyes",
+                province="Madrid",
+                country="España",
+                zip_code="28702",
+            )
+        inst.get_order_by_name.assert_awaited_once_with("1181")
+        # El adapter muta usando el id interno resuelto, no el número visible.
+        assert inst.update_shipping_address.await_args.args[0] == 7133866033432
+
+    @pytest.mark.asyncio
+    async def test_resolve_order_id_passthrough_when_already_internal(self) -> None:
+        """Si llega un id interno (ningún pedido tiene ese 'name'), se usa tal cual."""
+        adapter = ShopifyAdapter()
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
+            inst = MockClient.return_value
+            inst.get_order_by_name = AsyncMock(return_value=None)
+            resolved = await adapter._resolve_order_id(_CTX, 7133866033432)
+        assert resolved == 7133866033432
 
     @pytest.mark.asyncio
     async def test_missing_credentials_raises_error(self) -> None:
