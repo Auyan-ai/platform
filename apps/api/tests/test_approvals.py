@@ -302,6 +302,73 @@ class TestApproveAction:
         # Bug E: el resultado se entrega al helpdesk del cliente.
         assert deliver_mock.await_args.kwargs["content"] == content
 
+    def test_approve_skill_failure_leaves_pending_and_sends_no_reply(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Hallazgo 1: si la skill falla, no se resuelve ni se le confirma al cliente.
+
+        La aprobación queda 'pending' (reintentable), no se inserta mensaje al
+        cliente (no enmascarar el fallo) ni se entrega nada al helpdesk, y la
+        respuesta reporta execution_status='failed' con el error.
+        """
+        from pydantic import BaseModel
+
+        class _FakeInput(BaseModel):
+            order_id: int
+
+        class _FakeSkill:
+            input_schema = _FakeInput
+
+            async def execute(self, ctx: Any, inputs: Any) -> Any:
+                raise RuntimeError("Client error '404 Not Found' for url ...")
+
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.get_pending_approval",
+            AsyncMock(return_value=_sample_approval()),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.get_tenant_configuration",
+            AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.build_commerce_integration_ctx",
+            AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.SkillRegistry.get",
+            lambda slug: _FakeSkill,
+        )
+        resolve_mock = AsyncMock(return_value=None)
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.resolve_pending_approval", resolve_mock
+        )
+        insert_message_mock = AsyncMock()
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.insert_message", insert_message_mock
+        )
+        deliver_mock = AsyncMock(return_value=True)
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.deliver_message_to_helpdesk", deliver_mock
+        )
+
+        app, client = _make_app(monkeypatch, approvals_router)
+        resp = client.post(
+            f"/approvals/{APPROVAL_ID}/approve",
+            json={"comment": "ok"},
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["execution_status"] == "failed"
+        assert data["message_id"] is None
+        assert "404" in data["output"]["error"]
+        # No se resuelve (queda 'pending' para reintento), no se le confirma nada
+        # al cliente ni se entrega al helpdesk.
+        resolve_mock.assert_not_awaited()
+        insert_message_mock.assert_not_awaited()
+        deliver_mock.assert_not_awaited()
+
 
 # ----------------------------------------------------------------
 # POST /approvals/{id}/reject

@@ -165,22 +165,37 @@ async def approve_action(
         output_data = output.model_dump(mode="json")
         execution_status = "success"
     except Exception as exc:
-        logger.warning(
+        logger.error(
             "approved_skill_execution_failed",
             extra={
                 "approval_id": str(approval_id),
                 "skill": approval.skill_slug,
+                "conversation_id": str(approval.conversation_id),
                 "error": str(exc),
             },
         )
         output_data = {"error": str(exc)}
         execution_status = "failed"
 
-    # Mensaje al cliente: natural y sin jerga interna (Haiku, con fallback a plantilla).
-    # output_data crudo queda solo en metadata, no se le muestra al cliente.
+    # La ejecución falló (p.ej. error de la API del proveedor). NO marcamos la
+    # aprobación como 'approved' ni le mandamos al cliente una confirmación: eso
+    # enmascararía el fallo. La dejamos 'pending' para que siga en la cola del
+    # operador y pueda reintentarse; el gate L3 ya le avisó al cliente que un
+    # agente revisaría su solicitud. El error queda logueado arriba (nivel error)
+    # y en la respuesta para que el dashboard lo muestre.
+    if execution_status == "failed":
+        return {
+            "approval_id": str(approval_id),
+            "execution_status": execution_status,
+            "message_id": None,
+            "output": output_data,
+        }
+
+    # Éxito: mensaje al cliente natural y sin jerga interna (Haiku, con fallback a
+    # plantilla). output_data crudo queda solo en metadata, no se le muestra al cliente.
     anthropic_client = getattr(getattr(request.app.state, "agent_deps", None), "anthropic", None)
     result_message = await generate_customer_reply(
-        anthropic_client, approval.skill_slug, success=(execution_status == "success")
+        anthropic_client, approval.skill_slug, success=True
     )
 
     # Marcar aprobada y añadir mensaje a la conversación
