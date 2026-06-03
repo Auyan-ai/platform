@@ -244,6 +244,7 @@ def make_execute_skill_node(
                     "pending_tool_call": None,
                     "tool_iterations": new_iter,
                     "pending_approval_id": str(approval_id),
+                    "pending_approval_skill_slug": slug,
                     "escalation_reason": f"awaiting_human_approval:{approval_id}",
                 }
             # Sin tenant/conversation en state (no debería pasar en prod) → error.

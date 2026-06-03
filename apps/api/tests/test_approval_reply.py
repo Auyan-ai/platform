@@ -6,10 +6,27 @@ from unittest.mock import AsyncMock, MagicMock
 
 from apps.api.services.approval_reply import (
     _DEFAULT_DONE,
+    _DEFAULT_GATE,
     _FAILED,
     fallback_message,
+    gate_message,
     generate_customer_reply,
 )
+
+
+class TestGateMessage:
+    def test_known_skill_is_warm_and_contextual(self) -> None:
+        msg = gate_message("shopify.update_shipping_address")
+        assert "dirección de tu pedido" in msg
+        assert "shopify." not in msg
+        # No la plantilla robótica antigua.
+        assert "requiere revisión por parte de nuestro equipo" not in msg
+
+    def test_unknown_skill_uses_default(self) -> None:
+        assert gate_message("shopify.whatever") == _DEFAULT_GATE
+
+    def test_none_uses_default(self) -> None:
+        assert gate_message(None) == _DEFAULT_GATE
 
 
 class TestFallbackMessage:
