@@ -1,6 +1,8 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-06-02 (sesión 60 — **Fix #5 intent-switch continuity-aware**. `select_aop` ya no reclasifica ciego: carga el AOP del turno anterior desde `intent_classifier_runs` (sin migración ni checkpointer), se lo pasa al clasificador (continuidad a nivel prompt) y aplica histéresis determinista en `_resolve_aop_slug` (nuevo `intent_switch_threshold=0.70`): continuidad / salir-de-default-fácil (basta `min_confidence`) / pivote-confiable / anti-flapping. Borrado el scaffolding muerto (`_should_reclassify`, `aop_locked_until_turn`, `aop_completed_signal`). Suite **1143 verde** (matriz de histéresis + integración). [PR #167](https://github.com/Auyan-ai/platform/pull/167) **MERGEADO**. Cierra los 5/5 fixes de grafo del 10/10. **Dogfood E2E sobre Marea (verificado en vivo: Fix #5 multi-turno + returns/refunds + order_status #1181)** → destapó 4 hallazgos: #168 (política KB/facts) y #169 (token Shopify en claro) **MERGEADOS**; **Chatwoot real E2E verificado** (widget → tenant correcto → skill → respuesta de vuelta). Quedan 4 chips (provisioning, plazo devolución, guard de colisión account_id, sync de cierre por inactividad). PRs #167/#168/#169 MERGEADOS; #170 (progress) pendiente. Ver sección "Dogfood E2E Marea" abajo._
+_Última actualización: 2026-06-03 (sesión 62 — **Dogfood L3 cerrado E2E + 6 fixes**. Cerrado el flujo L3 con approval de punta a punta vía **widget Chatwoot real** (`order_change` → `update_shipping_address` sobre #1181: gate → `pending_approval` → aprobación en dashboard → ejecución real en Shopify → confirmación al cliente → revert a la dirección original). El camino de aprobación estaba **roto de raíz**; el dogfood destapó 5 bugs + 1 de seguridad, todos con PR + tests: [#172](https://github.com/Auyan-ai/platform/pull/172) **H5** colisión `account_id` cross-tenant (índice único parcial + guard fail-closed); [#173](https://github.com/Auyan-ai/platform/pull/173) 500 al aprobar (SkillContext con kwargs obsoletos → helper `build_commerce_integration_ctx`); [#174](https://github.com/Auyan-ai/platform/pull/174) **B1** el dashboard interno no exigía `super_admin` (un `tenant_admin` podía entrar — no era fuga de datos, la API aísla, pero sí frontera de operador rota); [#175](https://github.com/Auyan-ai/platform/pull/175) 500 mensaje `agent_human` sin autor (constraint); [#176](https://github.com/Auyan-ai/platform/pull/176) 422 país en texto libre ("España") → `country_code` ISO; [#177](https://github.com/Auyan-ai/platform/pull/177) mensaje al cliente crudo → redactado con **Haiku** (fallback plantilla); [#178](https://github.com/Auyan-ai/platform/pull/178) **entrega al helpdesk** de los mensajes del flujo L3 (escalate + approve) — **ABIERTO**, resto MERGEADOS. `complaint` también verificado (empatía + escalar, sin L3). **Decisión de producto:** ambos roles aprueban L3, cada uno desde su dashboard (la API ya aísla por tenant). Pendiente: **país determinista** (hoy lo rellena el LLM), H4, H6. Ver "Dogfood E2E Marea" abajo._
+> _Sesión 61 — **Fix de raíz Hallazgo 1 (provisioning)**: `provision_tenant` ahora crea `tenant_configurations` + prompt base `system` (helper idempotente `ensure_tenant_config_and_prompt` + script de backfill). [PR #171](https://github.com/Auyan-ai/platform/pull/171) MERGEADO._
+> _Sesión 60 — **Fix #5 intent-switch continuity-aware** ([#167](https://github.com/Auyan-ai/platform/pull/167) MERGEADO, cierra 5/5 fixes de grafo) + **dogfood E2E sobre Marea** (Fix #5 multi-turno + order_status #1181 + returns/refunds + **Chatwoot real**) → destapó hallazgos #168 (política KB/facts) y #169 (token Shopify en claro), MERGEADOS._
 > _Sesión 59 — **AOPs canónicos + fixes de grafo**. (1) Diseñados y verificados uno a uno los 8 AOPs por defecto de e-commerce ES en [`docs/aop-canonical-design.md`](aop-canonical-design.md). (2) **PR #1 [#163](https://github.com/Auyan-ai/platform/pull/163) MERGEADO**: provisioning copy-on-create — cada tenant nace con sus 8 AOPs + permisos (L1/L2 auto, L3 con approval) vía hook en `provision_tenant`; `aops/canonical.py` es la fuente de verdad + `scripts/seed_canonical_aops.py` para backfill. (3) Fixes de grafo (PR #2): [#164](https://github.com/Auyan-ai/platform/pull/164) (cablear `confidence_threshold` + `require_supervision` por-AOP, antes muertos; guard anti prompt-injection) y [#165](https://github.com/Auyan-ai/platform/pull/165) (fecha/hora TZ-aware del tenant + dep `tzdata`) — **AMBOS ABIERTOS, esperan review/merge**. (4) **Backfill aplicado en staging**: Marea Studio (8 nuevos) y Lunaria (6 nuevos + returns/default actualizados a canónico, `consulta_envio` viejo desactivado) — los 8 canónicos activos + 11 permisos en ambos. PENDIENTE: **Fix #5 intent-switch en sesión nueva** — ver sección abajo)._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
@@ -32,51 +34,51 @@ _Última actualización: 2026-06-02 (sesión 60 — **Fix #5 intent-switch conti
 
 ---
 
-## 🐕 Dogfood E2E Marea (sesión 60) — webhook + Chatwoot verificados ✅
+## 🐕 Dogfood E2E Marea — L1 + L3 verificados ✅ (sesiones 60→62)
 
-Se cambió el target del dogfood de Lunaria → **Marea Studio** (`683246c2-10ce-4f6c-a299-5053f32f8c01`, slug `marea-studio`) por estar completa (KB con 8 chunks+embeddings, facts, 8 AOPs canónicos, Shopify + Chatwoot con credenciales, 11 tool permissions). Canales verificados en vivo: webhook `/webhooks/inbound` ✅ y **Chatwoot real ✅**.
+Target del dogfood: **Marea Studio** (`683246c2-10ce-4f6c-a299-5053f32f8c01`, slug `marea-studio`) — completa (KB 8 chunks+embeddings, facts, 8 AOPs canónicos, Shopify + Chatwoot, 11 tool permissions). Pedido real de pruebas: **#1181** (`order_id` interno `7133866033432`).
 
-**✅ Fix #5 verificado en vivo (multi-turno por webhook):**
+**✅ L1 / routing (sesión 60):** Fix #5 multi-turno (shipping→returns→refunds, continuity-aware sin flapping); `order_status` sobre #1181 (L1 success, sin invención); returns/refunds responden política sin escalar; **Chatwoot real E2E** (widget → `/webhooks/chatwoot` → marea-studio → skill → respuesta en el widget).
 
-| Turn | Mensaje | AOP | Conf | reclasif. |
-|---|---|---|---|---|
-| 1 | envíos | `shipping_info` | 0.95 | f |
-| 2 | "devolver una camiseta" | `returns` | 0.95 | t |
-| 3 | "¿cuándo recupero el dinero?" | `refunds` | 0.85 | t |
+**✅ L3 con approval (sesión 62) — cerrado E2E:** `order_change` → `update_shipping_address` sobre #1181, vía **widget Chatwoot real**. Cadena completa: gate (no ejecuta, crea `pending_approval`, avisa al cliente) → aprobación desde dashboard → **ejecución real contra Shopify** → confirmación natural al cliente → **revert** a la dirección original. `complaint` también verificado (empatía + recoge contexto + escala con razón, sin L3, sin promesas). El camino de aprobación **nunca había funcionado**; lo abrió este dogfood.
 
-Routing continuity-aware funcionando: pivotes confiables limpios (≥ switch_threshold), `was_reclassification` correcto, sin flapping.
+### Hallazgos del dogfood
 
-**✅ order_status E2E sobre pedido real (#1181):** routing `order_status` 0.98 → skill `shopify.get_order_status` **L1 · success · 392ms** sobre datos reales de la tienda de Marea (Pagado, en preparación, Camiseta Oversize Caqui/S ×2, 81,90 €, "3 días" calculado por el `days_since_order` TZ-aware del fix #4). `decision: respond`, sin invención, trazado en `skill_audit_log`.
+| # | Hallazgo | Estado |
+|---|---|---|
+| H1 | Provisioning no crea `tenant_configurations` ni prompt base → tenant nuevo falla 1er mensaje | ✅ [#171](https://github.com/Auyan-ai/platform/pull/171) |
+| H2 | Política anclada solo en `get_shop_policies` (returns/refunds escalaban) | ✅ [#168](https://github.com/Auyan-ai/platform/pull/168) |
+| H3 | access_token Shopify cacheado en claro en DB | ✅ [#169](https://github.com/Auyan-ai/platform/pull/169) |
+| H4 | `returns` calcula plazo desde `created_at`, no desde la recepción (más estricto que la política) | ⏳ chip |
+| H5 | Colisión `account_id` cross-tenant en webhook (`LIMIT 1` sin unicidad) | ✅ [#172](https://github.com/Auyan-ai/platform/pull/172) — índice único parcial + fail-closed |
+| H6 | Cierre por inactividad no sincroniza `resolved` al helpdesk + verificar entrega del nudge | ⏳ chip |
 
-**✅ Chatwoot real E2E (cadena completa):** mensaje de cliente desde el widget web (conv `da217559`) → webhook `/webhooks/chatwoot` → tenant **marea-studio** (0 mal enrutadas a Lunaria) → `order_status` 0.95 → `get_order_status` L1 success 256ms sobre #1181 → **respuesta posteada de vuelta en el widget** (confirmado visualmente por Kenny). Trazado con `langfuse_trace_id` + coste. Página de prueba del widget: `apps/api/scripts/chatwoot_widget_test.html` (websiteToken del Website Inbox de Purigu; **sin commitear** aún). El grafo funcionó perfecto en ambos canales.
+### Bugs del flujo L3 (sesión 62 — el approve estaba roto de raíz)
 
-**Hallazgo 1 — bug de provisioning (chip abierto):** el onboarding por portal (PR #137) **no crea `tenant_configurations` ni el prompt base `tenant_prompts`** → todo tenant nuevo falla con `tenant_config_missing` / `no_active_system_prompt` en el primer mensaje, y la página de Configuración del dashboard muestra "No se pudo cargar la configuración". Marea es el primer tenant del flujo productizado, por eso salió. **Workaround:** ambas filas insertadas a mano en Marea (staging) para desbloquear. **Fix de raíz pendiente:** crear ambas en `tenant_provisioning` (transacción) + test + backfill.
+| Bug | Qué | PR |
+|---|---|---|
+| A | 500 al aprobar: `SkillContext` con kwargs obsoletos (`shopify_domain/token`) → `TypeError`. Helper `services/commerce_context.build_commerce_integration_ctx` (creds de `tenant_integrations` + token exchange) | ✅ [#173](https://github.com/Auyan-ai/platform/pull/173) |
+| B1 | El dashboard interno (`(dashboard)/layout.tsx`) solo validaba sesión, no `super_admin` → un `tenant_admin` podía renderizarlo. **No** es fuga de datos (la API aísla: `get_tenant_id` da 403), pero sí frontera de operador rota | ✅ [#174](https://github.com/Auyan-ai/platform/pull/174) |
+| B | 500: mensaje `agent_human` sin `author_user_id` (viola `messages_human_has_author`), en approve **y** reject | ✅ [#175](https://github.com/Auyan-ai/platform/pull/175) |
+| C | 422 Shopify: `country` en texto libre ("España") no soportado → `country_code` ISO (`_country_to_iso2`, ES-first + fallback) | ✅ [#176](https://github.com/Auyan-ai/platform/pull/176) |
+| D | Mensaje al cliente = volcado crudo del output (slug + dict) → redactado con **Haiku** (`services/approval_reply`, fallback plantilla) | ✅ [#177](https://github.com/Auyan-ai/platform/pull/177) |
+| E | Los mensajes del flujo L3 (escalate "en revisión" + confirmación al aprobar) **no llegaban al cliente** en el widget. E1: webhooks solo entregaban en `respond`. E2: approve/reject no despachaban al helpdesk (`services/helpdesk_delivery`) | ⏳ [#178](https://github.com/Auyan-ai/platform/pull/178) ABIERTO |
 
-**Hallazgo 2 — política anclada solo en get_shop_policies ([PR #168](https://github.com/Auyan-ai/platform/pull/168) ✅ MERGEADO):** returns/refunds escalaban aunque la política estaba en KB/facts, porque el body canónico decía "get_shop_policies es la fuente de verdad". Arreglado: política en capas (KB / facts / get_shop_policies) en returns/refunds/product_info. Re-seed `--update` a Marea (AOPs v2) → **verificado en vivo**: returns responde "30 días", refunds responde el timing, sin escalar ni inventar. **Pendiente:** re-seed `--update` a Lunaria.
+**Decisión de producto (quién aprueba L3):** ambos roles, cada uno desde su dashboard — `tenant_admin` los suyos vía `/clients`, `super_admin` vía el dashboard interno. La API ya aísla por tenant, así que **no** se añade `require_role` al router de approvals. (Auto-graduación de skills a automático y self-service de AOPs = roadmap.)
 
-**Hallazgo 3 — token de Shopify en texto plano ([PR #169](https://github.com/Auyan-ai/platform/pull/169) ✅ MERGEADO):** el access_token corto (24h) se cacheaba en claro en `tenant_integrations.config`, rompiendo el cifrado en reposo. Arreglado: el cache pasó a **memoria, acotado por maxsize** (`integrations/shopify.py`); el token nunca toca el disco, en DB solo quedan client_id/secret cifrados. Token cacheado existente **purgado en staging** (solo Marea lo tenía → 0).
+**Operativo:** página de prueba del widget en `apps/api/scripts/chatwoot_widget_test.html` (websiteToken de Purigu; **sin commitear**). Servirla con `python3 -m http.server 8899 --directory apps/api/scripts` → `http://localhost:8899/chatwoot_widget_test.html`.
 
-**Hallazgo 4 — plazo de devolución recepción vs created_at (chip abierto):** la KB de Marea dice "30 días desde la recepción" pero el AOP `returns` calcula desde `created_at` (fecha de pedido) → más estricto que la política real. Alinear el cálculo + el dato en facts.
-
-**Hallazgo 5 — colisión de `account_id` en webhook Chatwoot (resuelto en dato + chip de código):** marea-studio y lunaria tenían el MISMO `account_id 167723` (Purigu) activo; `get_integration_by_chatwoot_account` resuelve con `LIMIT 1` sin unicidad → enrutamiento a tenant arbitrario (riesgo cross-tenant). **Resuelto el dato:** soft-delete del Chatwoot de Lunaria (Kenny decidió que Marea use esa cuenta). **Chip abierto:** índice único `(provider, account_id)` para integraciones activas + detección de colisión fail-closed en código.
-
-**Hallazgo 6 — cierre por inactividad no sincroniza al helpdesk (chip abierto):** `close_external_helpdesk_ticket` (empuja `resolved` a Chatwoot) solo se llama desde el cierre MANUAL; el cierre por inactividad (`cleanup` → `closed_abandoned`) marca cerrado en DB pero **no** sincroniza el estado al helpdesk → conversación abandonada queda `open` en Chatwoot. Además, verificar que el nudge realmente se **entrega** al helpdesk (hoy solo se inserta en DB). NOTA de diseño: el agente NO cierra al detectar "gracias" (correcto/estándar); el cierre es por timeout (cleanup, 48h Chatwoot default) o manual.
-
-**Entregables extra:** 4 políticas de Shopify de Marea (devoluciones, envíos, privacidad, términos) redactadas 1:1 con la KB/facts, listas para pegar en Shopify → Configuración → Políticas (privacy/terms con placeholders de razón social/NIF/domicilio).
-
-**Chips abiertos (4):** H1 provisioning (config + prompt base), H4 plazo devolución (recepción vs created_at), H5 guard de colisión `account_id` en webhook helpdesk, H6 sync de cierre por inactividad → helpdesk + entrega de nudge.
-
-**Pendiente del dogfood:** order_change / complaint con pedido real (los flujos L3 con approval). Chatwoot real ✅ y order_status/returns/refunds ✅ ya cubiertos.
-
-### 🌅 Arranque de mañana (sesión 61)
-- **Modelo:** Sonnet (los pendientes son fixes acotados; sube a Opus solo si toca rediseño).
-- **Estado:** Fix #5 + canónicos + token + Chatwoot **cerrados y verificados en vivo**. PRs #167/#168/#169 MERGEADOS; **#170 (este progress.md) pendiente de merge**.
-- **Opciones para retomar, por prioridad sugerida:**
-  1. Bajar los **4 chips** a PRs (empezar por H1 provisioning — bloquea a todo cliente nuevo del portal; es el más impactante).
-  2. Re-seed `--update` de los AOPs canónicos a **Lunaria** (quedó pendiente del #168).
-  3. Cerrar el dogfood con **order_change / complaint** (flujos L3 con approval) usando un pedido real de Marea.
-  4. Commitear `apps/api/scripts/chatwoot_widget_test.html` si se quiere versionar la herramienta de prueba.
-- **Operativo:** el server HTTP `:8899` (widget de prueba) se levantó en background esta sesión — relanzarlo con `python3 -m http.server 8899` desde `apps/api/scripts/` cuando se necesite.
+### 🌅 Arranque (sesión 63)
+- **Modelo:** Sonnet para los chips acotados; Opus si toca diseño (país determinista / observabilidad).
+- **Verificar primero:** mergear **#178** → forzar deploy de `platform` si no firea (ver [[reference_railway_deploy_trigger]]) → re-probar L3 desde el widget: deben llegar el "en revisión" y la confirmación de Haiku.
+- **Chips pendientes (por prioridad sugerida):**
+  1. **País determinista** — hoy el LLM rellena `country` (puso "Spain" solo); para tienda solo-España no debe depender del LLM. Opción A: preservar el país del pedido actual; opción B: default del tenant. Importante porque clientes reales omiten el país.
+  2. **H4** — plazo de devolución desde la recepción, no `created_at` (+ dato en facts).
+  3. **H6** — sync de cierre por inactividad → helpdesk + entrega del nudge (relacionado con #178/E2).
+  4. **Observabilidad:** la ejecución del L3 al aprobar no deja fila en `skill_audit_log` (solo queda el gate como `rejected_by_permissions`).
+  5. **PII:** la dirección de envío no se redacta en `pending_approvals.inputs_redacted`.
+  6. **Limpieza:** dead code `isDashboardRoute` en `middleware.ts`; retrofitear `load_tenant_context` al helper `build_commerce_integration_ctx`; `REPLY_MODEL` (Haiku) constante → promover a setting + multi-idioma en `approval_reply`.
+  7. Re-seed `--update` de AOPs canónicos a **Lunaria** (pendiente del #168).
 
 ---
 
