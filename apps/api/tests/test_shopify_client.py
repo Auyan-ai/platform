@@ -5,7 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from apps.api.integrations.shopify import ShopifyClient
+from apps.api.integrations.shopify import ShopifyClient, _country_to_iso2
 
 DOMAIN = "myshop.myshopify.com"
 TOKEN = "shpat_test_token"
@@ -20,6 +20,7 @@ def _mock_httpx(json_data: dict) -> tuple[MagicMock, AsyncMock]:
     mock_client = AsyncMock()
     mock_client.get = AsyncMock(return_value=resp)
     mock_client.post = AsyncMock(return_value=resp)
+    mock_client.put = AsyncMock(return_value=resp)
 
     mock_cm = MagicMock()
     mock_cm.__aenter__ = AsyncMock(return_value=mock_client)
@@ -334,3 +335,61 @@ class TestEnsureShopifyAccessToken:
             shopify._token_cache_set(uuid4(), "shpat_x", future)
 
         assert len(shopify._token_cache) == shopify._TOKEN_CACHE_MAXSIZE
+
+
+# ----------------------------------------------------------------
+# Normalización de país (Shopify rechaza country en texto libre)
+# ----------------------------------------------------------------
+
+
+class TestCountryToIso2:
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("España", "ES"),
+            ("españa", "ES"),
+            ("espana", "ES"),
+            ("Spain", "ES"),
+            ("  spain  ", "ES"),
+            ("ES", "ES"),
+            ("es", "ES"),
+            ("Francia", "FR"),
+            ("Portugal", "PT"),
+            ("Marte", None),
+            ("", None),
+        ],
+    )
+    def test_resolves_or_none(self, raw: str, expected: str | None) -> None:
+        assert _country_to_iso2(raw) == expected
+
+
+class TestUpdateShippingAddress:
+    async def test_sends_country_code_when_resolvable(self) -> None:
+        mock_cm, mock_client = _mock_httpx({"order": _ORDER})
+        with patch("apps.api.integrations.shopify.httpx.AsyncClient", return_value=mock_cm):
+            await ShopifyClient(DOMAIN, TOKEN).update_shipping_address(
+                1001,
+                address1="Calle Dogfood 42",
+                city="Madrid",
+                province="Madrid",
+                country="España",
+                zip_code="28001",
+            )
+        sent = mock_client.put.call_args.kwargs["json"]["order"]["shipping_address"]
+        assert sent["country_code"] == "ES"
+        assert "country" not in sent  # no se manda el texto libre que Shopify rechaza
+
+    async def test_falls_back_to_country_when_unknown(self) -> None:
+        mock_cm, mock_client = _mock_httpx({"order": _ORDER})
+        with patch("apps.api.integrations.shopify.httpx.AsyncClient", return_value=mock_cm):
+            await ShopifyClient(DOMAIN, TOKEN).update_shipping_address(
+                1001,
+                address1="X",
+                city="Y",
+                province="Z",
+                country="Narnia",
+                zip_code="00000",
+            )
+        sent = mock_client.put.call_args.kwargs["json"]["order"]["shipping_address"]
+        assert sent["country"] == "Narnia"
+        assert "country_code" not in sent
