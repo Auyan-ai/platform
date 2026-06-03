@@ -26,6 +26,31 @@ from apps.api.aops.canonical import provision_canonical_aops
 from apps.api.core.config import Settings
 from apps.api.db.models import PlanTier, Tenant
 
+# Prompt base que nace con cada tenant. Es el fallback legacy: en runtime
+# select_aop sobreescribe system_prompt con el AOP compilado (todo tenant nace
+# con los 8 AOPs canónicos). Pero load_tenant_context hard-failea si no hay un
+# prompt activo, así que toda tenant necesita esta fila. Sin branding ni
+# políticas concretas — eso lo llena el onboarding.
+_DEFAULT_SYSTEM_PROMPT = """\
+Eres el agente de atención al cliente de {company_name}.
+
+Tono: cercano, claro y breve. Trata al cliente de "tú".
+
+Tu misión: resolver dudas de soporte (pedidos, envíos, devoluciones, productos) \
+con precisión y empatía, apoyándote SIEMPRE en la knowledge base y los datos del \
+tenant. Si la consulta requiere acción humana (reembolso fuera de política, queja \
+grave, asunto legal, cliente muy molesto) o no tienes información con respaldo, \
+escala a un agente humano explicando el motivo.
+
+Reglas no negociables:
+- Nunca inventes datos de pedidos, stock, plazos, fechas, importes ni políticas. \
+Si una herramienta devuelve vacío o error, trátalo como dato no disponible y \
+escala; no rellenes con suposiciones.
+- Usa la knowledge base del tenant antes de responder sobre políticas o productos.
+- Si el cliente pide hablar con un humano, escala sin discutir.
+
+Idioma: responde en el idioma del cliente (por defecto, español)."""
+
 
 class SlugTakenError(Exception):
     """El slug solicitado ya está en uso por un tenant activo."""
@@ -50,6 +75,49 @@ class ProvisionResult:
     tenant: Tenant
     tenant_admin_user_id: UUID
     invite_sent: bool
+
+
+async def ensure_tenant_config_and_prompt(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    company_name: str,
+) -> dict[str, bool]:
+    """Crea la fila 1:1 de `tenant_configurations` y el prompt 'system' activo si faltan.
+
+    Idempotente: la config usa ON CONFLICT DO NOTHING; el prompt sólo se inserta si
+    el tenant no tiene ya un 'system' (activo o no), para no pisar personalizaciones
+    ni colisionar con el unique de versión. Lo usan `provision_tenant` (tenant nuevo)
+    y el script de backfill (tenants existentes a los que les falte).
+
+    `created_by=NULL`: el creador es un internal_user y `tenant_prompts.created_by`
+    referencia `users(id)` — NULL evita una violación de FK (igual que en los AOPs).
+
+    Returns: flags `{config_created, prompt_created}` para que el backfill reporte.
+    """
+    config_status = await conn.execute(
+        """
+        INSERT INTO tenant_configurations (tenant_id) VALUES ($1)
+        ON CONFLICT (tenant_id) DO NOTHING
+        """,
+        tenant_id,
+    )
+    prompt_status = await conn.execute(
+        """
+        INSERT INTO tenant_prompts
+          (tenant_id, name, version, content, is_active, created_by)
+        SELECT $1, 'system', 1, $2, true, NULL
+        WHERE NOT EXISTS (
+            SELECT 1 FROM tenant_prompts WHERE tenant_id = $1 AND name = 'system'
+        )
+        """,
+        tenant_id,
+        _DEFAULT_SYSTEM_PROMPT.format(company_name=company_name),
+    )
+    return {
+        "config_created": config_status.endswith(" 1"),
+        "prompt_created": prompt_status.endswith(" 1"),
+    }
 
 
 async def provision_tenant(
@@ -123,6 +191,13 @@ async def provision_tenant(
             """,
             tenant_id,
             request.creator_internal_user_id,
+        )
+
+        # tenant_configurations (1:1) + prompt 'system' activo. Sin ambos,
+        # load_tenant_context hard-failea (tenant_config_missing /
+        # no_active_system_prompt) en el primer mensaje.
+        await ensure_tenant_config_and_prompt(
+            conn, tenant_id, company_name=request.company_name
         )
 
         # Copy-on-create: cada tenant nace con su propia copia de los 8 AOPs canónicos

@@ -108,10 +108,20 @@ class TestProvisionService:
         assert result.tenant.agent_lifecycle_state == "discovery"
         assert result.tenant.plan_tier == "founding"
 
-        # Verificó slug, insertó tenant + user + onboarding + assignment.
+        # Verificó slug, insertó tenant + user + onboarding + assignment + config + prompt.
         conn.fetchval.assert_awaited_once()
-        # 4 execute: users, tenant_onboarding, tenant_assignments (fetchrow ya cuenta INSERT tenants).
-        assert conn.execute.await_count == 3
+        # 5 execute: users, tenant_onboarding, tenant_assignments,
+        # tenant_configurations, tenant_prompts (fetchrow ya cuenta INSERT tenants).
+        assert conn.execute.await_count == 5
+
+        sql_calls = [call.args[0] for call in conn.execute.await_args_list]
+        assert any("INSERT INTO tenant_configurations" in sql for sql in sql_calls)
+        prompt_call = next(
+            call for call in conn.execute.await_args_list
+            if "INSERT INTO tenant_prompts" in call.args[0]
+        )
+        # El prompt base interpola el company_name del request.
+        assert "Lunaria 2" in prompt_call.args[2]
 
     @pytest.mark.asyncio
     async def test_slug_taken_raises_before_supabase(self) -> None:
