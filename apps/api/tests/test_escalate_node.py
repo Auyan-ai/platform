@@ -145,6 +145,35 @@ async def test_persists_agent_response_as_outbound_message(fake_deps, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_pending_approval_uses_contextual_gate_message(fake_deps, monkeypatch) -> None:
+    """Gate L3 sin agent_response propio: mensaje cálido y contextual por skill,
+    no la plantilla robótica ('requiere revisión por parte de nuestro equipo')."""
+    out_msg = make_message(id=OUTBOUND_MSG_ID, role="agent_ai", direction="outbound")
+    insert_msg_mock = AsyncMock(return_value=out_msg)
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    _mock_no_existing(monkeypatch)
+    monkeypatch.setattr(f"{MODULE}.insert_escalation", AsyncMock(return_value=make_escalation()))
+    monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
+    monkeypatch.setattr(f"{MODULE}.insert_message", insert_msg_mock)
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    node = make_escalate_node(fake_deps)
+
+    out = await node(
+        _state(
+            agent_response="",
+            pending_approval_id="ap-123",
+            pending_approval_skill_slug="shopify.update_shipping_address",
+        )
+    )
+
+    content = insert_msg_mock.await_args.kwargs["content"]
+    assert "dirección de tu pedido" in content
+    assert "requiere revisión por parte de nuestro equipo" not in content
+    # El mensaje del gate se expone para que el webhook lo entregue al cliente.
+    assert out["agent_response"] == content
+
+
+@pytest.mark.asyncio
 async def test_no_message_inserted_when_response_empty(fake_deps, monkeypatch) -> None:
     """Si no hay agent_response, no se inserta mensaje — no rompe."""
     insert_msg_mock = AsyncMock()

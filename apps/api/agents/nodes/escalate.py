@@ -23,6 +23,7 @@ from apps.api.db.queries import (
     update_conversation_last_message,
     update_conversation_status,
 )
+from apps.api.services.approval_reply import gate_message
 
 
 def make_escalate_node(
@@ -41,15 +42,11 @@ def make_escalate_node(
         )
         reason = state.get("escalation_reason") or "unspecified_escalation"
 
-        # Si la escalación es por pending_approval, construir mensaje de cortesía
-        # automáticamente si el agente no generó uno.
+        # Si la escalación es por pending_approval, construir un mensaje del gate
+        # cálido y contextual por skill si el agente no generó uno propio.
         pending_approval_id = state.get("pending_approval_id")
         if pending_approval_id and not state.get("agent_response"):
-            agent_response = (
-                "Tu solicitud requiere revisión por parte de nuestro equipo. "
-                "Un agente la revisará en breve y te confirmaremos el resultado. "
-                "¡Gracias por tu paciencia!"
-            )
+            agent_response = gate_message(state.get("pending_approval_skill_slug"))
         else:
             agent_response = state.get("agent_response") or ""
 

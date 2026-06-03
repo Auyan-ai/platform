@@ -33,6 +33,40 @@ _FAILED = (
     "Un agente de nuestro equipo lo revisará y te contactará en breve."
 )
 
+# Mensaje del "gate" L3: el agente recogió todo lo que necesita y la acción queda
+# pendiente de una última comprobación humana. Cálido y contextual por skill, para
+# no romper el tono de la conversación con una plantilla fría. Determinista (no
+# pasa por LLM): vive dentro del grafo, lo emite el nodo escalate.
+_SKILL_GATE: dict[str, str] = {
+    "shopify.update_shipping_address": (
+        "¡Genial! Ya tengo todos los datos para cambiar la dirección de tu pedido. "
+        "Lo paso a mi equipo para una última comprobación y te confirmo en cuanto esté hecho. 😊"
+    ),
+    "shopify.cancel_order": (
+        "Entendido. Voy a tramitar la cancelación de tu pedido; lo paso a mi equipo "
+        "para confirmarlo y te aviso en cuanto esté listo. 😊"
+    ),
+    "shopify.refund_partial": (
+        "¡Perfecto! Estoy gestionando el reembolso de tu pedido; lo paso a mi equipo "
+        "para confirmarlo y te aviso en cuanto esté hecho. 😊"
+    ),
+    "shopify.start_return": (
+        "¡Listo! Voy a iniciar la devolución de tu pedido; lo paso a mi equipo para "
+        "confirmarlo y te aviso en cuanto esté en marcha. 😊"
+    ),
+}
+_DEFAULT_GATE = (
+    "¡Perfecto! Ya tengo lo que necesito. Lo paso a mi equipo para una última "
+    "comprobación y te confirmo en cuanto esté listo. 😊"
+)
+
+
+def gate_message(skill_slug: str | None) -> str:
+    """Mensaje cálido del gate L3 (acción pendiente de aprobación humana)."""
+    if skill_slug is None:
+        return _DEFAULT_GATE
+    return _SKILL_GATE.get(skill_slug, _DEFAULT_GATE)
+
 _SYSTEM = (
     "Eres el asistente de atención al cliente de una tienda de e-commerce. "
     "Reescribe el mensaje que te doy como una confirmación breve, cálida y natural "

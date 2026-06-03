@@ -119,6 +119,9 @@ class AgentState(TypedDict, total=False):
     # Seteado por execute_skill cuando una skill L3 requiere aprobación humana.
     # El nodo escalate lo incluye en el contexto de escalación.
     pending_approval_id: str | None
+    # Slug de la skill que quedó pendiente de aprobación. El nodo escalate lo usa
+    # para redactar un mensaje del gate cálido y contextual (no plantilla genérica).
+    pending_approval_skill_slug: str | None
 
     # --- Simulator (Bloque 0, Sub-PR 0.10) ---
     # simulation_mode: cuando es True, execute_skill inyecta un mock de commerce
