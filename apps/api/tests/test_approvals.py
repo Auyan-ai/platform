@@ -214,6 +214,76 @@ class TestApproveAction:
 
         assert resp.status_code == 404
 
+    def test_approve_executes_skill_and_returns_success(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Happy-path: arma el SkillContext con integration_ctx y ejecuta la skill.
+
+        Regresión del 500: antes construía SkillContext con kwargs obsoletos
+        (shopify_domain/shopify_token) → TypeError. Este test recorre la línea 140+.
+        """
+        from pydantic import BaseModel
+
+        captured: dict[str, Any] = {}
+
+        class _FakeInput(BaseModel):
+            order_id: int
+
+        class _FakeOutput(BaseModel):
+            cancelled: bool = True
+
+        class _FakeSkill:
+            input_schema = _FakeInput
+
+            async def execute(self, ctx: Any, inputs: Any) -> _FakeOutput:
+                captured["ctx"] = ctx
+                return _FakeOutput()
+
+        class _FakeMsg:
+            id = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
+
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.get_pending_approval",
+            AsyncMock(return_value=_sample_approval()),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.get_tenant_configuration",
+            AsyncMock(return_value=None),
+        )
+        # No hace falta Shopify real: el helper devuelve None y la fake skill lo ignora.
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.build_commerce_integration_ctx",
+            AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.SkillRegistry.get",
+            lambda slug: _FakeSkill,
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.resolve_pending_approval", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.insert_message", AsyncMock(return_value=_FakeMsg())
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.update_conversation_last_message",
+            AsyncMock(return_value=None),
+        )
+
+        app, client = _make_app(monkeypatch, approvals_router)
+        resp = client.post(
+            f"/approvals/{APPROVAL_ID}/approve",
+            json={"comment": "ok"},
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["execution_status"] == "success"
+        # El SkillContext se construyó bien (integration_ctx, no kwargs obsoletos).
+        assert captured["ctx"].integration_ctx is None
+        assert captured["ctx"].tenant_id == str(TENANT_ID)
+
 
 # ----------------------------------------------------------------
 # POST /approvals/{id}/reject
