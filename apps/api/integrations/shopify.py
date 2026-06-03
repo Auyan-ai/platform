@@ -522,6 +522,20 @@ class ShopifyAdapter:
 
     # ── Métodos extendidos usados por las skills ───────────────────────────────
 
+    async def _resolve_order_id(self, ctx: IntegrationContext, order_ref: int) -> int:
+        """Resuelve el número de pedido visible para el cliente (p.ej. 1181) al
+        order_id interno de Shopify (p.ej. 7133866033432).
+
+        El cliente y el LLM solo conocen el número visible (#1181), pero los
+        endpoints de mutación de Shopify exigen el id interno. Si order_ref ya es
+        un id interno (ningún pedido tiene ese 'name'), se devuelve tal cual, así
+        que la resolución es segura tanto si llega el número visible como el id.
+        """
+        found = await self._client(ctx).get_order_by_name(str(order_ref))
+        if found and found.get("id"):
+            return int(found["id"])
+        return order_ref
+
     async def get_order_by_name(
         self, ctx: IntegrationContext, order_name: str
     ) -> dict[str, Any] | None:
@@ -543,11 +557,13 @@ class ShopifyAdapter:
     async def add_order_note(
         self, ctx: IntegrationContext, order_id: int, note: str
     ) -> dict[str, Any]:
+        order_id = await self._resolve_order_id(ctx, order_id)
         return await self._client(ctx).add_order_note(order_id, note)
 
     async def tag_order(
         self, ctx: IntegrationContext, order_id: int, tags_to_add: list[str]
     ) -> dict[str, Any]:
+        order_id = await self._resolve_order_id(ctx, order_id)
         return await self._client(ctx).tag_order(order_id, tags_to_add)
 
     async def cancel_order(
@@ -559,6 +575,7 @@ class ShopifyAdapter:
         email: bool = True,
         refund: bool = False,
     ) -> dict[str, Any]:
+        order_id = await self._resolve_order_id(ctx, order_id)
         return await self._client(ctx).cancel_order(
             order_id, reason=reason, email=email, refund=refund
         )
@@ -576,6 +593,7 @@ class ShopifyAdapter:
         first_name: str | None = None,
         last_name: str | None = None,
     ) -> dict[str, Any]:
+        order_id = await self._resolve_order_id(ctx, order_id)
         return await self._client(ctx).update_shipping_address(
             order_id,
             address1=address1,
@@ -596,6 +614,7 @@ class ShopifyAdapter:
         currency: str,
         note: str = "",
     ) -> dict[str, Any]:
+        order_id = await self._resolve_order_id(ctx, order_id)
         return await self._client(ctx).refund_partial(
             order_id, amount=amount, currency=currency, note=note
         )
@@ -609,6 +628,7 @@ class ShopifyAdapter:
         quantity: int,
         reason: str = "other",
     ) -> dict[str, Any]:
+        order_id = await self._resolve_order_id(ctx, order_id)
         return await self._client(ctx).start_return(
             order_id, line_item_id=line_item_id, quantity=quantity, reason=reason
         )

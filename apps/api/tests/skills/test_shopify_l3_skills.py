@@ -109,6 +109,7 @@ class TestCancelOrder:
 
         with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
+            instance.get_order_by_name = AsyncMock(return_value=None)
             instance.cancel_order = AsyncMock(return_value=_CANCELLED_ORDER)
 
             result = await skill.execute(CTX, inputs)
@@ -129,6 +130,7 @@ class TestCancelOrder:
 
         with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
+            instance.get_order_by_name = AsyncMock(return_value=None)
             instance.cancel_order = AsyncMock(return_value=_CANCELLED_ORDER)
 
             await skill.execute(CTX, inputs)
@@ -144,6 +146,7 @@ class TestCancelOrder:
 
         with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
+            instance.get_order_by_name = AsyncMock(return_value=None)
             instance.cancel_order = AsyncMock(return_value={"id": 1001})
 
             result = await skill.execute(CTX, inputs)
@@ -193,6 +196,7 @@ class TestUpdateShippingAddress:
             "apps.api.integrations.shopify.ShopifyClient"
         ) as MockClient:
             instance = MockClient.return_value
+            instance.get_order_by_name = AsyncMock(return_value=None)
             instance.update_shipping_address = AsyncMock(return_value=_UPDATED_ORDER)
 
             result = await skill.execute(CTX, inputs)
@@ -220,6 +224,7 @@ class TestUpdateShippingAddress:
             "apps.api.integrations.shopify.ShopifyClient"
         ) as MockClient:
             instance = MockClient.return_value
+            instance.get_order_by_name = AsyncMock(return_value=None)
             instance.update_shipping_address = AsyncMock(return_value={"id": 1001})
 
             result = await skill.execute(CTX, inputs)
@@ -269,6 +274,7 @@ class TestRefundPartial:
 
         with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
+            instance.get_order_by_name = AsyncMock(return_value=None)
             instance.refund_partial = AsyncMock(return_value=_REFUND_RESPONSE)
 
             result = await skill.execute(CTX, inputs)
@@ -288,6 +294,7 @@ class TestRefundPartial:
 
         with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
+            instance.get_order_by_name = AsyncMock(return_value=None)
             instance.refund_partial = AsyncMock(return_value={})
 
             result = await skill.execute(CTX, inputs)
@@ -329,6 +336,7 @@ class TestStartReturn:
 
         with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
+            instance.get_order_by_name = AsyncMock(return_value=None)
             instance.start_return = AsyncMock(return_value=_RETURN_RESPONSE)
 
             result = await skill.execute(CTX, inputs)
@@ -349,6 +357,7 @@ class TestStartReturn:
 
         with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
+            instance.get_order_by_name = AsyncMock(return_value=None)
             instance.start_return = AsyncMock(return_value=_RETURN_RESPONSE)
 
             await skill.execute(CTX, inputs)
@@ -364,6 +373,7 @@ class TestStartReturn:
 
         with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
+            instance.get_order_by_name = AsyncMock(return_value=None)
             instance.start_return = AsyncMock(return_value={})
 
             result = await skill.execute(CTX, inputs)
