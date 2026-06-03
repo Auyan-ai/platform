@@ -26,10 +26,11 @@ from apps.api.db.queries import (
     resolve_pending_approval,
     update_conversation_last_message,
 )
+from apps.api.services.approval_reply import generate_customer_reply
 from apps.api.services.commerce_context import build_commerce_integration_ctx
 from apps.api.skills.base import SkillContext
 from apps.api.skills.registry import SkillRegistry
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,7 @@ async def get_approval(
 async def approve_action(
     approval_id: UUID,
     body: ApproveRequest,
+    request: Request,
     tenant_id: TenantIdDep,
     auth: AuthDep,
 ) -> dict:
@@ -160,7 +162,6 @@ async def approve_action(
         output = await skill_instance.execute(skill_ctx, validated_input)
         output_data = output.model_dump(mode="json")
         execution_status = "success"
-        result_message = f"Acción completada: {approval.skill_slug}. Resultado: {output_data}"
     except Exception as exc:
         logger.warning(
             "approved_skill_execution_failed",
@@ -172,9 +173,13 @@ async def approve_action(
         )
         output_data = {"error": str(exc)}
         execution_status = "failed"
-        result_message = (
-            f"La acción {approval.skill_slug} fue aprobada pero falló al ejecutarse: {exc}"
-        )
+
+    # Mensaje al cliente: natural y sin jerga interna (Haiku, con fallback a plantilla).
+    # output_data crudo queda solo en metadata, no se le muestra al cliente.
+    anthropic_client = getattr(getattr(request.app.state, "agent_deps", None), "anthropic", None)
+    result_message = await generate_customer_reply(
+        anthropic_client, approval.skill_slug, success=(execution_status == "success")
+    )
 
     # Marcar aprobada y añadir mensaje a la conversación
     async with tenant_scope(tenant_id) as conn:
@@ -222,6 +227,7 @@ async def approve_action(
 async def reject_action(
     approval_id: UUID,
     body: RejectRequest,
+    request: Request,
     tenant_id: TenantIdDep,
     auth: AuthDep,
 ) -> dict:
@@ -243,16 +249,20 @@ async def reject_action(
             reviewed_by=auth.user_id,
             review_comment=body.comment,
         )
+        # Mensaje al cliente: natural y sin jerga interna (Haiku, con fallback a plantilla).
+        anthropic_client = getattr(
+            getattr(request.app.state, "agent_deps", None), "anthropic", None
+        )
+        reply = await generate_customer_reply(
+            anthropic_client, approval.skill_slug, success=False, reject_comment=body.comment
+        )
         msg = await insert_message(
             conn,
             tenant_id=tenant_id,
             conversation_id=approval.conversation_id,
             role="agent_human",
             direction="outbound",
-            content=(
-                f"La solicitud de {approval.skill_slug} fue revisada y no se realizará. "
-                f"Motivo: {body.comment}"
-            ),
+            content=reply,
             # role 'agent_human' exige autor (constraint messages_human_has_author).
             author_user_id=auth.user_id,
             metadata={
