@@ -58,6 +58,7 @@ async def test_happy_path_calls_send_outbound(monkeypatch) -> None:
         "get_integration_credentials_encrypted",
         AsyncMock(return_value=b"enc"),
     )
+    monkeypatch.setattr(helpdesk_delivery, "get_settings", lambda: object())
     monkeypatch.setattr(helpdesk_delivery, "get_integration_crypto_key", lambda _s: b"key")
     monkeypatch.setattr(
         helpdesk_delivery,
@@ -95,6 +96,7 @@ async def test_send_failure_returns_false(monkeypatch) -> None:
         "get_integration_credentials_encrypted",
         AsyncMock(return_value=b"enc"),
     )
+    monkeypatch.setattr(helpdesk_delivery, "get_settings", lambda: object())
     monkeypatch.setattr(helpdesk_delivery, "get_integration_crypto_key", lambda _s: b"key")
     monkeypatch.setattr(
         helpdesk_delivery, "decrypt_credentials", lambda _e, _k: json.dumps({"x": 1}).encode()
