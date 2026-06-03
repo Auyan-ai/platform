@@ -225,7 +225,15 @@ export function ApprovalQueue({
   async function handleApprove(id: string) {
     setActionError(null)
     try {
-      await approveMutation.mutateAsync({ approvalId: id })
+      const result = await approveMutation.mutateAsync({ approvalId: id })
+      // La ejecución de la skill puede fallar aunque el endpoint responda 200:
+      // la aprobación sigue pendiente para reintentar y no se le confirma nada
+      // al cliente. Mostramos el fallo en vez de tratarlo como éxito silencioso.
+      if (result.execution_status === 'failed') {
+        const detail =
+          typeof result.output?.error === 'string' ? result.output.error : 'error desconocido'
+        setActionError(`No se pudo ejecutar la acción: ${detail}. Sigue pendiente, reintenta.`)
+      }
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Error al aprobar')
     }

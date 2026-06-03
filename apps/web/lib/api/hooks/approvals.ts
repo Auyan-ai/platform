@@ -22,6 +22,13 @@ export interface ApprovalOut {
   created_at: string | null
 }
 
+export interface ApproveResult {
+  approval_id: string
+  execution_status: 'success' | 'failed'
+  message_id: string | null
+  output: Record<string, unknown>
+}
+
 async function apiFetch<T>(
   path: string,
   token: string,
@@ -87,7 +94,7 @@ export function useApproveMutation(tenantId: string) {
       comment?: string | null
     }) => {
       const token = await getToken()
-      return apiFetch<unknown>(`/approvals/${approvalId}/approve`, token, tenantId, {
+      return apiFetch<ApproveResult>(`/approvals/${approvalId}/approve`, token, tenantId, {
         method: 'POST',
         body: JSON.stringify({ comment: comment ?? null }),
       })
