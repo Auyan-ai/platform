@@ -26,6 +26,7 @@ from apps.api.db.queries import (
     resolve_pending_approval,
     update_conversation_last_message,
 )
+from apps.api.services.commerce_context import build_commerce_integration_ctx
 from apps.api.skills.base import SkillContext
 from apps.api.skills.registry import SkillRegistry
 from fastapi import APIRouter, Depends, Query
@@ -133,15 +134,16 @@ async def approve_action(
             )
 
         tenant_config = await get_tenant_configuration(conn, tenant_id)
+        extra = (tenant_config.extra if tenant_config else None) or {}
+        # Mismo camino que el grafo: creds desde tenant_integrations (cifradas +
+        # token exchange Shopify), fallback legacy a tenant_config.extra.
+        integration_ctx = await build_commerce_integration_ctx(conn, tenant_id, extra=extra)
 
-    extra = (tenant_config.extra if tenant_config else None) or {}
-
-    # Construir SkillContext con creds del tenant
+    # Construir SkillContext con el IntegrationContext del tenant
     skill_ctx = SkillContext(
         tenant_id=str(tenant_id),
         conversation_id=str(approval.conversation_id),
-        shopify_domain=extra.get("shopify_domain"),
-        shopify_token=extra.get("shopify_token"),
+        integration_ctx=integration_ctx,
     )
 
     # Resolver y ejecutar la skill
