@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
 import jwt
@@ -270,6 +270,13 @@ class TestApproveAction:
             "apps.api.routers.approvals.update_conversation_last_message",
             AsyncMock(return_value=None),
         )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.get_conversation", AsyncMock(return_value=MagicMock())
+        )
+        deliver_mock = AsyncMock(return_value=True)
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.deliver_message_to_helpdesk", deliver_mock
+        )
 
         app, client = _make_app(monkeypatch, approvals_router)
         resp = client.post(
@@ -292,6 +299,8 @@ class TestApproveAction:
         content = insert_message_mock.await_args.kwargs["content"]
         assert content == "Hemos cancelado tu pedido."
         assert "shopify." not in content and "order_id" not in content
+        # Bug E: el resultado se entrega al helpdesk del cliente.
+        assert deliver_mock.await_args.kwargs["content"] == content
 
 
 # ----------------------------------------------------------------
@@ -349,6 +358,11 @@ class TestRejectAction:
             "apps.api.routers.approvals.update_conversation_last_message",
             AsyncMock(return_value=None),
         )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.get_conversation", AsyncMock(return_value=MagicMock())
+        )
+        deliver_mock = AsyncMock(return_value=True)
+        monkeypatch.setattr("apps.api.routers.approvals.deliver_message_to_helpdesk", deliver_mock)
 
         app, client = _make_app(monkeypatch, approvals_router)
         resp = client.post(
@@ -360,6 +374,10 @@ class TestRejectAction:
         assert resp.status_code == 200
         assert resp.json()["execution_status"] == "rejected"
         assert insert_message_mock.await_args.kwargs["author_user_id"] == USER_ID
+        # Bug E: el rechazo se entrega al helpdesk del cliente.
+        assert deliver_mock.await_args.kwargs["content"] == insert_message_mock.await_args.kwargs[
+            "content"
+        ]
 
 
 # ----------------------------------------------------------------

@@ -280,8 +280,10 @@ async def chatwoot_webhook(
         },
     )
 
-    # 9. Enviar respuesta del agente de vuelta a Chatwoot.
-    if outcome.decision == "respond" and outcome.response_text:
+    # 9. Enviar el mensaje del agente de vuelta a Chatwoot. Incluye el caso escalate
+    #    (mensaje de cortesía "en revisión"), no solo respond — antes el cliente no
+    #    recibía nada cuando el agente escalaba.
+    if outcome.response_text:
         try:
             await adapter.send_outbound(ctx, chatwoot_conversation_id, outcome.response_text)
         except Exception as exc:

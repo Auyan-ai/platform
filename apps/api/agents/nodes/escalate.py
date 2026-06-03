@@ -102,6 +102,9 @@ def make_escalate_node(
                 )
                 await update_conversation_last_message(conn, tenant_id, conversation_id)
                 result["output_message_id"] = str(msg.id)
+                # Exponer el mensaje en el outcome para que el webhook lo entregue
+                # al helpdesk (antes en escalate quedaba sin enviar al cliente).
+                result["agent_response"] = agent_response
 
         tracker.emit(
             tenant_id=state["tenant_id"],

@@ -274,8 +274,9 @@ async def zendesk_webhook(
         },
     )
 
-    # 10. Enviar respuesta del agente de vuelta a Zendesk.
-    if outcome.decision == "respond" and outcome.response_text:
+    # 10. Enviar el mensaje del agente de vuelta a Zendesk. Incluye el caso escalate
+    #     (mensaje "en revisión"), no solo respond.
+    if outcome.response_text:
         try:
             await adapter.send_outbound(ctx, zendesk_ticket_id, outcome.response_text)
         except Exception as exc:

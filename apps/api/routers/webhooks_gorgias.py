@@ -272,8 +272,9 @@ async def gorgias_webhook(
         },
     )
 
-    # 9. Enviar respuesta del agente de vuelta a Gorgias.
-    if outcome.decision == "respond" and outcome.response_text:
+    # 9. Enviar el mensaje del agente de vuelta a Gorgias. Incluye el caso escalate
+    #    (mensaje "en revisión"), no solo respond.
+    if outcome.response_text:
         try:
             await adapter.send_outbound(ctx, ticket_id, outcome.response_text)
         except Exception as exc:
