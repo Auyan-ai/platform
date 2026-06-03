@@ -193,6 +193,9 @@ async def approve_action(
             role="agent_human",
             direction="outbound",
             content=result_message,
+            # role 'agent_human' exige autor (constraint messages_human_has_author):
+            # lo firma el operador que aprobó.
+            author_user_id=auth.user_id,
             metadata={
                 "approval_id": str(approval_id),
                 "skill_slug": approval.skill_slug,
@@ -250,6 +253,8 @@ async def reject_action(
                 f"La solicitud de {approval.skill_slug} fue revisada y no se realizará. "
                 f"Motivo: {body.comment}"
             ),
+            # role 'agent_human' exige autor (constraint messages_human_has_author).
+            author_user_id=auth.user_id,
             metadata={
                 "approval_id": str(approval_id),
                 "skill_slug": approval.skill_slug,

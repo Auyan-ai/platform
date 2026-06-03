@@ -262,8 +262,9 @@ class TestApproveAction:
         monkeypatch.setattr(
             "apps.api.routers.approvals.resolve_pending_approval", AsyncMock(return_value=None)
         )
+        insert_message_mock = AsyncMock(return_value=_FakeMsg())
         monkeypatch.setattr(
-            "apps.api.routers.approvals.insert_message", AsyncMock(return_value=_FakeMsg())
+            "apps.api.routers.approvals.insert_message", insert_message_mock
         )
         monkeypatch.setattr(
             "apps.api.routers.approvals.update_conversation_last_message",
@@ -283,6 +284,9 @@ class TestApproveAction:
         # El SkillContext se construyó bien (integration_ctx, no kwargs obsoletos).
         assert captured["ctx"].integration_ctx is None
         assert captured["ctx"].tenant_id == str(TENANT_ID)
+        # El mensaje 'agent_human' lleva autor (constraint messages_human_has_author).
+        assert insert_message_mock.await_args.kwargs["role"] == "agent_human"
+        assert insert_message_mock.await_args.kwargs["author_user_id"] == USER_ID
 
 
 # ----------------------------------------------------------------
@@ -320,6 +324,37 @@ class TestRejectAction:
         )
 
         assert resp.status_code == 403
+
+    def test_reject_inserts_message_with_author(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """El mensaje 'agent_human' de rechazo lleva autor (constraint messages_human_has_author)."""
+
+        class _FakeMsg:
+            id = UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.get_pending_approval",
+            AsyncMock(return_value=_sample_approval()),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.resolve_pending_approval", AsyncMock(return_value=None)
+        )
+        insert_message_mock = AsyncMock(return_value=_FakeMsg())
+        monkeypatch.setattr("apps.api.routers.approvals.insert_message", insert_message_mock)
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.update_conversation_last_message",
+            AsyncMock(return_value=None),
+        )
+
+        app, client = _make_app(monkeypatch, approvals_router)
+        resp = client.post(
+            f"/approvals/{APPROVAL_ID}/reject",
+            json={"comment": "No procede"},
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["execution_status"] == "rejected"
+        assert insert_message_mock.await_args.kwargs["author_user_id"] == USER_ID
 
 
 # ----------------------------------------------------------------
