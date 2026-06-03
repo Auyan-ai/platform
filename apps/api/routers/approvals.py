@@ -19,6 +19,7 @@ from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
 from apps.api.db.client import tenant_scope
 from apps.api.db.models import PendingApprovalStatus
 from apps.api.db.queries import (
+    get_conversation,
     get_pending_approval,
     get_tenant_configuration,
     insert_message,
@@ -28,6 +29,7 @@ from apps.api.db.queries import (
 )
 from apps.api.services.approval_reply import generate_customer_reply
 from apps.api.services.commerce_context import build_commerce_integration_ctx
+from apps.api.services.helpdesk_delivery import deliver_message_to_helpdesk
 from apps.api.skills.base import SkillContext
 from apps.api.skills.registry import SkillRegistry
 from fastapi import APIRouter, Depends, Query, Request
@@ -209,6 +211,13 @@ async def approve_action(
             },
         )
         await update_conversation_last_message(conn, tenant_id, approval.conversation_id)
+        # Entregar el resultado al helpdesk del cliente (best-effort; el mensaje ya
+        # quedó en DB). Antes este mensaje nunca llegaba al widget/ticket del cliente.
+        conversation = await get_conversation(conn, tenant_id, approval.conversation_id)
+        if conversation is not None:
+            await deliver_message_to_helpdesk(
+                conn, tenant_id=tenant_id, conversation=conversation, content=result_message
+            )
 
     return {
         "approval_id": str(approval_id),
@@ -272,6 +281,12 @@ async def reject_action(
             },
         )
         await update_conversation_last_message(conn, tenant_id, approval.conversation_id)
+        # Entregar el rechazo al helpdesk del cliente (best-effort).
+        conversation = await get_conversation(conn, tenant_id, approval.conversation_id)
+        if conversation is not None:
+            await deliver_message_to_helpdesk(
+                conn, tenant_id=tenant_id, conversation=conversation, content=reply
+            )
 
     return {
         "approval_id": str(approval_id),
