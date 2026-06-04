@@ -2074,6 +2074,40 @@ async def get_pending_approval(
     return PendingApproval(**dict(row)) if row else None
 
 
+async def get_open_pending_approval(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    skill_slug: str,
+) -> PendingApproval | None:
+    """Devuelve la aprobación pendiente (status='pending') más reciente de la
+    conversación para esa skill, o None.
+
+    Sirve para no duplicar el gate L3: si el cliente vuelve a escribir mientras su
+    acción sigue en revisión, el agente reusa esta aprobación en vez de crear otra.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, conversation_id, skill_slug, skill_tier,
+               inputs_raw, inputs_redacted, aop_slug, aop_version,
+               langfuse_trace_id, status, reviewed_by, reviewed_at,
+               review_comment, created_at
+          FROM pending_approvals
+         WHERE tenant_id = $1
+           AND conversation_id = $2
+           AND skill_slug = $3
+           AND status = 'pending'
+           AND deleted_at IS NULL
+         ORDER BY created_at DESC
+         LIMIT 1
+        """,
+        tenant_id,
+        conversation_id,
+        skill_slug,
+    )
+    return PendingApproval(**dict(row)) if row else None
+
+
 async def list_pending_approvals(
     conn: asyncpg.Connection,
     tenant_id: UUID,

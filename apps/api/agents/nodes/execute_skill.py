@@ -26,7 +26,7 @@ from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
-from apps.api.db.queries import create_pending_approval
+from apps.api.db.queries import create_pending_approval, get_open_pending_approval
 from apps.api.integrations.base import IntegrationContext
 from apps.api.services.pii import redact_inputs
 from apps.api.skills.base import SkillContext
@@ -180,25 +180,38 @@ def make_execute_skill_node(
             if state.get("conversation_id") and state.get("tenant_id"):
                 approval_id = uuid4()
                 tenant_id_uuid = UUID(state["tenant_id"])
+                conv_id_uuid = UUID(state["conversation_id"])
+                # is_repeat: el cliente volvió a escribir mientras su acción seguía
+                # en revisión → reusamos la aprobación abierta en vez de duplicarla.
+                is_repeat = False
                 try:
                     # Obtener salt para redactar PII — usamos tenant_scope directamente.
                     from apps.api.db.queries import get_tenant_pii_salt
                     async with tenant_scope(tenant_id_uuid) as conn:
-                        salt = await get_tenant_pii_salt(conn, tenant_id_uuid)
-                        inputs_redacted = redact_inputs(raw_input, salt)
-                        await create_pending_approval(
-                            conn,
-                            approval_id=approval_id,
-                            tenant_id=tenant_id_uuid,
-                            conversation_id=UUID(state["conversation_id"]),
-                            skill_slug=slug,
-                            skill_tier=skill_cls.tier,
-                            inputs_raw=raw_input,
-                            inputs_redacted=inputs_redacted,
-                            aop_slug=state.get("aop_slug") or "unknown",
-                            aop_version=state.get("aop_version") or 0,
-                            langfuse_trace_id=state.get("langfuse_trace_id"),
+                        # Idempotencia del gate L3: si ya hay una aprobación abierta
+                        # para esta misma acción, la reusamos (no creamos duplicado).
+                        existing = await get_open_pending_approval(
+                            conn, tenant_id_uuid, conv_id_uuid, slug
                         )
+                        if existing is not None:
+                            approval_id = existing.id
+                            is_repeat = True
+                        else:
+                            salt = await get_tenant_pii_salt(conn, tenant_id_uuid)
+                            inputs_redacted = redact_inputs(raw_input, salt)
+                            await create_pending_approval(
+                                conn,
+                                approval_id=approval_id,
+                                tenant_id=tenant_id_uuid,
+                                conversation_id=conv_id_uuid,
+                                skill_slug=slug,
+                                skill_tier=skill_cls.tier,
+                                inputs_raw=raw_input,
+                                inputs_redacted=inputs_redacted,
+                                aop_slug=state.get("aop_slug") or "unknown",
+                                aop_version=state.get("aop_version") or 0,
+                                langfuse_trace_id=state.get("langfuse_trace_id"),
+                            )
                 except Exception:
                     logger.exception("pending_approval_create_failed slug=%s", slug)
                     # Si falla la creación del pending_approval, escalamos igual.
@@ -245,6 +258,7 @@ def make_execute_skill_node(
                     "tool_iterations": new_iter,
                     "pending_approval_id": str(approval_id),
                     "pending_approval_skill_slug": slug,
+                    "pending_approval_is_repeat": is_repeat,
                     "escalation_reason": f"awaiting_human_approval:{approval_id}",
                 }
             # Sin tenant/conversation en state (no debería pasar en prod) → error.

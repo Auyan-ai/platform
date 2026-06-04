@@ -7,10 +7,12 @@ from unittest.mock import AsyncMock, MagicMock
 from apps.api.services.approval_reply import (
     _DEFAULT_DONE,
     _DEFAULT_GATE,
+    _DEFAULT_WAITING,
     _FAILED,
     fallback_message,
     gate_message,
     generate_customer_reply,
+    waiting_message,
 )
 
 
@@ -27,6 +29,21 @@ class TestGateMessage:
 
     def test_none_uses_default(self) -> None:
         assert gate_message(None) == _DEFAULT_GATE
+
+
+class TestWaitingMessage:
+    def test_known_skill_says_still_in_review(self) -> None:
+        msg = waiting_message("shopify.update_shipping_address")
+        assert "sigue en revisión" in msg
+        assert "shopify." not in msg
+        # No repite el gate ("lo paso a mi equipo").
+        assert "Lo paso a mi equipo" not in msg
+
+    def test_unknown_skill_uses_default(self) -> None:
+        assert waiting_message("shopify.whatever") == _DEFAULT_WAITING
+
+    def test_none_uses_default(self) -> None:
+        assert waiting_message(None) == _DEFAULT_WAITING
 
 
 class TestFallbackMessage:

@@ -23,7 +23,7 @@ from apps.api.db.queries import (
     update_conversation_last_message,
     update_conversation_status,
 )
-from apps.api.services.approval_reply import gate_message
+from apps.api.services.approval_reply import gate_message, waiting_message
 
 
 def make_escalate_node(
@@ -42,11 +42,17 @@ def make_escalate_node(
         )
         reason = state.get("escalation_reason") or "unspecified_escalation"
 
-        # Si la escalación es por pending_approval, construir un mensaje del gate
-        # cálido y contextual por skill si el agente no generó uno propio.
+        # Si la escalación es por pending_approval, construir un mensaje cálido y
+        # contextual por skill si el agente no generó uno propio. Si la aprobación
+        # ya existía (el cliente volvió a escribir mientras seguía en revisión),
+        # usamos un mensaje de espera en vez de repetir el gate de cero.
         pending_approval_id = state.get("pending_approval_id")
         if pending_approval_id and not state.get("agent_response"):
-            agent_response = gate_message(state.get("pending_approval_skill_slug"))
+            skill_slug = state.get("pending_approval_skill_slug")
+            if state.get("pending_approval_is_repeat"):
+                agent_response = waiting_message(skill_slug)
+            else:
+                agent_response = gate_message(skill_slug)
         else:
             agent_response = state.get("agent_response") or ""
 

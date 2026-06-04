@@ -67,6 +67,41 @@ def gate_message(skill_slug: str | None) -> str:
         return _DEFAULT_GATE
     return _SKILL_GATE.get(skill_slug, _DEFAULT_GATE)
 
+
+# Mensaje de espera: el cliente vuelve a escribir mientras su acción sigue en
+# revisión. No repetimos el gate ("lo paso a mi equipo…"), que sonaría a empezar
+# de cero; reconocemos que ya está en marcha.
+_SKILL_WAITING: dict[str, str] = {
+    "shopify.update_shipping_address": (
+        "Tu cambio de dirección sigue en revisión con mi equipo; te confirmo en "
+        "cuanto esté hecho. ¡Gracias por la paciencia! 😊"
+    ),
+    "shopify.cancel_order": (
+        "Tu cancelación sigue en revisión con mi equipo; te aviso en cuanto esté "
+        "lista. ¡Gracias por la paciencia! 😊"
+    ),
+    "shopify.refund_partial": (
+        "Tu reembolso sigue en revisión con mi equipo; te aviso en cuanto esté "
+        "hecho. ¡Gracias por la paciencia! 😊"
+    ),
+    "shopify.start_return": (
+        "Tu devolución sigue en revisión con mi equipo; te aviso en cuanto esté en "
+        "marcha. ¡Gracias por la paciencia! 😊"
+    ),
+}
+_DEFAULT_WAITING = (
+    "Tu solicitud sigue en revisión con mi equipo; te confirmo en cuanto esté "
+    "lista. ¡Gracias por la paciencia! 😊"
+)
+
+
+def waiting_message(skill_slug: str | None) -> str:
+    """Mensaje cuando el cliente pregunta de nuevo y su acción sigue pendiente."""
+    if skill_slug is None:
+        return _DEFAULT_WAITING
+    return _SKILL_WAITING.get(skill_slug, _DEFAULT_WAITING)
+
+
 _SYSTEM = (
     "Eres el asistente de atención al cliente de una tienda de e-commerce. "
     "Reescribe el mensaje que te doy como una confirmación breve, cálida y natural "
