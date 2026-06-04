@@ -339,6 +339,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
                 "Antes de update_shipping_address, lee al cliente la dirección completa parseada (calle, ciudad, provincia, país, código postal) y espera su confirmación: un error de transcripción no debe llegar a aprobación sin validarlo con el cliente.",
                 "Cambio y cancelación quedan pendientes de aprobación; informa que está en proceso.",
                 "No canceles ni modifiques sin petición explícita del cliente.",
+                "Una vez que el cambio o la cancelación ya quedó en aprobación o se aplicó en esta conversación, NO vuelvas a llamar la skill ante agradecimientos, confirmaciones o mensajes de cortesía del cliente: responde con cordialidad y cierra. Ejecuta de nuevo solo si el cliente pide explícitamente una acción nueva o distinta.",
             ],
             "max_tool_iterations": 5,
             "confidence_threshold": 0.72,
@@ -356,7 +357,8 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             "2. Si ya está enviado (fulfilled) → no se puede cambiar/cancelar; explícalo y reconduce a devolución o escala.\n"
             "3. Cambio de dirección (unfulfilled): reúne la dirección nueva pidiendo solo lo necesario (calle, localidad y código postal); deduce la provincia del CP y el país de la tienda en vez de pedirlos por separado. Antes de seguir, lee al cliente la dirección completa tal como la registraste y pide que confirme que es correcta. Solo con su confirmación → update_shipping_address (order_id + dirección). Pendiente de aprobación; informa.\n"
             "4. Cancelación (unfulfilled): confirma la intención → cancel_order (order_id). Pendiente de aprobación; informa.\n"
-            "5. Modificar artículos/cantidades no está soportado → escala."
+            "5. Tras dejar la acción en aprobación (o aplicada), si el cliente solo agradece o se despide, responde con cordialidad y cierra — NO vuelvas a llamar la skill. Repite la acción únicamente si pide un cambio nuevo o distinto.\n"
+            "6. Modificar artículos/cantidades no está soportado → escala."
         ),
     },
     {
