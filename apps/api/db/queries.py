@@ -2146,6 +2146,31 @@ async def get_recent_read_outputs_for_conversation(
     return [(r["skill_slug"], r["outputs_redacted"]) for r in rows]
 
 
+async def get_approved_actions_for_conversation(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+) -> list[tuple[str, dict]]:
+    """Skills L3 ya APROBADAS (ejecutadas) en la conversación, con sus inputs.
+
+    Se inyectan en el contexto como 'acciones ya hechas' para que el agente no las
+    re-dispare ante un agradecimiento/confirmación del cliente (causa de gates
+    espurios + latencia del supervisor L3).
+    """
+    rows = await conn.fetch(
+        """
+        SELECT skill_slug, inputs_redacted
+          FROM pending_approvals
+         WHERE tenant_id = $1 AND conversation_id = $2
+           AND status = 'approved' AND deleted_at IS NULL
+         ORDER BY created_at
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return [(r["skill_slug"], r["inputs_redacted"]) for r in rows]
+
+
 async def list_pending_approvals(
     conn: asyncpg.Connection,
     tenant_id: UUID,

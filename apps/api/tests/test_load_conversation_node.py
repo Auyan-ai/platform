@@ -70,6 +70,9 @@ async def test_known_facts_built_from_read_outputs(fake_deps, monkeypatch) -> No
         f"{MODULE}.get_recent_read_outputs_for_conversation",
         AsyncMock(return_value=[("shopify.get_order_status", {"order_number": "#1278", "fulfillment_status": None})]),
     )
+    monkeypatch.setattr(
+        f"{MODULE}.get_approved_actions_for_conversation", AsyncMock(return_value=[])
+    )
     node = make_load_conversation_node(fake_deps)
 
     out = await node(_state())
@@ -79,8 +82,34 @@ async def test_known_facts_built_from_read_outputs(fake_deps, monkeypatch) -> No
     assert "NO vuelvas a consultarlos" in out["known_facts"]
 
 
+@pytest.mark.asyncio
+async def test_known_facts_includes_completed_actions(fake_deps, monkeypatch) -> None:
+    """Las acciones L3 ya aprobadas se inyectan con la instrucción de no re-disparar."""
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.get_conversation", AsyncMock(return_value=make_conversation())
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.get_end_customer", AsyncMock(return_value=make_end_customer())
+    )
+    monkeypatch.setattr(f"{MODULE}.get_recent_messages", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        f"{MODULE}.get_recent_read_outputs_for_conversation", AsyncMock(return_value=[])
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.get_approved_actions_for_conversation",
+        AsyncMock(return_value=[("shopify.update_shipping_address", {"city": "Madrid"})]),
+    )
+    node = make_load_conversation_node(fake_deps)
+
+    out = await node(_state())
+
+    assert "shopify.update_shipping_address" in out["known_facts"]
+    assert "NO vuelvas a llamar estas skills" in out["known_facts"]
+
+
 def test_format_known_facts_empty_is_empty_string() -> None:
-    assert _format_known_facts([]) == ""
+    assert _format_known_facts([], []) == ""
 
 
 @pytest.mark.asyncio
