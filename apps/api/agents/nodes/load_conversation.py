@@ -16,6 +16,7 @@ from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import (
+    get_approved_actions_for_conversation,
     get_conversation,
     get_end_customer,
     get_recent_messages,
@@ -23,17 +24,32 @@ from apps.api.db.queries import (
 )
 
 
-def _format_known_facts(read_outputs: list[tuple[str, dict]]) -> str:
-    """Bloque de datos ya recuperados en la conversación (JSON compacto por skill)."""
-    if not read_outputs:
-        return ""
-    lines = [
-        "Resultados de herramientas que YA obtuviste en esta conversación. Úsalos "
-        "directamente y NO vuelvas a consultarlos salvo que el cliente pida un cambio:",
-    ]
-    for slug, output in read_outputs:
-        lines.append(f"- {slug}: {json.dumps(output, ensure_ascii=False, separators=(',', ':'))}")
-    return "\n".join(lines)
+def _json_compact(obj: dict) -> str:
+    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+
+
+def _format_known_facts(
+    read_outputs: list[tuple[str, dict]],
+    approved_actions: list[tuple[str, dict]],
+) -> str:
+    """Bloque de contexto: acciones ya hechas + datos ya recuperados (JSON compacto)."""
+    sections: list[str] = []
+    if approved_actions:
+        lines = [
+            "Acciones que YA ejecutaste y se aplicaron en esta conversación. NO "
+            "vuelvas a llamar estas skills ni repitas la acción — ya están hechas. "
+            "Si el cliente agradece o confirma, responde solo con cortesía:",
+        ]
+        lines += [f"- {slug}: {_json_compact(inputs)}" for slug, inputs in approved_actions]
+        sections.append("\n".join(lines))
+    if read_outputs:
+        lines = [
+            "Resultados de herramientas que YA obtuviste en esta conversación. Úsalos "
+            "directamente y NO vuelvas a consultarlos salvo que el cliente pida un cambio:",
+        ]
+        lines += [f"- {slug}: {_json_compact(output)}" for slug, output in read_outputs]
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections)
 
 
 def make_load_conversation_node(
@@ -61,11 +77,14 @@ def make_load_conversation_node(
             read_outputs = await get_recent_read_outputs_for_conversation(
                 conn, tenant_id, conversation_id
             )
+            approved_actions = await get_approved_actions_for_conversation(
+                conn, tenant_id, conversation_id
+            )
 
         return {
             "conversation_history": [m.model_dump(mode="json") for m in messages],
             "end_customer": customer.model_dump(mode="json"),
-            "known_facts": _format_known_facts(read_outputs),
+            "known_facts": _format_known_facts(read_outputs, approved_actions),
         }
 
     return _node
