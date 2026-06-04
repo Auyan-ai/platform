@@ -208,6 +208,14 @@ def test_render_global_rules_always_has_base_rules() -> None:
     assert "No inventes" in result or "nunca inventes" in result.lower()
 
 
+def test_render_global_rules_includes_conciseness_rule() -> None:
+    """Hallazgo 8: el agente no debe repetir info ya dada ni re-anunciar
+    reverificaciones internas — regla global, aplica a todos los AOPs."""
+    result = _render_global_rules([]).lower()
+    assert "no repitas información que ya" in result
+    assert "silencio" in result
+
+
 def test_render_global_rules_includes_escalation_triggers() -> None:
     result = _render_global_rules(["El pedido no aparece", "Cliente enojado"])
     assert "El pedido no aparece" in result
