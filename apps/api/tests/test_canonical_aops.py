@@ -195,6 +195,33 @@ def test_every_aop_compiles():
         assert len(compiled.tool_definitions) == len(fm["allowed_skills"])
 
 
+def test_order_change_prompt_instructs_address_readback():
+    """order_change debe instruir leer la dirección parseada y esperar confirmación
+    del cliente antes de update_shipping_address (hallazgo 5 del dogfood): un error
+    de transcripción no debe llegar a aprobación sin validarse con el cliente."""
+    tenant_id = uuid4()
+    tc = TenantConfiguration(
+        tenant_id=tenant_id, agent_model="claude-sonnet-4-6", escalation_threshold=0.7
+    )
+    a = next(x for x in CANONICAL_AOPS if x["slug"] == "order_change")
+    fm = a["frontmatter"]
+    awc = AopWithContent(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        slug="order_change",
+        workspace="production",
+        current_version=1,
+        yaml_frontmatter=fm,
+        body_markdown=a["body"],
+        raw_source=_build_raw_source(fm, a["body"]),
+    )
+    prompt = compile_aop(awc, tc).system_prompt.lower()
+    assert "confirme que es correcta" in prompt
+    assert "espera su confirmación" in prompt
+    # No instruye saltarse la confirmación (consistente con el guardrail adversarial).
+    assert "sin confirmación" not in prompt
+
+
 # ─── provision_canonical_aops ───────────────────────────────────────────────────
 
 
