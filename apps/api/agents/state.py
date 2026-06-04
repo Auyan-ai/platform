@@ -126,6 +126,11 @@ class AgentState(TypedDict, total=False):
     # en revisión). escalate emite un mensaje de espera en vez de repetir el gate.
     pending_approval_is_repeat: bool
 
+    # Bloque de "datos ya verificados" en esta conversación (outputs de skills de
+    # lectura previas), inyectado por load_conversation en el contexto de reason y
+    # del supervisor para no re-consultar lo mismo cada turno. "" si no hay.
+    known_facts: str
+
     # --- Simulator (Bloque 0, Sub-PR 0.10) ---
     # simulation_mode: cuando es True, execute_skill inyecta un mock de commerce
     # (MockShopifyAdapter) en vez del adapter real. El grafo no hace I/O externo

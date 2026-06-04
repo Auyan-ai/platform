@@ -2110,6 +2110,42 @@ async def get_recent_approval_for_skill(
     return PendingApproval(**dict(row)) if row else None
 
 
+async def get_recent_read_outputs_for_conversation(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+) -> list[tuple[str, dict]]:
+    """Último output exitoso por skill de LECTURA (L1) de la conversación.
+
+    Sirve para inyectar 'datos ya verificados' en el contexto del agente y del
+    supervisor, y evitar re-consultar lo mismo cada turno. Solo devuelve reads
+    POSTERIORES a la última escritura (L2/L3): un intento de mutación invalida los
+    reads previos porque el pedido pudo cambiar.
+    """
+    rows = await conn.fetch(
+        """
+        WITH last_write AS (
+            SELECT max(created_at) AS ts
+              FROM skill_audit_log
+             WHERE tenant_id = $1 AND conversation_id = $2
+               AND skill_tier IN ('L2', 'L3')
+        )
+        SELECT DISTINCT ON (skill_slug) skill_slug, outputs_redacted
+          FROM skill_audit_log
+         WHERE tenant_id = $1 AND conversation_id = $2
+           AND skill_tier = 'L1' AND status = 'success'
+           AND outputs_redacted IS NOT NULL
+           AND created_at > COALESCE(
+               (SELECT ts FROM last_write), '-infinity'::timestamptz
+           )
+         ORDER BY skill_slug, created_at DESC
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return [(r["skill_slug"], r["outputs_redacted"]) for r in rows]
+
+
 async def list_pending_approvals(
     conn: asyncpg.Connection,
     tenant_id: UUID,
