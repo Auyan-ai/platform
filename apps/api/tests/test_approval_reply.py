@@ -6,14 +6,31 @@ from unittest.mock import AsyncMock, MagicMock
 
 from apps.api.services.approval_reply import (
     _DEFAULT_DONE,
+    _DEFAULT_DONE_FOLLOWUP,
     _DEFAULT_GATE,
     _DEFAULT_WAITING,
     _FAILED,
+    done_followup_message,
     fallback_message,
     gate_message,
     generate_customer_reply,
     waiting_message,
 )
+
+
+class TestDoneFollowupMessage:
+    def test_known_skill_says_already_applied_not_in_review(self) -> None:
+        msg = done_followup_message("shopify.update_shipping_address")
+        assert "ya quedó aplicado" in msg
+        assert "shopify." not in msg
+        # No debe contradecir un cambio ya confirmado.
+        assert "sigue en revisión" not in msg
+
+    def test_unknown_skill_uses_default(self) -> None:
+        assert done_followup_message("shopify.whatever") == _DEFAULT_DONE_FOLLOWUP
+
+    def test_none_uses_default(self) -> None:
+        assert done_followup_message(None) == _DEFAULT_DONE_FOLLOWUP
 
 
 class TestGateMessage:

@@ -198,6 +198,10 @@ def make_execute_skill_node(
                 # cliente reescribió mientras seguía en revisión (pending) o tras
                 # aprobarse (approved)— así que la reusamos en vez de duplicarla.
                 is_repeat = False
+                # Estado del approval reusado ("pending" | "approved" | None): el
+                # mensaje al cliente depende de él — "sigue en revisión" si está
+                # pendiente, "ya quedó aplicado" si ya se aprobó/ejecutó.
+                reused_status: str | None = None
                 try:
                     # Obtener salt para redactar PII — usamos tenant_scope directamente.
                     from apps.api.db.queries import get_tenant_pii_salt
@@ -214,6 +218,7 @@ def make_execute_skill_node(
                         ):
                             approval_id = existing.id
                             is_repeat = True
+                            reused_status = existing.status
                         else:
                             salt = await get_tenant_pii_salt(conn, tenant_id_uuid)
                             inputs_redacted = redact_inputs(raw_input, salt)
@@ -277,6 +282,7 @@ def make_execute_skill_node(
                     "pending_approval_id": str(approval_id),
                     "pending_approval_skill_slug": slug,
                     "pending_approval_is_repeat": is_repeat,
+                    "pending_approval_reused_status": reused_status,
                     "escalation_reason": f"awaiting_human_approval:{approval_id}",
                 }
             # Sin tenant/conversation en state (no debería pasar en prod) → error.
