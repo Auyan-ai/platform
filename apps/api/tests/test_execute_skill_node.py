@@ -572,7 +572,7 @@ class TestL3HumanApprovalGate:
         )
         # No hay aprobación previa abierta → se crea una nueva.
         monkeypatch.setattr(
-            "apps.api.agents.nodes.execute_skill.get_open_pending_approval",
+            "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
             mock.AsyncMock(return_value=None),
         )
         # También mock get_tenant_pii_salt
@@ -611,7 +611,7 @@ class TestL3HumanApprovalGate:
         monkeypatch.setattr("apps.api.agents.nodes.execute_skill.tenant_scope", lambda *a, **kw: mock_scope)
         monkeypatch.setattr("apps.api.agents.nodes.execute_skill.create_pending_approval", mock.AsyncMock())
         monkeypatch.setattr(
-            "apps.api.agents.nodes.execute_skill.get_open_pending_approval",
+            "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
             mock.AsyncMock(return_value=None),
         )
         monkeypatch.setattr("apps.api.agents.nodes.execute_skill.redact_inputs", lambda i, s: i)
@@ -626,16 +626,10 @@ class TestL3HumanApprovalGate:
         reason = result.get("escalation_reason", "")
         assert reason.startswith("awaiting_human_approval:")
 
-    async def test_l3_repeat_reuses_existing_approval_without_duplicating(
-        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Si ya hay una aprobación abierta para la misma skill, no se crea otra:
-        se reusa y se marca is_repeat (el cliente volvió a escribir esperando)."""
+    def _mock_l3_scope(self, monkeypatch, mock_create, recent_return) -> None:
+        """Mock común del bloque L3: tenant_scope, create, recent-approval, redact."""
         import unittest.mock as mock
-        from uuid import UUID as _UUID
 
-        existing_id = _UUID("99999999-9999-9999-9999-999999999999")
-        mock_create = mock.AsyncMock()
         mock_scope = mock.MagicMock()
         mock_scope.__aenter__ = mock.AsyncMock(return_value=mock.AsyncMock(
             fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}),
@@ -644,10 +638,22 @@ class TestL3HumanApprovalGate:
         monkeypatch.setattr("apps.api.agents.nodes.execute_skill.tenant_scope", lambda *a, **kw: mock_scope)
         monkeypatch.setattr("apps.api.agents.nodes.execute_skill.create_pending_approval", mock_create)
         monkeypatch.setattr(
-            "apps.api.agents.nodes.execute_skill.get_open_pending_approval",
-            mock.AsyncMock(return_value=mock.MagicMock(id=existing_id)),
+            "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
+            mock.AsyncMock(return_value=recent_return),
         )
         monkeypatch.setattr("apps.api.agents.nodes.execute_skill.redact_inputs", lambda i, s: i)
+
+    async def test_l3_repeat_reuses_existing_approval_without_duplicating(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Misma acción ya pendiente → reusa, no duplica (cliente reescribió esperando)."""
+        import unittest.mock as mock
+        from uuid import UUID as _UUID
+
+        existing_id = _UUID("99999999-9999-9999-9999-999999999999")
+        mock_create = mock.AsyncMock()
+        existing = mock.MagicMock(id=existing_id, status="pending", inputs_raw={"text": "hola"})
+        self._mock_l3_scope(monkeypatch, mock_create, existing)
 
         node = make_execute_skill_node(deps)
         state = _base_state(
@@ -657,10 +663,64 @@ class TestL3HumanApprovalGate:
         )
         result = await node(state)
 
-        # No se duplicó la aprobación; se reusó la existente.
         mock_create.assert_not_awaited()
         assert result.get("pending_approval_id") == str(existing_id)
         assert result.get("pending_approval_is_repeat") is True
+
+    async def test_l3_no_duplicate_when_action_already_approved(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Hallazgo 7: si la MISMA acción ya fue aprobada y el agente la re-dispara
+        (p.ej. tras un 'gracias'), no se crea un approval huérfano — se reusa.
+        order_id distinto (interno vs visible) pero misma acción → se reconoce."""
+        import unittest.mock as mock
+        from uuid import UUID as _UUID
+
+        approved_id = _UUID("88888888-8888-8888-8888-888888888888")
+        mock_create = mock.AsyncMock()
+        existing = mock.MagicMock(
+            id=approved_id, status="approved", inputs_raw={"text": "hola", "order_id": 999}
+        )
+        self._mock_l3_scope(monkeypatch, mock_create, existing)
+
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.dangerous", input={"text": "hola", "order_id": 1278}),
+            allowed_skills=["test.dangerous"],
+            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+        )
+        result = await node(state)
+
+        mock_create.assert_not_awaited()
+        assert result.get("pending_approval_id") == str(approved_id)
+        assert result.get("pending_approval_is_repeat") is True
+
+    async def test_l3_creates_new_approval_when_action_differs(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Una acción DISTINTA sí crea un approval nuevo — no se bloquea un segundo
+        cambio legítimo."""
+        import unittest.mock as mock
+        from uuid import UUID as _UUID
+
+        mock_create = mock.AsyncMock()
+        existing = mock.MagicMock(
+            id=_UUID("77777777-7777-7777-7777-777777777777"),
+            status="approved",
+            inputs_raw={"text": "otra cosa distinta"},
+        )
+        self._mock_l3_scope(monkeypatch, mock_create, existing)
+
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.dangerous"),  # input {"text": "hola"}
+            allowed_skills=["test.dangerous"],
+            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+        )
+        result = await node(state)
+
+        mock_create.assert_awaited_once()
+        assert result.get("pending_approval_is_repeat") is False
 
 
 # ----------------------------------------------------------------

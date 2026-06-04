@@ -26,7 +26,7 @@ from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
-from apps.api.db.queries import create_pending_approval, get_open_pending_approval
+from apps.api.db.queries import create_pending_approval, get_recent_approval_for_skill
 from apps.api.integrations.base import IntegrationContext
 from apps.api.services.pii import redact_inputs
 from apps.api.skills.base import SkillContext
@@ -83,6 +83,19 @@ def _error_entry(
         "is_error": True,
         "error": error,
     }
+
+
+def _same_order_action(existing_inputs: dict, new_inputs: dict) -> bool:
+    """¿El nuevo tool call es la MISMA acción que un approval previo?
+
+    Compara los inputs ignorando 'order_id': el mismo pedido puede llegar como
+    número visible (1278) o como id interno (7133911154968) según el turno, así
+    que comparar order_id crudo daría falsos negativos. El resto de campos (p.ej.
+    la dirección nueva) sí distingue un re-disparo espurio de un cambio distinto.
+    """
+    a = {k: v for k, v in (existing_inputs or {}).items() if k != "order_id"}
+    b = {k: v for k, v in (new_inputs or {}).items() if k != "order_id"}
+    return a == b
 
 
 def make_execute_skill_node(
@@ -181,19 +194,24 @@ def make_execute_skill_node(
                 approval_id = uuid4()
                 tenant_id_uuid = UUID(state["tenant_id"])
                 conv_id_uuid = UUID(state["conversation_id"])
-                # is_repeat: el cliente volvió a escribir mientras su acción seguía
-                # en revisión → reusamos la aprobación abierta en vez de duplicarla.
+                # is_repeat: ya existe una aprobación para esta MISMA acción —el
+                # cliente reescribió mientras seguía en revisión (pending) o tras
+                # aprobarse (approved)— así que la reusamos en vez de duplicarla.
                 is_repeat = False
                 try:
                     # Obtener salt para redactar PII — usamos tenant_scope directamente.
                     from apps.api.db.queries import get_tenant_pii_salt
                     async with tenant_scope(tenant_id_uuid) as conn:
-                        # Idempotencia del gate L3: si ya hay una aprobación abierta
-                        # para esta misma acción, la reusamos (no creamos duplicado).
-                        existing = await get_open_pending_approval(
+                        # Idempotencia del gate L3: si ya hay una aprobación reciente
+                        # (pending o approved) para esta misma acción, la reusamos y
+                        # no creamos un duplicado huérfano. Comparamos la acción
+                        # ignorando order_id (visible vs interno = mismo pedido).
+                        existing = await get_recent_approval_for_skill(
                             conn, tenant_id_uuid, conv_id_uuid, slug
                         )
-                        if existing is not None:
+                        if existing is not None and _same_order_action(
+                            existing.inputs_raw, raw_input
+                        ):
                             approval_id = existing.id
                             is_repeat = True
                         else:
