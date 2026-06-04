@@ -249,6 +249,31 @@ def test_order_change_prompt_minimizes_address_friction():
     assert "nunca inventes" in prompt
 
 
+def test_order_change_prompt_no_respawn_after_approval():
+    """order_change no debe re-ejecutar la skill ante agradecimientos/cortesías una
+    vez que la acción quedó en aprobación (hallazgo 7): evita approvals duplicados
+    huérfanos. Solo repite si el cliente pide una acción nueva o distinta."""
+    tenant_id = uuid4()
+    tc = TenantConfiguration(
+        tenant_id=tenant_id, agent_model="claude-sonnet-4-6", escalation_threshold=0.7
+    )
+    a = next(x for x in CANONICAL_AOPS if x["slug"] == "order_change")
+    fm = a["frontmatter"]
+    awc = AopWithContent(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        slug="order_change",
+        workspace="production",
+        current_version=1,
+        yaml_frontmatter=fm,
+        body_markdown=a["body"],
+        raw_source=_build_raw_source(fm, a["body"]),
+    )
+    prompt = compile_aop(awc, tc).system_prompt.lower()
+    assert "no vuelvas a llamar la skill" in prompt
+    assert "acción nueva o distinta" in prompt
+
+
 # ─── provision_canonical_aops ───────────────────────────────────────────────────
 
 
