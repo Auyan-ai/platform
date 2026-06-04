@@ -152,6 +152,16 @@ def _build_supervisor_prompt(state: AgentState) -> str:
             )
         parts.append("## Tool results anteriores\n" + "\n".join(results_summary))
 
+    # Datos ya verificados en la conversación: el agente puede usarlos sin re-consultar.
+    known_facts = state.get("known_facts")
+    if known_facts:
+        parts.append(
+            "## Datos ya verificados en esta conversación\n"
+            "El agente YA tiene estos datos (de turnos anteriores); usarlos sin volver "
+            "a consultar la herramienta es correcto, NO lo penalices por no reconsultar:\n"
+            f"{known_facts}"
+        )
+
     # Historial reciente del cliente (últimos 3 mensajes)
     history = state.get("conversation_history") or []
     recent = history[-3:] if len(history) > 3 else history

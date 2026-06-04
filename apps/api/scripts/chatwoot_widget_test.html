@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Marea Studio — Widget de prueba (Chatwoot)</title>
+    <style>
+      :root { color-scheme: light; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 640px;
+        margin: 64px auto;
+        padding: 0 24px;
+        color: #1a1a1a;
+        line-height: 1.55;
+      }
+      h1 { font-size: 1.35rem; margin-bottom: 4px; }
+      .sub { color: #666; margin-top: 0; }
+      .card {
+        border: 1px solid #e4e4e7;
+        border-radius: 10px;
+        padding: 20px 22px;
+        margin-top: 24px;
+        background: #fafafa;
+      }
+      code {
+        background: #f0f0f2;
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-size: 0.9em;
+      }
+      ol { padding-left: 20px; }
+      li { margin: 6px 0; }
+      .msg {
+        background: #fff;
+        border: 1px dashed #c4c4c8;
+        border-radius: 8px;
+        padding: 10px 14px;
+        font-style: italic;
+      }
+      .hint { color: #888; font-size: 0.85rem; margin-top: 28px; }
+    </style>
+  </head>
+  <body>
+    <h1>Marea Studio — Widget de prueba</h1>
+    <p class="sub">Dogfood E2E del agente vía Chatwoot real.</p>
+
+    <div class="card">
+      <strong>Cómo usarlo</strong>
+      <ol>
+        <li>Abre la burbuja de chat (abajo a la derecha).</li>
+        <li>Escribe como si fueras un cliente. Por ejemplo:</li>
+      </ol>
+      <p class="msg">Hola, ¿en qué estado está mi pedido 1181?</p>
+      <p style="margin-bottom:0">
+        El mensaje entra por la cuenta Chatwoot <strong>Purigu</strong> →
+        webhook <code>/webhooks/chatwoot</code> → tenant <strong>marea-studio</strong> →
+        el agente responde de vuelta en esta misma conversación.
+      </p>
+    </div>
+
+    <p class="hint">
+      websiteToken del Website Inbox de Purigu. baseUrl: app.chatwoot.com.
+      Archivo de prueba — no se sirve en producción.
+    </p>
+
+    <!-- Chatwoot Website Widget -->
+    <script>
+      (function (d, t) {
+        var BASE_URL = "https://app.chatwoot.com";
+        var g = d.createElement(t),
+          s = d.getElementsByTagName(t)[0];
+        g.src = BASE_URL + "/packs/js/sdk.js";
+        g.defer = true;
+        g.async = true;
+        s.parentNode.insertBefore(g, s);
+        g.onload = function () {
+          window.chatwootSDK.run({
+            websiteToken: "bg9j4GoMiAvQFpZku9cwNNNy",
+            baseUrl: BASE_URL,
+          });
+        };
+      })(document, "script");
+    </script>
+  </body>
+</html>

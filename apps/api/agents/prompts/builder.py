@@ -25,12 +25,16 @@ def build_system_prompt(
     knowledge_chunks: list[dict],
     *,
     current_date: str | None = None,
+    known_facts: str | None = None,
 ) -> str:
     """Compone el system prompt: fecha actual + base del tenant + (opcional) contexto RAG.
 
     `current_date` (ISO YYYY-MM-DD) se inyecta para que el agente pueda razonar sobre
     fechas (días transcurridos desde un pedido, ventana de devolución de 30 días, etc.).
     Sin él, el LLM no sabe qué día es hoy y adivina. Si es None no se inyecta nada.
+
+    `known_facts` (opcional) es el bloque de datos ya recuperados en la conversación;
+    evita que el agente re-consulte lo mismo cada turno.
     """
     base = base_prompt
     if current_date:
@@ -41,6 +45,13 @@ def build_system_prompt(
             "a esta zona antes de comparar. NUNCA asumas otra fecha/zona ni confíes en la "
             "estimación del cliente sobre cuánto tiempo ha pasado.\n\n"
             f"{base_prompt}"
+        )
+    if known_facts:
+        base = (
+            f"{base}\n\n"
+            "---\n"
+            "## Datos ya verificados en esta conversación\n\n"
+            f"{known_facts}"
         )
     kb_block = format_knowledge_chunks(knowledge_chunks)
     if not kb_block:

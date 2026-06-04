@@ -5,7 +5,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
-from apps.api.agents.nodes.load_conversation import make_load_conversation_node
+from apps.api.agents.nodes.load_conversation import (
+    _format_known_facts,
+    make_load_conversation_node,
+)
 
 from tests.conftest import (
     CONVERSATION_ID,
@@ -50,6 +53,34 @@ async def test_happy_path(fake_deps, monkeypatch) -> None:
     assert len(out["conversation_history"]) == 2
     assert out["conversation_history"][0]["content"] == "primer mensaje"
     assert out["end_customer"]["email"] == "juan@example.com"
+
+
+@pytest.mark.asyncio
+async def test_known_facts_built_from_read_outputs(fake_deps, monkeypatch) -> None:
+    """Los outputs de lectura previos se inyectan como bloque known_facts."""
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.get_conversation", AsyncMock(return_value=make_conversation())
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.get_end_customer", AsyncMock(return_value=make_end_customer())
+    )
+    monkeypatch.setattr(f"{MODULE}.get_recent_messages", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        f"{MODULE}.get_recent_read_outputs_for_conversation",
+        AsyncMock(return_value=[("shopify.get_order_status", {"order_number": "#1278", "fulfillment_status": None})]),
+    )
+    node = make_load_conversation_node(fake_deps)
+
+    out = await node(_state())
+
+    assert "shopify.get_order_status" in out["known_facts"]
+    assert "#1278" in out["known_facts"]
+    assert "NO vuelvas a consultarlos" in out["known_facts"]
+
+
+def test_format_known_facts_empty_is_empty_string() -> None:
+    assert _format_known_facts([]) == ""
 
 
 @pytest.mark.asyncio
