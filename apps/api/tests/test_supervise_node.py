@@ -21,10 +21,21 @@ class TestNeedsSupervision:
     def test_false_without_pending_tool_or_flag(self):
         assert not self._fn({"tenant_config": {"extra": {}}})
 
-    def test_true_when_aop_requires_supervision(self):
-        # require_supervision por-AOP (propagado por select_aop) activa el supervisor
-        # también en respuestas/flujos sin tool L2/L3.
-        assert self._fn({"tenant_config": {"extra": {}}, "aop_require_supervision": True})
+    def test_aop_require_supervision_supervises_response_after_tools(self):
+        # require_supervision + el turno usó herramientas → supervisa la respuesta.
+        assert self._fn({
+            "tenant_config": {"extra": {}},
+            "aop_require_supervision": True,
+            "tool_results": [{"slug": "shopify.get_order_status", "is_error": False}],
+        })
+
+    def test_aop_require_supervision_skips_plain_response(self):
+        # require_supervision PERO respuesta de cortesía sin herramientas → no supervisa.
+        assert not self._fn({
+            "tenant_config": {"extra": {}},
+            "aop_require_supervision": True,
+            "tool_results": [],
+        })
 
     def test_aop_require_supervision_false_does_not_force(self):
         assert not self._fn({"tenant_config": {"extra": {}}, "aop_require_supervision": False})
@@ -119,10 +130,49 @@ class TestNeedsSupervision:
         finally:
             del SkillRegistry._by_slug["test.l3_supervise"]
 
-    def test_true_when_require_supervision_flag(self):
+    def test_require_supervision_flag_supervises_after_tools(self):
         assert self._fn({
             "tenant_config": {"extra": {"require_supervision": True}},
+            "tool_results": [{"slug": "x", "is_error": False}],
         })
+
+    def test_require_supervision_flag_skips_plain_response(self):
+        assert not self._fn({
+            "tenant_config": {"extra": {"require_supervision": True}},
+            "tool_results": [],
+        })
+
+    def test_l3_pending_supervised_even_without_tool_results(self):
+        """Una acción L3 pendiente se supervisa siempre, aunque no haya tool_results."""
+        from apps.api.skills.base import Skill, SkillInput, SkillOutput
+        from apps.api.skills.registry import SkillRegistry
+
+        class _FakeInput(SkillInput):
+            pass
+
+        class _FakeOutput(SkillOutput):
+            pass
+
+        class _L3Skill(Skill):
+            slug = "test.l3_always"
+            description = "test"
+            tier = "L3"
+            input_schema = _FakeInput
+            output_schema = _FakeOutput
+            default_threshold = 0.95
+
+            async def execute(self, ctx, inputs):
+                return _FakeOutput()
+
+        SkillRegistry._by_slug["test.l3_always"] = _L3Skill
+        try:
+            assert self._fn({
+                "tenant_config": {"extra": {}},
+                "pending_tool_call": {"slug": "test.l3_always", "input": {}},
+                "tool_results": [],
+            })
+        finally:
+            del SkillRegistry._by_slug["test.l3_always"]
 
     def test_false_when_already_retried(self):
         """Si supervisor_retried ya es True, no supervisar de nuevo (evita loop)."""
