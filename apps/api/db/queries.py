@@ -2074,17 +2074,19 @@ async def get_pending_approval(
     return PendingApproval(**dict(row)) if row else None
 
 
-async def get_open_pending_approval(
+async def get_recent_approval_for_skill(
     conn: asyncpg.Connection,
     tenant_id: UUID,
     conversation_id: UUID,
     skill_slug: str,
 ) -> PendingApproval | None:
-    """Devuelve la aprobación pendiente (status='pending') más reciente de la
-    conversación para esa skill, o None.
+    """Devuelve la aprobación más reciente (pending o approved) de la conversación
+    para esa skill, o None.
 
     Sirve para no duplicar el gate L3: si el cliente vuelve a escribir mientras su
-    acción sigue en revisión, el agente reusa esta aprobación en vez de crear otra.
+    acción sigue en revisión (pending) o ya fue aprobada/ejecutada (approved), el
+    agente reusa esa aprobación en vez de crear otra. Las rechazadas se ignoran:
+    una acción rechazada sí puede re-intentarse.
     """
     row = await conn.fetchrow(
         """
@@ -2096,7 +2098,7 @@ async def get_open_pending_approval(
          WHERE tenant_id = $1
            AND conversation_id = $2
            AND skill_slug = $3
-           AND status = 'pending'
+           AND status IN ('pending', 'approved')
            AND deleted_at IS NULL
          ORDER BY created_at DESC
          LIMIT 1
