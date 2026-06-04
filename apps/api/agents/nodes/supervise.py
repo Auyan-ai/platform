@@ -179,35 +179,35 @@ def needs_supervision(state: AgentState) -> bool:
     """Determina si la decisión actual necesita supervisión.
 
     Activadores:
-    1. El AOP compilado tiene require_supervision=true.
-    2. La tool pendiente es L2 o L3.
-    No supervisar L1 ni decisiones puras de respond/escalate sin tools.
+    1. La tool pendiente es L2 o L3 → siempre (la acción es el punto de riesgo).
+    2. El AOP pide require_supervision Y el turno usó herramientas → supervisar la
+       respuesta (puede contener afirmaciones sobre esos datos que revisar).
+
+    Una respuesta/escalación puramente conversacional (saludo, "de nada", cierre)
+    sin haber usado herramientas NO se supervisa: ahorra una llamada LLM (latencia)
+    en turnos sin riesgo de alucinación.
     """
     # No supervisar si ya se reintentó (para evitar loop infinito)
     if state.get("supervisor_retried"):
         return False
 
-    # Supervisión pedida por el AOP compilado (require_supervision=true), propagada por
-    # select_aop. Activa el supervisor también en respuestas/flujos sin tool L2/L3.
-    if state.get("aop_require_supervision"):
-        return True
-
-    # Revisar require_supervision en el config del AOP (via tenant_config.extra o system_prompt)
-    tenant_config = state.get("tenant_config") or {}
-    extra = tenant_config.get("extra") or {}
-    if extra.get("require_supervision"):
-        return True
-
-    # Revisar tier de la tool pendiente
+    # Tool L2/L3 pendiente → siempre supervisar, sea cual sea el AOP.
     pending = state.get("pending_tool_call")
     if pending:
         slug = pending.get("slug", "")
         try:
-            skill_cls = SkillRegistry.get(slug)
-            if skill_cls.tier in ("L2", "L3"):
+            if SkillRegistry.get(slug).tier in ("L2", "L3"):
                 return True
         except ValueError:
             pass
+
+    # require_supervision (AOP compilado o config del tenant): supervisar la
+    # respuesta SOLO si el turno usó herramientas. Una respuesta de cortesía sin
+    # tools no se supervisa (evita el supervisor en un "gracias").
+    tenant_config = state.get("tenant_config") or {}
+    extra = tenant_config.get("extra") or {}
+    if state.get("aop_require_supervision") or extra.get("require_supervision"):
+        return bool(state.get("tool_results"))
 
     return False
 
