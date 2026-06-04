@@ -222,6 +222,33 @@ def test_order_change_prompt_instructs_address_readback():
     assert "sin confirmación" not in prompt
 
 
+def test_order_change_prompt_minimizes_address_friction():
+    """order_change no debe pedir país ni provincia a ciegas cuando el CP/tienda los
+    determinan (hallazgo 6): asume el país de la tienda y deduce la provincia del CP,
+    confirmándolos en el read-back en vez de preguntarlos campo por campo."""
+    tenant_id = uuid4()
+    tc = TenantConfiguration(
+        tenant_id=tenant_id, agent_model="claude-sonnet-4-6", escalation_threshold=0.7
+    )
+    a = next(x for x in CANONICAL_AOPS if x["slug"] == "order_change")
+    fm = a["frontmatter"]
+    awc = AopWithContent(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        slug="order_change",
+        workspace="production",
+        current_version=1,
+        yaml_frontmatter=fm,
+        body_markdown=a["body"],
+        raw_source=_build_raw_source(fm, a["body"]),
+    )
+    prompt = compile_aop(awc, tc).system_prompt.lower()
+    assert "país de la tienda" in prompt
+    assert "deduce la provincia" in prompt
+    # Sigue prohibido inventar.
+    assert "nunca inventes" in prompt
+
+
 # ─── provision_canonical_aops ───────────────────────────────────────────────────
 
 

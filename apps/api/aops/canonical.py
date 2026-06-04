@@ -331,11 +331,11 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             ],
             "required_data": [
                 "Identificador del pedido",
-                "Para dirección: todos los campos nuevos (address1, city, province, country, zip)",
+                "Para dirección: la dirección nueva completa (calle, localidad, código postal); la provincia y el país se deducen del CP/tienda y se confirman, no hace falta pedirlos por separado",
             ],
             "guardrails": [
                 "Solo cambias dirección o cancelas si el pedido NO se ha enviado (unfulfilled). Si ya se envió → no es posible; explícalo y ofrece la vía de devolución / escala.",
-                "Para cambio de dirección, recoge TODOS los campos nuevos antes de llamar la skill.",
+                "Para cambio de dirección necesitas la dirección completa, pero no la pidas campo por campo a ciegas: asume el país de la tienda (salvo envío internacional explícito) y, con el código postal, deduce la provincia (y la localidad solo si el CP la identifica sin ambigüedad). Pide al cliente únicamente lo que falte; si dudas, pregunta y nunca inventes.",
                 "Antes de update_shipping_address, lee al cliente la dirección completa parseada (calle, ciudad, provincia, país, código postal) y espera su confirmación: un error de transcripción no debe llegar a aprobación sin validarlo con el cliente.",
                 "Cambio y cancelación quedan pendientes de aprobación; informa que está en proceso.",
                 "No canceles ni modifiques sin petición explícita del cliente.",
@@ -354,7 +354,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             "Objetivo: modificar (dirección) o cancelar un pedido AÚN NO enviado, con aprobación.\n\n"
             "1. Localiza el pedido (get_order_status) y comprueba el estado de fulfillment.\n"
             "2. Si ya está enviado (fulfilled) → no se puede cambiar/cancelar; explícalo y reconduce a devolución o escala.\n"
-            "3. Cambio de dirección (unfulfilled): recoge TODOS los campos nuevos; antes de seguir, lee al cliente la dirección completa tal como la registraste y pide que confirme que es correcta. Solo con su confirmación → update_shipping_address (order_id + dirección). Pendiente de aprobación; informa.\n"
+            "3. Cambio de dirección (unfulfilled): reúne la dirección nueva pidiendo solo lo necesario (calle, localidad y código postal); deduce la provincia del CP y el país de la tienda en vez de pedirlos por separado. Antes de seguir, lee al cliente la dirección completa tal como la registraste y pide que confirme que es correcta. Solo con su confirmación → update_shipping_address (order_id + dirección). Pendiente de aprobación; informa.\n"
             "4. Cancelación (unfulfilled): confirma la intención → cancel_order (order_id). Pendiente de aprobación; informa.\n"
             "5. Modificar artículos/cantidades no está soportado → escala."
         ),
