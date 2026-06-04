@@ -694,6 +694,8 @@ class TestL3HumanApprovalGate:
         mock_create.assert_not_awaited()
         assert result.get("pending_approval_id") == str(approved_id)
         assert result.get("pending_approval_is_repeat") is True
+        # El status del reusado se propaga para que escalate elija el mensaje correcto.
+        assert result.get("pending_approval_reused_status") == "approved"
 
     async def test_l3_creates_new_approval_when_action_differs(
         self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch

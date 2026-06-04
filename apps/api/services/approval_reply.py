@@ -102,6 +102,33 @@ def waiting_message(skill_slug: str | None) -> str:
     return _SKILL_WAITING.get(skill_slug, _DEFAULT_WAITING)
 
 
+# Seguimiento cuando la acción YA fue aprobada/aplicada y el cliente vuelve a
+# escribir (agradece, etc.). No decir "sigue en revisión" (contradiría el "ya está
+# hecho" que el cliente ya recibió): confirmar que está aplicado y ofrecer ayuda.
+_SKILL_DONE_FOLLOWUP: dict[str, str] = {
+    "shopify.update_shipping_address": (
+        "Tu cambio de dirección ya quedó aplicado. Si necesitas algo más, aquí estoy. 😊"
+    ),
+    "shopify.cancel_order": (
+        "Tu cancelación ya quedó registrada. Si necesitas algo más, aquí estoy. 😊"
+    ),
+    "shopify.refund_partial": (
+        "Tu reembolso ya quedó procesado. Si necesitas algo más, aquí estoy. 😊"
+    ),
+    "shopify.start_return": (
+        "Tu devolución ya quedó en marcha. Si necesitas algo más, aquí estoy. 😊"
+    ),
+}
+_DEFAULT_DONE_FOLLOWUP = "Tu solicitud ya quedó completada. Si necesitas algo más, aquí estoy. 😊"
+
+
+def done_followup_message(skill_slug: str | None) -> str:
+    """Mensaje cuando el cliente reescribe y su acción YA fue aprobada/aplicada."""
+    if skill_slug is None:
+        return _DEFAULT_DONE_FOLLOWUP
+    return _SKILL_DONE_FOLLOWUP.get(skill_slug, _DEFAULT_DONE_FOLLOWUP)
+
+
 _SYSTEM = (
     "Eres el asistente de atención al cliente de una tienda de e-commerce. "
     "Reescribe el mensaje que te doy como una confirmación breve, cálida y natural "
