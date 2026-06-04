@@ -231,6 +231,10 @@ def _render_global_rules(escalation_triggers: list[str]) -> str:
         "- Si una herramienta devuelve vacío, sin resultados o un error, trátalo "
         "como dato no disponible: no infieras la respuesta a partir de ese vacío; "
         "escala o pregunta en lugar de responder con datos inventados.",
+        "- Sé conciso y no repitas información que ya le diste al cliente en esta "
+        "conversación. Si necesitas reverificar con una herramienta algo que ya le "
+        "confirmaste, hazlo en silencio: no vuelvas a anunciar el mismo resultado, "
+        "avanza al siguiente paso.",
     ]
     if escalation_triggers:
         lines.append("")
