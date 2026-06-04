@@ -174,6 +174,34 @@ async def test_pending_approval_uses_contextual_gate_message(fake_deps, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_repeat_pending_approval_uses_waiting_message(fake_deps, monkeypatch) -> None:
+    """Gate L3 repetido (el cliente vuelve a escribir esperando): mensaje de espera
+    ('sigue en revisión'), no el gate de cero ('lo paso a mi equipo')."""
+    out_msg = make_message(id=OUTBOUND_MSG_ID, role="agent_ai", direction="outbound")
+    insert_msg_mock = AsyncMock(return_value=out_msg)
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    _mock_no_existing(monkeypatch)
+    monkeypatch.setattr(f"{MODULE}.insert_escalation", AsyncMock(return_value=make_escalation()))
+    monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
+    monkeypatch.setattr(f"{MODULE}.insert_message", insert_msg_mock)
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    node = make_escalate_node(fake_deps)
+
+    await node(
+        _state(
+            agent_response="",
+            pending_approval_id="ap-123",
+            pending_approval_skill_slug="shopify.update_shipping_address",
+            pending_approval_is_repeat=True,
+        )
+    )
+
+    content = insert_msg_mock.await_args.kwargs["content"]
+    assert "sigue en revisión" in content
+    assert "Lo paso a mi equipo" not in content
+
+
+@pytest.mark.asyncio
 async def test_no_message_inserted_when_response_empty(fake_deps, monkeypatch) -> None:
     """Si no hay agent_response, no se inserta mensaje — no rompe."""
     insert_msg_mock = AsyncMock()
