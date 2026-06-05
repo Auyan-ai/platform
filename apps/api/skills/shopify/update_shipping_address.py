@@ -16,8 +16,11 @@ class UpdateShippingAddressInput(SkillInput):
     address1: str
     city: str
     province: str
-    country: str
     zip_code: str
+    # País determinista: por defecto se conserva el del pedido (lo resuelve el
+    # adapter). Solo se envía cuando el cliente cambia de país explícitamente; el
+    # LLM NO debe rellenarlo en cambios domésticos.
+    country: str | None = None
     first_name: str | None = None
     last_name: str | None = None
 
@@ -67,5 +70,7 @@ class UpdateShippingAddress(Skill):
             order_id=order["id"],
             new_address1=shipping.get("address1", inputs.address1),
             new_city=shipping.get("city", inputs.city),
-            new_country=shipping.get("country", inputs.country),
+            new_country=(
+                shipping.get("country") or shipping.get("country_code") or inputs.country or ""
+            ),
         )

@@ -115,8 +115,8 @@ class MockShopifyAdapter:
         address1: str,
         city: str,
         province: str,
-        country: str,
         zip_code: str,
+        country: str | None = None,
         first_name: str | None = None,
         last_name: str | None = None,
     ) -> dict[str, Any]:

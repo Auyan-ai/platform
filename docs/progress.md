@@ -79,7 +79,6 @@ Target del dogfood: **Marea Studio** (`683246c2-10ce-4f6c-a299-5053f32f8c01`, sl
   4. **Observabilidad:** la ejecución del L3 al aprobar no deja fila en `skill_audit_log` (solo queda el gate como `rejected_by_permissions`).
   5. **PII:** la dirección de envío no se redacta en `pending_approvals.inputs_redacted`.
   6. **Limpieza:** dead code `isDashboardRoute` en `middleware.ts`; retrofitear `load_tenant_context` al helper `build_commerce_integration_ctx`; `REPLY_MODEL` (Haiku) constante → promover a setting + multi-idioma en `approval_reply`.
-  7. Re-seed `--update` de AOPs canónicos a **Lunaria** (pendiente del #168).
 
 ---
 
