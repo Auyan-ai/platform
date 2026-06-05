@@ -6,8 +6,6 @@ Sin config o prompt, el grafo no puede procesar — setea error.
 
 from __future__ import annotations
 
-import json
-import logging
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
@@ -17,17 +15,13 @@ from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import (
     get_active_system_prompt,
-    get_integration_credentials_encrypted,
-    get_primary_integration_for_kind,
     get_tenant_by_id,
     get_tenant_configuration,
     get_tenant_facts,
     get_tenant_playbook,
     list_tool_permissions,
 )
-from apps.api.services.integrations_crypto import decrypt_credentials, get_integration_crypto_key
-
-logger = logging.getLogger(__name__)
+from apps.api.services.commerce_context import build_commerce_integration_ctx
 
 
 def make_load_tenant_context_node(
@@ -54,19 +48,12 @@ def make_load_tenant_context_node(
             perm_rows = await list_tool_permissions(conn, tenant_id)
             playbook = await get_tenant_playbook(conn, tenant_id)
             facts = await get_tenant_facts(conn, tenant_id)
-            commerce_integration = await get_primary_integration_for_kind(
-                conn, tenant_id=tenant_id, kind="commerce"
-            )
-            commerce_encrypted: bytes | None = None
-            if commerce_integration:
-                commerce_encrypted = await get_integration_credentials_encrypted(
-                    conn,
-                    tenant_id=tenant_id,
-                    integration_id=commerce_integration.id,
-                )
 
-        config_dump = config.model_dump(mode="json")
-        extra = config_dump.get("extra") or {}
+            config_dump = config.model_dump(mode="json")
+            extra = config_dump.get("extra") or {}
+            commerce_ctx = await build_commerce_integration_ctx(
+                conn, tenant_id, extra=extra
+            )
 
         # Construir mapa slug → {is_enabled, human_approval_required, threshold_override}
         tool_permissions: dict = {
@@ -78,53 +65,16 @@ def make_load_tenant_context_node(
             for p in perm_rows
         }
 
-        # Construir commerce_integration_ctx: primero desde tenant_integrations,
-        # fallback a tenant_config.extra para tenants no migrados aún.
+        # `build_commerce_integration_ctx` resuelve las creds (descifrado + token
+        # exchange Shopify) desde tenant_integrations, o cae a tenant_config.extra.
+        # Aquí solo serializamos el IntegrationContext al state (JSON-safe).
         commerce_integration_ctx: dict | None = None
-        if commerce_integration and commerce_encrypted:
-            try:
-                from apps.api.core.config import get_settings
-                key = get_integration_crypto_key(get_settings())
-                creds = json.loads(decrypt_credentials(commerce_encrypted, key).decode())
-                config_jsonb = commerce_integration.config or {}
-
-                # Shopify 2026 flow: si hay client_id/client_secret, resolver el
-                # access_token corto (cache en memoria, no en DB) antes de pasar al
-                # adapter. El adapter espera 'access_token' (no client_id/secret).
-                if (
-                    commerce_integration.provider == "shopify"
-                    and creds.get("client_id")
-                    and creds.get("client_secret")
-                ):
-                    from apps.api.integrations.shopify import ensure_shopify_access_token
-
-                    access_token, _new_expires = await ensure_shopify_access_token(
-                        tenant_id=tenant_id,
-                        domain=creds["domain"],
-                        client_id=creds["client_id"],
-                        client_secret=creds["client_secret"],
-                    )
-                    # Reemplazamos creds: el adapter no necesita client_id/secret.
-                    creds = {"domain": creds["domain"], "access_token": access_token}
-
-                commerce_integration_ctx = {
-                    "tenant_id": str(tenant_id),
-                    "credentials": creds,
-                    "config": config_jsonb,
-                }
-            except Exception:
-                logger.warning(
-                    "commerce_integration_decrypt_failed tenant_id=%s", tenant_id
-                )
-        if commerce_integration_ctx is None:
-            shopify_domain = extra.get("shopify_domain")
-            shopify_token = extra.get("shopify_token")
-            if shopify_domain and shopify_token:
-                commerce_integration_ctx = {
-                    "tenant_id": str(tenant_id),
-                    "credentials": {"domain": shopify_domain, "token": shopify_token},
-                    "config": {},
-                }
+        if commerce_ctx is not None:
+            commerce_integration_ctx = {
+                "tenant_id": str(commerce_ctx.tenant_id),
+                "credentials": commerce_ctx.credentials,
+                "config": commerce_ctx.config,
+            }
 
         out: dict = {
             "tenant_config": config_dump,
