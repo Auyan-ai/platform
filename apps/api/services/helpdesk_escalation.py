@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from apps.api.core.config import get_settings
@@ -42,9 +42,12 @@ async def push_escalation_to_helpdesk(
     tenant_id: UUID,
     conversation: Conversation,
     reason: str,
-    agent_context: dict[str, Any],
 ) -> bool:
     """Publica la nota interna del escalado + asigna al equipo CX del cliente.
+
+    La nota es el `reason` en lenguaje natural (lo genera el agente, ya trae el
+    contexto: motivo, nº de pedido, urgencia). No se inyecta contexto estructurado
+    (confianza/trace/etc.): el agente humano ya ve el hilo y eso vive en LangSmith.
 
     Devuelve True si se empujó. False (sin lanzar) si el canal no es un helpdesk
     (widget de prueba), no hay integración activa o faltan credenciales. Lanza si la
@@ -82,7 +85,8 @@ async def push_escalation_to_helpdesk(
     ctx = IntegrationContext(
         tenant_id=tenant_id, credentials=creds, config=integration.config or {}
     )
-    await adapter_cls().push_escalation(ctx, external_id, reason, agent_context)
+    # Sin contexto estructurado: la nota es solo el motivo en lenguaje natural.
+    await adapter_cls().push_escalation(ctx, external_id, reason, {})
     logger.info(
         "escalation_pushed_to_helpdesk tenant_id=%s provider=%s conversation_id=%s",
         tenant_id,
@@ -97,7 +101,6 @@ async def push_escalation_to_helpdesk_safe(
     tenant_id: UUID,
     conversation: Conversation,
     reason: str,
-    agent_context: dict[str, Any],
 ) -> bool:
     """Versión best-effort de `push_escalation_to_helpdesk`: nunca lanza.
 
@@ -109,7 +112,6 @@ async def push_escalation_to_helpdesk_safe(
             tenant_id=tenant_id,
             conversation=conversation,
             reason=reason,
-            agent_context=agent_context,
         )
     except Exception:
         logger.warning(
