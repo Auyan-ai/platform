@@ -13,6 +13,8 @@ export interface ApprovalOut {
   skill_slug: string
   skill_tier: string
   inputs_redacted: Record<string, unknown>
+  // Datos reales que el operador necesita para revisar (ej. la dirección de envío).
+  inputs_raw: Record<string, unknown>
   aop_slug: string
   aop_version: number
   status: ApprovalStatus

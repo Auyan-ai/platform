@@ -46,6 +46,27 @@ class TestRedactInputs:
         result = redact_inputs({"first_name": "Carlos"}, SALT)
         assert result["first_name"] == "C."
 
+    def test_address_fields_redactados(self) -> None:
+        result = redact_inputs(
+            {
+                "address1": "Calle Jose Hierro 18, 3B",
+                "city": "Madrid",
+                "province": "Madrid",
+                "country": "España",
+                "zip_code": "28702",
+            },
+            SALT,
+        )
+        # La calle no deja rastro legible.
+        assert result["address1"] == "<dirección>"
+        assert "Jose Hierro" not in result["address1"]
+        # El CP conserva el prefijo de provincia (ES) pero no el resto.
+        assert result["zip_code"] == "28***"
+        # Ciudad/provincia/país no identifican a la persona → se conservan.
+        assert result["city"] == "Madrid"
+        assert result["province"] == "Madrid"
+        assert result["country"] == "España"
+
     def test_non_pii_fields_sin_cambio(self) -> None:
         result = redact_inputs(
             {"order_id": 1234, "note": "texto libre", "tags": ["a", "b"]},
