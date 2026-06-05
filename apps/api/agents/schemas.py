@@ -64,6 +64,16 @@ RESPOND_OR_ESCALATE_TOOL: dict[str, Any] = {
                     "'insufficient_context_in_knowledge_base'."
                 ),
             },
+            "awaiting_customer_reply": {
+                "type": "boolean",
+                "description": (
+                    "true SOLO si tu response_text le pide al cliente más información o "
+                    "una aclaración para poder continuar (p.ej. pedirle el nº de pedido, "
+                    "preguntarle qué artículo, confirmar una dirección). false si tu "
+                    "respuesta resuelve o cierra la consulta. Por defecto false. "
+                    "Se usa para no cerrar el ticket cuando aún esperas al cliente."
+                ),
+            },
         },
     },
 }
@@ -83,6 +93,7 @@ class AgentDecisionTool(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     response_text: str
     escalation_reason: str | None = None
+    awaiting_customer_reply: bool = False
 
     @model_validator(mode="after")
     def _coherent(self) -> AgentDecisionTool:

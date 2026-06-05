@@ -147,6 +147,10 @@ def _patch_all_db_and_llm(
     monkeypatch.setattr(
         "apps.api.agents.nodes.respond.update_conversation_last_message", AsyncMock()
     )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.respond.mark_conversation_resolved",
+        AsyncMock(return_value=True),
+    )
 
     # --- escalate ---
     monkeypatch.setattr("apps.api.agents.nodes.escalate.tenant_scope", fake_scope)

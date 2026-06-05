@@ -171,6 +171,9 @@ def _handle_decide_tool(
         "confidence": parsed.confidence,
         "agent_response": agent_response,
         "escalation_reason": escalation_reason,
+        # El agente resuelve salvo que su respuesta pida más datos al cliente.
+        # Un escalado nunca es una resolución autónoma.
+        "awaiting_customer_reply": parsed.awaiting_customer_reply or decision == "escalate",
         **tokens_update,
     }
 

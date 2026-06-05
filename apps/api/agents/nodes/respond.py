@@ -13,7 +13,11 @@ from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
-from apps.api.db.queries import insert_message, update_conversation_last_message
+from apps.api.db.queries import (
+    insert_message,
+    mark_conversation_resolved,
+    update_conversation_last_message,
+)
 
 
 def make_respond_node(
@@ -41,6 +45,11 @@ def make_respond_node(
             "confidence": state.get("confidence"),
         }
 
+        # El agente resuelve salvo que su respuesta pida más datos al cliente
+        # (pregunta de clarificación). Resolución autónoma = responder sin esperar
+        # al cliente; el ticket externo lo cierra el caller tras entregar la respuesta.
+        resolves = not state.get("awaiting_customer_reply", False)
+
         async with tenant_scope(tenant_id) as conn:
             msg = await insert_message(
                 conn,
@@ -52,6 +61,9 @@ def make_respond_node(
                 metadata=metadata,
             )
             await update_conversation_last_message(conn, tenant_id, conversation_id)
+            resolved = False
+            if resolves:
+                resolved = await mark_conversation_resolved(conn, tenant_id, conversation_id)
 
         tracker.emit(
             tenant_id=state["tenant_id"],
@@ -59,10 +71,10 @@ def make_respond_node(
             phase="response",
             event_type="choice",
             label="Agent responded",
-            detail={"message_id": str(msg.id)},
+            detail={"message_id": str(msg.id), "resolved": resolved},
             status="done",
         )
 
-        return {"output_message_id": str(msg.id)}
+        return {"output_message_id": str(msg.id), "conversation_resolved": resolved}
 
     return _node

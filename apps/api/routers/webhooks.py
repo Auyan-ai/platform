@@ -40,6 +40,8 @@ from apps.api.db.queries import (
     try_insert_idempotency_key,
     update_conversation_last_message,
 )
+from apps.api.services.conversations import reopen_if_resolved
+from apps.api.services.helpdesk_closure import close_external_helpdesk_ticket_safe
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
 from apps.api.services.usage import UsageRecorder, check_tenant_budget
@@ -243,6 +245,9 @@ async def inbound(
                     external_id=payload.external_conversation_id,
                     subject=payload.subject,
                 )
+            else:
+                # El cliente volvió a escribir: si estaba resuelta, reactivarla.
+                conversation = await reopen_if_resolved(conn, tenant.id, conversation)
 
             inbound_msg = await insert_message(
                 conn,
@@ -294,6 +299,13 @@ async def inbound(
             "trace_id": outcome.trace_id,
         },
     )
+
+    # Resolución autónoma: cerrar el ticket externo si hay helpdesk (no-op para
+    # canales de prueba sin helpdesk). Best-effort.
+    if outcome.resolved:
+        await close_external_helpdesk_ticket_safe(
+            tenant_id=tenant.id, conversation=conversation, settings=settings
+        )
 
     # 6. Registrar uso (fire-and-forget, no bloquea la respuesta).
     _usage_recorder.record(

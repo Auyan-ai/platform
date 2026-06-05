@@ -368,7 +368,7 @@ class TestWebhookRateLimit:
         outcome = AgentOutcome(
             decision="respond", response_text="Hola, ¿en qué te ayudo?",
             escalation_reason=None, output_message_id=str(OUTBOUND_MSG_ID),
-            escalation_id=None, trace_id="trace-abc", confidence=0.9,
+            escalation_id=None, resolved=False, trace_id="trace-abc", confidence=0.9,
             tokens_in=100, tokens_out=50, cost_usd=0.001,
             model_used="claude-sonnet-4-6", error=None,
         )
