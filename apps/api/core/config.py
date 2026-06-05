@@ -138,6 +138,9 @@ class Settings(BaseSettings):
     intent_switch_threshold: float = 0.70
     # Modelo para el clasificador de intent. Haiku: rápido y barato para clasificación.
     intent_classifier_model: str = "claude-haiku-4-5-20251001"
+    # Modelo para reescribir el mensaje al cliente tras aprobar/rechazar L3.
+    # Haiku: barato/rápido para una frase de confirmación.
+    reply_model: str = "claude-haiku-4-5-20251001"
 
     # --- Rate limiting (webhooks inbound) ---
     # Requests por minuto por tenant. Cubre ~50K tickets/día con headroom para bursts.

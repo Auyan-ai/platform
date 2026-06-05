@@ -15,6 +15,7 @@ import time
 from typing import Annotated
 from uuid import UUID
 
+from apps.api.core.config import get_settings
 from apps.api.core.errors import ForbiddenError, NotFoundError
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
 from apps.api.db.client import tenant_scope
@@ -224,7 +225,7 @@ async def approve_action(
     # plantilla). output_data crudo queda solo en metadata, no se le muestra al cliente.
     anthropic_client = getattr(getattr(request.app.state, "agent_deps", None), "anthropic", None)
     result_message = await generate_customer_reply(
-        anthropic_client, approval.skill_slug, success=True
+        anthropic_client, approval.skill_slug, success=True, model=get_settings().reply_model
     )
 
     # Marcar aprobada y añadir mensaje a la conversación
@@ -307,7 +308,11 @@ async def reject_action(
             getattr(request.app.state, "agent_deps", None), "anthropic", None
         )
         reply = await generate_customer_reply(
-            anthropic_client, approval.skill_slug, success=False, reject_comment=body.comment
+            anthropic_client,
+            approval.skill_slug,
+            success=False,
+            reject_comment=body.comment,
+            model=get_settings().reply_model,
         )
         msg = await insert_message(
             conn,
