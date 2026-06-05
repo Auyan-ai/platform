@@ -162,6 +162,8 @@ class TestGetApproval:
         data = resp.json()
         assert data["id"] == str(APPROVAL_ID)
         assert data["status"] == "pending"
+        # El operador ve los inputs reales (su propio cliente) para poder revisar.
+        assert data["inputs_raw"] == {"order_id": 1001}
 
     def test_returns_404_when_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(

@@ -4,9 +4,14 @@ Política (architecture-agent-v2.md § 11.3):
 - Email       → sha256(value + salt)[:16] como "<email:XXXXXXXXXXXXXXXX>"
 - Teléfono    → últimos 4 dígitos "***-1234"
 - Nombre      → iniciales "J. P."
+- Dirección   → "<dirección>" (la calle es PII; ciudad/provincia/país se conservan)
+- Cód. postal → prefijo de 2 dígitos "28***" (en ES identifica provincia, no a la persona)
 - IDs, números de pedido, textos libres → sin cambio
 
 El hashing ocurre en Python para que el salt nunca aparezca en logs de Postgres.
+
+Nota: esta es la copia FORENSE (skill_audit_log y pending_approvals.inputs_redacted).
+El operador que aprueba una acción ve `inputs_raw` (su propio cliente, autorizado).
 """
 
 from __future__ import annotations
@@ -31,6 +36,14 @@ _PII_FIELDS: dict[str, str] = {
     "last_name": "name",
     "full_name": "name",
     "contact_name": "name",
+    "address1": "address",
+    "address2": "address",
+    "address": "address",
+    "street": "address",
+    "zip": "zip",
+    "zip_code": "zip",
+    "postal_code": "zip",
+    "postcode": "zip",
 }
 
 
@@ -51,6 +64,19 @@ def _redact_name(value: str) -> str:
     return " ".join(f"{p[0].upper()}." for p in parts if p)
 
 
+def _redact_address(value: str) -> str:
+    # La calle es PII directa; no dejamos rastro legible en la copia forense.
+    return "<dirección>"
+
+
+def _redact_zip(value: str) -> str:
+    # En España el CP empieza por la provincia (2 dígitos): útil sin identificar.
+    digits = re.sub(r"\D", "", str(value))
+    if len(digits) >= 2:
+        return f"{digits[:2]}***"
+    return "***"
+
+
 def redact_inputs(inputs: dict[str, Any], salt: str) -> dict[str, Any]:
     """Devuelve una copia del dict con los campos PII pseudonimizados."""
     result: dict[str, Any] = {}
@@ -65,6 +91,10 @@ def redact_inputs(inputs: dict[str, Any], salt: str) -> dict[str, Any]:
             result[key] = _redact_phone(value)
         elif pii_kind == "name":
             result[key] = _redact_name(value)
+        elif pii_kind == "address":
+            result[key] = _redact_address(value)
+        elif pii_kind == "zip":
+            result[key] = _redact_zip(value)
         else:
             result[key] = value
     return result

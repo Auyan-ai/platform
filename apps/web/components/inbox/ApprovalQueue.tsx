@@ -139,7 +139,7 @@ function ApprovalRow({
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-foreground-body">{approval.skill_slug}</p>
           <p className="mt-0.5 text-xs text-foreground-muted truncate">
-            {formatInputs(approval.inputs_redacted)}
+            {formatInputs(approval.inputs_raw)}
           </p>
           <div className="mt-1 flex items-center gap-2 text-xs text-foreground-muted">
             <Link

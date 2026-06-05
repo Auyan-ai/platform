@@ -53,7 +53,11 @@ class ApprovalOut(BaseModel):
     conversation_id: UUID
     skill_slug: str
     skill_tier: str
+    # inputs_redacted: copia forense (PII pseudonimizada). inputs_raw: datos reales
+    # que el operador necesita para decidir (ej. la dirección a la que enviar). La
+    # API ya aísla por tenant; el operador revisa a su propio cliente.
     inputs_redacted: dict
+    inputs_raw: dict
     aop_slug: str
     aop_version: int
     status: str
