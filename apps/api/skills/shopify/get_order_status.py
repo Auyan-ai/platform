@@ -22,6 +22,12 @@ class OrderDetail(SkillOutput):
     total_price: str | None
     currency: str | None
     created_at: str | None
+    # Fecha de envío (created_at del primer fulfillment) y de entrega (cuando el
+    # carrier reporta shipment_status="delivered"). El plazo de devolución se mide
+    # desde la entrega; si no hay, desde el envío; y solo en último recurso desde
+    # created_at del pedido.
+    fulfilled_at: str | None = None
+    delivered_at: str | None = None
     fulfillments: list[FulfillmentInfo]
     # Artículos del pedido — el agente necesita line_item_id para start_return.
     line_items: list[LineItemInfo] = Field(default_factory=list)
@@ -60,6 +66,7 @@ class GetOrderStatus(Skill):
                 fulfillments=[],
             )
 
+        raw_fulfillments = raw.get("fulfillments", [])
         fulfillments = [
             FulfillmentInfo(
                 status=f.get("status", ""),
@@ -67,9 +74,21 @@ class GetOrderStatus(Skill):
                 tracking_url=(f.get("tracking_urls") or [None])[0]
                 or f.get("tracking_url"),
                 tracking_company=f.get("tracking_company"),
+                shipment_status=f.get("shipment_status"),
             )
-            for f in raw.get("fulfillments", [])
+            for f in raw_fulfillments
         ]
+        # Fecha de envío: created_at del primer fulfillment. Fecha de entrega:
+        # updated_at del fulfillment que el carrier marca como "delivered".
+        fulfilled_at = raw_fulfillments[0].get("created_at") if raw_fulfillments else None
+        delivered_at = next(
+            (
+                f.get("updated_at")
+                for f in raw_fulfillments
+                if f.get("shipment_status") == "delivered"
+            ),
+            None,
+        )
         line_items = [
             LineItemInfo(
                 line_item_id=li["id"],
@@ -89,6 +108,8 @@ class GetOrderStatus(Skill):
             total_price=raw.get("total_price"),
             currency=raw.get("currency"),
             created_at=raw.get("created_at"),
+            fulfilled_at=fulfilled_at,
+            delivered_at=delivered_at,
             fulfillments=fulfillments,
             line_items=line_items,
         )

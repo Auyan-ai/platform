@@ -13,6 +13,10 @@ class FulfillmentInfo(BaseModel):
     tracking_number: str | None
     tracking_url: str | None
     tracking_company: str | None
+    # Estado del envío reportado por el transportista ("delivered", "in_transit"…),
+    # cuando la integración del carrier lo informa. Permite medir el plazo de
+    # devolución desde la ENTREGA y no desde la creación del pedido.
+    shipment_status: str | None = None
 
 
 class LineItemInfo(BaseModel):
