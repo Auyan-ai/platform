@@ -71,8 +71,9 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             ],
             "guardrails": [
                 "Nunca inventes tracking, transportista ni fecha de entrega: solo lo que devuelva la skill.",
-                "Pedido 'unfulfilled' (en preparación, sin tracking) es normal; NO escales por eso.",
-                "La impaciencia no es motivo de escalado: recalcula los días desde created_at y tranquiliza con el dato real.",
+                "Pedido 'unfulfilled' DENTRO del plazo de preparación/envío es normal; NO escales por eso.",
+                "Antes de tranquilizar, COMPARA los días desde created_at con el plazo de envío real (KB/tenant_facts/get_shop_policies). Si está DENTRO de plazo → tranquiliza con el dato. Si está MUY POR ENCIMA del plazo y sigue sin enviarse → NO digas que 'está a puntito de salir' ni 'en camino': reconoce el retraso con empatía y ESCALA.",
+                "Nunca afirmes que un pedido retrasado 'está en camino' o 'a punto de salir' si no hay tracking y el plazo ya venció: eso es inventar tranquilidad.",
             ],
             "max_tool_iterations": 4,
             "confidence_threshold": 0.65,
@@ -80,6 +81,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             "escalation_triggers": [
                 "El cliente reporta el pedido dañado o incompleto",
                 "El pedido figura entregado pero el cliente dice no haberlo recibido",
+                "El pedido sigue sin enviarse (unfulfilled) y los días desde la compra superan claramente el plazo de envío de la tienda",
             ],
         },
         "body": (
@@ -90,8 +92,12 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             "3. Si el email tiene varios pedidos → pregúntale cuál (menciónalos por fecha y nº).\n"
             "4. Con el pedido:\n"
             "   - Con tracking → comparte estado + transportista + nº de tracking + link de seguimiento.\n"
-            "   - Sin tracking (en preparación) → dilo como algo normal; si se queja del retraso, calcula\n"
-            "     los días desde `created_at` y tranquilízalo con ese dato concreto.\n"
+            "   - Sin tracking (en preparación): calcula los días desde `created_at` y compáralos con el\n"
+            "     plazo de envío real de la tienda (KB/tenant_facts/get_shop_policies).\n"
+            "       · DENTRO de plazo → dilo como algo normal y tranquiliza con el dato concreto.\n"
+            "       · FUERA de plazo (días > plazo de envío y sigue sin enviarse) → reconoce el retraso\n"
+            "         con empatía, NO digas que está 'en camino' ni 'a punto de salir', y ESCALA para que\n"
+            "         una persona revise qué pasó con el envío.\n"
             "5. Cierra preguntando si necesita algo más."
         ),
     },

@@ -222,6 +222,35 @@ def test_order_change_prompt_instructs_address_readback():
     assert "sin confirmación" not in prompt
 
 
+def test_order_status_prompt_escalates_overdue_unfulfilled():
+    """order_status no debe dar falsa tranquilidad: si el pedido sigue sin enviarse y
+    los días superan el plazo de envío, reconoce el retraso y escala (no 'en camino')."""
+    tenant_id = uuid4()
+    tc = TenantConfiguration(
+        tenant_id=tenant_id, agent_model="claude-sonnet-4-6", escalation_threshold=0.7
+    )
+    a = next(x for x in CANONICAL_AOPS if x["slug"] == "order_status")
+    fm = a["frontmatter"]
+    awc = AopWithContent(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        slug="order_status",
+        workspace="production",
+        current_version=1,
+        yaml_frontmatter=fm,
+        body_markdown=a["body"],
+        raw_source=_build_raw_source(fm, a["body"]),
+    )
+    prompt = compile_aop(awc, tc).system_prompt.lower()
+    # Compara contra el plazo de envío real, no tranquiliza a ciegas.
+    assert "plazo de envío" in prompt
+    # Fuera de plazo → reconoce el retraso y escala.
+    assert "reconoce el retraso" in prompt
+    # No inventa tranquilidad ("en camino"/"a punto de salir") con plazo vencido.
+    assert "en camino" in prompt
+    assert "a punto de salir" in prompt
+
+
 def test_order_change_prompt_minimizes_address_friction():
     """order_change no debe pedir país ni provincia a ciegas cuando el CP/tienda los
     determinan (hallazgo 6): asume el país de la tienda y deduce la provincia del CP,
