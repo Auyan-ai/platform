@@ -287,7 +287,8 @@ async def find_conversation_by_external(
     row = await conn.fetchrow(
         """
         SELECT id, tenant_id, end_customer_id, channel, external_id,
-               subject, status, assigned_user_id, last_message_at, nudged_at, created_at
+               subject, status, assigned_user_id, last_message_at, nudged_at,
+               resolved_at, created_at
           FROM conversations
          WHERE tenant_id = $1 AND channel = $2::channel_type AND external_id = $3
            AND deleted_at IS NULL
@@ -383,6 +384,53 @@ async def update_conversation_status(
         conversation_id,
         status,
     )
+
+
+async def mark_conversation_resolved(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> bool:
+    """Marca la conversación como resuelta por el agente (status + resolved_at).
+
+    Solo aplica si está activa (open/pending): no re-resuelve una ya cerrada,
+    escalada o abandonada. Retorna True si actualizó una fila.
+    Invariante: resolved_at IS NOT NULL <=> status='resolved'.
+    """
+    result = await conn.execute(
+        """
+        UPDATE conversations
+           SET status      = 'resolved'::conversation_status,
+               resolved_at = now(),
+               updated_at  = now()
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+           AND status IN ('open', 'pending')
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return int(result.split()[-1]) > 0
+
+
+async def reopen_conversation(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> bool:
+    """Reabre una conversación resuelta cuando el cliente vuelve a escribir.
+
+    Limpia resolved_at (mantiene el invariante) y vuelve a 'open'. Retorna True
+    si reabrió una fila (estaba en 'resolved').
+    """
+    result = await conn.execute(
+        """
+        UPDATE conversations
+           SET status      = 'open'::conversation_status,
+               resolved_at = NULL,
+               updated_at  = now()
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+           AND status = 'resolved'
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return int(result.split()[-1]) > 0
 
 
 async def soft_delete_conversation(

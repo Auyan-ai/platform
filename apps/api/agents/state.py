@@ -51,6 +51,12 @@ class AgentState(TypedDict, total=False):
     confidence: float
     escalation_reason: str | None
     agent_response: str | None
+    # True si la respuesta del agente pide más datos al cliente (pregunta de
+    # clarificación) o si se escaló: en esos casos NO se marca resolución autónoma.
+    awaiting_customer_reply: bool
+    # Seteado por respond: la conversación quedó resuelta por el agente (status
+    # 'resolved' + resolved_at). El caller post-grafo cierra el ticket externo.
+    conversation_resolved: bool
 
     # --- Telemetría del LLM (acumulada en reason) ---
     tokens_in: int

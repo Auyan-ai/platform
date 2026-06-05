@@ -330,3 +330,39 @@ class TestClose:
         assert resp.status_code == 502
         assert resp.json()["error"] == "external_helpdesk_close_failed"
         close_internal.assert_not_awaited()
+
+
+# ============================================================
+# reopen_if_resolved — reactivar al volver a escribir el cliente
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_reopen_if_resolved_reopens_resolved_conversation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apps.api.services import conversations as conv_service
+
+    conv = make_conversation(status="resolved")
+    reopened = AsyncMock(return_value=True)
+    monkeypatch.setattr(conv_service, "reopen_conversation", reopened)
+
+    result = await conv_service.reopen_if_resolved(AsyncMock(), TENANT_ID, conv)
+
+    assert result.status == "open"
+    assert result.resolved_at is None
+    reopened.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reopen_if_resolved_noop_when_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    from apps.api.services import conversations as conv_service
+
+    conv = make_conversation(status="open")
+    reopened = AsyncMock()
+    monkeypatch.setattr(conv_service, "reopen_conversation", reopened)
+
+    result = await conv_service.reopen_if_resolved(AsyncMock(), TENANT_ID, conv)
+
+    assert result.status == "open"
+    reopened.assert_not_awaited()

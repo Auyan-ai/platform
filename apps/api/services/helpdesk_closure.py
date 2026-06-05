@@ -119,3 +119,27 @@ async def close_external_helpdesk_ticket(
         },
     )
     return True
+
+
+async def close_external_helpdesk_ticket_safe(
+    *,
+    tenant_id: UUID,
+    conversation: Conversation,
+    settings: Settings,
+) -> bool:
+    """Versión best-effort de close_external_helpdesk_ticket: nunca lanza.
+
+    Para usar en caminos donde el cierre externo es secundario (resolución autónoma
+    del agente, cleanup por inactividad) y no debe tumbar el flujo si el helpdesk
+    falla. El estado interno de la conversación ya es la fuente de verdad.
+    """
+    try:
+        return await close_external_helpdesk_ticket(
+            tenant_id=tenant_id, conversation=conversation, settings=settings
+        )
+    except Exception:
+        logger.warning(
+            "external_helpdesk_close_best_effort_failed",
+            extra={"tenant_id": str(tenant_id), "conversation_id": str(conversation.id)},
+        )
+        return False

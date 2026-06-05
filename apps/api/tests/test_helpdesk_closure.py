@@ -137,3 +137,19 @@ async def test_close_external_helpdesk_ticket_raises_when_provider_call_fails(
             conversation=make_conversation(channel="zendesk", external_id="123"),
             settings=_FakeSettings(),  # type: ignore[arg-type]
         )
+
+
+@pytest.mark.asyncio
+async def test_close_safe_swallows_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """La variante _safe nunca lanza: devuelve False si el cierre falla."""
+    monkeypatch.setattr(
+        helpdesk_closure,
+        "close_external_helpdesk_ticket",
+        AsyncMock(side_effect=ExternalIntegrationError("boom", code="x")),
+    )
+    result = await helpdesk_closure.close_external_helpdesk_ticket_safe(
+        tenant_id=TENANT_ID,
+        conversation=make_conversation(channel="zendesk", external_id="123"),
+        settings=_FakeSettings(),  # type: ignore[arg-type]
+    )
+    assert result is False

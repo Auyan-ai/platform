@@ -85,6 +85,7 @@ class Conversation(_BaseModel):
     assigned_user_id: UUID | None = None
     last_message_at: datetime | None = None
     nudged_at: datetime | None = None
+    resolved_at: datetime | None = None
     is_simulation: bool = False
     created_at: datetime | None = None
 

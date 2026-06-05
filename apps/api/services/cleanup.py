@@ -29,10 +29,12 @@ import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+from apps.api.core.config import get_settings
 from apps.api.db.client import bootstrap_connection, tenant_scope
 from apps.api.db.models import TenantConfiguration
 from apps.api.db.queries import (
     delete_expired_rate_limit_buckets,
+    get_conversation,
     get_nudge_candidates,
     get_stale_conversations,
     get_tenant_configuration,
@@ -41,6 +43,8 @@ from apps.api.db.queries import (
     mark_conversations_abandoned,
     mark_conversations_nudged,
 )
+from apps.api.services.helpdesk_closure import close_external_helpdesk_ticket_safe
+from apps.api.services.helpdesk_delivery import deliver_message_to_helpdesk
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +116,20 @@ async def _close_abandoned_for_tenant(
         if not stale_ids:
             return 0
 
+        # Capturar las conversaciones (canal + external_id) antes de cerrar, para
+        # sincronizar el cierre con el helpdesk fuera del scope.
+        stale_convs = [await get_conversation(conn, tenant_id, cid) for cid in stale_ids]
         count = await mark_conversations_abandoned(conn, tenant_id, stale_ids)
+
+    # Cerrar el ticket externo de las abandonadas (best-effort). El cliente dejó de
+    # responder; cerramos el ticket del helpdesk para no dejarlo abierto indefinidamente.
+    to_close = [c for c in stale_convs if c is not None]
+    if to_close:
+        settings = get_settings()
+        for conv in to_close:
+            await close_external_helpdesk_ticket_safe(
+                tenant_id=tenant_id, conversation=conv, settings=settings
+            )
 
     return count
 
@@ -201,6 +218,8 @@ async def _nudge_for_tenant(
             return 0
 
         # Insertar mensaje de nudge en cada conversación (sin actualizar last_message_at)
+        # y entregarlo al helpdesk del cliente — antes solo se guardaba en DB y nunca
+        # llegaba al widget/ticket.
         for conv_id in nudge_ids:
             await insert_message(
                 conn,
@@ -210,6 +229,11 @@ async def _nudge_for_tenant(
                 direction="outbound",
                 content=nudge_message,
             )
+            conv = await get_conversation(conn, tenant_id, conv_id)
+            if conv is not None:
+                await deliver_message_to_helpdesk(
+                    conn, tenant_id=tenant_id, conversation=conv, content=nudge_message
+                )
 
         count = await mark_conversations_nudged(conn, tenant_id, nudge_ids)
 

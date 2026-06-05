@@ -43,6 +43,7 @@ async def test_happy_path_persists_message(fake_deps, monkeypatch) -> None:
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
     monkeypatch.setattr(f"{MODULE}.insert_message", insert_mock)
     monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", update_mock)
+    monkeypatch.setattr(f"{MODULE}.mark_conversation_resolved", AsyncMock(return_value=True))
     node = make_respond_node(fake_deps)
 
     out = await node(_state())
@@ -54,12 +55,49 @@ async def test_happy_path_persists_message(fake_deps, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_marks_resolved_when_not_awaiting(fake_deps, monkeypatch) -> None:
+    """Respuesta terminal (no pide más datos) → marca resolución autónoma."""
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.insert_message", AsyncMock(return_value=make_message(id=OUTBOUND_MSG_ID))
+    )
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    resolved_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(f"{MODULE}.mark_conversation_resolved", resolved_mock)
+    node = make_respond_node(fake_deps)
+
+    out = await node(_state(awaiting_customer_reply=False))
+
+    resolved_mock.assert_awaited_once()
+    assert out["conversation_resolved"] is True
+
+
+@pytest.mark.asyncio
+async def test_does_not_resolve_when_awaiting_customer(fake_deps, monkeypatch) -> None:
+    """Pregunta de clarificación (awaiting_customer_reply) → NO resuelve ni cierra."""
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.insert_message", AsyncMock(return_value=make_message(id=OUTBOUND_MSG_ID))
+    )
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    resolved_mock = AsyncMock(return_value=True)
+    monkeypatch.setattr(f"{MODULE}.mark_conversation_resolved", resolved_mock)
+    node = make_respond_node(fake_deps)
+
+    out = await node(_state(awaiting_customer_reply=True))
+
+    resolved_mock.assert_not_called()
+    assert out["conversation_resolved"] is False
+
+
+@pytest.mark.asyncio
 async def test_message_metadata_includes_telemetry(fake_deps, monkeypatch) -> None:
     """metadata del mensaje debe traer trace_id, model, tokens, cost, confidence."""
     insert_mock = AsyncMock(return_value=make_message(id=OUTBOUND_MSG_ID))
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
     monkeypatch.setattr(f"{MODULE}.insert_message", insert_mock)
     monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    monkeypatch.setattr(f"{MODULE}.mark_conversation_resolved", AsyncMock(return_value=True))
     node = make_respond_node(fake_deps)
 
     await node(_state())
@@ -95,6 +133,7 @@ async def test_inserts_with_correct_role_and_direction(fake_deps, monkeypatch) -
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
     monkeypatch.setattr(f"{MODULE}.insert_message", insert_mock)
     monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    monkeypatch.setattr(f"{MODULE}.mark_conversation_resolved", AsyncMock(return_value=True))
     node = make_respond_node(fake_deps)
 
     await node(_state())

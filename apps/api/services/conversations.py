@@ -16,6 +16,7 @@ from apps.api.db.queries import (
     insert_escalation,
     insert_message,
     list_conversations,
+    reopen_conversation,
     update_conversation_last_message,
     update_conversation_status,
 )
@@ -24,6 +25,23 @@ if TYPE_CHECKING:
     import asyncpg
 
 _CLOSED_CONVERSATION_STATUSES = {"closed", "closed_abandoned", "resolved"}
+
+
+async def reopen_if_resolved(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation: Conversation
+) -> Conversation:
+    """Reabre la conversación si estaba resuelta (el cliente volvió a escribir).
+
+    El agente resuelve y cierra el ticket; cuando el cliente responde en el mismo
+    thread hay que reactivarla (status 'open', resolved_at limpio) para procesar el
+    nuevo mensaje. Un tema NUEVO suele llegar como thread nuevo del helpdesk (otro
+    external_id → conversación nueva), así que aquí solo tratamos la reapertura del
+    mismo thread. No-op si no estaba resuelta.
+    """
+    if conversation.status != "resolved":
+        return conversation
+    await reopen_conversation(conn, tenant_id, conversation.id)
+    return conversation.model_copy(update={"status": "open", "resolved_at": None})
 
 
 async def list_tenant_conversations(

@@ -41,6 +41,8 @@ from apps.api.db.queries import (
 )
 from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.chatwoot import ChatwootAdapter, verify_chatwoot_signature
+from apps.api.services.conversations import reopen_if_resolved
+from apps.api.services.helpdesk_closure import close_external_helpdesk_ticket_safe
 from apps.api.services.integrations_crypto import decrypt_credentials, get_integration_crypto_key
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
@@ -231,6 +233,9 @@ async def chatwoot_webhook(
                     external_id=chatwoot_conversation_id,
                     subject=None,
                 )
+            else:
+                # El cliente volvió a escribir: si estaba resuelta, reactivarla.
+                conversation = await reopen_if_resolved(conn, tenant_id, conversation)
 
             inbound_db_msg = await insert_message(
                 conn,
@@ -291,6 +296,13 @@ async def chatwoot_webhook(
                 "chatwoot_send_outbound_failed",
                 extra={"error": str(exc), "tenant_id": str(tenant_id)},
             )
+
+    # Resolución autónoma: tras entregar la respuesta, cerrar el ticket externo
+    # (best-effort). El estado interno ya quedó 'resolved' en el grafo.
+    if outcome.resolved:
+        await close_external_helpdesk_ticket_safe(
+            tenant_id=tenant_id, conversation=conversation, settings=settings
+        )
 
     _usage_recorder.record(
         tenant_id=tenant_id,
