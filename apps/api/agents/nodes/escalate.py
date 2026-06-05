@@ -93,7 +93,13 @@ def make_escalate_node(
             else:
                 esc = existing
 
-            result: dict = {"escalation_id": str(esc.id), "decision": "escalate"}
+            result: dict = {
+                "escalation_id": str(esc.id),
+                "decision": "escalate",
+                # Solo al crear: el caller empuja la nota + asignación al helpdesk
+                # una única vez (no en cada re-escalado de la misma conversación).
+                "escalation_created": existing is None,
+            }
 
             if agent_response.strip():
                 msg = await insert_message(

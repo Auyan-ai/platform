@@ -140,4 +140,5 @@ async def enforce_message_cap(
         cost_usd=0.0,
         model_used=None,
         error=None,
+        escalation_created=True,
     )

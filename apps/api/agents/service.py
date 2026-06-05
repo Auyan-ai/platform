@@ -45,6 +45,9 @@ class AgentOutcome:
     cost_usd: float
     model_used: str | None
     error: str | None
+    # True solo cuando se creó una escalación nueva (no al reusar una activa). El
+    # caller empuja la nota interna + asignación al helpdesk solo en ese caso.
+    escalation_created: bool = False
 
 
 class AgentService:
@@ -157,4 +160,5 @@ class AgentService:
             cost_usd=final_state.get("cost_usd", 0.0),
             model_used=final_state.get("model_used"),
             error=error,
+            escalation_created=bool(final_state.get("escalation_created", False)),
         )

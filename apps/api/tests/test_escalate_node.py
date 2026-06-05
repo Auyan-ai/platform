@@ -57,6 +57,8 @@ async def test_creates_escalation_with_reason(fake_deps, monkeypatch) -> None:
     out = await node(_state())
 
     assert out["escalation_id"] == str(ESCALATION_ID)
+    # Escalación nueva → el caller debe empujar la nota + asignación al helpdesk.
+    assert out["escalation_created"] is True
     insert_mock.assert_awaited_once()
     kwargs = insert_mock.await_args.kwargs
     assert kwargs["reason"] == "customer_requested_human"
@@ -271,6 +273,8 @@ async def test_reuses_existing_open_escalation(fake_deps, monkeypatch) -> None:
     insert_mock.assert_not_awaited()
     update_status_mock.assert_not_awaited()
     assert out["escalation_id"] == str(ESCALATION_ID)
+    # Reusa una escalación existente → NO se re-empuja la nota al helpdesk (anti-duplicado).
+    assert out["escalation_created"] is False
 
 
 @pytest.mark.asyncio
