@@ -41,6 +41,7 @@ class FakeAuthSettings:
     auth_user_cache_ttl_seconds: int = 60
     supabase_jwt_algorithm: str = JWT_ALG
     supabase_jwt_audience: str = JWT_AUD
+    reply_model: str = "claude-haiku-4-5-20251001"
 
     @property
     def supabase_jwt_secret(self) -> _SecretWrap:
@@ -98,6 +99,8 @@ def _make_app(
 
     monkeypatch.setattr("apps.api.routers.approvals.tenant_scope", _fake_scope)
     monkeypatch.setattr("apps.api.routers.tool_permissions.tenant_scope", _fake_scope)
+    # El router llama get_settings() directo (reply_model); en tests no hay env real.
+    monkeypatch.setattr("apps.api.routers.approvals.get_settings", lambda: FakeAuthSettings())
 
     from apps.api.core.config import get_settings
 

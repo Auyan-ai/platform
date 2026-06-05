@@ -31,7 +31,6 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   const isLoginRoute = pathname === '/login' || pathname === '/login/'
-  const isDashboardRoute = pathname.startsWith('/dashboard')
 
   // Sin sesión y tratando de entrar a una ruta protegida → login
   if (!user && !isLoginRoute) {
