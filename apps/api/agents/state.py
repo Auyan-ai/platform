@@ -66,6 +66,10 @@ class AgentState(TypedDict, total=False):
     # --- Producido por respond / escalate / handle_error ---
     output_message_id: str
     escalation_id: str
+    # True solo cuando escalate creó una escalación nueva (no al reusar una activa).
+    # El caller post-grafo empuja la nota interna + asignación al helpdesk solo en
+    # ese caso, para no duplicar notas en cada mensaje de una conversación ya escalada.
+    escalation_created: bool
 
     # --- Trace (poblado por el caller antes de invocar el grafo) ---
     langfuse_trace_id: str | None

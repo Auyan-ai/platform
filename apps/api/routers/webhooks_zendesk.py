@@ -54,6 +54,7 @@ from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.zendesk import ZendeskAdapter, verify_zendesk_signature
 from apps.api.services.conversations import reopen_if_resolved
 from apps.api.services.helpdesk_closure import close_external_helpdesk_ticket_safe
+from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
 from apps.api.services.integrations_crypto import decrypt_credentials, get_integration_crypto_key
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
@@ -293,6 +294,20 @@ async def zendesk_webhook(
     if outcome.resolved:
         await close_external_helpdesk_ticket_safe(
             tenant_id=tenant_id, conversation=conversation, settings=settings
+        )
+
+    # Escalado: nota interna con contexto + asignación al equipo CX del cliente.
+    # Solo al crear la escalación. Best-effort.
+    if outcome.escalation_created:
+        await push_escalation_to_helpdesk_safe(
+            tenant_id=tenant_id,
+            conversation=conversation,
+            reason=outcome.escalation_reason or "unspecified_escalation",
+            agent_context={
+                "mensaje_al_cliente": outcome.response_text,
+                "confianza": outcome.confidence,
+                "trace_id": outcome.trace_id,
+            },
         )
 
     _usage_recorder.record(

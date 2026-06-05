@@ -155,6 +155,8 @@ async def test_over_cap_creates_escalation_and_returns_outcome():
     assert result.output_message_id == str(OUTBOUND_MSG_ID)
     assert result.tokens_in == 0
     assert result.cost_usd == 0.0
+    # Escalación nueva por cap → el caller empuja la nota + asignación al helpdesk.
+    assert result.escalation_created is True
 
 
 @pytest.mark.asyncio
@@ -234,6 +236,8 @@ async def test_existing_escalation_is_reused():
     assert result is not None
     assert result.escalation_id == str(ESCALATION_ID)
     assert result.output_message_id is None  # no se insertó mensaje de cortesía
+    # Reusa una escalación existente → NO se re-empuja al helpdesk (anti-duplicado).
+    assert result.escalation_created is False
 
 
 # ----------------------------------------------------------------

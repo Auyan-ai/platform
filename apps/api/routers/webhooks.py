@@ -42,6 +42,7 @@ from apps.api.db.queries import (
 )
 from apps.api.services.conversations import reopen_if_resolved
 from apps.api.services.helpdesk_closure import close_external_helpdesk_ticket_safe
+from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
 from apps.api.services.usage import UsageRecorder, check_tenant_budget
@@ -305,6 +306,20 @@ async def inbound(
     if outcome.resolved:
         await close_external_helpdesk_ticket_safe(
             tenant_id=tenant.id, conversation=conversation, settings=settings
+        )
+
+    # Escalado: nota interna + asignación al equipo CX del cliente, solo al crear la
+    # escalación (no-op para canales sin helpdesk). Best-effort.
+    if outcome.escalation_created:
+        await push_escalation_to_helpdesk_safe(
+            tenant_id=tenant.id,
+            conversation=conversation,
+            reason=outcome.escalation_reason or "unspecified_escalation",
+            agent_context={
+                "mensaje_al_cliente": outcome.response_text,
+                "confianza": outcome.confidence,
+                "trace_id": outcome.trace_id,
+            },
         )
 
     # 6. Registrar uso (fire-and-forget, no bloquea la respuesta).
