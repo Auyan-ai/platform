@@ -302,6 +302,74 @@ class TestApproveAction:
         # Bug E: el resultado se entrega al helpdesk del cliente.
         assert deliver_mock.await_args.kwargs["content"] == content
 
+    def test_approve_writes_skill_audit_log(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Observabilidad: aprobar y ejecutar una skill L3 deja fila en skill_audit_log
+        (status real + latencia + outputs), no solo el gate como rejected_by_permissions."""
+        from types import SimpleNamespace
+
+        from pydantic import BaseModel
+
+        class _FakeInput(BaseModel):
+            order_id: int
+
+        class _FakeOutput(BaseModel):
+            cancelled: bool = True
+
+        class _FakeSkill:
+            input_schema = _FakeInput
+
+            async def execute(self, ctx: Any, inputs: Any) -> _FakeOutput:
+                return _FakeOutput()
+
+        class _FakeMsg:
+            id = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
+
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.get_pending_approval",
+            AsyncMock(return_value=_sample_approval()),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.get_tenant_configuration", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.build_commerce_integration_ctx",
+            AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr("apps.api.routers.approvals.SkillRegistry.get", lambda slug: _FakeSkill)
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.resolve_pending_approval", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.insert_message", AsyncMock(return_value=_FakeMsg())
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.update_conversation_last_message",
+            AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.get_conversation", AsyncMock(return_value=None)
+        )
+
+        app, client = _make_app(monkeypatch, approvals_router)
+        audit_logger = MagicMock()
+        app.state.agent_deps = SimpleNamespace(audit_logger=audit_logger, anthropic=None)
+
+        resp = client.post(
+            f"/approvals/{APPROVAL_ID}/approve",
+            json={"comment": "ok"},
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        audit_logger.log.assert_called_once()
+        kwargs = audit_logger.log.call_args.kwargs
+        assert kwargs["status"] == "success"
+        assert kwargs["skill_slug"] == "shopify.cancel_order"
+        assert kwargs["skill_tier"] == "L3"
+        assert kwargs["aop_slug"] == "cancelaciones"
+        assert kwargs["latency_ms"] is not None
+        assert kwargs["outputs"] == {"cancelled": True}
+
     def test_approve_skill_failure_leaves_pending_and_sends_no_reply(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
