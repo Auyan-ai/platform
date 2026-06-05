@@ -275,6 +275,31 @@ def test_order_change_prompt_no_respawn_after_approval():
     assert "acción nueva o distinta" in prompt
 
 
+def test_returns_prompt_measures_window_from_delivery():
+    """El plazo de devolución se mide desde la recepción (delivered_at → fulfilled_at
+    → created_at), no desde la compra (H4): created_at solo como último recurso."""
+    tenant_id = uuid4()
+    tc = TenantConfiguration(
+        tenant_id=tenant_id, agent_model="claude-sonnet-4-6", escalation_threshold=0.7
+    )
+    a = next(x for x in CANONICAL_AOPS if x["slug"] == "returns")
+    fm = a["frontmatter"]
+    awc = AopWithContent(
+        id=uuid4(),
+        tenant_id=tenant_id,
+        slug="returns",
+        workspace="production",
+        current_version=1,
+        yaml_frontmatter=fm,
+        body_markdown=a["body"],
+        raw_source=_build_raw_source(fm, a["body"]),
+    )
+    prompt = compile_aop(awc, tc).system_prompt.lower()
+    assert "desde la recepción" in prompt
+    assert "delivered_at" in prompt
+    assert "fulfilled_at" in prompt
+
+
 # ─── provision_canonical_aops ───────────────────────────────────────────────────
 
 

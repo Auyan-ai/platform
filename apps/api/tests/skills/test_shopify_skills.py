@@ -212,6 +212,60 @@ class TestGetOrderStatus:
             )
         assert isinstance(result, OrderDetail)
         assert result.fulfillments == []
+        assert result.fulfilled_at is None
+        assert result.delivered_at is None
+
+    async def test_exposes_fulfilled_and_delivered_dates(self) -> None:
+        """fulfilled_at = envío del primer fulfillment; delivered_at = entrega
+        cuando el carrier marca shipment_status='delivered'."""
+        raw = {
+            **_RAW_ORDER,
+            "fulfillments": [
+                {
+                    "status": "success",
+                    "tracking_number": "TRACK123",
+                    "tracking_company": "UPS",
+                    "shipment_status": "delivered",
+                    "created_at": "2026-05-02T10:00:00Z",
+                    "updated_at": "2026-05-05T14:00:00Z",
+                }
+            ],
+        }
+        mock_client = _mock_shopify(get_order_by_name=raw)
+        with patch(
+            "apps.api.integrations.shopify.ShopifyClient",
+            return_value=mock_client,
+        ):
+            result = await GetOrderStatus().execute(
+                CTX, GetOrderStatusInput(order_identifier="#1001")
+            )
+        assert result.fulfilled_at == "2026-05-02T10:00:00Z"
+        assert result.delivered_at == "2026-05-05T14:00:00Z"
+        assert result.fulfillments[0].shipment_status == "delivered"
+
+    async def test_fulfilled_without_delivery_signal(self) -> None:
+        """Enviado pero sin shipment_status delivered → fulfilled_at sí, delivered_at no."""
+        raw = {
+            **_RAW_ORDER,
+            "fulfillments": [
+                {
+                    "status": "success",
+                    "tracking_number": "T1",
+                    "created_at": "2026-05-02T10:00:00Z",
+                    "updated_at": "2026-05-02T10:00:00Z",
+                }
+            ],
+        }
+        mock_client = _mock_shopify(get_order_by_name=raw)
+        with patch(
+            "apps.api.integrations.shopify.ShopifyClient",
+            return_value=mock_client,
+        ):
+            result = await GetOrderStatus().execute(
+                CTX, GetOrderStatusInput(order_identifier="#1001")
+            )
+        assert result.fulfilled_at == "2026-05-02T10:00:00Z"
+        assert result.delivered_at is None
 
 
 # ----------------------------------------------------------------
