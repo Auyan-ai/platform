@@ -148,6 +148,91 @@ class TestAdapterMethods:
         assert inst.update_shipping_address.await_args.args[0] == 7133866033432
 
     @pytest.mark.asyncio
+    async def test_update_shipping_preserves_order_country_when_omitted(self) -> None:
+        """Sin `country` explícito → se conserva el del pedido (no lo inventa el LLM)."""
+        adapter = ShopifyAdapter()
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
+            inst = MockClient.return_value
+            inst.get_order_by_name = AsyncMock(
+                return_value={"id": 7133, "shipping_address": {"country_code": "PT"}}
+            )
+            inst.update_shipping_address = AsyncMock(return_value={"id": 7133})
+            await adapter.update_shipping_address(
+                _CTX,
+                1181,
+                address1="Rua X 1",
+                city="Lisboa",
+                province="Lisboa",
+                zip_code="1000-001",
+            )
+        assert inst.update_shipping_address.await_args.kwargs["country"] == "PT"
+
+    @pytest.mark.asyncio
+    async def test_update_shipping_falls_back_to_tenant_default_country(self) -> None:
+        """Pedido sin país y sin `country` → cae al default_country_code del tenant."""
+        adapter = ShopifyAdapter()
+        ctx = IntegrationContext(
+            tenant_id=UUID("33333333-3333-3333-3333-333333333333"),
+            credentials={"domain": "x.myshopify.com", "token": "shpat_x"},
+            config={"default_country_code": "ES"},
+        )
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
+            inst = MockClient.return_value
+            inst.get_order_by_name = AsyncMock(return_value={"id": 7133})
+            inst.update_shipping_address = AsyncMock(return_value={"id": 7133})
+            await adapter.update_shipping_address(
+                ctx,
+                1181,
+                address1="Calle X 1",
+                city="Madrid",
+                province="Madrid",
+                zip_code="28001",
+            )
+        assert inst.update_shipping_address.await_args.kwargs["country"] == "ES"
+
+    @pytest.mark.asyncio
+    async def test_update_shipping_explicit_country_is_used(self) -> None:
+        """Cambio internacional explícito → se respeta el `country` recibido."""
+        adapter = ShopifyAdapter()
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
+            inst = MockClient.return_value
+            inst.get_order_by_name = AsyncMock(return_value={"id": 7133})
+            inst.update_shipping_address = AsyncMock(return_value={"id": 7133})
+            await adapter.update_shipping_address(
+                _CTX,
+                1181,
+                address1="Rue X 1",
+                city="Paris",
+                province="Île-de-France",
+                zip_code="75001",
+                country="Francia",
+            )
+        assert inst.update_shipping_address.await_args.kwargs["country"] == "Francia"
+
+    @pytest.mark.asyncio
+    async def test_update_shipping_reads_order_by_id_when_internal(self) -> None:
+        """Si llega el id interno (no resuelve por name), se lee el pedido por id
+        para conservar su país."""
+        adapter = ShopifyAdapter()
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
+            inst = MockClient.return_value
+            inst.get_order_by_name = AsyncMock(return_value=None)
+            inst.get_order = AsyncMock(
+                return_value={"id": 7133, "shipping_address": {"country": "Spain"}}
+            )
+            inst.update_shipping_address = AsyncMock(return_value={"id": 7133})
+            await adapter.update_shipping_address(
+                _CTX,
+                7133,
+                address1="Calle X 1",
+                city="Madrid",
+                province="Madrid",
+                zip_code="28001",
+            )
+        inst.get_order.assert_awaited_once_with(7133)
+        assert inst.update_shipping_address.await_args.kwargs["country"] == "Spain"
+
+    @pytest.mark.asyncio
     async def test_resolve_order_id_passthrough_when_already_internal(self) -> None:
         """Si llega un id interno (ningún pedido tiene ese 'name'), se usa tal cual."""
         adapter = ShopifyAdapter()

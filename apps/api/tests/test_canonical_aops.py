@@ -243,7 +243,8 @@ def test_order_change_prompt_minimizes_address_friction():
         raw_source=_build_raw_source(fm, a["body"]),
     )
     prompt = compile_aop(awc, tc).system_prompt.lower()
-    assert "país de la tienda" in prompt
+    # El país se conserva del pedido; no se pide ni se envía salvo cambio explícito.
+    assert "no envíes el campo `country`" in prompt
     assert "deduce la provincia" in prompt
     # Sigue prohibido inventar.
     assert "nunca inventes" in prompt

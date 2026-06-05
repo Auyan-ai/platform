@@ -379,12 +379,17 @@ class ShopifyClient:
         address1: str,
         city: str,
         province: str,
-        country: str,
+        country: str | None,
         zip_code: str,
         first_name: str | None = None,
         last_name: str | None = None,
     ) -> dict[str, Any]:
-        """Actualiza la dirección de envío de un pedido. Acción L3."""
+        """Actualiza la dirección de envío de un pedido. Acción L3.
+
+        `country` puede llegar None: la resolución determinista (conservar el del
+        pedido / default del tenant) la hace el adapter; aquí solo lo mandamos si
+        existe. Si es None no tocamos el país (Shopify conserva el actual).
+        """
         shipping_address: dict[str, Any] = {
             "address1": address1,
             "city": city,
@@ -393,10 +398,10 @@ class ShopifyClient:
         }
         # Shopify quiere country_code (ISO-2) cuando se puede resolver; si no, el
         # nombre original como best-effort.
-        iso2 = _country_to_iso2(country)
+        iso2 = _country_to_iso2(country) if country else None
         if iso2:
             shipping_address["country_code"] = iso2
-        else:
+        elif country:
             shipping_address["country"] = country
         if first_name:
             shipping_address["first_name"] = first_name
@@ -588,18 +593,43 @@ class ShopifyAdapter:
         address1: str,
         city: str,
         province: str,
-        country: str,
         zip_code: str,
+        country: str | None = None,
         first_name: str | None = None,
         last_name: str | None = None,
     ) -> dict[str, Any]:
-        order_id = await self._resolve_order_id(ctx, order_id)
-        return await self._client(ctx).update_shipping_address(
-            order_id,
+        """Actualiza la dirección de envío conservando el país de forma determinista.
+
+        El país NO lo inventa el LLM: si no llega `country` (cambio doméstico, lo
+        normal), se conserva el del pedido actual; si el pedido no lo tuviera, se
+        cae al `default_country_code` de la config del tenant. Solo se manda un país
+        distinto cuando el cliente cambia de país explícitamente (`country` no nulo).
+        """
+        client = self._client(ctx)
+        # Resolver el id interno y, de paso, quedarnos con el pedido para leer su país.
+        found = await client.get_order_by_name(str(order_id))
+        if found and found.get("id"):
+            resolved_id = int(found["id"])
+            order: dict[str, Any] | None = found
+        else:
+            resolved_id = order_id
+            order = None
+
+        resolved_country = country
+        if resolved_country is None:
+            if order is None:
+                order = await client.get_order(resolved_id)
+            shipping = (order or {}).get("shipping_address") or {}
+            resolved_country = shipping.get("country_code") or shipping.get("country")
+        if resolved_country is None:
+            resolved_country = (ctx.config or {}).get("default_country_code")
+
+        return await client.update_shipping_address(
+            resolved_id,
             address1=address1,
             city=city,
             province=province,
-            country=country,
+            country=resolved_country,
             zip_code=zip_code,
             first_name=first_name,
             last_name=last_name,

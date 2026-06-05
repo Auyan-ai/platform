@@ -335,7 +335,8 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             ],
             "guardrails": [
                 "Solo cambias dirección o cancelas si el pedido NO se ha enviado (unfulfilled). Si ya se envió → no es posible; explícalo y ofrece la vía de devolución / escala.",
-                "Para cambio de dirección necesitas la dirección completa, pero no la pidas campo por campo a ciegas: asume el país de la tienda (salvo envío internacional explícito) y, con el código postal, deduce la provincia (y la localidad solo si el CP la identifica sin ambigüedad). Pide al cliente únicamente lo que falte; si dudas, pregunta y nunca inventes.",
+                "Para cambio de dirección necesitas la dirección completa, pero no la pidas campo por campo a ciegas: con el código postal deduce la provincia (y la localidad solo si el CP la identifica sin ambigüedad). Pide al cliente únicamente lo que falte; si dudas, pregunta y nunca inventes.",
+                "NO envíes el campo `country` a update_shipping_address en un cambio doméstico: por defecto se conserva el país del pedido. Pásalo solo si el cliente cambia de país de envío explícitamente.",
                 "Antes de update_shipping_address, lee al cliente la dirección completa parseada (calle, ciudad, provincia, país, código postal) y espera su confirmación: un error de transcripción no debe llegar a aprobación sin validarlo con el cliente.",
                 "Cambio y cancelación quedan pendientes de aprobación; informa que está en proceso.",
                 "No canceles ni modifiques sin petición explícita del cliente.",
@@ -355,7 +356,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             "Objetivo: modificar (dirección) o cancelar un pedido AÚN NO enviado, con aprobación.\n\n"
             "1. Localiza el pedido (get_order_status) y comprueba el estado de fulfillment.\n"
             "2. Si ya está enviado (fulfilled) → no se puede cambiar/cancelar; explícalo y reconduce a devolución o escala.\n"
-            "3. Cambio de dirección (unfulfilled): reúne la dirección nueva pidiendo solo lo necesario (calle, localidad y código postal); deduce la provincia del CP y el país de la tienda en vez de pedirlos por separado. Antes de seguir, lee al cliente la dirección completa tal como la registraste y pide que confirme que es correcta. Solo con su confirmación → update_shipping_address (order_id + dirección). Pendiente de aprobación; informa.\n"
+            "3. Cambio de dirección (unfulfilled): reúne la dirección nueva pidiendo solo lo necesario (calle, localidad y código postal); deduce la provincia del CP en vez de pedirla por separado. El país se conserva del pedido automáticamente: NO lo pidas ni lo envíes salvo cambio internacional explícito. Antes de seguir, lee al cliente la dirección completa tal como la registraste y pide que confirme que es correcta. Solo con su confirmación → update_shipping_address (order_id + dirección). Pendiente de aprobación; informa.\n"
             "4. Cancelación (unfulfilled): confirma la intención → cancel_order (order_id). Pendiente de aprobación; informa.\n"
             "5. Tras dejar la acción en aprobación (o aplicada), si el cliente solo agradece o se despide, responde con cordialidad y cierra — NO vuelvas a llamar la skill. Repite la acción únicamente si pide un cambio nuevo o distinto.\n"
             "6. Modificar artículos/cantidades no está soportado → escala."
