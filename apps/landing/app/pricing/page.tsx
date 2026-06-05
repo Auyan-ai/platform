@@ -1,9 +1,9 @@
 import { SimplePage } from '@/components/SiteShell'
 
 const tiers = [
-  ['Starter', '€890/mes', '1.500 tickets/mes', 'Para equipos CX de 2-5 personas.'],
-  ['Growth', '€2.490/mes', '5.000 tickets/mes', 'Target principal SMB+ y mid-market low-end.'],
-  ['Scale', '€5.990/mes', '15.000 tickets/mes', 'Para operaciones con 15-30 personas CX.'],
+  ['Starter', '€890/mes', '1.000 tickets/mes', 'Para equipos CX de 2-4 personas.'],
+  ['Growth', '€2.490/mes', '3.000 tickets/mes', 'Target principal SMB+ y mid-market low-end.'],
+  ['Scale', '€5.990/mes', '10.000 tickets/mes', 'Para operaciones con 10-25 personas CX.'],
 ] as const
 
 export default function PricingPage() {

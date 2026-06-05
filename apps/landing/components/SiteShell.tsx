@@ -1,13 +1,14 @@
 import { ArrowRight } from 'lucide-react'
 import Link from 'next/link'
 import type { ReactNode } from 'react'
+import { ClientSignInMenu } from './ClientSignInMenu'
 
 const navItems = [
+  ['Producto', '/#producto'],
+  ['Cómo funciona', '/#como-funciona'],
   ['Pricing', '/pricing'],
-  ['Founding Partner', '/founding-partner'],
-  ['Security', '/security'],
-  ['About', '/about'],
-  ['Blog', '/blog'],
+  ['Seguridad', '/security'],
+  ['Recursos', '/blog'],
 ] as const
 
 export function SiteHeader() {
@@ -17,20 +18,23 @@ export function SiteHeader() {
         <Link href="/" className="text-sm font-semibold tracking-tight">
           Auyan
         </Link>
-        <nav className="hidden items-center gap-6 text-sm text-foreground-muted md:flex">
+        <nav className="hidden items-center gap-6 text-sm text-foreground-muted lg:flex">
           {navItems.map(([label, href]) => (
             <Link key={href} href={href} className="transition-colors hover:text-foreground">
               {label}
             </Link>
           ))}
         </nav>
-        <Link
-          href="/founding-partner"
-          className="inline-flex h-9 items-center gap-2 rounded-sm bg-accent px-3 text-sm font-medium text-foreground-on-accent transition-colors hover:bg-accent-hover"
-        >
-          Ver programa
-          <ArrowRight className="size-4" />
-        </Link>
+        <div className="flex items-center gap-2">
+          <ClientSignInMenu />
+          <Link
+            href="/founding-partner"
+            className="hidden h-9 items-center gap-2 rounded-full bg-accent px-4 text-sm font-medium text-foreground-on-accent transition-colors hover:bg-accent-hover sm:inline-flex"
+          >
+            Founding Partner
+            <ArrowRight className="size-4" />
+          </Link>
+        </div>
       </div>
     </header>
   )

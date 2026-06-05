@@ -121,7 +121,7 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="bg-surface py-20">
+      <section id="producto" className="scroll-mt-20 bg-surface py-20">
         <div className="mx-auto max-w-7xl px-5">
           <div className="max-w-2xl">
             <h2 className="text-3xl font-semibold tracking-tight text-foreground md:text-5xl">
@@ -133,7 +133,7 @@ export function HomePage() {
               voz de marca.
             </p>
           </div>
-          <div className="mt-10 grid gap-4 md:grid-cols-4">
+          <div id="como-funciona" className="mt-10 grid scroll-mt-24 gap-4 md:grid-cols-4">
             {workflow.map(([title, body], index) => (
               <motion.div
                 key={title}
