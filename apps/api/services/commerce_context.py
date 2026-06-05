@@ -1,13 +1,10 @@
 """Construye el IntegrationContext de commerce (Shopify) de un tenant.
 
-Compartido entre el grafo y el endpoint de approvals, que ejecuta skills L3 fuera
-del grafo. El endpoint /approve leía las creds de `tenant_config.extra` (camino
-legacy) y armaba un SkillContext con kwargs obsoletos → 500. Centralizar el
-descifrado + token exchange evita duplicar la lógica sensible de cripto.
-
-NOTA: `load_tenant_context` (hot path del agente) todavía tiene su propia copia
-inline; adoptar este helper allí queda como cleanup futuro (sus tests parchean
-las queries por módulo).
+Fuente única de la lógica sensible de cripto (descifrado + token exchange Shopify).
+Lo usan tanto `load_tenant_context` (hot path del agente) como el endpoint de
+approvals, que ejecuta skills L3 fuera del grafo. El endpoint /approve leía las
+creds de `tenant_config.extra` (camino legacy) y armaba un SkillContext con kwargs
+obsoletos → 500. Centralizar evita que ambos caminos diverjan.
 """
 
 from __future__ import annotations

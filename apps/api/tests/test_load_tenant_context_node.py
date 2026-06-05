@@ -27,8 +27,7 @@ def _patch_module(
     tenant,
     config,
     system_prompt,
-    commerce_integration=None,
-    commerce_encrypted=None,
+    commerce_ctx=None,
     playbook=None,
     facts=None,
 ) -> None:
@@ -42,12 +41,8 @@ def _patch_module(
     monkeypatch.setattr(f"{MODULE}.get_tenant_playbook", AsyncMock(return_value=playbook))
     monkeypatch.setattr(f"{MODULE}.get_tenant_facts", AsyncMock(return_value=facts))
     monkeypatch.setattr(
-        f"{MODULE}.get_primary_integration_for_kind",
-        AsyncMock(return_value=commerce_integration),
-    )
-    monkeypatch.setattr(
-        f"{MODULE}.get_integration_credentials_encrypted",
-        AsyncMock(return_value=commerce_encrypted),
+        f"{MODULE}.build_commerce_integration_ctx",
+        AsyncMock(return_value=commerce_ctx),
     )
 
 
@@ -157,18 +152,21 @@ async def test_passthrough_if_prior_error(fake_deps, monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# commerce_integration_ctx — carga desde tenant_integrations + fallback extra
+# commerce_integration_ctx — el nodo delega en build_commerce_integration_ctx
+# y serializa el IntegrationContext resultante al state. La lógica de cripto
+# (descifrado, token exchange, fallback) se prueba en test_commerce_context.py.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_no_commerce_integration_returns_none(fake_deps, monkeypatch) -> None:
-    """Tenant sin integración commerce ni creds en extra → ctx es None."""
+    """Helper devuelve None (sin integración ni creds) → ctx es None."""
     _patch_module(
         monkeypatch,
         tenant=make_tenant(),
         config=make_tenant_configuration(),
         system_prompt="ok",
+        commerce_ctx=None,
     )
     node = make_load_tenant_context_node(fake_deps)
 
@@ -178,173 +176,33 @@ async def test_no_commerce_integration_returns_none(fake_deps, monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_falls_back_to_extra_shopify_creds(fake_deps, monkeypatch) -> None:
-    """Sin tenant_integrations, lee credentials de tenant_config.extra (legacy)."""
-    config = make_tenant_configuration(
-        extra={"shopify_domain": "legacy.myshopify.com", "shopify_token": "shpat_legacy"}
-    )
-    _patch_module(
-        monkeypatch,
-        tenant=make_tenant(),
-        config=config,
-        system_prompt="ok",
-    )
-    node = make_load_tenant_context_node(fake_deps)
+async def test_serializes_commerce_ctx_to_dict(fake_deps, monkeypatch) -> None:
+    """Helper devuelve IntegrationContext → el nodo lo serializa JSON-safe al state."""
+    from apps.api.integrations.base import IntegrationContext
 
-    out = await node(_state())
-
-    ctx = out["commerce_integration_ctx"]
-    assert ctx is not None
-    assert ctx["credentials"]["domain"] == "legacy.myshopify.com"
-    assert ctx["credentials"]["token"] == "shpat_legacy"
-    assert ctx["tenant_id"] == str(TENANT_ID)
-
-
-@pytest.mark.asyncio
-async def test_loads_from_tenant_integrations_decrypted(
-    fake_deps, monkeypatch, tmp_path
-) -> None:
-    """Smoke test multi-tenant: tenant con integración en DB carga sus credentials cifradas."""
-    import json
-    import secrets
-    from unittest.mock import MagicMock
-    from uuid import UUID
-
-    from apps.api.db.models import TenantIntegration
-    from apps.api.services.integrations_crypto import encrypt_credentials
-
-    # Key de 32 bytes para AES-GCM
-    key = secrets.token_bytes(32)
-    creds = {"domain": "tenant-a.myshopify.com", "token": "shpat_aaaaa"}
-    encrypted = encrypt_credentials(json.dumps(creds).encode(), key)
-
-    integration = TenantIntegration(
-        id=UUID("99999999-9999-9999-9999-999999999999"),
+    ctx = IntegrationContext(
         tenant_id=TENANT_ID,
-        kind="commerce",
-        provider="shopify",
+        credentials={"domain": "tenant-a.myshopify.com", "access_token": "shpat_x"},
         config={"shop_name": "Tenant A"},
-        is_active=True,
-        is_primary_for_kind=True,
     )
-
     _patch_module(
         monkeypatch,
         tenant=make_tenant(),
         config=make_tenant_configuration(),
         system_prompt="ok",
-        commerce_integration=integration,
-        commerce_encrypted=encrypted,
+        commerce_ctx=ctx,
     )
-    # Inject key vía settings mock
-    fake_settings = MagicMock()
-    fake_settings.integrations_secret_key = key.hex()
-    monkeypatch.setattr(
-        f"{MODULE}.get_settings", lambda: fake_settings, raising=False
-    )
-    monkeypatch.setattr(
-        "apps.api.core.config.get_settings", lambda: fake_settings
-    )
-
     node = make_load_tenant_context_node(fake_deps)
+
     out = await node(_state())
 
-    ctx = out["commerce_integration_ctx"]
-    assert ctx is not None
-    assert ctx["credentials"]["domain"] == "tenant-a.myshopify.com"
-    assert ctx["credentials"]["token"] == "shpat_aaaaa"
-    assert ctx["config"] == {"shop_name": "Tenant A"}
-
-
-@pytest.mark.asyncio
-async def test_tenant_integrations_takes_precedence_over_extra(
-    fake_deps, monkeypatch
-) -> None:
-    """Si hay integración en DB Y creds en extra, DB gana."""
-    import json
-    import secrets
-    from unittest.mock import MagicMock
-    from uuid import UUID
-
-    from apps.api.db.models import TenantIntegration
-    from apps.api.services.integrations_crypto import encrypt_credentials
-
-    key = secrets.token_bytes(32)
-    creds = {"domain": "from-db.myshopify.com", "token": "shpat_db"}
-    encrypted = encrypt_credentials(json.dumps(creds).encode(), key)
-
-    integration = TenantIntegration(
-        id=UUID("99999999-9999-9999-9999-999999999999"),
-        tenant_id=TENANT_ID,
-        kind="commerce",
-        provider="shopify",
-        config={},
-        is_active=True,
-        is_primary_for_kind=True,
-    )
-
-    config = make_tenant_configuration(
-        extra={"shopify_domain": "from-extra.myshopify.com", "shopify_token": "shpat_extra"}
-    )
-    _patch_module(
-        monkeypatch,
-        tenant=make_tenant(),
-        config=config,
-        system_prompt="ok",
-        commerce_integration=integration,
-        commerce_encrypted=encrypted,
-    )
-    fake_settings = MagicMock()
-    fake_settings.integrations_secret_key = key.hex()
-    monkeypatch.setattr("apps.api.core.config.get_settings", lambda: fake_settings)
-
-    node = make_load_tenant_context_node(fake_deps)
-    out = await node(_state())
-
-    assert out["commerce_integration_ctx"]["credentials"]["domain"] == "from-db.myshopify.com"
-
-
-@pytest.mark.asyncio
-async def test_decrypt_failure_falls_back_to_extra(fake_deps, monkeypatch) -> None:
-    """Si descifrar falla (key incorrecta), cae al fallback de extra sin romper el nodo."""
-    from unittest.mock import MagicMock
-    from uuid import UUID
-
-    from apps.api.db.models import TenantIntegration
-
-    integration = TenantIntegration(
-        id=UUID("99999999-9999-9999-9999-999999999999"),
-        tenant_id=TENANT_ID,
-        kind="commerce",
-        provider="shopify",
-        config={},
-        is_active=True,
-        is_primary_for_kind=True,
-    )
-
-    config = make_tenant_configuration(
-        extra={"shopify_domain": "fallback.myshopify.com", "shopify_token": "shpat_fb"}
-    )
-    _patch_module(
-        monkeypatch,
-        tenant=make_tenant(),
-        config=config,
-        system_prompt="ok",
-        commerce_integration=integration,
-        commerce_encrypted=b"corrupt-cipher",
-    )
-    fake_settings = MagicMock()
-    # Key válida (32 bytes hex) pero el ciphertext es basura → descifrado lanza
-    fake_settings.integrations_secret_key = "00" * 32
-    monkeypatch.setattr("apps.api.core.config.get_settings", lambda: fake_settings)
-
-    node = make_load_tenant_context_node(fake_deps)
-    out = await node(_state())
-
-    # Fallback a extra
-    ctx = out["commerce_integration_ctx"]
-    assert ctx is not None
-    assert ctx["credentials"]["domain"] == "fallback.myshopify.com"
+    result = out["commerce_integration_ctx"]
+    assert result == {
+        "tenant_id": str(TENANT_ID),
+        "credentials": {"domain": "tenant-a.myshopify.com", "access_token": "shpat_x"},
+        "config": {"shop_name": "Tenant A"},
+    }
+    assert isinstance(result["tenant_id"], str)  # UUID serializado a str para el state
 
 
 # ---------------------------------------------------------------------------

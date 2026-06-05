@@ -73,11 +73,7 @@ def _patch_all_db_and_llm(
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.load_tenant_context.get_primary_integration_for_kind",
-        AsyncMock(return_value=None),
-    )
-    monkeypatch.setattr(
-        "apps.api.agents.nodes.load_tenant_context.get_integration_credentials_encrypted",
+        "apps.api.agents.nodes.load_tenant_context.build_commerce_integration_ctx",
         AsyncMock(return_value=None),
     )
 
