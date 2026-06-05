@@ -11,6 +11,7 @@ Flujo:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Annotated
 from uuid import UUID
 
@@ -158,6 +159,8 @@ async def approve_action(
             f"skill not found: {approval.skill_slug}", code="skill_not_found"
         ) from exc
 
+    error_message: str | None = None
+    t0 = time.monotonic()
     try:
         validated_input = skill_cls.input_schema.model_validate(approval.inputs_raw)
         skill_instance = skill_cls()
@@ -176,6 +179,28 @@ async def approve_action(
         )
         output_data = {"error": str(exc)}
         execution_status = "failed"
+        error_message = str(exc)
+    latency_ms = int((time.monotonic() - t0) * 1000)
+
+    # Observabilidad: la EJECUCIÓN real de la skill L3 al aprobar dejaba el grafo
+    # sin rastro (solo quedaba el gate como rejected_by_permissions). Registramos
+    # la ejecución en skill_audit_log con su status real, latencia y outputs.
+    auditor = getattr(getattr(request.app.state, "agent_deps", None), "audit_logger", None)
+    if auditor is not None:
+        auditor.log(
+            tenant_id=tenant_id,
+            conversation_id=approval.conversation_id,
+            aop_slug=approval.aop_slug,
+            aop_version=approval.aop_version,
+            skill_slug=approval.skill_slug,
+            skill_tier=approval.skill_tier,
+            inputs_raw=approval.inputs_raw,
+            status=execution_status,
+            outputs=output_data if execution_status == "success" else None,
+            idempotency_key=approval_id,
+            error_message=error_message,
+            latency_ms=latency_ms,
+        )
 
     # La ejecución falló (p.ej. error de la API del proveedor). NO marcamos la
     # aprobación como 'approved' ni le mandamos al cliente una confirmación: eso
