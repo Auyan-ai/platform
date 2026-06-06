@@ -15,7 +15,7 @@ export function SiteHeader() {
   return (
     <header className="fixed left-0 right-0 top-0 z-50 border-b border-border/80 bg-background/85 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5">
-        <Link href="/" className="text-sm font-semibold tracking-tight">
+        <Link href="/" className="text-sm font-semibold">
           Auyan
         </Link>
         <nav className="hidden items-center gap-6 text-sm text-foreground-muted lg:flex">
@@ -79,10 +79,10 @@ export function SimplePage({
   return (
     <PageShell>
       <section className="mx-auto min-h-[78vh] max-w-4xl px-5 pb-20 pt-32">
-        <p className="text-sm font-medium uppercase tracking-[0.18em] text-accent-foreground">
+        <p className="text-sm font-medium uppercase text-accent-foreground">
           {eyebrow}
         </p>
-        <h1 className="mt-4 text-4xl font-semibold tracking-tight text-foreground md:text-6xl">
+        <h1 className="mt-4 text-4xl font-semibold text-foreground md:text-6xl">
           {title}
         </h1>
         <div className="mt-8 space-y-6 text-lg leading-8 text-foreground-body">{children}</div>
