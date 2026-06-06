@@ -5,6 +5,7 @@ import { ClientSignInMenu } from './ClientSignInMenu'
 
 const navItems = [
   ['Producto', '/#producto'],
+  ['Shopify AI', '/shopify-ai-agent'],
   ['Cómo funciona', '/#como-funciona'],
   ['Pricing', '/pricing'],
   ['Seguridad', '/security'],
