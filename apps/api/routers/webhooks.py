@@ -308,18 +308,13 @@ async def inbound(
             tenant_id=tenant.id, conversation=conversation, settings=settings
         )
 
-    # Escalado: nota interna + asignación al equipo CX del cliente, solo al crear la
-    # escalación (no-op para canales sin helpdesk). Best-effort.
+    # Escalado: nota interna con el motivo + asignación al equipo CX del cliente,
+    # solo al crear la escalación (no-op para canales sin helpdesk). Best-effort.
     if outcome.escalation_created:
         await push_escalation_to_helpdesk_safe(
             tenant_id=tenant.id,
             conversation=conversation,
             reason=outcome.escalation_reason or "unspecified_escalation",
-            agent_context={
-                "mensaje_al_cliente": outcome.response_text,
-                "confianza": outcome.confidence,
-                "trace_id": outcome.trace_id,
-            },
         )
 
     # 6. Registrar uso (fire-and-forget, no bloquea la respuesta).

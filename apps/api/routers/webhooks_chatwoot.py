@@ -305,19 +305,14 @@ async def chatwoot_webhook(
             tenant_id=tenant_id, conversation=conversation, settings=settings
         )
 
-    # Escalado: nota interna con razón + contexto del agente y asignación al equipo
-    # CX del cliente. Solo al crear la escalación (no en cada mensaje posterior de
-    # una conversación ya escalada). Best-effort: no tumba el webhook si falla.
+    # Escalado: nota interna con el motivo + asignación al equipo CX del cliente.
+    # Solo al crear la escalación (no en cada mensaje posterior de una conversación
+    # ya escalada). Best-effort: no tumba el webhook si falla.
     if outcome.escalation_created:
         await push_escalation_to_helpdesk_safe(
             tenant_id=tenant_id,
             conversation=conversation,
             reason=outcome.escalation_reason or "unspecified_escalation",
-            agent_context={
-                "mensaje_al_cliente": outcome.response_text,
-                "confianza": outcome.confidence,
-                "trace_id": outcome.trace_id,
-            },
         )
 
     _usage_recorder.record(

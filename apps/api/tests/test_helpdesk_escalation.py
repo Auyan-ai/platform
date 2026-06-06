@@ -74,7 +74,7 @@ def _patch_resolution(monkeypatch, *, provider: str, config: dict[str, Any], cre
     ],
 )
 @pytest.mark.asyncio
-async def test_push_escalation_calls_adapter_with_context(
+async def test_push_escalation_calls_adapter_with_reason(
     monkeypatch: pytest.MonkeyPatch, provider: str, config: dict[str, Any], creds: dict
 ) -> None:
     _FakeAdapter.calls = []
@@ -84,7 +84,6 @@ async def test_push_escalation_calls_adapter_with_context(
         tenant_id=TENANT_ID,
         conversation=make_conversation(channel=provider, external_id="123"),
         reason="cliente_pide_humano",
-        agent_context={"mensaje_al_cliente": "Lo paso a mi equipo"},
     )
 
     assert result is True
@@ -94,7 +93,8 @@ async def test_push_escalation_calls_adapter_with_context(
     assert ctx.config == config
     assert ref == "123"
     assert reason == "cliente_pide_humano"
-    assert agent_context == {"mensaje_al_cliente": "Lo paso a mi equipo"}
+    # Sin contexto estructurado: la nota es solo el motivo en lenguaje natural.
+    assert agent_context == {}
 
 
 @pytest.mark.asyncio
@@ -104,7 +104,6 @@ async def test_skips_non_helpdesk_channel() -> None:
         tenant_id=TENANT_ID,
         conversation=make_conversation(channel="chat", external_id="123"),
         reason="x",
-        agent_context={},
     )
     assert result is False
 
@@ -116,7 +115,6 @@ async def test_returns_false_without_external_id() -> None:
         tenant_id=TENANT_ID,
         conversation=make_conversation(channel="chatwoot", external_id=None),
         reason="x",
-        agent_context={},
     )
     assert result is False
 
@@ -132,7 +130,6 @@ async def test_returns_false_when_no_active_integration(monkeypatch: pytest.Monk
         tenant_id=TENANT_ID,
         conversation=make_conversation(channel="chatwoot", external_id="123"),
         reason="x",
-        agent_context={},
     )
     assert result is False
 
@@ -149,6 +146,5 @@ async def test_safe_swallows_errors(monkeypatch: pytest.MonkeyPatch) -> None:
         tenant_id=TENANT_ID,
         conversation=make_conversation(channel="chatwoot", external_id="123"),
         reason="x",
-        agent_context={},
     )
     assert result is False
