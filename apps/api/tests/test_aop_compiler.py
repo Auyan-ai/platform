@@ -216,6 +216,14 @@ def test_render_global_rules_includes_conciseness_rule() -> None:
     assert "silencio" in result
 
 
+def test_render_global_rules_includes_chat_format_rule() -> None:
+    """Las respuestas van a un widget de chat: nada de tablas ni Markdown pesado,
+    texto plano y conciso — regla global, aplica a todos los AOPs y marcas."""
+    result = _render_global_rules([]).lower()
+    assert "tablas" in result
+    assert "chat" in result
+
+
 def test_render_global_rules_includes_escalation_triggers() -> None:
     result = _render_global_rules(["El pedido no aparece", "Cliente enojado"])
     assert "El pedido no aparece" in result
