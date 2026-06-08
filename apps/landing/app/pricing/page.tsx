@@ -1,5 +1,5 @@
 import { PageShell } from '@/components/SiteShell'
-import type { Metadata } from 'next'
+import { createPageMetadata } from '@/lib/metadata'
 import Link from 'next/link'
 import {
   ArrowRight,
@@ -10,11 +10,12 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 
-export const metadata: Metadata = {
+export const metadata = createPageMetadata({
   title: 'Pricing Auyan',
   description:
     'Planes de Auyan para Managed AI en CX e-commerce: Founding Partner, Starter, Growth y Scale ligados a operación y volumen de tickets.',
-}
+  path: '/pricing',
+})
 
 const tiers = [
   {

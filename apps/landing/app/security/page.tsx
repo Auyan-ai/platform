@@ -1,5 +1,5 @@
 import { PageShell } from '@/components/SiteShell'
-import type { Metadata } from 'next'
+import { createPageMetadata } from '@/lib/metadata'
 import Link from 'next/link'
 import {
   ArrowRight,
@@ -12,11 +12,12 @@ import {
   UserCheck,
 } from 'lucide-react'
 
-export const metadata: Metadata = {
+export const metadata = createPageMetadata({
   title: 'Seguridad Auyan',
   description:
     'Cómo Auyan protege operaciones CX e-commerce: permisos por acción, approvals humanos, aislamiento por tenant y conexión sobre tu helpdesk actual.',
-}
+  path: '/security',
+})
 
 const pillars = [
   {

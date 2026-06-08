@@ -1,5 +1,5 @@
 import { PageShell } from '@/components/SiteShell'
-import type { Metadata } from 'next'
+import { createPageMetadata } from '@/lib/metadata'
 import Link from 'next/link'
 import {
   ArrowRight,
@@ -12,11 +12,12 @@ import {
   Truck,
 } from 'lucide-react'
 
-export const metadata: Metadata = {
+export const metadata = createPageMetadata({
   title: 'AI Agent para Shopify CX',
   description:
     'Auyan opera agentes IA para soporte Shopify: pedidos, devoluciones, cambios, conocimiento de marca, approvals humanos y mejora semanal.',
-}
+  path: '/shopify-ai-agent',
+})
 
 const useCases = [
   ['Estado de pedido', Truck, 'Consulta órdenes, tracking y contexto de envío sin pedirle al cliente repetir datos.'],

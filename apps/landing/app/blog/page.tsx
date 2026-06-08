@@ -1,4 +1,12 @@
 import { SimplePage } from '@/components/SiteShell'
+import { createPageMetadata } from '@/lib/metadata'
+
+export const metadata = createPageMetadata({
+  title: 'Blog',
+  description:
+    'Notas de Auyan sobre Managed AI, shadow mode, operaciones CX y agentes IA para e-commerce.',
+  path: '/blog',
+})
 
 const posts = [
   ['Por qué Managed AI no es otro chatbot', 'Modelo operativo para CX e-commerce.'],

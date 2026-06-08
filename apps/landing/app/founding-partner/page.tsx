@@ -1,5 +1,6 @@
 import { PageShell } from '@/components/SiteShell'
-import type { Metadata } from 'next'
+import { createPageMetadata } from '@/lib/metadata'
+import { siteConfig } from '@/lib/site'
 import Link from 'next/link'
 import {
   ArrowRight,
@@ -11,13 +12,14 @@ import {
   Sparkles,
 } from 'lucide-react'
 
-export const metadata: Metadata = {
+export const metadata = createPageMetadata({
   title: 'Founding Partner Auyan',
   description:
     'Programa para los primeros clientes de Auyan: killer test en 24h, setup gratis, mes 1 gratis y operación gestionada para CX Shopify.',
-}
+  path: '/founding-partner',
+})
 
-const founderEmail = 'founders@auyan.ai'
+const founderEmail = siteConfig.founderEmail
 
 const offer = [
   ['Setup gratis', 'Auditoría inicial, AOPs base, KB curada y conexión al stack existente.'],
