@@ -235,6 +235,11 @@ def _render_global_rules(escalation_triggers: list[str]) -> str:
         "conversación. Si necesitas reverificar con una herramienta algo que ya le "
         "confirmaste, hazlo en silencio: no vuelvas a anunciar el mismo resultado, "
         "avanza al siguiente paso.",
+        "- **Formato:** tus respuestas se muestran en una ventana de chat. Escribe "
+        "en texto plano y breve. NUNCA uses tablas, encabezados Markdown (`#`, `##`) "
+        "ni bloques de código: se renderizan ilegibles en el chat. Si necesitas "
+        "enumerar varios datos, usa frases cortas o una lista simple de viñetas "
+        "(un guion al inicio de cada línea). Ve al grano.",
     ]
     if escalation_triggers:
         lines.append("")
