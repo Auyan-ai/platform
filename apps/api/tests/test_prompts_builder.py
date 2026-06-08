@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from apps.api.agents.prompts.builder import (
     build_message_history,
+    build_system_blocks,
     build_system_prompt,
     format_knowledge_chunks,
 )
@@ -83,6 +84,35 @@ class TestBuildSystemPrompt:
     def test_known_facts_none_no_injection(self) -> None:
         base = "Eres el agente de Acme."
         assert build_system_prompt(base, [], known_facts=None) == base
+
+
+class TestBuildSystemBlocks:
+    def test_base_only_single_cached_block(self) -> None:
+        """Sin contenido volátil: un solo bloque (el AOP) marcado para cachear."""
+        blocks = build_system_blocks("Eres el agente de Acme.", [])
+        assert len(blocks) == 1
+        assert blocks[0]["text"] == "Eres el agente de Acme."
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_stable_block_first_volatile_after_breakpoint(self) -> None:
+        """El AOP (estable) va primero con cache_control; lo volátil (fecha/facts/RAG)
+        va en un segundo bloque SIN cachear, después del breakpoint."""
+        blocks = build_system_blocks(
+            "BASE_AOP",
+            [{"document_title": "x", "similarity": 0.8, "content": "y"}],
+            current_date="2026-06-08 10:00 (Europe/Madrid)",
+            known_facts="- order #1278",
+        )
+        assert len(blocks) == 2
+        # bloque estable
+        assert blocks[0]["text"] == "BASE_AOP"
+        assert blocks[0]["cache_control"] == {"type": "ephemeral"}
+        # bloque dinámico: sin cache_control, con lo volátil, y la fecha NO contamina el estable
+        assert "cache_control" not in blocks[1]
+        assert "BASE_AOP" not in blocks[1]["text"]
+        assert "2026-06-08 10:00" in blocks[1]["text"]
+        assert "order #1278" in blocks[1]["text"]
+        assert "Contexto relevante de la base de conocimiento" in blocks[1]["text"]
 
 
 class TestBuildMessageHistory:

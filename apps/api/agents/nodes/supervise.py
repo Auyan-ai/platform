@@ -246,6 +246,7 @@ def make_supervise_node(
             max_tokens=512,
             max_retries=deps.settings.llm_max_retries,
             timeout_seconds=deps.settings.llm_timeout_seconds,
+            cache=True,
         )
 
         tool_block = next((b for b in response.content if b.type == "tool_use"), None)

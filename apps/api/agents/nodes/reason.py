@@ -26,7 +26,7 @@ from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.prompts.builder import (
     build_message_history,
-    build_system_prompt,
+    build_system_blocks,
 )
 from apps.api.agents.schemas import RESPOND_OR_ESCALATE_TOOL, AgentDecisionTool
 from apps.api.agents.state import AgentState
@@ -207,7 +207,7 @@ def make_reason_node(
                 status="done",
             )
 
-        system_prompt = build_system_prompt(
+        system_blocks = build_system_blocks(
             state["system_prompt"],
             state.get("retrieved_chunks", []),
             current_date=_tenant_now_str(state.get("tenant_facts")),
@@ -224,12 +224,13 @@ def make_reason_node(
         response = await call_claude_with_tools(
             client=deps.anthropic,
             model=model,
-            system=system_prompt,
+            system=system_blocks,
             messages=messages,
             tools=tools,
             tool_choice={"type": "any"},
             max_retries=deps.settings.llm_max_retries,
             timeout_seconds=deps.settings.llm_timeout_seconds,
+            cache=True,
         )
 
         # Extraer el primer tool_use block. tool_choice=any garantiza que exista.
