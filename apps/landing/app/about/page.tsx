@@ -1,4 +1,12 @@
 import { SimplePage } from '@/components/SiteShell'
+import { createPageMetadata } from '@/lib/metadata'
+
+export const metadata = createPageMetadata({
+  title: 'About',
+  description:
+    'Auyan es un equipo externo de Agent Engineers que configura, prueba y mejora agentes IA para CX e-commerce.',
+  path: '/about',
+})
 
 export default function AboutPage() {
   return (

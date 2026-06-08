@@ -297,6 +297,22 @@ Pendiente futuro, sólo cuando haga falta más granularidad:
 
 ---
 
+## Deuda no prioritaria — Landing launch polish (2026-06-08)
+
+No mover esto a "Siguiente paso" mientras Customer Discovery + onboarding sigan mandando. Esta deuda no bloquea el PR actual ni el lanzamiento exploratorio de la landing.
+
+| Deuda | Prioridad | Nota |
+|---|---|---|
+| Captura real de leads | baja por ahora | La landing puede salir con CTAs a correo/calendario. Luego decidir entre Tally/Typeform/Calendly o formulario propio conectado a CRM. |
+| Eventos de analytics | baja | Añadir eventos para CTAs principales, pricing, Founding Partner y sign in cuando tengamos dominio/analytics final. |
+| Legal mínimo público | media-baja | Privacy, Terms, Cookies y DPA antes de campañas más amplias o tráfico pagado. |
+| Favicon, OG social y marca final | baja | Pulir favicon/logo final, preview social y assets de share cuando el dominio esté comprado. |
+| QA post-deploy | baja | Canary visual y smoke test en producción después de montar dominio/env vars. |
+| Blog real o navegación sin blog | baja | La landing ya referencia blog; publicar al menos una pieza SEO o esconderlo hasta tener contenido útil. |
+| Páginas long-tail SEO | baja | Más adelante: alternativas/competidores y casos tipo `gorgias-ai-alternative`, `zendesk-ai-shopify`, `managed-ai-customer-support`. |
+
+---
+
 ## Referencias rápidas
 
 - [`docs/progress-archive.md`](progress-archive.md) — historial completo.
