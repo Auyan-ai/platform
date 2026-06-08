@@ -211,3 +211,94 @@ async def test_passes_multiple_tools() -> None:
 
     kwargs = client.messages.create.await_args.kwargs
     assert len(kwargs["tools"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_cache_false_passes_system_and_tools_untouched() -> None:
+    """Sin cache, system (str) y tools pasan tal cual — sin cache_control."""
+    client = MagicMock()
+    client.messages.create = AsyncMock(return_value=_fake_response())
+
+    await call_claude_with_tools(
+        client=client,
+        model="claude-sonnet-4-6",
+        system="x",
+        messages=[{"role": "user", "content": "y"}],
+        tools=[RESPOND_OR_ESCALATE_TOOL],
+        max_retries=1,
+    )
+
+    kwargs = client.messages.create.await_args.kwargs
+    assert kwargs["system"] == "x"
+    assert "cache_control" not in kwargs["tools"][-1]
+
+
+@pytest.mark.asyncio
+async def test_cache_true_marks_last_tool_and_wraps_system() -> None:
+    """Con cache=True: cache_control en la última tool y system (str) → bloque cacheado."""
+    client = MagicMock()
+    client.messages.create = AsyncMock(return_value=_fake_response())
+
+    extra_tool = {"name": "shopify_get_order", "description": "x", "input_schema": {}}
+    await call_claude_with_tools(
+        client=client,
+        model="claude-sonnet-4-6",
+        system="system base",
+        messages=[{"role": "user", "content": "y"}],
+        tools=[RESPOND_OR_ESCALATE_TOOL, extra_tool],
+        max_retries=1,
+        cache=True,
+    )
+
+    kwargs = client.messages.create.await_args.kwargs
+    # última tool marcada, las anteriores no
+    assert kwargs["tools"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in kwargs["tools"][0]
+    # system string envuelto en un bloque cacheado
+    assert kwargs["system"] == [
+        {"type": "text", "text": "system base", "cache_control": {"type": "ephemeral"}}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cache_true_does_not_mutate_caller_tools() -> None:
+    """El wrapper copia las tools; no muta la lista del caller."""
+    client = MagicMock()
+    client.messages.create = AsyncMock(return_value=_fake_response())
+
+    tools = [{"name": "t", "description": "x", "input_schema": {}}]
+    await call_claude_with_tools(
+        client=client,
+        model="claude-sonnet-4-6",
+        system="x",
+        messages=[{"role": "user", "content": "y"}],
+        tools=tools,
+        max_retries=1,
+        cache=True,
+    )
+
+    assert "cache_control" not in tools[0]
+
+
+@pytest.mark.asyncio
+async def test_cache_true_respects_system_blocks_from_caller() -> None:
+    """Si system ya es lista de bloques, el wrapper no la re-envuelve (caller manda)."""
+    client = MagicMock()
+    client.messages.create = AsyncMock(return_value=_fake_response())
+
+    blocks = [
+        {"type": "text", "text": "estable", "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "dinamico"},
+    ]
+    await call_claude_with_tools(
+        client=client,
+        model="claude-sonnet-4-6",
+        system=blocks,
+        messages=[{"role": "user", "content": "y"}],
+        tools=[RESPOND_OR_ESCALATE_TOOL],
+        max_retries=1,
+        cache=True,
+    )
+
+    kwargs = client.messages.create.await_args.kwargs
+    assert kwargs["system"] == blocks

@@ -36,13 +36,14 @@ async def call_claude_with_tools(
     *,
     client: anthropic.AsyncAnthropic,
     model: str,
-    system: str,
+    system: str | list[dict[str, Any]],
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
     tool_choice: dict[str, Any] | None = None,
     max_tokens: int = 1024,
     max_retries: int = 3,
     timeout_seconds: int = 30,
+    cache: bool = False,
 ) -> Message:
     """Llama a Claude con una lista de tools, con reintentos en errores transitorios.
 
@@ -51,16 +52,41 @@ async def call_claude_with_tools(
         tool_choice: si None, Claude elige libremente entre tools o texto.
             `{"type": "any"}` fuerza el uso de alguna tool.
             `{"type": "tool", "name": "..."}` fuerza una tool específica.
+        cache: si True activa prompt caching (cache_control ephemeral) sobre el
+            prefijo tools + system. Cachea las definiciones de tools (marca la última)
+            y, si `system` llega como string, lo envuelve en un bloque cacheado. Si
+            `system` llega ya como lista de bloques, el caller controla los breakpoints
+            (debe marcar el bloque ESTABLE con cache_control). Pega solo si el prefijo
+            es idéntico entre llamadas (TTL ~5 min).
 
     Raises:
         anthropic.APIError o subclase si después de los reintentos sigue fallando.
     """
+    system_param: Any = system
+    tools_param = tools
+    if cache:
+        if tools_param:
+            # cache_control en la última tool cachea TODO el bloque de tools.
+            # Copia superficial: no mutamos el input del caller.
+            tools_param = [
+                *tools_param[:-1],
+                {**tools_param[-1], "cache_control": {"type": "ephemeral"}},
+            ]
+        if isinstance(system_param, str):
+            system_param = [
+                {
+                    "type": "text",
+                    "text": system_param,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+
     kwargs: dict[str, Any] = {
         "model": model,
         "max_tokens": max_tokens,
-        "system": system,
+        "system": system_param,
         "messages": messages,
-        "tools": tools,
+        "tools": tools_param,
         "timeout": timeout_seconds,
     }
     if tool_choice is not None:
