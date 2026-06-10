@@ -174,6 +174,11 @@ def _handle_decide_tool(
         # El agente resuelve salvo que su respuesta pida más datos al cliente.
         # Un escalado nunca es una resolución autónoma.
         "awaiting_customer_reply": parsed.awaiting_customer_reply or decision == "escalate",
+        # Anular una tool pendiente de la pasada anterior (retry post-rechazo
+        # del supervisor). LangGraph solo pisa las keys presentes en el parche:
+        # sin este None, route_after_reason prioriza la tool residual y ejecuta
+        # la acción rechazada sin re-supervisión (supervisor_retried=True).
+        "pending_tool_call": None,
         **tokens_update,
     }
 
@@ -325,6 +330,13 @@ def make_reason_node(
                 "slug": slug,
                 "input": tool_block.input,
             },
+            # Anular la decisión de la pasada anterior (espejo del caso decide):
+            # si el supervisor rechazó un respond y el retry pide una tool, el
+            # agent_response rechazado quedaría en el state y escalate lo
+            # reenviaría al cliente si este turno muere por max_tool_iterations.
+            "decision": None,
+            "agent_response": None,
+            "escalation_reason": None,
             **tokens_update,
         }
 
