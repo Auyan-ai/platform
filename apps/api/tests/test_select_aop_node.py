@@ -288,6 +288,59 @@ async def test_select_aop_happy_path(fake_deps: Any) -> None:
 
 
 @pytest.mark.asyncio
+async def test_select_aop_tolerates_missing_optional_fields(fake_deps: Any) -> None:
+    """Haiku a veces omite ambiguity_detected/reasoning aunque el tool schema los
+    marque required (visto en staging 2026-06-10). No invalidan la clasificación:
+    el nodo debe seguir el flujo normal, no tumbar el turno con ValidationError."""
+    node = make_select_aop_node(fake_deps)
+    fake_conn = AsyncMock()
+    tool_block = MagicMock()
+    tool_block.type = "tool_use"
+    # El payload real del incidente: primary válido, sin reasoning ni ambiguity.
+    tool_block.input = {"primary": {"slug": "consulta_envio", "confidence": 0.92}}
+    response = MagicMock()
+    response.content = [tool_block]
+    fake_deps.anthropic.messages.create = AsyncMock(return_value=response)
+
+    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
+         _patch_previous(None), \
+         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
+         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO), \
+         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+        result = await node(BASE_STATE)
+
+    assert result["aop_slug"] == "consulta_envio"
+    assert result["intent_confidence"] == 0.92
+
+
+@pytest.mark.asyncio
+async def test_select_aop_malformed_classifier_output_falls_back_to_default(
+    fake_deps: Any,
+) -> None:
+    """Output del clasificador sin primary (malformado de verdad) → degradar a
+    default con confidence 0.0, igual que el caso no_tool_block. Nunca propagar
+    ValidationError: eso escalaba el turno entero por agent_error."""
+    node = make_select_aop_node(fake_deps)
+    fake_conn = AsyncMock()
+    tool_block = MagicMock()
+    tool_block.type = "tool_use"
+    tool_block.input = {"reasoning": "sin primary"}
+    response = MagicMock()
+    response.content = [tool_block]
+    fake_deps.anthropic.messages.create = AsyncMock(return_value=response)
+
+    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
+         _patch_previous(None), \
+         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
+         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=DEFAULT_AOP), \
+         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+        result = await node(BASE_STATE)
+
+    assert result["aop_slug"] == "default"
+    assert result["intent_confidence"] == 0.0
+
+
+@pytest.mark.asyncio
 async def test_select_aop_falls_back_to_default_on_low_confidence(fake_deps: Any) -> None:
     """Primer turno, confidence < intent_min_confidence → selecciona el AOP 'default'."""
     node = make_select_aop_node(fake_deps)

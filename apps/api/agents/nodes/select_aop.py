@@ -38,7 +38,7 @@ from apps.api.db.queries import (
     insert_intent_classifier_run,
 )
 from apps.api.integrations.anthropic_client import call_claude_with_tools
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -113,8 +113,11 @@ class _Candidate(BaseModel):
 class _ClassifierOutput(BaseModel):
     primary: _Candidate
     alternative: _Candidate | None = None
-    reasoning: str
-    ambiguity_detected: bool
+    # Con default: Haiku a veces los omite aunque el tool schema los marque
+    # required, y la metadata faltante no invalida una clasificación con
+    # primary válido (incidente staging 2026-06-10).
+    reasoning: str = ""
+    ambiguity_detected: bool = False
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -295,7 +298,22 @@ def make_select_aop_node(
                 ambiguity_detected=False,
             )
         else:
-            parsed = _ClassifierOutput.model_validate(tool_block.input)
+            try:
+                parsed = _ClassifierOutput.model_validate(tool_block.input)
+            except ValidationError:
+                # Output malformado de verdad (sin primary, confidence fuera de
+                # rango). Degradar a default igual que no_tool_block — nunca
+                # propagar: el ValidationError tumbaba el turno entero por
+                # agent_error y escalaba sin necesidad.
+                logger.warning(
+                    "select_aop.invalid_classifier_output tenant_id=%s — "
+                    "falling back to default",
+                    tenant_id,
+                )
+                parsed = _ClassifierOutput(
+                    primary=_Candidate(slug="default", confidence=0.0),
+                    reasoning="invalid_classifier_output",
+                )
 
         classified_slug = parsed.primary.slug
         primary_confidence = parsed.primary.confidence
