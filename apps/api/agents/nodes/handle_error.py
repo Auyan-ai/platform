@@ -17,7 +17,11 @@ from uuid import UUID
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
-from apps.api.db.queries import insert_escalation, update_conversation_status
+from apps.api.db.queries import (
+    get_open_escalation_for_conversation,
+    insert_escalation,
+    update_conversation_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,18 +60,33 @@ def make_handle_error_node(
 
         try:
             async with tenant_scope(tenant_id) as conn:
-                esc = await insert_escalation(
-                    conn,
-                    tenant_id=tenant_id,
-                    conversation_id=conversation_id,
-                    reason=f"agent_error: {error_msg}",
-                    triggered_by_message_id=inbound_id,
-                    metadata=metadata,
+                existing = await get_open_escalation_for_conversation(
+                    conn, tenant_id, conversation_id
                 )
-                await update_conversation_status(
-                    conn, tenant_id, conversation_id, "escalated"
-                )
-            return {"escalation_id": str(esc.id)}
+                if existing is None:
+                    esc = await insert_escalation(
+                        conn,
+                        tenant_id=tenant_id,
+                        conversation_id=conversation_id,
+                        reason=f"agent_error: {error_msg}",
+                        triggered_by_message_id=inbound_id,
+                        metadata=metadata,
+                    )
+                    await update_conversation_status(
+                        conn, tenant_id, conversation_id, "escalated"
+                    )
+                else:
+                    esc = existing
+            return {
+                "escalation_id": str(esc.id),
+                # Solo al crear: el caller empuja la nota interna + asignación al
+                # helpdesk del cliente una única vez (igual que escalate). Sin esta
+                # señal, los errores de sistema no llegaban al equipo CX del cliente.
+                "escalation_created": existing is None,
+                # La nota interna del helpdesk usa outcome.escalation_reason; sin
+                # esto llegaría como "unspecified_escalation".
+                "escalation_reason": f"agent_error: {error_msg}",
+            }
         except Exception:
             # No tenemos otra capa donde caer. Log y seguir — el trace ya quedó.
             logger.exception(
