@@ -8,6 +8,7 @@ los backoffs reales.
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import anthropic
@@ -302,3 +303,90 @@ async def test_cache_true_respects_system_blocks_from_caller() -> None:
 
     kwargs = client.messages.create.await_args.kwargs
     assert kwargs["system"] == blocks
+
+
+@pytest.mark.asyncio
+async def test_trace_label_logs_duration_and_cache_breakdown(caplog) -> None:
+    """Con trace_label, loguea a INFO una línea con duración + breakdown de cache."""
+    client = MagicMock()
+    resp = MagicMock()
+    resp.content = []
+    resp.usage = MagicMock(
+        input_tokens=12,
+        output_tokens=7,
+        cache_creation_input_tokens=0,
+        cache_read_input_tokens=2000,
+    )
+    client.messages.create = AsyncMock(return_value=resp)
+
+    with caplog.at_level(logging.INFO, logger="apps.api.integrations.anthropic_client"):
+        await call_claude_with_tools(
+            client=client,
+            model="claude-sonnet-4-6",
+            system="x",
+            messages=[{"role": "user", "content": "y"}],
+            tools=[RESPOND_OR_ESCALATE_TOOL],
+            tool_choice={"type": "any"},
+            max_retries=1,
+            cache=True,
+            trace_label="reason",
+        )
+
+    lines = [r.getMessage() for r in caplog.records if "llm_call" in r.getMessage()]
+    assert len(lines) == 1
+    msg = lines[0]
+    assert "label=reason" in msg
+    assert "cache_r=2000" in msg
+    assert "cache_w=0" in msg
+    assert "out=7" in msg
+    assert "dur_ms=" in msg
+
+
+@pytest.mark.asyncio
+async def test_no_trace_label_does_not_log(caplog) -> None:
+    """Sin trace_label no se emite la línea de instrumentación (callers que no la piden)."""
+    client = MagicMock()
+    client.messages.create = AsyncMock(return_value=_fake_response())
+
+    with caplog.at_level(logging.INFO, logger="apps.api.integrations.anthropic_client"):
+        await call_claude_with_tools(
+            client=client,
+            model="claude-sonnet-4-6",
+            system="x",
+            messages=[{"role": "user", "content": "y"}],
+            tools=[RESPOND_OR_ESCALATE_TOOL],
+            max_retries=1,
+        )
+
+    assert not [r for r in caplog.records if "llm_call" in r.getMessage()]
+
+
+@pytest.mark.asyncio
+async def test_trace_label_survives_missing_cache_fields(caplog) -> None:
+    """Si el usage no trae campos de cache (respuesta sin caching), loguea 0 sin romper."""
+    client = MagicMock()
+    resp = MagicMock()
+    resp.content = []
+    # usage sólo con input/output; sin atributos de cache → _usage_int devuelve 0.
+    resp.usage = MagicMock(spec=["input_tokens", "output_tokens"])
+    resp.usage.input_tokens = 30
+    resp.usage.output_tokens = 4
+    client.messages.create = AsyncMock(return_value=resp)
+
+    with caplog.at_level(logging.INFO, logger="apps.api.integrations.anthropic_client"):
+        await call_claude_with_tools(
+            client=client,
+            model="claude-sonnet-4-6",
+            system="x",
+            messages=[{"role": "user", "content": "y"}],
+            tools=[RESPOND_OR_ESCALATE_TOOL],
+            tool_choice={"type": "any"},
+            max_retries=1,
+            trace_label="supervise",
+        )
+
+    lines = [r.getMessage() for r in caplog.records if "llm_call" in r.getMessage()]
+    assert len(lines) == 1
+    assert "cache_r=0" in lines[0]
+    assert "cache_w=0" in lines[0]
+    assert "in=30" in lines[0]
