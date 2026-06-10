@@ -178,6 +178,10 @@ def _patch_all_db_and_llm(
     # --- handle_error ---
     monkeypatch.setattr("apps.api.agents.nodes.handle_error.tenant_scope", fake_scope)
     monkeypatch.setattr(
+        "apps.api.agents.nodes.handle_error.get_open_escalation_for_conversation",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
         "apps.api.agents.nodes.handle_error.insert_escalation",
         AsyncMock(return_value=make_escalation()),
     )

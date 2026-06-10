@@ -34,6 +34,9 @@ def _state(**overrides) -> dict:
 async def test_escalates_with_agent_error_prefix(fake_deps, monkeypatch) -> None:
     insert_mock = AsyncMock(return_value=make_escalation())
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.get_open_escalation_for_conversation", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(f"{MODULE}.insert_escalation", insert_mock)
     monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
     node = make_handle_error_node(fake_deps)
@@ -44,6 +47,54 @@ async def test_escalates_with_agent_error_prefix(fake_deps, monkeypatch) -> None
     reason = insert_mock.await_args.kwargs["reason"]
     assert reason.startswith("agent_error:")
     assert "load_tenant_context: tenant_not_found" in reason
+
+
+@pytest.mark.asyncio
+async def test_new_escalation_sets_escalation_created(fake_deps, monkeypatch) -> None:
+    """Al crear una escalación nueva, el parche debe traer escalation_created=True.
+    Sin esa señal, el caller post-grafo nunca empuja la nota interna + asignación
+    al helpdesk del cliente: los errores de sistema quedaban invisibles para el
+    equipo CX (solo aparecían en el dashboard de Auyan)."""
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.get_open_escalation_for_conversation", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.insert_escalation", AsyncMock(return_value=make_escalation())
+    )
+    monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
+    node = make_handle_error_node(fake_deps)
+
+    out = await node(_state())
+
+    assert out["escalation_created"] is True
+    # La nota interna del helpdesk se redacta desde escalation_reason.
+    assert out["escalation_reason"] == "agent_error: load_tenant_context: tenant_not_found"
+
+
+@pytest.mark.asyncio
+async def test_reuses_open_escalation(fake_deps, monkeypatch) -> None:
+    """Si la conversación ya tiene una escalación activa (pending/claimed), un
+    nuevo error NO crea otra: reusa la existente y escalation_created=False
+    (el helpdesk ya recibió su nota; no duplicar). Mismo patrón que escalate."""
+    existing = make_escalation(reason="previous")
+    insert_mock = AsyncMock()
+    status_mock = AsyncMock()
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.get_open_escalation_for_conversation",
+        AsyncMock(return_value=existing),
+    )
+    monkeypatch.setattr(f"{MODULE}.insert_escalation", insert_mock)
+    monkeypatch.setattr(f"{MODULE}.update_conversation_status", status_mock)
+    node = make_handle_error_node(fake_deps)
+
+    out = await node(_state())
+
+    assert out["escalation_id"] == str(existing.id)
+    assert out["escalation_created"] is False
+    insert_mock.assert_not_called()
+    status_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -66,6 +117,9 @@ async def test_resilient_to_persistence_failure(fake_deps, monkeypatch) -> None:
     """Si la persistencia de la escalación falla, NO propaga — el trace ya quedó."""
     insert_mock = AsyncMock(side_effect=RuntimeError("db is down"))
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.get_open_escalation_for_conversation", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(f"{MODULE}.insert_escalation", insert_mock)
     monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
     node = make_handle_error_node(fake_deps)
@@ -80,6 +134,9 @@ async def test_falls_back_to_unknown_error(fake_deps, monkeypatch) -> None:
     """Si error está vacío por alguna razón, reason refleja 'unknown_error'."""
     insert_mock = AsyncMock(return_value=make_escalation())
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.get_open_escalation_for_conversation", AsyncMock(return_value=None)
+    )
     monkeypatch.setattr(f"{MODULE}.insert_escalation", insert_mock)
     monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
     node = make_handle_error_node(fake_deps)
