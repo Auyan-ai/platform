@@ -289,9 +289,81 @@ async def test_skill_tool_emits_pending_tool_call(
     assert out["pending_tool_call"]["id"] == "toolu_search_001"
     assert out["pending_tool_call"]["slug"] == "test.search"
     assert out["pending_tool_call"]["input"] == {"query": "hola"}
-    assert "decision" not in out
+    # "Sin decisión" se expresa como None explícito (anula residuos de pasadas
+    # anteriores en el merge de LangGraph), no como key ausente.
+    assert out["decision"] is None
     assert out["tokens_in"] == 100
     assert out["tokens_out"] == 50
+
+
+@pytest.mark.asyncio
+async def test_decide_tool_clears_stale_pending_tool_call(
+    fake_deps, make_anthropic_response, monkeypatch
+) -> None:
+    """Retry post-rechazo del supervisor: la pasada anterior dejó una tool
+    pendiente y en el retry el LLM usa el decide tool. El parche debe anular
+    pending_tool_call — LangGraph solo pisa las keys presentes, así que sin el
+    None explícito route_after_reason prioriza la tool residual y ejecuta la
+    acción que el supervisor rechazó (sin re-supervisión, porque
+    supervisor_retried=True desactiva needs_supervision)."""
+    fake_response = make_anthropic_response(
+        {
+            "decision": "respond",
+            "confidence": 0.92,
+            "response_text": "¿Me confirmas la dirección de envío?",
+        }
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        AsyncMock(return_value=fake_response),
+    )
+    node = make_reason_node(fake_deps)
+
+    state = _base_state()
+    state["pending_tool_call"] = {
+        "id": "toolu_rejected",
+        "slug": "test.search",
+        "input": {"query": "stale"},
+    }
+    state["supervisor_retried"] = True
+    out = await node(state)
+
+    assert out["decision"] == "respond"
+    assert out["pending_tool_call"] is None
+
+
+@pytest.mark.asyncio
+async def test_skill_tool_clears_stale_decision_fields(
+    fake_deps, make_anthropic_response, monkeypatch, _register_search
+) -> None:
+    """Espejo del caso anterior: la pasada rechazada fue una decisión
+    (respond/escalate) y en el retry el LLM pide una skill. El parche debe
+    anular decision/agent_response/escalation_reason — si el turno muere por
+    max_tool_iterations, escalate reenviaría al cliente el agent_response que
+    el supervisor rechazó."""
+    fake_response = make_anthropic_response(
+        {"query": "pedido 1234"},
+        tool_name="test_search",
+        tool_id="toolu_search_002",
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        AsyncMock(return_value=fake_response),
+    )
+    node = make_reason_node(fake_deps)
+
+    state = _base_state()
+    state["allowed_skills"] = ["test.search"]
+    state["decision"] = "respond"
+    state["agent_response"] = "respuesta que el supervisor rechazó"
+    state["escalation_reason"] = "low_confidence previa"
+    state["supervisor_retried"] = True
+    out = await node(state)
+
+    assert out["pending_tool_call"]["slug"] == "test.search"
+    assert out["decision"] is None
+    assert out["agent_response"] is None
+    assert out["escalation_reason"] is None
 
 
 @pytest.mark.asyncio

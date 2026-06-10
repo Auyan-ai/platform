@@ -47,7 +47,10 @@ class AgentState(TypedDict, total=False):
     retrieved_chunks: list[dict]
 
     # --- Producido por reason ---
-    decision: Decision
+    # None explícito cuando reason pide una skill: anula la decisión de una
+    # pasada anterior rechazada por el supervisor (el merge de LangGraph
+    # conserva las keys que el parche no incluye).
+    decision: Decision | None
     confidence: float
     escalation_reason: str | None
     agent_response: str | None
