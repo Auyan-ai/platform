@@ -231,6 +231,7 @@ def make_reason_node(
             max_retries=deps.settings.llm_max_retries,
             timeout_seconds=deps.settings.llm_timeout_seconds,
             cache=True,
+            trace_label="reason",
         )
 
         # Extraer el primer tool_use block. tool_choice=any garantiza que exista.
