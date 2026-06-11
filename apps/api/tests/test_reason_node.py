@@ -80,7 +80,9 @@ async def test_respond_happy_path(fake_deps, make_anthropic_response, monkeypatc
     assert out["tokens_in"] == 100
     assert out["tokens_out"] == 50
     assert out["cost_usd"] > 0
-    assert out["model_used"] == "claude-sonnet-4-6"
+    # _base_state es un turno conversacional puro (sin skills ni tool_results) →
+    # el router usa el modelo rápido. Ver TestSelectReasonModel.
+    assert out["model_used"] == "claude-haiku-4-5-20251001"
 
 
 @pytest.mark.asyncio
@@ -107,6 +109,78 @@ async def test_threshold_override_low_confidence_respond_to_escalate(
     assert out["agent_response"] is None
     assert "low_confidence" in (out["escalation_reason"] or "")
     assert "0.50" in (out["escalation_reason"] or "")
+
+
+# ──────────────────────────────────────────────────────────
+# _select_reason_model — router por complejidad (palanca de latencia c)
+# ──────────────────────────────────────────────────────────
+
+
+class TestSelectReasonModel:
+    """Haiku SOLO en turnos sin riesgo: AOP sin skills, sin tool_results previos
+    y sin pending_tool_call → el único desenlace posible es respond/escalate puro.
+    Apenas el turno pueda tocar una herramienta, se usa el modelo del tenant."""
+
+    def _fn(self, state: dict) -> str:
+        from apps.api.agents.nodes.reason import _select_reason_model
+
+        from tests.conftest import FakeSettings
+
+        return _select_reason_model(state, FakeSettings())  # type: ignore[arg-type]
+
+    def test_simple_turn_uses_fast_model(self) -> None:
+        model = self._fn({
+            "model_used": "claude-sonnet-4-6",
+            "allowed_skills": [],
+            "tool_results": [],
+        })
+        assert model == "claude-haiku-4-5-20251001"
+
+    def test_aop_with_skills_uses_tenant_model(self) -> None:
+        model = self._fn({
+            "model_used": "claude-sonnet-4-6",
+            "allowed_skills": ["shopify.get_order_status"],
+            "tool_results": [],
+        })
+        assert model == "claude-sonnet-4-6"
+
+    def test_prior_tool_results_force_tenant_model(self) -> None:
+        # Venimos de un hop del loop ReAct: aunque el AOP no tenga skills ahora,
+        # el turno ya tocó una herramienta → no degradar.
+        model = self._fn({
+            "model_used": "claude-sonnet-4-6",
+            "allowed_skills": [],
+            "tool_results": [{"slug": "x", "is_error": False}],
+        })
+        assert model == "claude-sonnet-4-6"
+
+    def test_pending_tool_call_forces_tenant_model(self) -> None:
+        model = self._fn({
+            "model_used": "claude-sonnet-4-6",
+            "allowed_skills": [],
+            "tool_results": [],
+            "pending_tool_call": {"slug": "x", "input": {}},
+        })
+        assert model == "claude-sonnet-4-6"
+
+
+@pytest.mark.asyncio
+async def test_simple_turn_calls_claude_with_fast_model(
+    fake_deps, make_anthropic_response, monkeypatch
+) -> None:
+    """Integración: un turno conversacional puro llama a Claude con el modelo rápido
+    y reporta ese modelo en model_used (para que el costo se compute correcto)."""
+    fake_response = make_anthropic_response(
+        {"decision": "respond", "confidence": 0.95, "response_text": "¡De nada!"}
+    )
+    mock_call = AsyncMock(return_value=fake_response)
+    monkeypatch.setattr("apps.api.agents.nodes.reason.call_claude_with_tools", mock_call)
+    node = make_reason_node(fake_deps)
+
+    out = await node(_base_state())  # allowed_skills=[], tool_results=[]
+
+    assert mock_call.await_args.kwargs["model"] == "claude-haiku-4-5-20251001"
+    assert out["model_used"] == "claude-haiku-4-5-20251001"
 
 
 @pytest.mark.asyncio

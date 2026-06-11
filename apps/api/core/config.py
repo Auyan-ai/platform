@@ -141,6 +141,11 @@ class Settings(BaseSettings):
     # Modelo para reescribir el mensaje al cliente tras aprobar/rechazar L3.
     # Haiku: barato/rápido para una frase de confirmación.
     reply_model: str = "claude-haiku-4-5-20251001"
+    # Modelo para turnos conversacionales puros (sin skills disponibles ni
+    # herramientas en juego): el único desenlace es respond/escalate, así que
+    # Haiku basta y recorta latencia/costo. Apenas haya tool, reason usa el
+    # modelo del tenant. Ver _select_reason_model en agents/nodes/reason.py.
+    simple_turn_model: str = "claude-haiku-4-5-20251001"
 
     # --- Rate limiting (webhooks inbound) ---
     # Requests por minuto por tenant. Cubre ~50K tickets/día con headroom para bursts.
