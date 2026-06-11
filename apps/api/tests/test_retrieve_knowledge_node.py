@@ -66,6 +66,48 @@ async def test_empty_knowledge_base(fake_deps, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_embedding_failure_degrades_to_no_chunks(fake_deps, monkeypatch) -> None:
+    """Auditoría sesión 67 (d): OpenAI embeddings caído NO debe tumbar el turno
+    (antes: excepción → @guarded → handle_error → escalar TODO). El RAG es
+    contexto opcional: se degrada a chunks=[] y el agente sigue."""
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.get_query_embedding",
+        AsyncMock(side_effect=RuntimeError("openai_down")),
+    )
+    search_mock = AsyncMock(return_value=[])
+    monkeypatch.setattr(f"{MODULE}.search_knowledge_chunks", search_mock)
+    node = make_retrieve_knowledge_node(fake_deps)
+
+    out = await node(_state())
+
+    assert out["retrieved_chunks"] == []
+    assert "error" not in out
+    # Sin embedding no hay búsqueda que hacer.
+    search_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_search_failure_still_raises_to_guard(fake_deps, monkeypatch) -> None:
+    """Un fallo de la búsqueda en Postgres NO se degrada: si la DB está caída,
+    el resto del turno también va a fallar — mejor fail-fast vía @guarded."""
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.get_query_embedding", AsyncMock(return_value=[0.0] * 1536)
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.search_knowledge_chunks",
+        AsyncMock(side_effect=RuntimeError("db_down")),
+    )
+    node = make_retrieve_knowledge_node(fake_deps)
+
+    out = await node(_state())
+
+    # @guarded atrapa y marca el error para rutear a handle_error.
+    assert out.get("error")
+
+
+@pytest.mark.asyncio
 async def test_embeds_the_inbound_message(fake_deps, monkeypatch) -> None:
     """El embedding se calcula sobre el mensaje entrante, no sobre el historial."""
     embed_mock = AsyncMock(return_value=[0.0] * 1536)

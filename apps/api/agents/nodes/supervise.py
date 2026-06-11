@@ -115,11 +115,19 @@ def _build_supervisor_prompt(state: AgentState) -> str:
     aop_slug = state.get("aop_slug", "unknown")
     parts.append(f"## AOP activo: {aop_slug}")
 
-    # Los guardrails están compilados en system_prompt; los extraemos de ahí si podemos
-    system_prompt = state.get("system_prompt", "")
-    if "Reglas NO negociables" in system_prompt:
-        guardrail_section = system_prompt.split("Reglas NO negociables")[-1].split("---")[0]
-        parts.append(f"## Guardrails del AOP\n{guardrail_section.strip()}")
+    # Guardrails: preferir la lista estructurada que propaga select_aop desde el
+    # AOP compilado — no depende del texto del system_prompt. El parseo del
+    # prompt queda solo como fallback legacy (tenant sin AOP cuyo prompt de
+    # tenant_prompts traiga el encabezado).
+    guardrails = state.get("aop_guardrails")
+    if guardrails:
+        lines = "\n".join(f"- {g}" for g in guardrails)
+        parts.append(f"## Guardrails del AOP\n{lines}")
+    else:
+        system_prompt = state.get("system_prompt", "")
+        if "Reglas NO negociables" in system_prompt:
+            guardrail_section = system_prompt.split("Reglas NO negociables")[-1].split("---")[0]
+            parts.append(f"## Guardrails del AOP\n{guardrail_section.strip()}")
 
     # Tool pendiente (si hay)
     pending = state.get("pending_tool_call")

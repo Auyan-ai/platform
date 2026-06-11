@@ -9,6 +9,7 @@ queda vacío — el agente igual puede decidir respond/escalate sin contexto ext
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
@@ -19,6 +20,8 @@ from apps.api.db.client import tenant_scope
 from apps.api.db.queries import search_knowledge_chunks
 from apps.api.integrations.openai_embeddings import get_query_embedding
 
+logger = logging.getLogger(__name__)
+
 
 def make_retrieve_knowledge_node(
     deps: AgentDependencies,
@@ -28,12 +31,25 @@ def make_retrieve_knowledge_node(
         tenant_id = UUID(state["tenant_id"])
         query = state["inbound_message_content"]
 
-        embedding = await get_query_embedding(
-            deps.openai,
-            query,
-            model=deps.settings.embedding_model,
-            max_retries=deps.settings.llm_max_retries,
-        )
+        # OpenAI embeddings caído NO tumba el turno: el RAG es contexto opcional
+        # por diseño (KB vacía ya devuelve []), así que se degrada a chunks=[]
+        # en vez de propagar a @guarded → handle_error → escalar todo.
+        try:
+            embedding = await get_query_embedding(
+                deps.openai,
+                query,
+                model=deps.settings.embedding_model,
+                max_retries=deps.settings.llm_max_retries,
+            )
+        except Exception:
+            logger.exception(
+                "rag_embedding_failed — degradando a retrieved_chunks=[]",
+                extra={
+                    "tenant_id": state.get("tenant_id"),
+                    "conversation_id": state.get("conversation_id"),
+                },
+            )
+            return {"retrieved_chunks": []}
 
         async with tenant_scope(tenant_id) as conn:
             chunks = await search_knowledge_chunks(

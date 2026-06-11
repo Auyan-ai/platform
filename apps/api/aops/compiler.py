@@ -52,6 +52,9 @@ class CompiledAOP:
     require_supervision: bool
     escalation_triggers: list[str] = field(default_factory=list)
     steps: list[AopStep] = field(default_factory=list)
+    # Guardrails crudos del frontmatter: el supervisor los lee estructurados
+    # (state.aop_guardrails) en vez de parsear el system_prompt compilado.
+    guardrails: list[str] = field(default_factory=list)
 
 
 # ─── Función principal ───────────────────────────────────────────────────────
@@ -99,6 +102,7 @@ def compile_aop(
         require_supervision=bool(fm.get("require_supervision", False)),
         escalation_triggers=list(fm.get("escalation_triggers", [])),
         steps=steps,
+        guardrails=list(fm.get("guardrails", [])),
     )
 
 
