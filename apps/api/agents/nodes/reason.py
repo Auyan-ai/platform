@@ -176,8 +176,8 @@ def _handle_decide_tool(
         "awaiting_customer_reply": parsed.awaiting_customer_reply or decision == "escalate",
         # Anular una tool pendiente de la pasada anterior (retry post-rechazo
         # del supervisor). LangGraph solo pisa las keys presentes en el parche:
-        # sin este None, route_after_reason prioriza la tool residual y ejecuta
-        # la acción rechazada sin re-supervisión (supervisor_retried=True).
+        # sin este None, route_after_reason prioriza la tool residual y re-procesa
+        # la acción YA rechazada en vez de la decisión nueva de este retry.
         "pending_tool_call": None,
         **tokens_update,
     }
