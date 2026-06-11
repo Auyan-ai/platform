@@ -1,4 +1,4 @@
-"""Canonical AOPs de Auyan — los 8 procedimientos por defecto de e-commerce ES.
+"""Canonical AOPs de Auyan — los 9 procedimientos por defecto de e-commerce ES.
 
 Fuente de verdad EN CÓDIGO. `provision_tenant` los siembra al crear cada tenant
 (copy-on-create): cada tenant recibe SU PROPIA copia (filas en aops/aop_versions),
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 CANONICAL_WORKSPACE = "production"
 
 
-# ─── Definiciones de los 8 AOPs canónicos ─────────────────────────────────────
+# ─── Definiciones de los 9 AOPs canónicos ─────────────────────────────────────
 # Tenant-agnósticos: cero constantes de tienda (plazos/moneda/tiempos salen de
 # tenant_facts, get_shop_policies o del propio pedido).
 
@@ -464,6 +464,57 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             "4. Sé honesto sobre lo que sabes y lo que no."
         ),
     },
+    {
+        "slug": "smalltalk",
+        "frontmatter": {
+            "name": "Saludos y cierres",
+            "slug": "smalltalk",
+            "workspace": CANONICAL_WORKSPACE,
+            "triggers": {
+                "description": (
+                    "Charla social SIN solicitud de información ni acción: saludos de "
+                    "apertura, agradecimientos, confirmaciones de cierre y despedidas. "
+                    "NO es: cualquier pregunta sobre un pedido, producto, envío, "
+                    "devolución, reembolso o política — esas van a su procedimiento. "
+                    "Ante la menor duda de si el cliente necesita un dato real, NO uses "
+                    "este AOP (cae a 'default', que sí puede consultar)."
+                ),
+                "examples": [
+                    "hola, buenas",
+                    "muchas gracias, muy amable",
+                    "perfecto, gracias",
+                    "vale, adiós",
+                    "ok genial, un saludo",
+                ],
+            },
+            # A propósito SIN skills: el turno solo puede respond/escalate, así que
+            # _select_reason_model (router de latencia) usa el modelo rápido (Haiku).
+            # Ver agents/nodes/reason.py y docs/aop-canonical-design.md.
+            "allowed_skills": [],
+            "required_data": [],
+            "guardrails": [
+                "Solo cortesía: si el cliente desliza una pregunta o pide una acción "
+                "real, NO la respondas a ciegas — escala para que se reclasifique al "
+                "procedimiento adecuado.",
+                "No inventes información de la tienda; aquí no tienes herramientas "
+                "para consultarla.",
+            ],
+            "max_tool_iterations": 1,
+            "confidence_threshold": 0.60,
+            "require_supervision": False,
+            "escalation_triggers": [
+                "El cliente pide datos o una acción que requiere consultar la tienda",
+            ],
+        },
+        "body": (
+            "## Procedimiento: saludos y cierres\n"
+            "Objetivo: responder con calidez y brevedad a charla social, sin pedir ni dar datos de la tienda.\n\n"
+            "1. Saludo de apertura → devuélvelo y ofrece ayuda en una frase.\n"
+            "2. Agradecimiento o despedida → responde con cortesía y cierra; no añadas nada que no pidió.\n"
+            "3. Si detectas una consulta real (pedido, producto, envío, devolución, política) → NO la respondas aquí: escala para que se reclasifique.\n"
+            "4. Sé muy breve."
+        ),
+    },
 ]
 
 
@@ -509,7 +560,7 @@ async def provision_canonical_aops(
     created_by: UUID | None = None,
     update_existing: bool = False,
 ) -> dict[str, int]:
-    """Siembra los 8 AOPs canónicos + permisos default para `tenant_id`. Idempotente.
+    """Siembra los 9 AOPs canónicos + permisos default para `tenant_id`. Idempotente.
 
     No abre transacción propia: el caller decide la atomicidad. `provision_tenant` lo
     envuelve en su transacción (todo o nada). La conexión debe tener privilegios

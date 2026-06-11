@@ -41,6 +41,7 @@ EXPECTED_SLUGS = {
     "order_change",
     "complaint",
     "default",
+    "smalltalk",
 }
 
 
@@ -75,11 +76,23 @@ def _ensure_shopify_skills_registered():
 # ─── Integridad de los datos ───────────────────────────────────────────────────
 
 
-def test_exactly_eight_canonical_aops_unique():
+def test_exactly_nine_canonical_aops_unique():
     slugs = [a["slug"] for a in CANONICAL_AOPS]
-    assert len(slugs) == 8
+    assert len(slugs) == 9
     assert set(slugs) == EXPECTED_SLUGS
     assert len(slugs) == len(set(slugs)), "hay slugs duplicados"
+
+
+# Slugs cuyo AOP es puramente conversacional: sin allowed_skills a propósito,
+# para que _select_reason_model (router de latencia) use el modelo rápido.
+SKILL_LESS_SLUGS = {"smalltalk"}
+
+
+def test_smalltalk_has_no_skills():
+    """INVARIANTE de latencia: smalltalk no tiene skills → el turno solo puede
+    respond/escalate y _select_reason_model usa el modelo rápido (Haiku)."""
+    smalltalk = next(a for a in CANONICAL_AOPS if a["slug"] == "smalltalk")
+    assert smalltalk["frontmatter"]["allowed_skills"] == []
 
 
 def test_frontmatter_required_keys():
@@ -89,7 +102,10 @@ def test_frontmatter_required_keys():
         assert fm["name"]
         assert fm["workspace"] == "production"
         assert fm["triggers"]["description"].strip()
-        assert isinstance(fm["allowed_skills"], list) and fm["allowed_skills"]
+        assert isinstance(fm["allowed_skills"], list)
+        # Todos llevan skills salvo los conversacionales puros (smalltalk).
+        if a["slug"] not in SKILL_LESS_SLUGS:
+            assert fm["allowed_skills"], f"{a['slug']} sin allowed_skills"
         assert isinstance(fm["max_tool_iterations"], int) and fm["max_tool_iterations"] > 0
         assert 0.0 <= fm["confidence_threshold"] <= 1.0
         assert isinstance(fm["require_supervision"], bool)
@@ -358,7 +374,7 @@ async def test_provision_creates_eight_aops_and_all_permissions(monkeypatch):
 
     result = await provision_canonical_aops(AsyncMock(), uuid4())
 
-    assert result["created"] == 8
+    assert result["created"] == 9
     assert result["updated"] == 0
     assert result["skipped"] == 0
     assert set(created_slugs) == EXPECTED_SLUGS
@@ -387,7 +403,7 @@ async def test_provision_idempotent_skips_existing(monkeypatch):
     result = await provision_canonical_aops(AsyncMock(), uuid4())
 
     assert result["created"] == 0
-    assert result["skipped"] == 8
+    assert result["skipped"] == 9
     # los permisos se hacen upsert igual (idempotente)
     assert result["tool_permissions"] == 11
 
@@ -416,6 +432,6 @@ async def test_provision_update_existing_creates_new_versions(monkeypatch):
 
     result = await provision_canonical_aops(AsyncMock(), uuid4(), update_existing=True)
 
-    assert result["updated"] == 8
+    assert result["updated"] == 9
     assert result["created"] == 0
     assert set(saved_slugs) == EXPECTED_SLUGS
