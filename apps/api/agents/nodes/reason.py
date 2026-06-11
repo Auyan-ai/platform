@@ -19,8 +19,11 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+if TYPE_CHECKING:
+    from apps.api.core.config import Settings
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
@@ -109,6 +112,28 @@ def _append_tool_result_blocks(
             }
         )
     return messages
+
+
+def _select_reason_model(state: AgentState, settings: Settings) -> str:
+    """Router por complejidad (palanca de latencia): Haiku para turnos sin riesgo.
+
+    Un turno es "simple" cuando NO puede tocar la tienda: el AOP activo no tiene
+    skills permitidas, no venimos de un hop del loop ReAct (sin tool_results) y no
+    hay una tool pendiente. En ese caso `_build_tools` solo expone el decide tool,
+    así que el único desenlace posible es respond/escalate puro — Haiku basta y es
+    mucho más rápido (saludos, "gracias", FAQ conversacional). Apenas el turno
+    pueda usar una herramienta, se mantiene el modelo del tenant (Sonnet).
+
+    Invariante: `state["model_used"]` aquí es el modelo del tenant. El state se
+    reconstruye por cada mensaje inbound (no hay checkpointer) y un turno simple es
+    de una sola vuelta, así que la elección Haiku nunca contamina el base de otro turno.
+    """
+    tenant_model = state["model_used"]
+    if state.get("allowed_skills"):
+        return tenant_model
+    if state.get("tool_results") or state.get("pending_tool_call"):
+        return tenant_model
+    return settings.simple_turn_model
 
 
 def _build_tools(allowed_skills: list[str]) -> list[dict[str, Any]]:
@@ -224,7 +249,7 @@ def make_reason_node(
         allowed_skills: list[str] = state.get("allowed_skills") or []
         tools = _build_tools(allowed_skills)
 
-        model = state["model_used"]
+        model = _select_reason_model(state, deps.settings)
 
         response = await call_claude_with_tools(
             client=deps.anthropic,

@@ -216,6 +216,15 @@ def test_render_global_rules_includes_conciseness_rule() -> None:
     assert "silencio" in result
 
 
+def test_render_global_rules_caps_response_length() -> None:
+    """Palanca de latencia (a): instrucción imperativa y cuantitativa de brevedad.
+    El output domina la latencia (medido sesión 67), así que la regla pasa de un
+    'sé conciso' blando a un techo de frases por defecto + sin preámbulos de relleno."""
+    result = _render_global_rules([]).lower()
+    assert "frase" in result  # techo cuantitativo en frases
+    assert "preámbulo" in result or "relleno" in result
+
+
 def test_render_global_rules_includes_chat_format_rule() -> None:
     """Las respuestas van a un widget de chat: nada de tablas ni Markdown pesado,
     texto plano y conciso — regla global, aplica a todos los AOPs y marcas."""

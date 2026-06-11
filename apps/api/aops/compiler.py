@@ -231,7 +231,13 @@ def _render_global_rules(escalation_triggers: list[str]) -> str:
         "- Si una herramienta devuelve vacío, sin resultados o un error, trátalo "
         "como dato no disponible: no infieras la respuesta a partir de ese vacío; "
         "escala o pregunta en lugar de responder con datos inventados.",
-        "- Sé conciso y no repitas información que ya le diste al cliente en esta "
+        "- **Brevedad (impacta el tiempo de respuesta):** responde con el menor "
+        "número de frases posible. Por defecto 1-3 frases; usa más solo si el "
+        "cliente pidió detalle explícito o la consulta lo exige (p.ej. varios "
+        "pedidos a la vez). No abras con preámbulos de relleno ('Claro, con mucho "
+        "gusto te ayudo con eso'), no repitas la pregunta del cliente ni cierres "
+        "con frases vacías. Ve directo al dato o a la acción.",
+        "- No repitas información que ya le diste al cliente en esta "
         "conversación. Si necesitas reverificar con una herramienta algo que ya le "
         "confirmaste, hazlo en silencio: no vuelvas a anunciar el mismo resultado, "
         "avanza al siguiente paso.",
