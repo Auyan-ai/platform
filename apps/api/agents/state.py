@@ -120,8 +120,11 @@ class AgentState(TypedDict, total=False):
     # aop_confidence_threshold: umbral para escalar la RESPUESTA, por-AOP. reason lo usa
     #   en vez de tenant_config.escalation_threshold cuando hay un AOP activo.
     # aop_require_supervision: el AOP pide supervisar la respuesta (no solo por tier de tool).
+    # aop_guardrails: guardrails crudos del AOP activo — el supervisor los usa
+    #   estructurados en vez de parsear el system_prompt compilado (frágil).
     aop_confidence_threshold: float
     aop_require_supervision: bool
+    aop_guardrails: list[str]
 
     # --- Tool Permissions (Sprint 10) ---
     # Mapa slug → {is_enabled: bool, human_approval_required: bool, threshold_override: float|None}

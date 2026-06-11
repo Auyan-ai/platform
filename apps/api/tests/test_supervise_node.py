@@ -219,6 +219,54 @@ class TestNeedsSupervision:
 
 
 # ──────────────────────────────────────────────────────────
+# _build_supervisor_prompt — guardrails
+# ──────────────────────────────────────────────────────────
+
+
+class TestSupervisorPromptGuardrails:
+    def _prompt(self, state: dict) -> str:
+        from apps.api.agents.nodes.supervise import _build_supervisor_prompt
+
+        return _build_supervisor_prompt(state)
+
+    def test_uses_structured_guardrails_from_state(self):
+        """Con aop_guardrails en el state, el supervisor los recibe aunque el
+        compiler reformule (o elimine) el encabezado del system_prompt."""
+        prompt = self._prompt({
+            "aop_slug": "cancelacion",
+            "system_prompt": "prompt SIN el encabezado conocido",
+            "aop_guardrails": ["NUNCA canceles un pedido enviado.", "Verifica el email."],
+        })
+        assert "NUNCA canceles un pedido enviado." in prompt
+        assert "Verifica el email." in prompt
+        assert "## Guardrails del AOP" in prompt
+
+    def test_structured_guardrails_take_priority_over_prompt_parsing(self):
+        """Si hay aop_guardrails, NO se parsea el system_prompt (evita duplicar
+        o arrastrar texto de otros bloques)."""
+        prompt = self._prompt({
+            "aop_slug": "cancelacion",
+            "system_prompt": (
+                "x\n## Reglas NO negociables\n- regla vieja del prompt\n---\nresto"
+            ),
+            "aop_guardrails": ["regla estructurada"],
+        })
+        assert "regla estructurada" in prompt
+        assert "regla vieja del prompt" not in prompt
+
+    def test_falls_back_to_prompt_parsing_for_legacy(self):
+        """Sin aop_guardrails (tenant legacy sin AOP), se mantiene el parseo del
+        system_prompt como red de compatibilidad."""
+        prompt = self._prompt({
+            "aop_slug": "legacy",
+            "system_prompt": (
+                "x\n## Reglas NO negociables\n- no inventes tracking\n---\nresto"
+            ),
+        })
+        assert "no inventes tracking" in prompt
+
+
+# ──────────────────────────────────────────────────────────
 # Nodo supervise
 # ──────────────────────────────────────────────────────────
 
