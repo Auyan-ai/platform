@@ -85,17 +85,67 @@ def _error_entry(
     }
 
 
-def _same_order_action(existing_inputs: dict, new_inputs: dict) -> bool:
+def _normalize_order_ref(value: Any) -> str | None:
+    """Normaliza una referencia de pedido a string comparable ('#1278' → '1278')."""
+    if value is None:
+        return None
+    return str(value).strip().lstrip("#")
+
+
+async def _refs_point_to_same_order(state: AgentState, ref_a: str, ref_b: str) -> bool:
+    """Resuelve dos referencias de pedido al id interno vía el adapter de commerce
+    (igual que las skills de mutación: visible 1278 ↔ interno 7133911154968).
+
+    Si no hay integración commerce o la resolución falla, fail-safe → False:
+    duplicar una aprobación es inocuo; tragarse una acción sobre OTRO pedido no.
+    """
+    ctx = build_skill_context(state)
+    adapter: Any = ctx.commerce_mock
+    if adapter is None:
+        if ctx.integration_ctx is None:
+            return False
+        from apps.api.integrations.shopify import ShopifyAdapter
+
+        adapter = ShopifyAdapter()
+
+    async def _to_internal(ref: str) -> int:
+        found = await adapter.get_order_by_name(ctx.integration_ctx, ref)
+        if found and found.get("id"):
+            return int(found["id"])
+        return int(ref)
+
+    try:
+        return await _to_internal(ref_a) == await _to_internal(ref_b)
+    except Exception:
+        logger.warning("order_ref_resolution_failed refs=(%s, %s)", ref_a, ref_b)
+        return False
+
+
+async def _same_order_action(
+    state: AgentState, existing_inputs: dict, new_inputs: dict
+) -> bool:
     """¿El nuevo tool call es la MISMA acción que un approval previo?
 
-    Compara los inputs ignorando 'order_id': el mismo pedido puede llegar como
-    número visible (1278) o como id interno (7133911154968) según el turno, así
-    que comparar order_id crudo daría falsos negativos. El resto de campos (p.ej.
-    la dirección nueva) sí distingue un re-disparo espurio de un cambio distinto.
+    Los campos que no son order_id deben coincidir exactamente (p.ej. la
+    dirección nueva distingue un re-disparo espurio de un cambio distinto).
+    El order_id se compara aparte: el mismo pedido puede llegar como número
+    visible (1278) o como id interno (7133911154968) según el turno, así que
+    si los refs difieren textualmente se resuelven ambos al id interno antes
+    de decidir — ignorarlo se tragaba una acción L3 sobre OTRO pedido cuando
+    el resto de inputs coincidía (auditoría sesión 67).
     """
     a = {k: v for k, v in (existing_inputs or {}).items() if k != "order_id"}
     b = {k: v for k, v in (new_inputs or {}).items() if k != "order_id"}
-    return a == b
+    if a != b:
+        return False
+
+    ref_a = _normalize_order_ref((existing_inputs or {}).get("order_id"))
+    ref_b = _normalize_order_ref((new_inputs or {}).get("order_id"))
+    if ref_a == ref_b:
+        return True
+    if ref_a is None or ref_b is None:
+        return False
+    return await _refs_point_to_same_order(state, ref_a, ref_b)
 
 
 def make_execute_skill_node(
@@ -208,13 +258,13 @@ def make_execute_skill_node(
                     async with tenant_scope(tenant_id_uuid) as conn:
                         # Idempotencia del gate L3: si ya hay una aprobación reciente
                         # (pending o approved) para esta misma acción, la reusamos y
-                        # no creamos un duplicado huérfano. Comparamos la acción
-                        # ignorando order_id (visible vs interno = mismo pedido).
+                        # no creamos un duplicado huérfano. order_id se compara
+                        # resolviendo visible ↔ interno (mismo pedido, formas distintas).
                         existing = await get_recent_approval_for_skill(
                             conn, tenant_id_uuid, conv_id_uuid, slug
                         )
-                        if existing is not None and _same_order_action(
-                            existing.inputs_raw, raw_input
+                        if existing is not None and await _same_order_action(
+                            state, existing.inputs_raw, raw_input
                         ):
                             approval_id = existing.id
                             is_repeat = True

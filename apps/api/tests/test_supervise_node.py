@@ -174,12 +174,48 @@ class TestNeedsSupervision:
         finally:
             del SkillRegistry._by_slug["test.l3_always"]
 
-    def test_false_when_already_retried(self):
-        """Si supervisor_retried ya es True, no supervisar de nuevo (evita loop)."""
-        assert not self._fn({
+    def test_still_supervises_response_after_retry(self):
+        """supervisor_retried NO apaga la supervisión del turno: la respuesta
+        corregida tras un reject tactical se re-supervisa (el anti-loop vive en
+        el nodo supervise: segundo reject → escalation_reason → escalate)."""
+        assert self._fn({
             "tenant_config": {"extra": {"require_supervision": True}},
             "supervisor_retried": True,
+            "tool_results": [{"slug": "x", "is_error": False}],
         })
+
+    def test_still_supervises_l2_tool_after_retry(self):
+        """Una L2 nueva pedida DESPUÉS de un retry del supervisor se supervisa
+        igual — supervisor_retried es por-turno y no debe ser un kill-switch."""
+        from apps.api.skills.base import Skill, SkillInput, SkillOutput
+        from apps.api.skills.registry import SkillRegistry
+
+        class _FakeInput(SkillInput):
+            pass
+
+        class _FakeOutput(SkillOutput):
+            pass
+
+        class _L2Skill(Skill):
+            slug = "test.l2_after_retry"
+            description = "test"
+            tier = "L2"
+            input_schema = _FakeInput
+            output_schema = _FakeOutput
+            default_threshold = 0.85
+
+            async def execute(self, ctx, inputs):
+                return _FakeOutput()
+
+        SkillRegistry._by_slug["test.l2_after_retry"] = _L2Skill
+        try:
+            assert self._fn({
+                "tenant_config": {"extra": {}},
+                "pending_tool_call": {"slug": "test.l2_after_retry", "input": {}},
+                "supervisor_retried": True,
+            })
+        finally:
+            del SkillRegistry._by_slug["test.l2_after_retry"]
 
 
 # ──────────────────────────────────────────────────────────
@@ -255,6 +291,25 @@ class TestSuperviseNode:
         assert result.get("supervisor_retried") is True
         # El feedback se inyecta en system_prompt
         assert "Feedback del supervisor" in result.get("system_prompt", "")
+
+    @pytest.mark.asyncio
+    async def test_reject_tactical_after_retry_escalates(self, fake_deps: Any) -> None:
+        """Segundo rechazo (tactical con supervisor_retried=True ya seteado) →
+        no hay segundo retry: el nodo pone escalation_reason y el grafo escala."""
+        from apps.api.agents.nodes.supervise import make_supervise_node
+
+        fake_deps.anthropic.messages.create = AsyncMock(
+            return_value=_make_supervisor_response(
+                "reject", reject_kind="tactical", reason="sigue mal"
+            )
+        )
+
+        state = {**self._base_state(), "supervisor_retried": True}
+        node = make_supervise_node(fake_deps)
+        result = await node(state)
+
+        assert "supervisor_rejected" in result.get("escalation_reason", "")
+        assert "supervisor_retried" not in result  # no re-arma otro retry
 
     @pytest.mark.asyncio
     async def test_reject_structural_sets_escalation_reason(self, fake_deps: Any) -> None:
@@ -396,15 +451,14 @@ class TestRouteAfterSupervise:
         }) == "reason"
 
     def test_reject_tactical_second_time_goes_to_escalate(self):
-        # supervisor_retried=True cuando se entra, y reject+tactical de nuevo
-        # pero route_after_supervise no puede distinguir primero de segundo aquí
-        # porque el nodo ya lo setó. Si supervisor_retried=True y reject+tactical,
-        # el nodo NO setó escalation_reason... pero route_after_supervise sí escala.
-        # Vamos a verificar el flujo: si el nodo setó supervisor_retried=True en el
-        # PRIMER rechazo, y en el segundo rechazo needs_supervision devuelve False
-        # (porque supervisor_retried=True), el route_after_reason va directo a
-        # escalate sin pasar por supervise. Así que este caso no llega aquí.
-        pass
+        # Segundo rechazo: el nodo ve supervisor_retried=True y pone
+        # escalation_reason (aunque el reject sea tactical) → ruta a escalate.
+        assert self._route({
+            "supervisor_verdict": "reject",
+            "supervisor_reject_kind": "tactical",
+            "supervisor_retried": True,
+            "escalation_reason": "supervisor_rejected (tactical): sigue mal",
+        }) == "escalate"
 
     def test_reject_structural_goes_to_escalate(self):
         # Rechazo structural: el nodo pone escalation_reason → ruta a escalate

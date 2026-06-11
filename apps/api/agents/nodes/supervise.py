@@ -186,11 +186,12 @@ def needs_supervision(state: AgentState) -> bool:
     Una respuesta/escalación puramente conversacional (saludo, "de nada", cierre)
     sin haber usado herramientas NO se supervisa: ahorra una llamada LLM (latencia)
     en turnos sin riesgo de alucinación.
-    """
-    # No supervisar si ya se reintentó (para evitar loop infinito)
-    if state.get("supervisor_retried"):
-        return False
 
+    `supervisor_retried` NO apaga la supervisión: la acción corregida tras un
+    reject tactical (o una L2/L3 nueva pedida después del retry) se re-supervisa.
+    El anti-loop vive en el nodo supervise: con `supervisor_retried=True`, un
+    segundo reject pone `escalation_reason` y el grafo escala en vez de reintentar.
+    """
     # Tool L2/L3 pendiente → siempre supervisar, sea cual sea el AOP.
     pending = state.get("pending_tool_call")
     if pending:

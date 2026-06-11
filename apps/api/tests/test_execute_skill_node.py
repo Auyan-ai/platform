@@ -672,14 +672,111 @@ class TestL3HumanApprovalGate:
     ) -> None:
         """Hallazgo 7: si la MISMA acción ya fue aprobada y el agente la re-dispara
         (p.ej. tras un 'gracias'), no se crea un approval huérfano — se reusa.
-        order_id distinto (interno vs visible) pero misma acción → se reconoce."""
+        order_id en forma distinta (interno vs visible) pero MISMO pedido según
+        el adapter → se reconoce como la misma acción."""
         import unittest.mock as mock
         from uuid import UUID as _UUID
 
         approved_id = _UUID("88888888-8888-8888-8888-888888888888")
         mock_create = mock.AsyncMock()
+        # El approval previo guardó el id interno; el nuevo tool call trae el
+        # número visible. El mock de Shopify resuelve ambos al mismo pedido.
         existing = mock.MagicMock(
-            id=approved_id, status="approved", inputs_raw={"text": "hola", "order_id": 999}
+            id=approved_id,
+            status="approved",
+            inputs_raw={"text": "hola", "order_id": 7133911154968},
+        )
+        self._mock_l3_scope(monkeypatch, mock_create, existing)
+
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.dangerous", input={"text": "hola", "order_id": 1278}),
+            allowed_skills=["test.dangerous"],
+            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+            simulation_mode=True,
+            simulation_fixtures={"shopify": {"get_order_by_name": {"id": 7133911154968}}},
+        )
+        result = await node(state)
+
+        mock_create.assert_not_awaited()
+        assert result.get("pending_approval_id") == str(approved_id)
+        assert result.get("pending_approval_is_repeat") is True
+        # El status del reusado se propaga para que escalate elija el mensaje correcto.
+        assert result.get("pending_approval_reused_status") == "approved"
+
+    async def test_l3_different_order_creates_new_approval(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Auditoría sesión 67 (b): mismos inputs pero sobre OTRO pedido → NO se
+        reusa el approval previo. Antes order_id se ignoraba al comparar y la
+        acción sobre el segundo pedido se tragaba como repeat."""
+        import unittest.mock as mock
+        from uuid import UUID as _UUID
+
+        mock_create = mock.AsyncMock()
+        existing = mock.MagicMock(
+            id=_UUID("66666666-6666-6666-6666-666666666666"),
+            status="approved",
+            inputs_raw={"text": "hola", "order_id": 999},
+        )
+        self._mock_l3_scope(monkeypatch, mock_create, existing)
+
+        node = make_execute_skill_node(deps)
+        # Sin fixture de get_order_by_name → el mock devuelve None → cada ref
+        # se resuelve a sí misma: 999 ≠ 1278 → pedidos distintos.
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.dangerous", input={"text": "hola", "order_id": 1278}),
+            allowed_skills=["test.dangerous"],
+            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+            simulation_mode=True,
+            simulation_fixtures={"shopify": {}},
+        )
+        result = await node(state)
+
+        mock_create.assert_awaited_once()
+        assert result.get("pending_approval_is_repeat") is False
+
+    async def test_l3_differing_refs_without_commerce_fail_safe_new_approval(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Si los order_id difieren y NO hay integración commerce para resolverlos,
+        fail-safe: se trata como acción distinta (duplicar un approval es inocuo;
+        tragarse una L3 sobre otro pedido no)."""
+        import unittest.mock as mock
+        from uuid import UUID as _UUID
+
+        mock_create = mock.AsyncMock()
+        existing = mock.MagicMock(
+            id=_UUID("55555555-5555-5555-5555-555555555555"),
+            status="pending",
+            inputs_raw={"text": "hola", "order_id": 7133911154968},
+        )
+        self._mock_l3_scope(monkeypatch, mock_create, existing)
+
+        node = make_execute_skill_node(deps)
+        # Sin simulation_mode ni commerce_integration_ctx → no hay adapter.
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.dangerous", input={"text": "hola", "order_id": 1278}),
+            allowed_skills=["test.dangerous"],
+            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+        )
+        result = await node(state)
+
+        mock_create.assert_awaited_once()
+        assert result.get("pending_approval_is_repeat") is False
+
+    async def test_l3_same_visible_ref_reuses_without_lookup(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Refs textualmente iguales (con o sin '#') → misma acción sin necesidad
+        de adapter (no hay lookup que hacer)."""
+        import unittest.mock as mock
+        from uuid import UUID as _UUID
+
+        reused_id = _UUID("44444444-4444-4444-4444-444444444444")
+        mock_create = mock.AsyncMock()
+        existing = mock.MagicMock(
+            id=reused_id, status="pending", inputs_raw={"text": "hola", "order_id": "#1278"}
         )
         self._mock_l3_scope(monkeypatch, mock_create, existing)
 
@@ -692,10 +789,8 @@ class TestL3HumanApprovalGate:
         result = await node(state)
 
         mock_create.assert_not_awaited()
-        assert result.get("pending_approval_id") == str(approved_id)
+        assert result.get("pending_approval_id") == str(reused_id)
         assert result.get("pending_approval_is_repeat") is True
-        # El status del reusado se propaga para que escalate elija el mensaje correcto.
-        assert result.get("pending_approval_reused_status") == "approved"
 
     async def test_l3_creates_new_approval_when_action_differs(
         self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
