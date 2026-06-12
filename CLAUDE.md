@@ -150,7 +150,6 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 ### docs
 - auyan-master-context.md → fuente única de verdad del negocio + arquitectura post-pivot
 - architecture-agent-v2.md → detalle técnico del agente v2 (Skills, AOPs, Supervisor, Slow Agent)
-- bloque-0-plan.md → plan histórico original de Bloque 0
 - progress.md → bitácora operativa de sprints terminados y próximos pasos
 
 ### Raíz del proyecto
