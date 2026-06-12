@@ -17,6 +17,7 @@ from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.gorgias import (
     GorgiasAdapter,
     GorgiasClient,
+    _build_reply_payload,
     verify_gorgias_signature,
 )
 from apps.api.integrations.registry import IntegrationRegistry
@@ -120,25 +121,46 @@ class TestGorgiasClient:
         with pytest.raises(ValueError):
             GorgiasClient(domain="x")
 
+
     @pytest.mark.asyncio
     async def test_send_message(self) -> None:
         client = GorgiasClient(domain="d", oauth_token="t")
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"id": 1}
-        mock_resp.raise_for_status = MagicMock()
+        ticket = {
+            "messages": [
+                {
+                    "from_agent": False,
+                    "channel": "email",
+                    "source": {
+                        "type": "email",
+                        "to": [{"address": "support@store.gorgias.com"}],
+                        "from": {"address": "cliente@example.com"},
+                    },
+                    "sender": {"id": 111},
+                    "receiver": {"id": 222},
+                }
+            ]
+        }
+        get_resp = MagicMock()
+        get_resp.json.return_value = ticket
+        get_resp.raise_for_status = MagicMock()
+        post_resp = MagicMock()
+        post_resp.json.return_value = {"id": 1}
+        post_resp.raise_for_status = MagicMock()
 
         with patch("httpx.AsyncClient") as MockHTTP:
-            MockHTTP.return_value.__aenter__.return_value.post = AsyncMock(
-                return_value=mock_resp
-            )
+            inst = MockHTTP.return_value.__aenter__.return_value
+            inst.get = AsyncMock(return_value=get_resp)
+            inst.post = AsyncMock(return_value=post_resp)
             result = await client.send_message(123, "hola")
 
         assert result == {"id": 1}
-        call_kwargs = MockHTTP.return_value.__aenter__.return_value.post.call_args
-        body = call_kwargs.kwargs["json"]
+        body = inst.post.call_args.kwargs["json"]
         assert body["channel"] == "email"
         assert body["from_agent"] is True
-        assert "hola" in body["body_text"]
+        assert body["body_text"] == "hola"
+        # source espejado: el cliente ahora es el destinatario
+        assert body["source"]["to"] == [{"address": "cliente@example.com"}]
+        assert body["receiver"] == {"id": 111}
 
     @pytest.mark.asyncio
     async def test_send_internal_note(self) -> None:
@@ -372,3 +394,68 @@ class TestProtocolMethods:
             ref = await adapter.push_escalation(ctx, "99", "razon", {})
 
         assert ref.url == "https://cliente.gorgias.com/app/ticket/99"
+
+
+# ---------------------------------------------------------------------------
+# _build_reply_payload (mirror del mensaje entrante)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildReplyPayload:
+    _TICKET = {
+        "messages": [
+            {
+                "from_agent": False,
+                "channel": "email",
+                "source": {
+                    "type": "email",
+                    "to": [{"address": "support@store.gorgias.com"}],
+                    "from": {"name": "Cliente", "address": "cliente@example.com"},
+                },
+                "sender": {"id": 111},
+                "receiver": {"id": 222},
+            }
+        ]
+    }
+
+    def test_mirrors_inbound(self) -> None:
+        reply = _build_reply_payload(self._TICKET, "Hola, tu pedido va en camino.")
+        assert reply["from_agent"] is True
+        assert reply["channel"] == "email"
+        assert reply["via"] == "api"
+        assert reply["body_text"] == "Hola, tu pedido va en camino."
+        # source invertido: from = soporte, to = [cliente]
+        assert reply["source"]["type"] == "email"
+        assert reply["source"]["from"] == {"address": "support@store.gorgias.com"}
+        assert reply["source"]["to"] == [{"name": "Cliente", "address": "cliente@example.com"}]
+        # sender/receiver invertidos
+        assert reply["sender"] == {"id": 222}
+        assert reply["receiver"] == {"id": 111}
+
+    def test_uses_last_inbound_when_agent_replies_exist(self) -> None:
+        ticket = {
+            "messages": [
+                {
+                    "from_agent": False,
+                    "source": {"from": {"address": "a@x.com"}, "to": [{"address": "s@x.com"}]},
+                    "sender": {"id": 1},
+                    "receiver": {"id": 2},
+                    "channel": "email",
+                },
+                {"from_agent": True, "source": {}, "sender": {"id": 2}, "receiver": {"id": 1}},
+                {
+                    "from_agent": False,
+                    "source": {"from": {"address": "b@x.com"}, "to": [{"address": "s@x.com"}]},
+                    "sender": {"id": 3},
+                    "receiver": {"id": 2},
+                    "channel": "email",
+                },
+            ]
+        }
+        reply = _build_reply_payload(ticket, "ok")
+        assert reply["source"]["to"] == [{"address": "b@x.com"}]
+        assert reply["receiver"] == {"id": 3}
+
+    def test_raises_without_inbound(self) -> None:
+        with pytest.raises(ValueError):
+            _build_reply_payload({"messages": [{"from_agent": True}]}, "x")

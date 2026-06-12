@@ -67,6 +67,40 @@ def verify_gorgias_signature(raw_body: bytes, secret: str, received_sig: str) ->
     return hmac.compare_digest(expected, received_sig)
 
 
+# ─── Construcción de la respuesta outbound ─────────────────────────────────────
+
+
+def _build_reply_payload(ticket: dict[str, Any], body_text: str) -> dict[str, Any]:
+    """Arma la respuesta pública espejando el último mensaje entrante del cliente.
+
+    Gorgias valida `source` (tipo + from/to) y exige sender/receiver; un
+    `source.type` genérico como "agent" se rechaza con 400. Para responder hay
+    que invertir el source (from↔to) y sender↔receiver del último mensaje con
+    `from_agent=false`.
+    """
+    messages = ticket.get("messages") or []
+    inbound = next((m for m in reversed(messages) if not m.get("from_agent")), None)
+    if inbound is None:
+        raise ValueError("gorgias_no_inbound_message_to_reply")
+
+    source = inbound.get("source") or {}
+    support_addr = (source.get("to") or [{}])[0]
+    customer_addr = source.get("from") or {}
+    return {
+        "channel": inbound.get("channel") or "email",
+        "via": "api",
+        "from_agent": True,
+        "source": {
+            "type": source.get("type") or "email",
+            "from": support_addr,
+            "to": [customer_addr],
+        },
+        "sender": {"id": (inbound.get("receiver") or {}).get("id")},
+        "receiver": {"id": (inbound.get("sender") or {}).get("id")},
+        "body_text": body_text,
+    }
+
+
 # ─── Cliente HTTP con estado ───────────────────────────────────────────────────
 
 
@@ -109,17 +143,23 @@ class GorgiasClient:
     # ── Mensajes ──────────────────────────────────────────────────────────────
 
     async def send_message(self, ticket_id: int, body_text: str) -> dict[str, Any]:
-        """Envía un mensaje público outbound al cliente en el ticket."""
+        """Envía un mensaje público outbound al cliente en el ticket.
+
+        Lee el ticket para espejar el último mensaje entrante (source +
+        sender/receiver); Gorgias rechaza un payload con `source.type` genérico.
+        """
         async with httpx.AsyncClient(timeout=10) as client:
+            ticket_resp = await client.get(
+                f"{self.base_url}/tickets/{ticket_id}",
+                headers=self._headers(),
+            )
+            ticket_resp.raise_for_status()
+            reply = _build_reply_payload(ticket_resp.json(), body_text)
+
             response = await client.post(
                 f"{self.base_url}/tickets/{ticket_id}/messages",
                 headers=self._headers(),
-                json={
-                    "body_text": body_text,
-                    "channel": "email",
-                    "from_agent": True,
-                    "source": {"type": "agent", "from": {}, "to": []},
-                },
+                json=reply,
             )
             response.raise_for_status()
             return response.json()  # type: ignore[no-any-return]
