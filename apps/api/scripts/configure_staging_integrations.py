@@ -16,6 +16,10 @@ Uso:
     poetry run python -m scripts.configure_staging_integrations \\
         --tenant lunaria --only shopify --allow-missing-e2e-orders
 
+    # Sólo Gorgias (API Key / Basic auth) en un tenant — ej. Marea.
+    poetry run python -m scripts.configure_staging_integrations \\
+        --tenant marea-studio --only gorgias
+
 Variables esperadas en .env:
     DATABASE_URL
     INTEGRATIONS_SECRET_KEY
@@ -24,10 +28,14 @@ Variables esperadas en .env:
     CHATWOOT_BASE_URL
     CHATWOOT_ACCOUNT_ID
     CHATWOOT_API_ACCESS_TOKEN
+    GORGIAS_DOMAIN          (subdomain o host; ej. mareastudio o mareastudio.gorgias.com)
+    GORGIAS_EMAIL              (Username del API Key — Settings → Account → REST API)
+    GORGIAS_API_ACCESS_TOKEN   (Password / API Key)
 
 Opcionales:
     CHATWOOT_WEBHOOK_SECRET_TOKEN
     CHATWOOT_ESCALATION_TEAM_ID
+    GORGIAS_WEBHOOK_SIGNING_SECRET   (si configuras firma HMAC en el webhook)
 """
 
 # ruff: noqa: E402,I001
@@ -61,7 +69,7 @@ load_dotenv(_ENV_FILE)
 
 SHOPIFY_API_VERSION = "2024-10"
 DEFAULT_E2E_ORDER_TAG = "auyan-e2e"
-Provider = Literal["shopify", "chatwoot"]
+Provider = Literal["shopify", "chatwoot", "gorgias"]
 
 
 @dataclass(frozen=True)
@@ -90,7 +98,14 @@ def redact_credentials(credentials: dict[str, Any]) -> dict[str, Any]:
     for key, value in credentials.items():
         if value in (None, ""):
             redacted[key] = value
-        elif key in {"token", "api_access_token", "webhook_secret_token"}:
+        elif key in {
+            "token",
+            "api_access_token",
+            "webhook_secret_token",
+            "api_key",
+            "oauth_token",
+            "webhook_signing_secret",
+        }:
             text = str(value)
             suffix = text[-4:] if len(text) >= 4 else "set"
             redacted[key] = f"***{suffix}"
@@ -267,6 +282,53 @@ async def build_chatwoot_plan() -> IntegrationPlan:
     )
 
 
+def _normalize_gorgias_domain(domain: str) -> str:
+    raw = domain.strip().removeprefix("https://").removeprefix("http://").rstrip("/")
+    return raw.removesuffix(".gorgias.com")
+
+
+async def _validate_gorgias(domain: str, email: str, api_key: str) -> dict[str, Any]:
+    """Valida las credenciales contra la API de Gorgias (Basic auth)."""
+    url = f"https://{domain}.gorgias.com/api/account"
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            url,
+            auth=(email, api_key),
+            headers={"Content-Type": "application/json"},
+            timeout=15,
+        )
+    response.raise_for_status()
+    payload = response.json()
+    return payload if isinstance(payload, dict) else {}
+
+
+async def build_gorgias_plan() -> IntegrationPlan:
+    domain = _normalize_gorgias_domain(_require_env("GORGIAS_DOMAIN"))
+    email = _require_env("GORGIAS_EMAIL")
+    api_key = _require_env("GORGIAS_API_ACCESS_TOKEN")
+    webhook_secret = _optional_env("GORGIAS_WEBHOOK_SIGNING_SECRET")
+
+    account = await _validate_gorgias(domain, email, api_key)
+    credentials: dict[str, Any] = {"email": email, "api_key": api_key}
+    if webhook_secret:
+        credentials["webhook_signing_secret"] = webhook_secret
+
+    config: dict[str, Any] = {
+        "domain": domain,
+        "account_name": account.get("name"),
+        "verified_at": _now_iso(),
+    }
+    # NO-primary: Marea ya tiene Chatwoot como helpdesk primary; el webhook
+    # resuelve el canal por sí mismo (no depende del primary).
+    return IntegrationPlan(
+        provider="gorgias",
+        kind="helpdesk",
+        credentials=credentials,
+        config=config,
+        is_primary_for_kind=False,
+    )
+
+
 async def _resolve_tenant_id(conn: asyncpg.Connection, tenant: str) -> UUID:
     try:
         tenant_id = UUID(tenant)
@@ -339,6 +401,8 @@ async def run(
         )
     if "chatwoot" in providers:
         plans.append(await build_chatwoot_plan())
+    if "gorgias" in providers:
+        plans.append(await build_gorgias_plan())
 
     conn = await _connect_database(database_url)
     try:
@@ -364,9 +428,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--tenant", default="lunaria", help="Slug o UUID del tenant")
     parser.add_argument(
         "--only",
-        choices=["shopify", "chatwoot"],
+        choices=["shopify", "chatwoot", "gorgias"],
         default=None,
-        help="Configura sólo un proveedor. Default: ambos.",
+        help="Configura sólo un proveedor. Default: shopify + chatwoot (gorgias solo con --only).",
     )
     parser.add_argument("--dry-run", action="store_true", help="Valida y muestra sin guardar")
     parser.add_argument(

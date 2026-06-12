@@ -5,9 +5,10 @@ Dos capas:
 - `GorgiasAdapter`: adapter stateless registrado en IntegrationRegistry. Recibe
   IntegrationContext por llamada — habilita multi-tenant real (un adapter, N accounts).
 
-Credentials esperadas en IntegrationContext:
+Credentials esperadas en IntegrationContext (uno de los dos modos de auth):
+    OAuth2 (vía /oauth/gorgias):   {"oauth_token": "..."}              # Authorization: Bearer
+    API Key / Basic (managed):     {"email": "...", "api_key": "..."}  # Authorization: Basic
     {
-        "oauth_token":            "...",  # Bearer token OAuth
         "webhook_signing_secret": "..."   # opcional — valida X-Gorgias-Hmac-Sha256
     }
 
@@ -70,17 +71,38 @@ def verify_gorgias_signature(raw_body: bytes, secret: str, received_sig: str) ->
 
 
 class GorgiasClient:
-    def __init__(self, domain: str, oauth_token: str) -> None:
+    def __init__(
+        self,
+        domain: str,
+        *,
+        oauth_token: str | None = None,
+        email: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
+        """Acepta dos modos de auth: OAuth2 (oauth_token → Bearer) o
+        API Key (email + api_key → Basic). Exactamente uno debe venir poblado.
+        """
+        if oauth_token is None and not (email and api_key):
+            raise ValueError(
+                "GorgiasClient requiere oauth_token (OAuth2) o email+api_key (Basic auth)"
+            )
         self._domain = domain
-        self._token = oauth_token
+        self._oauth_token = oauth_token
+        self._email = email
+        self._api_key = api_key
 
     @property
     def base_url(self) -> str:
         return f"https://{self._domain}.gorgias.com/api"
 
     def _headers(self) -> dict[str, str]:
+        if self._oauth_token is not None:
+            authorization = f"Bearer {self._oauth_token}"
+        else:
+            raw = f"{self._email}:{self._api_key}".encode()
+            authorization = f"Basic {base64.b64encode(raw).decode()}"
         return {
-            "Authorization": f"Bearer {self._token}",
+            "Authorization": authorization,
             "Content-Type": "application/json",
         }
 
@@ -151,9 +173,12 @@ class GorgiasAdapter:
     """
 
     def _client(self, ctx: IntegrationContext) -> GorgiasClient:
+        creds = ctx.credentials
         return GorgiasClient(
             domain=ctx.config["domain"],
-            oauth_token=ctx.credentials["oauth_token"],
+            oauth_token=creds.get("oauth_token"),
+            email=creds.get("email"),
+            api_key=creds.get("api_key"),
         )
 
     # ── MessageProvider ───────────────────────────────────────────────────────

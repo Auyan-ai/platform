@@ -74,6 +74,26 @@ class TestMultiTenantIsolation:
             assert call_b.kwargs["oauth_token"] == "token_b"
             assert call_b.kwargs["domain"] == "empresa-b"
 
+    @pytest.mark.asyncio
+    async def test_basic_auth_credentials_passed_through(self) -> None:
+        ctx = IntegrationContext(
+            tenant_id=UUID("33333333-3333-3333-3333-333333333333"),
+            credentials={"email": "ops@empresa-c.com", "api_key": "key_c"},
+            config={"domain": "empresa-c"},
+        )
+        adapter = GorgiasAdapter()
+        with patch("apps.api.integrations.gorgias.GorgiasClient") as MockClient:
+            instance = MockClient.return_value
+            instance.send_message = AsyncMock(return_value={})
+
+            await adapter.send_outbound(ctx, "303", "hola")
+
+            call = MockClient.call_args_list[0]
+            assert call.kwargs["email"] == "ops@empresa-c.com"
+            assert call.kwargs["api_key"] == "key_c"
+            assert call.kwargs["oauth_token"] is None
+            assert call.kwargs["domain"] == "empresa-c"
+
 
 # ---------------------------------------------------------------------------
 # GorgiasClient
@@ -89,6 +109,16 @@ class TestGorgiasClient:
         client = GorgiasClient(domain="x", oauth_token="mytoken")
         headers = client._headers()
         assert headers["Authorization"] == "Bearer mytoken"
+
+    def test_headers_basic(self) -> None:
+        client = GorgiasClient(domain="x", email="u", api_key="p")
+        headers = client._headers()
+        # base64("u:p") == "dTpw"
+        assert headers["Authorization"] == "Basic dTpw"
+
+    def test_requires_some_auth(self) -> None:
+        with pytest.raises(ValueError):
+            GorgiasClient(domain="x")
 
     @pytest.mark.asyncio
     async def test_send_message(self) -> None:
