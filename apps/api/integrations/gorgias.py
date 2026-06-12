@@ -41,6 +41,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import html
 import json
 import logging
 from typing import Any
@@ -86,6 +87,9 @@ def _build_reply_payload(ticket: dict[str, Any], body_text: str) -> dict[str, An
     source = inbound.get("source") or {}
     support_addr = (source.get("to") or [{}])[0]
     customer_addr = source.get("from") or {}
+    # Gorgias arma el email saliente desde body_html; sin él, el cliente recibe
+    # un correo vacío (solo la cita autogenerada). Lo derivamos del texto.
+    body_html = "<div>" + html.escape(body_text).replace("\n", "<br>") + "</div>"
     return {
         "channel": inbound.get("channel") or "email",
         "via": "api",
@@ -98,6 +102,7 @@ def _build_reply_payload(ticket: dict[str, Any], body_text: str) -> dict[str, An
         "sender": {"id": (inbound.get("receiver") or {}).get("id")},
         "receiver": {"id": (inbound.get("sender") or {}).get("id")},
         "body_text": body_text,
+        "body_html": body_html,
     }
 
 

@@ -424,6 +424,8 @@ class TestBuildReplyPayload:
         assert reply["channel"] == "email"
         assert reply["via"] == "api"
         assert reply["body_text"] == "Hola, tu pedido va en camino."
+        # body_html es obligatorio o Gorgias envía un email vacío
+        assert reply["body_html"] == "<div>Hola, tu pedido va en camino.</div>"
         # source invertido: from = soporte, to = [cliente]
         assert reply["source"]["type"] == "email"
         assert reply["source"]["from"] == {"address": "support@store.gorgias.com"}
