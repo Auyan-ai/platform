@@ -70,6 +70,21 @@ def get_agent_service(request: Request) -> AgentService:
 AgentServiceDep = Annotated["AgentService", Depends(get_agent_service)]
 
 
+def _is_from_agent(value: Any) -> bool:
+    """Coacciona el flag from_agent a bool.
+
+    Gorgias puede enviarlo como booleano JSON o como string ("true"/"false"/
+    "True"/"False") según cómo se renderice la plantilla del HTTP integration.
+    Ausente o ambiguo → True (conservador: no procesar como mensaje de cliente,
+    evita loops con las respuestas del propio agente).
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes"}
+    return bool(value)
+
+
 @router.post(
     "/gorgias",
     status_code=status.HTTP_200_OK,
@@ -90,7 +105,7 @@ async def gorgias_webhook(
 
     data = payload.get("data") or {}
     message = data.get("message") or {}
-    if message.get("from_agent", True):
+    if _is_from_agent(message.get("from_agent", True)):
         return {"received": True, "processed": False}
 
     body_text = message.get("body_text") or ""

@@ -102,8 +102,9 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 ## Selección de modelo
 - Al inicio de cada sesión, recomendar qué modelo usar según la tarea descrita antes de arrancar.
 - Si el usuario no especifica la tarea al inicio, preguntar qué va a hacer antes de arrancar.
-- **Sonnet** (`claude-sonnet-4-6`): tareas rutinarias de código, scaffolding, fixes, boilerplate y preguntas de contexto.
-- **Opus** (`claude-opus-4-7`): diseño de arquitectura, decisiones complejas del grafo de LangGraph, revisión de seguridad y RLS, y cuando Sonnet falle repetidamente en algo.
+- **Sonnet** (`claude-sonnet-4-6`): modelo por defecto. Tareas rutinarias de código, scaffolding, fixes, boilerplate, integraciones y preguntas de contexto. Donde la velocidad y el costo importan más que la profundidad.
+- **Opus** (`claude-opus-4-8`): diseño de arquitectura, decisiones complejas del grafo de LangGraph, revisión de seguridad y RLS, latencia/diseño del grafo, y cuando Sonnet falle repetidamente en algo.
+- **Fable** (`claude-fable-5`): el modelo más potente — tier por encima de Opus, ~2× su costo ($10/$50 vs $5/$25 por 1M). NO es "Opus más rápido": es más inteligente y más caro. Reservar para lo que Opus no resuelve (arquitectura crítica o lógica del grafo de máxima dificultad donde el costo extra se justifica). Nunca por defecto.
 
 ## Lo que nunca hay que hacer
 - Modificar datos de un tenant desde el contexto de otro
