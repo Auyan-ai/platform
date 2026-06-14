@@ -337,8 +337,11 @@ class TestSuperviseNode:
         assert result["supervisor_verdict"] == "reject"
         assert result["supervisor_reject_kind"] == "tactical"
         assert result.get("supervisor_retried") is True
-        # El feedback se inyecta en system_prompt
-        assert "Feedback del supervisor" in result.get("system_prompt", "")
+        # El feedback va en su campo propio (reason lo inyecta como bloque dinámico),
+        # NO concatenado al system_prompt: pegarlo al prefijo cacheado rompía el
+        # cache hit del retry (#211).
+        assert result.get("supervisor_feedback") == "no verificaste el estado"
+        assert "system_prompt" not in result
 
     @pytest.mark.asyncio
     async def test_reject_tactical_after_retry_escalates(self, fake_deps: Any) -> None:

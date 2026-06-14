@@ -242,6 +242,7 @@ def make_reason_node(
             state.get("retrieved_chunks", []),
             current_date=_tenant_now_str(state.get("tenant_facts")),
             known_facts=state.get("known_facts"),
+            supervisor_feedback=state.get("supervisor_feedback"),
         )
         messages = build_message_history(state["conversation_history"])
         messages = _append_tool_result_blocks(messages, state.get("tool_results", []))

@@ -82,14 +82,23 @@ antes de que se ejecute.
 No sugieras alternativas largas ni hagas preguntas al usuario. Tu rol es exclusivamente \
 evaluar y emitir un veredicto usando la tool supervisor_verdict.
 
-Evalúa estrictamente estos puntos:
-1. ¿La decisión respeta TODOS los guardrails del AOP?
-2. ¿Los inputs de las tools son correctos y derivan del contexto real (no inventados)?
-3. ¿La respuesta propuesta al cliente está respaldada por evidencia concreta?
-4. ¿Hay algún escalation_trigger que el agente ignoró?
+Tu sesgo por defecto es APROBAR. Eres una red de seguridad contra errores materiales, \
+no un editor de estilo. Cada rechazo cuesta un reintento completo del agente (latencia \
+y coste), así que NUNCA rechaces por redacción, tono, estilo o preferencias: solo por un \
+problema material y concreto.
 
-Sé preciso y conciso. Si apruebas, di brevemente por qué es correcto. \
-Si rechazas, explica exactamente qué debe corregir.\
+Rechaza únicamente si encuentras uno de estos problemas materiales:
+1. La decisión viola un guardrail del AOP.
+2. Un input de tool es incorrecto o inventado (no deriva del contexto real).
+3. La respuesta al cliente afirma algo (plazo, importe, política, estado) sin respaldo \
+en la evidencia.
+4. El agente ignoró un escalation_trigger que claramente aplicaba.
+
+Si rechazas como "tactical", DEBES nombrar la corrección concreta: qué guardrail se viola, \
+qué dato está inventado, qué afirmación no tiene respaldo o qué trigger se ignoró. Si no \
+puedes nombrar uno de esos cuatro, APRUEBA.
+
+Sé preciso y conciso. Si apruebas, di brevemente por qué es correcto.\
 """
 
 
@@ -310,11 +319,11 @@ def make_supervise_node(
             # Si fue tactical y no se ha reintentado → el grafo va a reason con feedback
             if reject_kind == "tactical" and not state.get("supervisor_retried"):
                 result["supervisor_retried"] = True
-                # Inyectar feedback del supervisor en el state para que reason lo vea
-                result["system_prompt"] = (
-                    state.get("system_prompt", "")
-                    + f"\n\n## Feedback del supervisor (corrección requerida)\n{reason}"
-                )
+                # El feedback va en un campo propio, NO concatenado al system_prompt:
+                # reason lo inyecta como bloque dinámico (no cacheado). Pegarlo al
+                # system_prompt rompía el prefijo cacheado (#211) → el retry hacía
+                # cache-miss y pagaba todo el input de nuevo (latencia + coste).
+                result["supervisor_feedback"] = reason
             else:
                 # structural o segundo rechazo → escalar
                 result["escalation_reason"] = (
