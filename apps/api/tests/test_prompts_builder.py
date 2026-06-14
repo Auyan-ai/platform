@@ -114,6 +114,32 @@ class TestBuildSystemBlocks:
         assert "order #1278" in blocks[1]["text"]
         assert "Contexto relevante de la base de conocimiento" in blocks[1]["text"]
 
+    def test_supervisor_feedback_goes_to_dynamic_block_not_cached_prefix(self) -> None:
+        """El feedback del supervisor (retry) va en el bloque dinámico, NO en el
+        prefijo cacheado: el bloque estable debe quedar BIT-IDÉNTICO con o sin
+        feedback, para que el retry recupere el cache hit (#211)."""
+        base = "BASE_AOP_ESTABLE"
+        without = build_system_blocks(base, [], current_date="2026-06-08 10:00 (Europe/Madrid)")
+        with_fb = build_system_blocks(
+            base,
+            [],
+            current_date="2026-06-08 10:00 (Europe/Madrid)",
+            supervisor_feedback="verifica el estado del pedido antes de cancelar",
+        )
+        # El bloque cacheado es idéntico → el prefijo (tools + bloque 1) cachea igual.
+        assert with_fb[0] == without[0]
+        assert with_fb[0]["text"] == base
+        # El feedback aparece solo en el bloque dinámico, sin cache_control.
+        assert "cache_control" not in with_fb[1]
+        assert "Feedback del supervisor" in with_fb[1]["text"]
+        assert "verifica el estado del pedido antes de cancelar" in with_fb[1]["text"]
+
+    def test_no_supervisor_feedback_no_block(self) -> None:
+        """Sin feedback (caso normal): no se agrega el bloque de corrección."""
+        blocks = build_system_blocks("BASE", [])
+        assert len(blocks) == 1
+        assert "Feedback del supervisor" not in blocks[0]["text"]
+
 
 class TestBuildMessageHistory:
     def test_maps_customer_to_user(self) -> None:

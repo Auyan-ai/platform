@@ -34,6 +34,14 @@ def _facts_block(known_facts: str) -> str:
     return f"## Datos ya verificados en esta conversación\n\n{known_facts}"
 
 
+def _supervisor_feedback_block(feedback: str) -> str:
+    return (
+        "## Feedback del supervisor (corrección requerida)\n\n"
+        f"{feedback}\n\n"
+        "Corrige tu decisión anterior según esta indicación antes de volver a responder."
+    )
+
+
 def _kb_wrapper(knowledge_chunks: list[dict]) -> str:
     kb_block = format_knowledge_chunks(knowledge_chunks)
     if not kb_block:
@@ -54,17 +62,21 @@ def build_system_blocks(
     *,
     current_date: str | None = None,
     known_facts: str | None = None,
+    supervisor_feedback: str | None = None,
 ) -> list[dict]:
     """Compone el system como bloques para Anthropic, optimizado para prompt caching.
 
     Bloque 1 = `base_prompt` (AOP compilado del tenant): estable durante toda la
     conversación → se marca con `cache_control` ephemeral para cachear el prefijo
     (tools + este bloque). Bloque 2 (opcional) = lo VOLÁTIL del turno (fecha/hora,
-    datos ya verificados, contexto RAG) → va DESPUÉS del breakpoint, sin cachear.
+    datos ya verificados, contexto RAG, feedback del supervisor) → va DESPUÉS del
+    breakpoint, sin cachear.
 
     Ojo al orden: el contenido volátil debe ir al final; si se cuela antes del
     breakpoint, invalida el cache. Por eso la fecha (que cambia cada turno) ya NO
-    va de preámbulo del AOP como antes.
+    va de preámbulo del AOP como antes — y por eso el feedback del supervisor en el
+    retry va aquí y NO concatenado a `base_prompt`: así el prefijo cacheado se
+    mantiene idéntico entre la pasada original y el reintento (recupera el cache hit).
     """
     blocks: list[dict] = [
         {
@@ -81,6 +93,8 @@ def build_system_blocks(
     kb = _kb_wrapper(knowledge_chunks)
     if kb:
         dynamic.append(kb)
+    if supervisor_feedback:
+        dynamic.append(_supervisor_feedback_block(supervisor_feedback))
     if dynamic:
         blocks.append({"type": "text", "text": "\n\n---\n\n".join(dynamic)})
     return blocks
@@ -92,6 +106,7 @@ def build_system_prompt(
     *,
     current_date: str | None = None,
     known_facts: str | None = None,
+    supervisor_feedback: str | None = None,
 ) -> str:
     """Versión string del system prompt (AOP base + fecha + datos + RAG).
 
@@ -103,6 +118,7 @@ def build_system_prompt(
         knowledge_chunks,
         current_date=current_date,
         known_facts=known_facts,
+        supervisor_feedback=supervisor_feedback,
     )
     return "\n\n---\n\n".join(b["text"] for b in blocks)
 

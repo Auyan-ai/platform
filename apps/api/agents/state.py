@@ -172,6 +172,10 @@ class AgentState(TypedDict, total=False):
     supervisor_reject_kind: Literal["tactical", "structural"]  # tactical=reintentable
     # ya se reintentó → si rechaza de nuevo, escala
     supervisor_retried: bool
+    # Corrección a aplicar tras un reject tactical. reason lo inyecta como bloque
+    # dinámico (NO cacheado), no concatenado al system_prompt: si fuera al system_prompt
+    # rompería el prefijo cacheado (#211) y el retry pagaría todo el input sin caché.
+    supervisor_feedback: str | None
     supervisor_model_used: str                         # qué modelo fue el supervisor
     supervisor_tokens_in: int                          # tokens del supervisor
     supervisor_tokens_out: int                         # tokens del supervisor
