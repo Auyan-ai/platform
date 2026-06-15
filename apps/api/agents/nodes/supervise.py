@@ -197,31 +197,38 @@ def needs_supervision(state: AgentState) -> bool:
 
     Activadores:
     1. La tool pendiente es L2 o L3 → siempre (la acción es el punto de riesgo).
-    2. El AOP pide require_supervision Y el turno usó herramientas → supervisar la
-       respuesta (puede contener afirmaciones sobre esos datos que revisar).
+    2. SIN tool pendiente (la decisión es respond/escalate) y el AOP pide
+       require_supervision Y el turno usó herramientas → supervisar la respuesta
+       (puede contener afirmaciones sobre esos datos que revisar).
+
+    Una **lectura L1 pendiente NO se supervisa**, aunque el AOP pida
+    require_supervision: leer no muta nada ni afirma nada al cliente — lo que
+    importa es cómo se USA el dato en la respuesta, y eso se supervisa después en
+    el respond. Supervisar la intención de leer solo añade un hop secuencial sin
+    reducir riesgo (latencia). Por eso, cuando hay tool pendiente, el ÚNICO
+    criterio es el tier; require_supervision queda reservado al respond/escalate.
 
     Una respuesta/escalación puramente conversacional (saludo, "de nada", cierre)
-    sin haber usado herramientas NO se supervisa: ahorra una llamada LLM (latencia)
-    en turnos sin riesgo de alucinación.
+    sin haber usado herramientas tampoco se supervisa: ahorra una llamada LLM.
 
     `supervisor_retried` NO apaga la supervisión: la acción corregida tras un
     reject tactical (o una L2/L3 nueva pedida después del retry) se re-supervisa.
     El anti-loop vive en el nodo supervise: con `supervisor_retried=True`, un
     segundo reject pone `escalation_reason` y el grafo escala en vez de reintentar.
     """
-    # Tool L2/L3 pendiente → siempre supervisar, sea cual sea el AOP.
+    # Tool pendiente → el único criterio es el tier. L2/L3 (mutaciones) se
+    # supervisan antes de ejecutarse; una lectura L1 pendiente no (su uso se
+    # supervisa luego en el respond).
     pending = state.get("pending_tool_call")
     if pending:
         slug = pending.get("slug", "")
         try:
-            if SkillRegistry.get(slug).tier in ("L2", "L3"):
-                return True
+            return SkillRegistry.get(slug).tier in ("L2", "L3")
         except ValueError:
-            pass
+            return False
 
-    # require_supervision (AOP compilado o config del tenant): supervisar la
-    # respuesta SOLO si el turno usó herramientas. Una respuesta de cortesía sin
-    # tools no se supervisa (evita el supervisor en un "gracias").
+    # Sin tool pendiente (respond/escalate): require_supervision (AOP compilado o
+    # config del tenant) supervisa la respuesta SOLO si el turno usó herramientas.
     tenant_config = state.get("tenant_config") or {}
     extra = tenant_config.get("extra") or {}
     if state.get("aop_require_supervision") or extra.get("require_supervision"):

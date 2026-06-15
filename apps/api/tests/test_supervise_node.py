@@ -67,6 +67,15 @@ class TestNeedsSupervision:
                 "tenant_config": {"extra": {}},
                 "pending_tool_call": {"slug": "test.l1_supervise", "input": {}},
             })
+            # P3: una lectura L1 pendiente NO se supervisa aunque el AOP pida
+            # require_supervision y ya haya tool_results. Supervisar la intención
+            # de leer es un hop sin valor; el respond que use el dato sí se supervisa.
+            assert not self._fn({
+                "tenant_config": {"extra": {"require_supervision": True}},
+                "aop_require_supervision": True,
+                "tool_results": [{"slug": "shopify.get_order_status", "is_error": False}],
+                "pending_tool_call": {"slug": "test.l1_supervise", "input": {}},
+            })
         finally:
             del SkillRegistry._by_slug["test.l1_supervise"]
 
