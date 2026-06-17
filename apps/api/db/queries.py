@@ -2001,14 +2001,24 @@ async def upsert_tool_permission(
     human_approval_required: bool = False,
     threshold_override: float | None = None,
     enabled_by: UUID | None = None,
+    l3_autonomy_acknowledged: bool = False,
 ) -> TenantToolPermission:
-    """Crea o actualiza el permiso de una skill para un tenant."""
+    """Crea o actualiza el permiso de una skill para un tenant.
+
+    `l3_autonomy_acknowledged` registra un opt-out CONSCIENTE de la aprobación humana
+    para una L3: cuando es True sella acknowledged_at=NOW() + acknowledged_by; cuando es
+    False los limpia a NULL. El opt-out solo persiste mientras se reafirme — un update
+    posterior que no lo reconozca vuelve a fail-safe (execute_skill exige approval).
+    """
     row = await conn.fetchrow(
         """
         INSERT INTO tenant_tool_permissions
             (tenant_id, skill_slug, is_enabled, human_approval_required,
-             threshold_override, enabled_at, enabled_by)
-        VALUES ($1, $2, $3, $4, $5, CASE WHEN $3 THEN NOW() ELSE NULL END, $6)
+             threshold_override, enabled_at, enabled_by,
+             l3_autonomy_acknowledged_at, l3_autonomy_acknowledged_by)
+        VALUES ($1, $2, $3, $4, $5, CASE WHEN $3 THEN NOW() ELSE NULL END, $6,
+                CASE WHEN $7 THEN NOW() ELSE NULL END,
+                CASE WHEN $7 THEN $6 ELSE NULL END)
         ON CONFLICT (tenant_id, skill_slug)
         DO UPDATE SET
             is_enabled              = EXCLUDED.is_enabled,
@@ -2022,9 +2032,12 @@ async def upsert_tool_permission(
                                         EXCLUDED.enabled_by,
                                         tenant_tool_permissions.enabled_by
                                       ),
+            l3_autonomy_acknowledged_at = EXCLUDED.l3_autonomy_acknowledged_at,
+            l3_autonomy_acknowledged_by = EXCLUDED.l3_autonomy_acknowledged_by,
             updated_at              = NOW()
         RETURNING id, tenant_id, skill_slug, is_enabled, threshold_override,
-                  human_approval_required, enabled_at, enabled_by, created_at
+                  human_approval_required, enabled_at, enabled_by,
+                  l3_autonomy_acknowledged_at, l3_autonomy_acknowledged_by, created_at
         """,
         tenant_id,
         skill_slug,
@@ -2032,6 +2045,7 @@ async def upsert_tool_permission(
         human_approval_required,
         threshold_override,
         enabled_by,
+        l3_autonomy_acknowledged,
     )
     return TenantToolPermission(**dict(row))
 
@@ -2044,7 +2058,8 @@ async def list_tool_permissions(
     rows = await conn.fetch(
         """
         SELECT id, tenant_id, skill_slug, is_enabled, threshold_override,
-               human_approval_required, enabled_at, enabled_by, created_at
+               human_approval_required, enabled_at, enabled_by,
+               l3_autonomy_acknowledged_at, l3_autonomy_acknowledged_by, created_at
           FROM tenant_tool_permissions
          WHERE tenant_id = $1
            AND deleted_at IS NULL

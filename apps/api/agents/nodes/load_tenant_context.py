@@ -61,6 +61,9 @@ def make_load_tenant_context_node(
                 "is_enabled": p.is_enabled,
                 "human_approval_required": p.human_approval_required,
                 "threshold_override": p.threshold_override,
+                # Opt-out de aprobación humana para L3: solo cuenta si fue reconocido
+                # explícitamente. El piso en execute_skill exige approval cuando es False.
+                "l3_autonomy_acknowledged": p.l3_autonomy_acknowledged_at is not None,
             }
             for p in perm_rows
         }

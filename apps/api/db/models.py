@@ -244,6 +244,8 @@ class TenantToolPermission(_BaseModel):
     human_approval_required: bool
     enabled_at: datetime | None = None
     enabled_by: UUID | None = None
+    l3_autonomy_acknowledged_at: datetime | None = None
+    l3_autonomy_acknowledged_by: UUID | None = None
     created_at: datetime | None = None
 
 

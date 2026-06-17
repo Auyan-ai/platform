@@ -446,8 +446,17 @@ class L3Skill(Skill):
         return EchoOutput(echoed="dangerous")
 
 
-def _perm(is_enabled: bool = True, human_approval_required: bool = False) -> dict:
-    return {"is_enabled": is_enabled, "human_approval_required": human_approval_required, "threshold_override": None}
+def _perm(
+    is_enabled: bool = True,
+    human_approval_required: bool = False,
+    l3_autonomy_acknowledged: bool = False,
+) -> dict:
+    return {
+        "is_enabled": is_enabled,
+        "human_approval_required": human_approval_required,
+        "threshold_override": None,
+        "l3_autonomy_acknowledged": l3_autonomy_acknowledged,
+    }
 
 
 class TestPermissionGate:
@@ -525,13 +534,67 @@ class TestPermissionGate:
         result = await node(state)
         assert result["tool_iterations"] == 3
 
-    async def test_l3_without_approval_required_executes(self, deps: AgentDependencies) -> None:
-        """L3 habilitada sin human_approval_required se ejecuta (para tenants que la apagaron)."""
+    async def test_l3_without_acknowledged_optout_requires_approval(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """L3 con human_approval_required=False pero SIN opt-out reconocido → exige approval.
+
+        Piso fail-safe: un False de descuido (seed/default de fábrica) no desactiva la
+        red de una acción irreversible. Solo un opt-out explícito y reconocido
+        (l3_autonomy_acknowledged=True) permite ejecutar sin aprobación humana.
+        """
+        import unittest.mock as mock
+
+        mock_scope = mock.MagicMock()
+        mock_scope.__aenter__ = mock.AsyncMock(return_value=mock.AsyncMock(
+            fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}),
+        ))
+        mock_scope.__aexit__ = mock.AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.tenant_scope", lambda *a, **kw: mock_scope
+        )
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.create_pending_approval", mock.AsyncMock()
+        )
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
+            mock.AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.redact_inputs", lambda i, s: i
+        )
+
         node = make_execute_skill_node(deps)
         state = _base_state(
             pending_tool_call=_pending(slug="test.dangerous"),
             allowed_skills=["test.dangerous"],
-            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=False)},
+            tool_permissions={
+                "test.dangerous": _perm(is_enabled=True, human_approval_required=False),
+            },
+        )
+        result = await node(state)
+
+        # NO se ejecutó la skill: se creó un pending_approval (rama segura).
+        assert result.get("pending_approval_id") is not None
+        assert "awaiting_human_approval" in result.get("escalation_reason", "")
+
+    async def test_l3_with_acknowledged_optout_executes(self, deps: AgentDependencies) -> None:
+        """L3 con opt-out explícito y reconocido (l3_autonomy_acknowledged=True) ejecuta.
+
+        Preserva la flexibilidad: un tenant maduro que aceptó conscientemente el riesgo
+        opera la L3 en autonomía. Sin reconocimiento, el piso exige approval.
+        """
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.dangerous"),
+            allowed_skills=["test.dangerous"],
+            tool_permissions={
+                "test.dangerous": _perm(
+                    is_enabled=True,
+                    human_approval_required=False,
+                    l3_autonomy_acknowledged=True,
+                ),
+            },
         )
         result = await node(state)
         entry = result["tool_results"][-1]
