@@ -2044,7 +2044,8 @@ async def list_tool_permissions(
     rows = await conn.fetch(
         """
         SELECT id, tenant_id, skill_slug, is_enabled, threshold_override,
-               human_approval_required, enabled_at, enabled_by, created_at
+               human_approval_required, enabled_at, enabled_by,
+               l3_autonomy_acknowledged_at, l3_autonomy_acknowledged_by, created_at
           FROM tenant_tool_permissions
          WHERE tenant_id = $1
            AND deleted_at IS NULL

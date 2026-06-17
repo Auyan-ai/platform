@@ -29,7 +29,7 @@ from apps.api.db.client import tenant_scope
 from apps.api.db.queries import create_pending_approval, get_recent_approval_for_skill
 from apps.api.integrations.base import IntegrationContext
 from apps.api.services.pii import redact_inputs
-from apps.api.skills.base import SkillContext
+from apps.api.skills.base import Skill, SkillContext
 from apps.api.skills.registry import SkillRegistry
 from pydantic import ValidationError
 
@@ -148,6 +148,26 @@ async def _same_order_action(
     return await _refs_point_to_same_order(state, ref_a, ref_b)
 
 
+def _l3_requires_human_approval(skill_cls: type[Skill], perm: dict[str, Any]) -> bool:
+    """Piso de seguridad para skills L3 (destructivas / irreversibles).
+
+    Una L3 exige aprobación humana SALVO que exista un opt-out explícito y reconocido
+    (`l3_autonomy_acknowledged=True`). Es fail-safe a propósito: un
+    `human_approval_required=False` de descuido —el default de fábrica del schema es
+    FALSE, y los seeds pueden traerlo así— NO desactiva la red de una acción que mueve
+    plata o no se puede deshacer. Solo un reconocimiento consciente del riesgo lo hace.
+
+    Razón: el supervisor LLM corre antes de ejecutar, pero su prompt lo sesga a APROBAR
+    (es una red contra errores materiales, no un control determinístico), así que no
+    basta como única barrera de algo irreversible.
+    """
+    if skill_cls.tier != "L3":
+        return False
+    if perm.get("human_approval_required", True):
+        return True
+    return not perm.get("l3_autonomy_acknowledged", False)
+
+
 def make_execute_skill_node(
     deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict[str, Any]]]:
@@ -210,7 +230,7 @@ def make_execute_skill_node(
 
         # 3) Gate de permisos desde tenant_tool_permissions.
         #    Si la skill no tiene row o is_enabled=False → rechazada.
-        #    Si L3 + human_approval_required → crear pending_approval y escalar.
+        #    L3 → crear pending_approval y escalar, salvo opt-out reconocido.
         tool_permissions: dict[str, Any] = state.get("tool_permissions") or {}
         perm = tool_permissions.get(slug)
 
@@ -238,8 +258,8 @@ def make_execute_skill_node(
                 )
             )
 
-        # Skill L3 + human_approval_required → crear pending_approval y pausar.
-        if skill_cls.tier == "L3" and perm.get("human_approval_required", False):
+        # Piso L3: exige aprobación humana salvo opt-out explícito y reconocido.
+        if _l3_requires_human_approval(skill_cls, perm):
             if state.get("conversation_id") and state.get("tenant_id"):
                 approval_id = uuid4()
                 tenant_id_uuid = UUID(state["tenant_id"])
