@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from apps.api.core.errors import ForbiddenError, NotFoundError
+from apps.api.core.errors import ForbiddenError, NotFoundError, ValidationFailed
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import (
@@ -40,6 +40,10 @@ class UpdatePermissionRequest(BaseModel):
     is_enabled: bool
     human_approval_required: bool = False
     threshold_override: float | None = None
+    # Reconocimiento CONSCIENTE de operar una L3 sin aprobación humana. El sistema
+    # rechaza desactivar la aprobación de una L3 sin este flag (fail-safe): un opt-out
+    # de una acción irreversible debe ser deliberado y auditado, no un default silencioso.
+    acknowledge_l3_autonomy: bool = False
 
 
 # ----------------------------------------------------------------
@@ -97,6 +101,22 @@ async def update_permission(
     except ValueError as exc:
         raise NotFoundError(f"skill not found: {skill_slug}", code="skill_not_found") from exc
 
+    # Piso de seguridad L3: no se puede desactivar la aprobación humana de una skill
+    # destructiva sin reconocer explícitamente el riesgo. El opt-out debe ser consciente,
+    # no un default silencioso (ver execute_skill._l3_requires_human_approval). El
+    # acknowledge solo aplica a L3 — en otros tiers se ignora.
+    l3_optout = (
+        skill_cls.tier == "L3"
+        and body.is_enabled
+        and not body.human_approval_required
+    )
+    if l3_optout and not body.acknowledge_l3_autonomy:
+        raise ValidationFailed(
+            "Una skill L3 no puede operar sin aprobación humana salvo opt-out explícito: "
+            "enviá acknowledge_l3_autonomy=true para aceptar el riesgo.",
+            code="l3_autonomy_not_acknowledged",
+        )
+
     async with tenant_scope(tenant_id) as conn:
         perm = await upsert_tool_permission(
             conn,
@@ -106,6 +126,7 @@ async def update_permission(
             human_approval_required=body.human_approval_required,
             threshold_override=body.threshold_override,
             enabled_by=auth.user_id,
+            l3_autonomy_acknowledged=l3_optout and body.acknowledge_l3_autonomy,
         )
 
     return ToolPermissionOut(
