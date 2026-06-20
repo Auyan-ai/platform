@@ -18,6 +18,7 @@ def test_redact_credentials_masks_sensitive_values() -> None:
             "token": "shpat_1234567890",
             "api_access_token": "cw_token_abcdef",
             "webhook_secret_token": "secret_xyz",
+            "api_token": "zd_token_9999",
             "empty": "",
         }
     )
@@ -27,6 +28,7 @@ def test_redact_credentials_masks_sensitive_values() -> None:
         "token": "***7890",
         "api_access_token": "***cdef",
         "webhook_secret_token": "***_xyz",
+        "api_token": "***9999",
         "empty": "",
     }
 
@@ -113,6 +115,41 @@ async def test_build_chatwoot_plan(monkeypatch: pytest.MonkeyPatch) -> None:
     assert plan.config["account_id"] == "7"
     assert plan.config["account_name"] == "Lunaria"
     assert plan.config["escalation_team_id"] == "12"
+
+
+def test_normalize_zendesk_subdomain_accepts_host_or_url() -> None:
+    assert script._normalize_zendesk_subdomain("https://marea.zendesk.com/") == "marea"
+    assert script._normalize_zendesk_subdomain("marea.zendesk.com") == "marea"
+    assert script._normalize_zendesk_subdomain("marea") == "marea"
+
+
+@pytest.mark.asyncio
+async def test_build_zendesk_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ZENDESK_SUBDOMAIN", "https://mareastudio.zendesk.com/")
+    monkeypatch.setenv("ZENDESK_EMAIL", "agent@marea.test")
+    monkeypatch.setenv("ZENDESK_API_TOKEN", "zd_token_123")
+    monkeypatch.setenv("ZENDESK_WEBHOOK_SIGNING_SECRET", "zd_webhook_secret")
+    monkeypatch.setenv("ZENDESK_ESCALATION_GROUP_ID", "42")
+    monkeypatch.setattr(
+        script,
+        "_validate_zendesk",
+        _async_return({"user": {"email": "agent@marea.test", "name": "Agente"}}),
+    )
+
+    plan = await script.build_zendesk_plan()
+
+    assert plan.kind == "helpdesk"
+    assert plan.provider == "zendesk"
+    # No-primary: no pisa el helpdesk primary del tenant.
+    assert plan.is_primary_for_kind is False
+    assert plan.credentials == {
+        "email": "agent@marea.test",
+        "api_token": "zd_token_123",
+        "webhook_signing_secret": "zd_webhook_secret",
+    }
+    assert plan.config["subdomain"] == "mareastudio"
+    assert plan.config["verified_as"] == "agent@marea.test"
+    assert plan.config["escalation_group_id"] == "42"
 
 
 @pytest.mark.asyncio

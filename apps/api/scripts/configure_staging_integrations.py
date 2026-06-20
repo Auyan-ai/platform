@@ -20,6 +20,10 @@ Uso:
     poetry run python -m scripts.configure_staging_integrations \\
         --tenant marea-studio --only gorgias
 
+    # Sólo Zendesk (API token / Basic auth) en un tenant.
+    poetry run python -m scripts.configure_staging_integrations \\
+        --tenant marea-studio --only zendesk
+
 Variables esperadas en .env:
     DATABASE_URL
     INTEGRATIONS_SECRET_KEY
@@ -31,11 +35,16 @@ Variables esperadas en .env:
     GORGIAS_DOMAIN          (subdomain o host; ej. mareastudio o mareastudio.gorgias.com)
     GORGIAS_EMAIL              (Username del API Key — Settings → Account → REST API)
     GORGIAS_API_ACCESS_TOKEN   (Password / API Key)
+    ZENDESK_SUBDOMAIN       (subdomain o host; ej. mareastudio o mareastudio.zendesk.com)
+    ZENDESK_EMAIL              (email del agente dueño del API token)
+    ZENDESK_API_TOKEN          (Admin Center → Apps and integrations → APIs → Zendesk API → Token)
 
 Opcionales:
     CHATWOOT_WEBHOOK_SECRET_TOKEN
     CHATWOOT_ESCALATION_TEAM_ID
     GORGIAS_WEBHOOK_SIGNING_SECRET   (si configuras firma HMAC en el webhook)
+    ZENDESK_WEBHOOK_SIGNING_SECRET   (si configuras firma HMAC en el webhook)
+    ZENDESK_ESCALATION_GROUP_ID      (grupo al que asignar escalaciones)
 """
 
 # ruff: noqa: E402,I001
@@ -69,7 +78,7 @@ load_dotenv(_ENV_FILE)
 
 SHOPIFY_API_VERSION = "2024-10"
 DEFAULT_E2E_ORDER_TAG = "auyan-e2e"
-Provider = Literal["shopify", "chatwoot", "gorgias"]
+Provider = Literal["shopify", "chatwoot", "gorgias", "zendesk"]
 
 
 @dataclass(frozen=True)
@@ -103,6 +112,7 @@ def redact_credentials(credentials: dict[str, Any]) -> dict[str, Any]:
             "api_access_token",
             "webhook_secret_token",
             "api_key",
+            "api_token",
             "oauth_token",
             "webhook_signing_secret",
         }:
@@ -329,6 +339,64 @@ async def build_gorgias_plan() -> IntegrationPlan:
     )
 
 
+def _normalize_zendesk_subdomain(domain: str) -> str:
+    raw = domain.strip().removeprefix("https://").removeprefix("http://").rstrip("/")
+    return raw.removesuffix(".zendesk.com")
+
+
+async def _validate_zendesk(subdomain: str, email: str, api_token: str) -> dict[str, Any]:
+    """Valida las credenciales contra la API de Zendesk (API token / Basic auth).
+
+    Zendesk usa Basic auth con username `{email}/token` y password el api_token.
+    `users/me.json` confirma que las credenciales autentican sin requerir scope admin.
+    """
+    url = f"https://{subdomain}.zendesk.com/api/v2/users/me.json"
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            url,
+            auth=(f"{email}/token", api_token),
+            headers={"Content-Type": "application/json"},
+            timeout=15,
+        )
+    response.raise_for_status()
+    payload = response.json()
+    return payload if isinstance(payload, dict) else {}
+
+
+async def build_zendesk_plan() -> IntegrationPlan:
+    subdomain = _normalize_zendesk_subdomain(_require_env("ZENDESK_SUBDOMAIN"))
+    email = _require_env("ZENDESK_EMAIL")
+    api_token = _require_env("ZENDESK_API_TOKEN")
+    webhook_secret = _optional_env("ZENDESK_WEBHOOK_SIGNING_SECRET")
+    escalation_group_id = _optional_env("ZENDESK_ESCALATION_GROUP_ID")
+
+    me = await _validate_zendesk(subdomain, email, api_token)
+    user_raw = me.get("user")
+    user: dict[str, Any] = user_raw if isinstance(user_raw, dict) else {}
+
+    credentials: dict[str, Any] = {"email": email, "api_token": api_token}
+    if webhook_secret:
+        credentials["webhook_signing_secret"] = webhook_secret
+
+    config: dict[str, Any] = {
+        "subdomain": subdomain,
+        "verified_as": user.get("email") or user.get("name"),
+        "verified_at": _now_iso(),
+    }
+    if escalation_group_id:
+        config["escalation_group_id"] = escalation_group_id
+
+    # NO-primary: no pisa el helpdesk primary existente del tenant; el webhook
+    # resuelve el canal por el subdomain del payload (no depende del primary).
+    return IntegrationPlan(
+        provider="zendesk",
+        kind="helpdesk",
+        credentials=credentials,
+        config=config,
+        is_primary_for_kind=False,
+    )
+
+
 async def _resolve_tenant_id(conn: asyncpg.Connection, tenant: str) -> UUID:
     try:
         tenant_id = UUID(tenant)
@@ -403,6 +471,8 @@ async def run(
         plans.append(await build_chatwoot_plan())
     if "gorgias" in providers:
         plans.append(await build_gorgias_plan())
+    if "zendesk" in providers:
+        plans.append(await build_zendesk_plan())
 
     conn = await _connect_database(database_url)
     try:
@@ -428,9 +498,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--tenant", default="lunaria", help="Slug o UUID del tenant")
     parser.add_argument(
         "--only",
-        choices=["shopify", "chatwoot", "gorgias"],
+        choices=["shopify", "chatwoot", "gorgias", "zendesk"],
         default=None,
-        help="Configura sólo un proveedor. Default: shopify + chatwoot (gorgias solo con --only).",
+        help=(
+            "Configura sólo un proveedor. Default: shopify + chatwoot "
+            "(gorgias/zendesk solo con --only)."
+        ),
     )
     parser.add_argument("--dry-run", action="store_true", help="Valida y muestra sin guardar")
     parser.add_argument(
