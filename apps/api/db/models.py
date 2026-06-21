@@ -651,3 +651,59 @@ class SimulationRun(_BaseModel):
     cost_cents: float | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
+
+
+# ─── Billing por resolución (Bloque 2) ──────────────────────────────────────────
+# PRD: docs/billing-resolution-prd.md. La unidad de cobro es la resolución (el
+# agente cerró la conversación sin escalar).
+
+BillingTier = Literal["starter", "growth", "scale", "founding"]
+
+
+class ResolutionEvent(_BaseModel):
+    """Una resolución cobrable (log append-only). `reverted_at` se anota si el cliente
+    reabre el mismo thread; el conteo de billing decide si descuenta según la ventana
+    de reapertura (PRD §2.3) — la fila nunca se borra."""
+
+    id: UUID
+    tenant_id: UUID
+    conversation_id: UUID
+    resolved_at: datetime
+    reverted_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class BillingSubscription(_BaseModel):
+    """Plan del tenant. floor/included/overage son un SNAPSHOT: cambiar el catálogo de
+    tiers (services/billing.py) no altera contratos vigentes."""
+
+    tenant_id: UUID
+    tier: BillingTier
+    floor_cents: int
+    included_resolutions: int
+    overage_cents: int
+    currency: str = "EUR"
+    reopen_window_days: int = 7
+    period_anchor_day: int = 1
+    status: str = "active"
+    stripe_customer_id: str | None = None
+    stripe_subscription_id: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class BillingUsage(_BaseModel):
+    """Uso del periodo actual, calculado (no es fila de DB): resoluciones cobrables vs
+    incluidas, overage y total estimado en céntimos. Lo consume el dashboard del cliente."""
+
+    tenant_id: UUID
+    tier: BillingTier
+    period_start: datetime
+    period_end: datetime
+    billable_resolutions: int
+    included_resolutions: int
+    overage_resolutions: int
+    floor_cents: int
+    overage_cents_total: int
+    total_cents: int
+    currency: str

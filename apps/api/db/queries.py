@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -23,6 +23,8 @@ from apps.api.db.models import (
     AopVersion,
     AopWithContent,
     AopWorkspace,
+    BillingSubscription,
+    BillingTier,
     ChannelType,
     Conversation,
     ConversationJudgment,
@@ -48,6 +50,7 @@ from apps.api.db.models import (
     ReasoningEventType,
     ReasoningPhase,
     ReasoningStatus,
+    ResolutionEvent,
     RolePermission,
     SimulationRun,
     SimulationRunStatus,
@@ -4990,3 +4993,148 @@ async def mark_outbound_email_job_failed(
         error[:1_000],
     )
     return _outbound_email_job_from_row(row) if row else None
+
+
+# ─── Billing por resolución (Bloque 2) ──────────────────────────────────────────
+
+
+async def insert_resolution_event(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> ResolutionEvent:
+    """Registra una resolución cobrable (append-only). Lo llama el nodo respond
+    cuando el agente marca la conversación resolved."""
+    row = await conn.fetchrow(
+        """
+        INSERT INTO resolution_events (tenant_id, conversation_id)
+        VALUES ($1, $2)
+        RETURNING id, tenant_id, conversation_id, resolved_at, reverted_at, created_at
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    assert row is not None
+    return ResolutionEvent(**dict(row))
+
+
+async def mark_resolution_event_reverted(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> bool:
+    """Marca como revertido el evento abierto más reciente de la conversación cuando
+    el cliente reabre el mismo thread. El conteo de billing decide si descuenta según
+    la ventana de reapertura. No-op si no hay evento abierto. Retorna True si marcó."""
+    result = await conn.execute(
+        """
+        UPDATE resolution_events
+           SET reverted_at = now()
+         WHERE id = (
+             SELECT id FROM resolution_events
+              WHERE tenant_id = $1 AND conversation_id = $2 AND reverted_at IS NULL
+              ORDER BY resolved_at DESC
+              LIMIT 1
+         )
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return int(result.split()[-1]) > 0
+
+
+async def count_billable_resolutions(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    period_start: datetime,
+    period_end: datetime,
+    reopen_window: timedelta,
+) -> int:
+    """Cuenta las resoluciones cobrables del periodo [start, end).
+
+    Una resolución cuenta si su resolved_at cae en el periodo y NO fue revertida, o
+    fue revertida DESPUÉS de la ventana de reapertura (duró resuelta lo suficiente →
+    resolución legítima). Si se revirtió DENTRO de la ventana no cuenta (mismo tema,
+    no estaba resuelto del todo) — PRD §2.3."""
+    count = await conn.fetchval(
+        """
+        SELECT count(*)
+          FROM resolution_events
+         WHERE tenant_id = $1
+           AND resolved_at >= $2
+           AND resolved_at < $3
+           AND (reverted_at IS NULL OR reverted_at - resolved_at > $4)
+        """,
+        tenant_id,
+        period_start,
+        period_end,
+        reopen_window,
+    )
+    return int(count or 0)
+
+
+async def get_billing_subscription(
+    conn: asyncpg.Connection, tenant_id: UUID
+) -> BillingSubscription | None:
+    row = await conn.fetchrow(
+        """
+        SELECT tenant_id, tier, floor_cents, included_resolutions, overage_cents,
+               currency, reopen_window_days, period_anchor_day, status,
+               stripe_customer_id, stripe_subscription_id, created_at, updated_at
+          FROM billing_subscriptions
+         WHERE tenant_id = $1
+        """,
+        tenant_id,
+    )
+    return BillingSubscription(**dict(row)) if row else None
+
+
+async def upsert_billing_subscription(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    tier: BillingTier,
+    floor_cents: int,
+    included_resolutions: int,
+    overage_cents: int,
+    currency: str = "EUR",
+    reopen_window_days: int = 7,
+    period_anchor_day: int = 1,
+    status: str = "active",
+    stripe_customer_id: str | None = None,
+    stripe_subscription_id: str | None = None,
+) -> BillingSubscription:
+    """Crea o actualiza la suscripción del tenant. Idempotente por tenant_id."""
+    row = await conn.fetchrow(
+        """
+        INSERT INTO billing_subscriptions (
+            tenant_id, tier, floor_cents, included_resolutions, overage_cents,
+            currency, reopen_window_days, period_anchor_day, status,
+            stripe_customer_id, stripe_subscription_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ON CONFLICT (tenant_id) DO UPDATE SET
+            tier = EXCLUDED.tier,
+            floor_cents = EXCLUDED.floor_cents,
+            included_resolutions = EXCLUDED.included_resolutions,
+            overage_cents = EXCLUDED.overage_cents,
+            currency = EXCLUDED.currency,
+            reopen_window_days = EXCLUDED.reopen_window_days,
+            period_anchor_day = EXCLUDED.period_anchor_day,
+            status = EXCLUDED.status,
+            stripe_customer_id = EXCLUDED.stripe_customer_id,
+            stripe_subscription_id = EXCLUDED.stripe_subscription_id
+        RETURNING tenant_id, tier, floor_cents, included_resolutions, overage_cents,
+                  currency, reopen_window_days, period_anchor_day, status,
+                  stripe_customer_id, stripe_subscription_id, created_at, updated_at
+        """,
+        tenant_id,
+        tier,
+        floor_cents,
+        included_resolutions,
+        overage_cents,
+        currency,
+        reopen_window_days,
+        period_anchor_day,
+        status,
+        stripe_customer_id,
+        stripe_subscription_id,
+    )
+    assert row is not None
+    return BillingSubscription(**dict(row))

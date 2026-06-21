@@ -15,6 +15,7 @@ from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import (
     insert_message,
+    insert_resolution_event,
     mark_conversation_resolved,
     update_conversation_last_message,
 )
@@ -64,6 +65,9 @@ def make_respond_node(
             resolved = False
             if resolves:
                 resolved = await mark_conversation_resolved(conn, tenant_id, conversation_id)
+                if resolved:
+                    # Billing por resolución: log append-only de la resolución cobrable.
+                    await insert_resolution_event(conn, tenant_id, conversation_id)
 
         tracker.emit(
             tenant_id=state["tenant_id"],
