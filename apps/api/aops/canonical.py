@@ -175,7 +175,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
                 "Qué artículo(s) quiere devolver y el motivo",
             ],
             "guardrails": [
-                "Confirma elegibilidad con la política REAL (KB inyectada / tenant_facts / get_shop_policies), nunca con un plazo asumido.",
+                "Antes de mencionar o afirmar CUALQUIER plazo, condición o exclusión de devolución, ten el dato de una fuente real EN ESTE turno: si ya viene en la KB inyectada o en tenant_facts, úsalo directo; si NO lo tienes, llama get_shop_policies ANTES de responder. Nunca sueltes un plazo asumido para corregirlo luego: el dato va primero, la afirmación después.",
                 "Fuera del plazo de la tienda → no inicies la devolución: explícalo con empatía y escala si insiste.",
                 "Productos excluidos por la política (digitales/perecederos) no admiten devolución.",
                 "No inicies start_return hasta tener artículo y motivo confirmados por el cliente.",
@@ -193,9 +193,12 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             "## Procedimiento: devolución\n"
             "Objetivo: ayudar a devolver un producto elegible, según la política real de la tienda.\n\n"
             "1. Identifica el pedido: nº → get_order_status; email → get_order_by_email.\n"
-            "2. Determina plazo, condiciones y exclusiones desde la política REAL, en este orden de fuentes:\n"
-            "   el contexto de la KB inyectado (si lo hay), `tenant_facts` (p.ej. plazo de devolución) y `get_shop_policies`.\n"
-            "   No asumas un plazo que no esté en NINGUNA de esas fuentes; si falta en todas, dilo y escala.\n"
+            "2. ANTES de afirmar nada sobre plazos: determina plazo, condiciones y exclusiones desde la\n"
+            "   política REAL, en este orden de fuentes: el contexto de la KB inyectado (si lo hay),\n"
+            "   `tenant_facts` (p.ej. plazo de devolución) y `get_shop_policies`. Si el dato ya viene en la\n"
+            "   KB o tenant_facts inyectados, úsalo SIN llamar la tool; si no está, llama `get_shop_policies`\n"
+            "   antes de responder con cualquier plazo. No asumas un plazo que no esté en NINGUNA de esas\n"
+            "   fuentes; si falta en todas, dilo y escala.\n"
             "3. Elegibilidad: el plazo cuenta desde la RECEPCIÓN del pedido, no desde la compra. Usa la\n"
             "   primera fecha disponible en este orden: delivered_at (entrega) → fulfilled_at (envío) →\n"
             "   created_at (creación, solo como último recurso y avisando de que es conservador). Compárala\n"
