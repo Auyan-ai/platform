@@ -95,6 +95,23 @@ def test_smalltalk_has_no_skills():
     assert smalltalk["frontmatter"]["allowed_skills"] == []
 
 
+def test_returns_verifies_policy_before_claiming():
+    """INVARIANTE de latencia (anti reject+retry del supervisor): el AOP returns
+    instruye obtener el plazo de una fuente real ANTES de afirmarlo. Si el agente
+    suelta un plazo sin verificar, el supervisor lo rechaza (reject legítimo) y se
+    encadena un retry → HOPS extra. La secuenciación 'dato primero, afirmación
+    después' mata ese ciclo de raíz."""
+    returns = next(a for a in CANONICAL_AOPS if a["slug"] == "returns")
+    guardrails = " ".join(returns["frontmatter"]["guardrails"]).lower()
+    body = returns["body"].lower()
+    # La fuente de verdad de la política sigue disponible como skill...
+    assert "shopify.get_shop_policies" in returns["frontmatter"]["allowed_skills"]
+    # ...y los guardrails + el procedimiento exigen verificar ANTES de afirmar.
+    assert "get_shop_policies" in guardrails
+    assert "antes" in guardrails
+    assert "antes de afirmar" in body
+
+
 def test_frontmatter_required_keys():
     for a in CANONICAL_AOPS:
         fm = a["frontmatter"]
