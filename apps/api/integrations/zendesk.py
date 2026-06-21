@@ -5,11 +5,16 @@ Dos capas:
 - `ZendeskAdapter`: adapter stateless registrado en IntegrationRegistry. Recibe
   IntegrationContext por llamada — habilita multi-tenant real (un adapter, N accounts).
 
-Credentials esperadas en IntegrationContext:
+Credentials esperadas en IntegrationContext (uno de los dos modos de auth):
+    OAuth2:                {"oauth_token": "..."}                # Authorization: Bearer
+    API token (managed):   {"email": "...", "api_token": "..."}  # Authorization: Basic
     {
-        "oauth_token":            "...",  # Bearer token OAuth (preferido)
         "webhook_signing_secret": "..."   # opcional — valida X-Zendesk-Webhook-Signature
     }
+
+El API token es el modo preferido para el modelo managed: no caduca ni necesita
+refresh (el OAuth de Zendesk puede expirar/revocarse). Basic auth con username
+`{email}/token` y password `{api_token}` — espejo de la dual-auth de Gorgias.
 
 Config esperada en IntegrationContext:
     {
@@ -62,17 +67,39 @@ logger = logging.getLogger(__name__)
 
 
 class ZendeskClient:
-    def __init__(self, subdomain: str, oauth_token: str) -> None:
+    def __init__(
+        self,
+        subdomain: str,
+        *,
+        oauth_token: str | None = None,
+        email: str | None = None,
+        api_token: str | None = None,
+    ) -> None:
+        """Acepta dos modos de auth: OAuth2 (oauth_token → Bearer) o API token
+        (email + api_token → Basic, username `{email}/token`). Exactamente uno
+        debe venir poblado.
+        """
+        if oauth_token is None and not (email and api_token):
+            raise ValueError(
+                "ZendeskClient requiere oauth_token (OAuth2) o email+api_token (API token)"
+            )
         self._subdomain = subdomain
-        self._token = oauth_token
+        self._oauth_token = oauth_token
+        self._email = email
+        self._api_token = api_token
 
     @property
     def base_url(self) -> str:
         return f"https://{self._subdomain}.zendesk.com/api/v2"
 
     def _headers(self) -> dict[str, str]:
+        if self._oauth_token is not None:
+            authorization = f"Bearer {self._oauth_token}"
+        else:
+            raw = f"{self._email}/token:{self._api_token}".encode()
+            authorization = f"Basic {base64.b64encode(raw).decode()}"
         return {
-            "Authorization": f"Bearer {self._token}",
+            "Authorization": authorization,
             "Content-Type": "application/json",
         }
 
@@ -160,9 +187,12 @@ class ZendeskAdapter:
     """
 
     def _client(self, ctx: IntegrationContext) -> ZendeskClient:
+        creds = ctx.credentials
         return ZendeskClient(
             subdomain=ctx.config["subdomain"],
-            oauth_token=ctx.credentials["oauth_token"],
+            oauth_token=creds.get("oauth_token"),
+            email=creds.get("email"),
+            api_token=creds.get("api_token"),
         )
 
     # ── MessageProvider ───────────────────────────────────────────────────────

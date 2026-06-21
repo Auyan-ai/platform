@@ -74,6 +74,25 @@ class TestMultiTenantIsolation:
             assert call_b.kwargs["oauth_token"] == "token_b"
             assert call_b.kwargs["subdomain"] == "empresa-b"
 
+    @pytest.mark.asyncio
+    async def test_api_token_credentials_passed_through(self) -> None:
+        """El modo managed (email + api_token) llega intacto al ZendeskClient."""
+        ctx = IntegrationContext(
+            tenant_id=UUID("55555555-5555-5555-5555-555555555555"),
+            credentials={"email": "agent@test.com", "api_token": "tok_x"},
+            config={"subdomain": "empresa-c"},
+        )
+        adapter = ZendeskAdapter()
+        with patch("apps.api.integrations.zendesk.ZendeskClient") as MockClient:
+            instance = MockClient.return_value
+            instance.add_comment = AsyncMock(return_value={})
+            await adapter.send_outbound(ctx, "303", "hola")
+            call = MockClient.call_args
+            assert call.kwargs["email"] == "agent@test.com"
+            assert call.kwargs["api_token"] == "tok_x"
+            assert call.kwargs["oauth_token"] is None
+            assert call.kwargs["subdomain"] == "empresa-c"
+
 
 # ---------------------------------------------------------------------------
 # ZendeskClient
@@ -82,13 +101,23 @@ class TestMultiTenantIsolation:
 
 class TestZendeskClient:
     def test_base_url(self) -> None:
-        client = ZendeskClient("myco", "tok")
+        client = ZendeskClient("myco", oauth_token="tok")
         assert client.base_url == "https://myco.zendesk.com/api/v2"
 
     def test_headers_include_bearer(self) -> None:
-        client = ZendeskClient("myco", "mytoken")
+        client = ZendeskClient("myco", oauth_token="mytoken")
         assert client._headers()["Authorization"] == "Bearer mytoken"
         assert client._headers()["Content-Type"] == "application/json"
+
+    def test_headers_basic_auth_with_api_token(self) -> None:
+        client = ZendeskClient("myco", email="agent@test.com", api_token="tok123")
+        expected = base64.b64encode(b"agent@test.com/token:tok123").decode()
+        assert client._headers()["Authorization"] == f"Basic {expected}"
+        assert client._headers()["Content-Type"] == "application/json"
+
+    def test_requires_some_auth(self) -> None:
+        with pytest.raises(ValueError, match="oauth_token"):
+            ZendeskClient("myco")
 
 
 # ---------------------------------------------------------------------------
@@ -230,14 +259,14 @@ class TestAdapterMethods:
         assert ref.provider == "zendesk"
 
     @pytest.mark.asyncio
-    async def test_missing_oauth_token_raises(self) -> None:
+    async def test_missing_all_creds_raises(self) -> None:
         ctx_bad = IntegrationContext(
             tenant_id=UUID("44444444-4444-4444-4444-444444444444"),
             credentials={},
             config={"subdomain": "testco"},
         )
         adapter = ZendeskAdapter()
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match="oauth_token"):
             await adapter.send_outbound(ctx_bad, "1", "hello")
 
 
