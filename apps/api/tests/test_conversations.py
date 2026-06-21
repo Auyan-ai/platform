@@ -346,12 +346,16 @@ async def test_reopen_if_resolved_reopens_resolved_conversation(
     conv = make_conversation(status="resolved")
     reopened = AsyncMock(return_value=True)
     monkeypatch.setattr(conv_service, "reopen_conversation", reopened)
+    reverted = AsyncMock(return_value=True)
+    monkeypatch.setattr(conv_service, "mark_resolution_event_reverted", reverted)
 
     result = await conv_service.reopen_if_resolved(AsyncMock(), TENANT_ID, conv)
 
     assert result.status == "open"
     assert result.resolved_at is None
     reopened.assert_awaited_once()
+    # Billing: la reapertura del mismo thread anota la reversión en el evento.
+    reverted.assert_awaited_once()
 
 
 @pytest.mark.asyncio

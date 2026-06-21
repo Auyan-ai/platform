@@ -41,6 +41,7 @@ from apps.api.integrations.openai_embeddings import build_openai_client
 from apps.api.integrations.postmark import build_postmark_adapter
 from apps.api.routers.aops import router as aops_router
 from apps.api.routers.approvals import router as approvals_router
+from apps.api.routers.billing import router as billing_router
 from apps.api.routers.conversations import router as conversations_router
 from apps.api.routers.escalations import router as escalations_router
 from apps.api.routers.oauth_gorgias import router as oauth_gorgias_router
@@ -189,6 +190,7 @@ app.include_router(reasoning_router)
 app.include_router(approvals_router)
 app.include_router(tool_permissions_router)
 app.include_router(simulations_router)
+app.include_router(billing_router)
 
 
 @app.get("/health", tags=["health"])

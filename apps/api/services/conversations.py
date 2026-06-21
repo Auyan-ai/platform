@@ -16,6 +16,7 @@ from apps.api.db.queries import (
     insert_escalation,
     insert_message,
     list_conversations,
+    mark_resolution_event_reverted,
     reopen_conversation,
     update_conversation_last_message,
     update_conversation_status,
@@ -40,7 +41,11 @@ async def reopen_if_resolved(
     """
     if conversation.status != "resolved":
         return conversation
-    await reopen_conversation(conn, tenant_id, conversation.id)
+    reopened = await reopen_conversation(conn, tenant_id, conversation.id)
+    if reopened:
+        # Billing: anota la reapertura en el evento; el conteo decide si descuenta
+        # según la ventana de reapertura (PRD §2.3).
+        await mark_resolution_event_reverted(conn, tenant_id, conversation.id)
     return conversation.model_copy(update={"status": "open", "resolved_at": None})
 
 

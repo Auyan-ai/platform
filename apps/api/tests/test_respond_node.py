@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 from apps.api.agents.nodes.respond import make_respond_node
@@ -44,6 +44,7 @@ async def test_happy_path_persists_message(fake_deps, monkeypatch) -> None:
     monkeypatch.setattr(f"{MODULE}.insert_message", insert_mock)
     monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", update_mock)
     monkeypatch.setattr(f"{MODULE}.mark_conversation_resolved", AsyncMock(return_value=True))
+    monkeypatch.setattr(f"{MODULE}.insert_resolution_event", AsyncMock())
     node = make_respond_node(fake_deps)
 
     out = await node(_state())
@@ -64,11 +65,15 @@ async def test_marks_resolved_when_not_awaiting(fake_deps, monkeypatch) -> None:
     monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
     resolved_mock = AsyncMock(return_value=True)
     monkeypatch.setattr(f"{MODULE}.mark_conversation_resolved", resolved_mock)
+    event_mock = AsyncMock()
+    monkeypatch.setattr(f"{MODULE}.insert_resolution_event", event_mock)
     node = make_respond_node(fake_deps)
 
     out = await node(_state(awaiting_customer_reply=False))
 
     resolved_mock.assert_awaited_once()
+    # Billing: la resolución cobrable queda registrada en el log append-only.
+    event_mock.assert_awaited_once_with(ANY, TENANT_ID, CONVERSATION_ID)
     assert out["conversation_resolved"] is True
 
 
@@ -82,11 +87,14 @@ async def test_does_not_resolve_when_awaiting_customer(fake_deps, monkeypatch) -
     monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
     resolved_mock = AsyncMock(return_value=True)
     monkeypatch.setattr(f"{MODULE}.mark_conversation_resolved", resolved_mock)
+    event_mock = AsyncMock()
+    monkeypatch.setattr(f"{MODULE}.insert_resolution_event", event_mock)
     node = make_respond_node(fake_deps)
 
     out = await node(_state(awaiting_customer_reply=True))
 
     resolved_mock.assert_not_called()
+    event_mock.assert_not_called()
     assert out["conversation_resolved"] is False
 
 
@@ -98,6 +106,7 @@ async def test_message_metadata_includes_telemetry(fake_deps, monkeypatch) -> No
     monkeypatch.setattr(f"{MODULE}.insert_message", insert_mock)
     monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
     monkeypatch.setattr(f"{MODULE}.mark_conversation_resolved", AsyncMock(return_value=True))
+    monkeypatch.setattr(f"{MODULE}.insert_resolution_event", AsyncMock())
     node = make_respond_node(fake_deps)
 
     await node(_state())
@@ -134,6 +143,7 @@ async def test_inserts_with_correct_role_and_direction(fake_deps, monkeypatch) -
     monkeypatch.setattr(f"{MODULE}.insert_message", insert_mock)
     monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
     monkeypatch.setattr(f"{MODULE}.mark_conversation_resolved", AsyncMock(return_value=True))
+    monkeypatch.setattr(f"{MODULE}.insert_resolution_event", AsyncMock())
     node = make_respond_node(fake_deps)
 
     await node(_state())
@@ -141,3 +151,23 @@ async def test_inserts_with_correct_role_and_direction(fake_deps, monkeypatch) -
     kwargs = insert_mock.await_args.kwargs
     assert kwargs["role"] == "agent_ai"
     assert kwargs["direction"] == "outbound"
+
+
+@pytest.mark.asyncio
+async def test_no_resolution_event_when_mark_returns_false(fake_deps, monkeypatch) -> None:
+    """Si mark_conversation_resolved no actualiza (ya cerrada/escalada), NO se registra
+    una resolución cobrable — se respeta el invariante resolved_at <=> resolved."""
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.insert_message", AsyncMock(return_value=make_message(id=OUTBOUND_MSG_ID))
+    )
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    monkeypatch.setattr(f"{MODULE}.mark_conversation_resolved", AsyncMock(return_value=False))
+    event_mock = AsyncMock()
+    monkeypatch.setattr(f"{MODULE}.insert_resolution_event", event_mock)
+    node = make_respond_node(fake_deps)
+
+    out = await node(_state(awaiting_customer_reply=False))
+
+    event_mock.assert_not_called()
+    assert out["conversation_resolved"] is False
