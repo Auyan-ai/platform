@@ -38,7 +38,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes.escalate import make_escalate_node
@@ -63,6 +63,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_TOOL_ITERATIONS = 5
 
+# Allowlist de keys que cada nodo puede emitir a LangSmith. Allowlist, NO denylist:
+# un nodo sin entrada aquí emite `{}` (solo el span con timing). Esto evita filtrar
+# credenciales (load_tenant_context.commerce_integration_ctx.credentials.token) y PII
+# (load_conversation.conversation_history / end_customer) a un SaaS de terceros.
+# NUNCA agregar aquí keys que carguen secretos: commerce_integration_ctx, tenant_config.
 _NODE_OUTPUT_KEYS: dict[str, list[str]] = {
     "select_aop": ["aop_slug", "aop_version", "intent_confidence"],
     "reason": ["decision", "confidence", "pending_tool_call", "agent_response"],
@@ -73,16 +78,42 @@ _NODE_OUTPUT_KEYS: dict[str, list[str]] = {
     "handle_error": ["error"],
 }
 
+# Keys sensibles que se redactan recursivamente como defensa en profundidad, por si
+# una key permitida llegara a anidar un secreto en el futuro.
+_REDACT_KEYS = frozenset(
+    {"token", "access_token", "credentials", "secret", "api_key", "password", "authorization"}
+)
+
+
+def _redact(value: object) -> object:
+    """Reemplaza recursivamente valores bajo keys sensibles por '[REDACTED]'."""
+    if isinstance(value, dict):
+        return {
+            k: ("[REDACTED]" if k.lower() in _REDACT_KEYS else _redact(v))
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact(v) for v in value]
+    return value
+
+
+def _redact_dict(data: dict[str, Any]) -> dict[str, Any]:
+    """Variante tipada de `_redact` para outputs (siempre un dict en el top level)."""
+    return {
+        k: ("[REDACTED]" if k.lower() in _REDACT_KEYS else _redact(v))
+        for k, v in data.items()
+    }
+
 
 def _traced(
     name: str,
-    node_fn: Callable[[AgentState], Awaitable[dict]],
+    node_fn: Callable[[AgentState], Awaitable[dict[str, Any]]],
     deps: AgentDependencies,
-) -> Callable[[AgentState], Awaitable[dict]]:
+) -> Callable[[AgentState], Awaitable[dict[str, Any]]]:
     """Envuelve un nodo del grafo para registrar un child run en LangSmith."""
     obs = deps.observability
 
-    async def wrapper(state: AgentState) -> dict:
+    async def wrapper(state: AgentState) -> dict[str, Any]:
         if obs is None:
             return await node_fn(state)
 
@@ -93,7 +124,7 @@ def _traced(
 
         start = datetime.now(UTC)
         error_msg: str | None = None
-        result: dict = {}
+        result: dict[str, Any] = {}
         try:
             result = await node_fn(state)
             return result
@@ -101,8 +132,10 @@ def _traced(
             error_msg = str(exc)
             raise
         finally:
-            keep_keys = _NODE_OUTPUT_KEYS.get(name)
-            outputs = {k: v for k, v in result.items() if k in keep_keys} if keep_keys else result
+            # Allowlist estricta: nodo sin keys declaradas → no se emite output.
+            # Evita filtrar credenciales/PII de nodos como load_tenant_context.
+            keep_keys = _NODE_OUTPUT_KEYS.get(name, [])
+            outputs = _redact_dict({k: result[k] for k in keep_keys if k in result})
             try:
                 obs.record_node_run(
                     trace_run_id=trace_run_id,
@@ -193,7 +226,9 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
     """Construye y compila el grafo. Llamar UNA vez en startup; reusar la instancia."""
     graph: StateGraph = StateGraph(AgentState)
 
-    def traced(name: str, factory: Callable) -> Callable:
+    NodeFn = Callable[[AgentState], Awaitable[dict[str, Any]]]
+
+    def traced(name: str, factory: Callable[[AgentDependencies], NodeFn]) -> NodeFn:
         return _traced(name, factory(deps), deps)
 
     _ltc = traced("load_tenant_context", make_load_tenant_context_node)
