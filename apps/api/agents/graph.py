@@ -35,6 +35,9 @@ tool pendiente es L2/L3. Usa Sonnet para L1/L2, Opus para L3.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from apps.api.agents.dependencies import AgentDependencies
@@ -56,7 +59,64 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_MAX_TOOL_ITERATIONS = 5
+
+_NODE_OUTPUT_KEYS: dict[str, list[str]] = {
+    "select_aop": ["aop_slug", "aop_version", "intent_confidence"],
+    "reason": ["decision", "confidence", "pending_tool_call", "agent_response"],
+    "execute_skill": ["tool_results", "pending_approval_id"],
+    "supervise": ["supervisor_verdict", "supervisor_reason", "supervisor_reject_kind"],
+    "respond": ["output_message_id", "conversation_resolved"],
+    "escalate": ["escalation_id", "escalation_reason"],
+    "handle_error": ["error"],
+}
+
+
+def _traced(
+    name: str,
+    node_fn: Callable[[AgentState], Awaitable[dict]],
+    deps: AgentDependencies,
+) -> Callable[[AgentState], Awaitable[dict]]:
+    """Envuelve un nodo del grafo para registrar un child run en LangSmith."""
+    obs = deps.observability
+
+    async def wrapper(state: AgentState) -> dict:
+        if obs is None:
+            return await node_fn(state)
+
+        trace_run_id = state.get("_trace_run_id")
+        trace_dotted_order = state.get("_trace_dotted_order")
+        if not trace_run_id or not trace_dotted_order:
+            return await node_fn(state)
+
+        start = datetime.now(UTC)
+        error_msg: str | None = None
+        result: dict = {}
+        try:
+            result = await node_fn(state)
+            return result
+        except Exception as exc:
+            error_msg = str(exc)
+            raise
+        finally:
+            keep_keys = _NODE_OUTPUT_KEYS.get(name)
+            outputs = {k: v for k, v in result.items() if k in keep_keys} if keep_keys else result
+            try:
+                obs.record_node_run(
+                    trace_run_id=trace_run_id,
+                    trace_dotted_order=trace_dotted_order,
+                    node_name=name,
+                    start_time=start,
+                    end_time=datetime.now(UTC),
+                    outputs=outputs,
+                    error=error_msg,
+                )
+            except Exception:
+                logger.debug("node_trace_failed node=%s", name, exc_info=True)
+
+    return wrapper
 
 
 def route_after_reason(state: AgentState) -> str:
@@ -133,17 +193,20 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
     """Construye y compila el grafo. Llamar UNA vez en startup; reusar la instancia."""
     graph: StateGraph = StateGraph(AgentState)
 
-    graph.add_node("load_tenant_context", make_load_tenant_context_node(deps))
-    graph.add_node("load_conversation", make_load_conversation_node(deps))
-    graph.add_node("select_aop", make_select_aop_node(deps))
-    graph.add_node("retrieve_knowledge", make_retrieve_knowledge_node(deps))
-    graph.add_node("reason", make_reason_node(deps))
-    graph.add_node("execute_skill", make_execute_skill_node(deps))
-    graph.add_node("supervise", make_supervise_node(deps))
-    graph.add_node("respond", make_respond_node(deps))
-    graph.add_node("escalate", make_escalate_node(deps))
-    graph.add_node("handle_error", make_handle_error_node(deps))
-    graph.add_node("finalize_trace", make_finalize_trace_node(deps))
+    def traced(name: str, factory: Callable) -> Callable:
+        return _traced(name, factory(deps), deps)
+
+    graph.add_node("load_tenant_context", traced("load_tenant_context", make_load_tenant_context_node))
+    graph.add_node("load_conversation", traced("load_conversation", make_load_conversation_node))
+    graph.add_node("select_aop", traced("select_aop", make_select_aop_node))
+    graph.add_node("retrieve_knowledge", traced("retrieve_knowledge", make_retrieve_knowledge_node))
+    graph.add_node("reason", traced("reason", make_reason_node))
+    graph.add_node("execute_skill", traced("execute_skill", make_execute_skill_node))
+    graph.add_node("supervise", traced("supervise", make_supervise_node))
+    graph.add_node("respond", traced("respond", make_respond_node))
+    graph.add_node("escalate", traced("escalate", make_escalate_node))
+    graph.add_node("handle_error", traced("handle_error", make_handle_error_node))
+    graph.add_node("finalize_trace", traced("finalize_trace", make_finalize_trace_node))
 
     graph.add_edge(START, "load_tenant_context")
     graph.add_edge("load_tenant_context", "load_conversation")

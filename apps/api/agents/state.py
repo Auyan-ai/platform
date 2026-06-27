@@ -151,6 +151,10 @@ class AgentState(TypedDict, total=False):
     # approved (no contradecir un cambio ya confirmado).
     pending_approval_reused_status: str | None
 
+    # --- LangSmith node-level tracing ---
+    _trace_run_id: str | None
+    _trace_dotted_order: str | None
+
     # --- Simulator (Bloque 0, Sub-PR 0.10) ---
     # simulation_mode: cuando es True, execute_skill inyecta un mock de commerce
     # (MockShopifyAdapter) en vez del adapter real. El grafo no hace I/O externo

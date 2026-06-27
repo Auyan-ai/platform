@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
     from apps.api.core.config import Settings
+    from apps.api.integrations.observability import ObservabilityClient
     from apps.api.services.audit import AuditLogger
     from apps.api.services.reasoning import ReasoningTracker
     from openai import AsyncOpenAI
@@ -29,3 +30,4 @@ class AgentDependencies:
     settings: Settings
     reasoning_tracker: ReasoningTracker
     audit_logger: AuditLogger
+    observability: ObservabilityClient | None = None

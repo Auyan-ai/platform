@@ -74,6 +74,7 @@ class AgentService:
         )
         trace_id = self._observability.trace_id(trace)
 
+        primary_trace = trace.primary if trace else None
         initial_state: AgentState = {
             "tenant_id": str(tenant_id),
             "conversation_id": str(conversation_id),
@@ -84,6 +85,9 @@ class AgentService:
             # Backward-compatible field name. Its value is the primary
             # observability trace id (LangSmith when enabled).
             "langfuse_trace_id": trace_id,
+            # LangSmith node-level tracing — the wrapper in build_graph reads these.
+            "_trace_run_id": str(primary_trace.run_id) if primary_trace else None,
+            "_trace_dotted_order": primary_trace.dotted_order if primary_trace else None,
             # ReAct loop defaults — load_tenant_context puede overridear desde
             # tenant_config.extra. allowed_skills queda vacío hasta Sprint 7
             # (select_aop) salvo opt-in explícito del tenant.

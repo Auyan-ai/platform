@@ -7,6 +7,7 @@ secundario para compatibilidad durante la transición.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from apps.api.integrations.langfuse_client import LangfuseClient
@@ -106,6 +107,29 @@ class ObservabilityClient:
                 model=model,
                 error=error,
             )
+
+    def record_node_run(
+        self,
+        *,
+        trace_run_id: str,
+        trace_dotted_order: str,
+        node_name: str,
+        start_time: datetime,
+        end_time: datetime,
+        outputs: dict | None = None,
+        error: str | None = None,
+    ) -> None:
+        from uuid import UUID
+
+        ls_trace = LangSmithTrace(run_id=UUID(trace_run_id), dotted_order=trace_dotted_order)
+        self._primary.record_node_run(
+            ls_trace,
+            node_name=node_name,
+            start_time=start_time,
+            end_time=end_time,
+            outputs=outputs,
+            error=error,
+        )
 
     def trace_id(self, trace: ObservabilityTrace) -> str | None:
         primary_id = self._primary.trace_id(trace.primary)

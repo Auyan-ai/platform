@@ -64,6 +64,40 @@ class LangSmithClient:
             usage["total_cost"] = cost_usd
         return usage
 
+    def record_node_run(
+        self,
+        trace: LangSmithTrace,
+        *,
+        node_name: str,
+        start_time: datetime,
+        end_time: datetime,
+        outputs: dict | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Registra un child run por cada nodo del grafo (chain type)."""
+        if self._client is None:
+            return
+        run_id = uuid4()
+        dotted_order = f"{trace.dotted_order}.{self._dotted_order_segment(start_time, run_id)}"
+        try:
+            self._client.create_run(
+                id=run_id,
+                trace_id=trace.run_id,
+                parent_run_id=trace.run_id,
+                dotted_order=dotted_order,
+                project_name=self._project_name,
+                name=node_name,
+                run_type="chain",
+                inputs={"node": node_name},
+                start_time=start_time,
+                end_time=end_time,
+                outputs=outputs or {},
+                error=error,
+                tags=["source:agent_service", "graph_node"],
+            )
+        except Exception:
+            logger.exception("langsmith_node_run_failed node=%s", node_name)
+
     def _record_model_usage_run(
         self,
         trace: LangSmithTrace,
