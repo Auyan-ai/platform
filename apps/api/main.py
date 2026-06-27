@@ -113,6 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings=settings,
         reasoning_tracker=reasoning_tracker,
         audit_logger=audit_logger,
+        observability=observability,
     )
     graph = build_graph(deps)
     service = AgentService(graph=graph, observability=observability)
