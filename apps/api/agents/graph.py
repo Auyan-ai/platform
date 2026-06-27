@@ -196,7 +196,8 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
     def traced(name: str, factory: Callable) -> Callable:
         return _traced(name, factory(deps), deps)
 
-    graph.add_node("load_tenant_context", traced("load_tenant_context", make_load_tenant_context_node))
+    _ltc = traced("load_tenant_context", make_load_tenant_context_node)
+    graph.add_node("load_tenant_context", _ltc)
     graph.add_node("load_conversation", traced("load_conversation", make_load_conversation_node))
     graph.add_node("select_aop", traced("select_aop", make_select_aop_node))
     graph.add_node("retrieve_knowledge", traced("retrieve_knowledge", make_retrieve_knowledge_node))
