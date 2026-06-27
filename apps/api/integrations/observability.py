@@ -116,7 +116,7 @@ class ObservabilityClient:
         node_name: str,
         start_time: datetime,
         end_time: datetime,
-        outputs: dict | None = None,
+        outputs: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> None:
         from uuid import UUID

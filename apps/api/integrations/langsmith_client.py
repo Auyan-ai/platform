@@ -10,7 +10,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from langsmith import Client
@@ -71,7 +71,7 @@ class LangSmithClient:
         node_name: str,
         start_time: datetime,
         end_time: datetime,
-        outputs: dict | None = None,
+        outputs: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> None:
         """Registra un child run por cada nodo del grafo (chain type)."""
