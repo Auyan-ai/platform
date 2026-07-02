@@ -54,9 +54,87 @@ function relativeTime(dateStr: string | null | undefined): string {
   return `${Math.floor(hours / 24)}d`
 }
 
+const SKILL_LABELS: Record<string, string> = {
+  'shopify.update_shipping_address': 'Cambiar dirección de envío',
+  'shopify.cancel_order': 'Cancelar pedido',
+  'shopify.refund_partial': 'Reembolso parcial',
+  'shopify.start_return': 'Iniciar devolución',
+  'shopify.add_order_note': 'Añadir nota al pedido',
+  'shopify.tag_order': 'Etiquetar pedido',
+  'shopify.get_order_status': 'Consultar estado del pedido',
+  'shopify.get_order_by_email': 'Buscar pedido por email',
+  'shopify.get_shop_policies': 'Consultar políticas de la tienda',
+  'shopify.get_product_info': 'Consultar producto',
+  'shopify.get_customer_history': 'Consultar historial del cliente',
+}
+
+const AOP_LABELS: Record<string, string> = {
+  order_status: 'Estado de pedido',
+  shipping_info: 'Información de envío',
+  order_change: 'Cambio de pedido',
+  returns: 'Devoluciones',
+  refunds: 'Reembolsos',
+  product_info: 'Información de producto',
+  complaint: 'Reclamación',
+  smalltalk: 'Conversación general',
+  default: 'General',
+}
+
+const INPUT_LABELS: Record<string, string> = {
+  order_id: 'Pedido',
+  reason: 'Motivo',
+  address1: 'Dirección',
+  address2: 'Dirección (línea 2)',
+  city: 'Ciudad',
+  province: 'Provincia',
+  zip_code: 'Código postal',
+  country: 'País',
+  country_code: 'País',
+  send_email: 'Notificar por email',
+  refund_payment: 'Reembolsar pago',
+  restock: 'Reponer stock',
+  amount: 'Importe',
+  currency: 'Moneda',
+  note: 'Nota',
+  tag: 'Etiqueta',
+  email: 'Email',
+  phone: 'Teléfono',
+  first_name: 'Nombre',
+  last_name: 'Apellidos',
+}
+
+const CANCEL_REASON_LABELS: Record<string, string> = {
+  customer: 'solicitado por el cliente',
+  fraud: 'fraude',
+  inventory: 'sin stock',
+  declined: 'pago rechazado',
+  other: 'otro',
+}
+
+function humanizeSlug(slug: string): string {
+  const base = slug.includes('.') ? slug.split('.').pop()! : slug
+  return base.replaceAll('_', ' ')
+}
+
+function skillLabel(slug: string): string {
+  return SKILL_LABELS[slug] ?? humanizeSlug(slug)
+}
+
+function aopLabel(slug: string): string {
+  return AOP_LABELS[slug] ?? humanizeSlug(slug)
+}
+
+function formatInputValue(key: string, value: unknown): string {
+  if (typeof value === 'boolean') return value ? 'Sí' : 'No'
+  if (key === 'reason' && typeof value === 'string') {
+    return CANCEL_REASON_LABELS[value] ?? value
+  }
+  return String(value)
+}
+
 function formatInputs(inputs: Record<string, unknown>): string {
   return Object.entries(inputs)
-    .map(([k, v]) => `${k}: ${v}`)
+    .map(([k, v]) => `${INPUT_LABELS[k] ?? k.replaceAll('_', ' ')}: ${formatInputValue(k, v)}`)
     .join(' · ')
 }
 
@@ -137,7 +215,7 @@ function ApprovalRow({
         </Badge>
 
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground-body">{approval.skill_slug}</p>
+          <p className="text-sm font-medium text-foreground-body">{skillLabel(approval.skill_slug)}</p>
           <p className="mt-0.5 text-xs text-foreground-muted truncate">
             {formatInputs(approval.inputs_raw)}
           </p>
@@ -150,7 +228,7 @@ function ApprovalRow({
             </Link>
             <span>·</span>
             <span>
-              AOP: {approval.aop_slug} v{approval.aop_version}
+              Procedimiento: {aopLabel(approval.aop_slug)} (v{approval.aop_version})
             </span>
             <span>·</span>
             <span className="tabular-nums">{relativeTime(approval.created_at)}</span>
