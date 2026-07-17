@@ -1,3 +1,8 @@
+> ⚠️ **DOC HISTÓRICO — ARCHIVADO 2026-07-17.** No es fuente de verdad y NO debe usarse para
+> decisiones ni implementación actual (ni por humanos ni por agentes). Lo diseñado aquí ya se
+> implementó; la verdad vigente vive en el código + tests, y el estado en `docs/progress.md`.
+> Se conserva únicamente como registro del racional de diseño.
+
 # AOPs canónicos de Auyan — diseño + sesión de comprensión
 
 > Doc vivo. Objetivo de la sesión: definir los **AOPs por defecto de Auyan e-commerce ES**

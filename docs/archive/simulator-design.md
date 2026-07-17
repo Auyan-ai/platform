@@ -1,3 +1,8 @@
+> ⚠️ **DOC HISTÓRICO — ARCHIVADO 2026-07-17.** No es fuente de verdad y NO debe usarse para
+> decisiones ni implementación actual (ni por humanos ni por agentes). Lo diseñado aquí ya se
+> implementó; la verdad vigente vive en el código + tests, y el estado en `docs/progress.md`.
+> Se conserva únicamente como registro del racional de diseño.
+
 # Simulator MVP — Documento de diseño (Sub-PR 0.10)
 
 > Diseñado y aprobado 2026-05-24. Modelo original: Opus 4.7 para judge.

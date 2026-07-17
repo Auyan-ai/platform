@@ -14,7 +14,7 @@ editable de forma aislada desde el dashboard interno sin afectar a otros tenants
 Postura de autonomía (tool_permissions default): L1/L2 autónomos; los 4 L3 nacen
 `enabled` + `human_approval_required=true`. super_admin gradúa por cliente.
 
-Diseño completo, fronteras y razones: docs/aop-canonical-design.md.
+Diseño completo, fronteras y razones: docs/archive/aop-canonical-design.md (histórico).
 """
 
 from __future__ import annotations
@@ -492,7 +492,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             },
             # A propósito SIN skills: el turno solo puede respond/escalate, así que
             # _select_reason_model (router de latencia) usa el modelo rápido (Haiku).
-            # Ver agents/nodes/reason.py y docs/aop-canonical-design.md.
+            # Ver agents/nodes/reason.py y docs/archive/aop-canonical-design.md.
             "allowed_skills": [],
             "required_data": [],
             "guardrails": [

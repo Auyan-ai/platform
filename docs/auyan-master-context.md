@@ -1,8 +1,8 @@
 # Auyan — Contexto Maestro
 
 > Fuente única de verdad del proyecto. Documento vivo, versionado en git.
-> Última actualización: 2026-05-29 (ElevenLabs re-clasificado como competidor/proveedor según caso; README viejo eliminado).
-> Versión: 2.0 (post-pivot)
+> Última actualización: 2026-07-17 (§9: unidad de cobro = resolución, decisión sesión 64).
+> Versión: 2.1 (post-pivot)
 
 ---
 
@@ -308,7 +308,9 @@ Tiempo primera respuesta: 47s · CSAT estimado: 4.3/5
 
 ## 9. Pricing
 
-> **Estado:** pricing provisional. Los precios y límites de tickets siguen sujetos a validación con los primeros Founding Partners, datos reales de volumen, coste LLM y horas humanas post-onboarding. No tratar como definitivo hasta cerrar evidencia comercial.
+> **Estado:** pricing provisional. Los precios y límites siguen sujetos a validación con los primeros Founding Partners, datos reales de volumen, coste LLM y horas humanas post-onboarding. No tratar como definitivo hasta cerrar evidencia comercial.
+>
+> **Decisión sesión 64 (2026-06):** la unidad de cobro es la **resolución** (cierre sin escalar), con **suelo mensual + overage**, no el ticket plano. COGS real medido: ~€0,071/resolución. Modelo completo y decisiones abiertas en [`billing-resolution-prd.md`](billing-resolution-prd.md); el motor técnico (conteo con ventana de reapertura, tiers, endpoints) ya está mergeado ([#234](https://github.com/Auyan-ai/platform/pull/234)). Los tiers de abajo siguen siendo la envolvente comercial de referencia; los números por resolución los fija el PRD.
 
 ### Programa Founding Partner (primeros 5 clientes, mes 1-6)
 - Setup gratis

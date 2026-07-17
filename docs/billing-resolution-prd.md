@@ -1,10 +1,13 @@
 # PRD — Billing por resolución
 
-**Estado:** borrador para validar con Founding Partners. **No** es código a implementar ya
-(las tablas `billing_*` y Stripe siguen difereridas a Bloque 2 según
-[`billing-manual.md`](billing-manual.md)). Este doc fija el **modelo** y las **decisiones
-abiertas**; la mecánica técnica de resolución (marcar/cerrar/reabrir + `resolved_at`) ya se
-implementó (ver [PR #196](https://github.com/Auyan-ai/platform/pull/196)).
+**Estado 2026-07:** modelo vigente, números por validar con Founding Partners. El **motor ya
+está implementado y mergeado** ([PR #234](https://github.com/Auyan-ai/platform/pull/234)):
+`resolution_events` append-only + `billing_subscriptions`, conteo por periodo con ventana de
+reapertura (§2.3), catálogo de tiers (números PROVISIONALES) y endpoints
+`GET /billing/usage` + `PUT /billing/subscription`. La mecánica de resolución
+(marcar/cerrar/reabrir + `resolved_at`) venía de [PR #196](https://github.com/Auyan-ai/platform/pull/196).
+**Pendiente:** Stripe (subscription = suelo, metered = overage + webhook) y fijar el precio de
+overage con COGS real de LangSmith (ancla: €0,071/resolución, s64).
 
 Contexto estratégico: [`auyan-master-context.md`](auyan-master-context.md),
 [`billing-manual.md`](billing-manual.md). Posicionamiento: el tooling es table-stakes; el moat
