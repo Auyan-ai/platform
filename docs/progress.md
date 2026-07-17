@@ -1,14 +1,36 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-07-17 (limpieza documental: cabeceras s59-s70 y secciones cerradas → [`progress-archive.md`](progress-archive.md); `simulator-design` y `aop-canonical-design` → `docs/archive/`; `architecture-agent-v2.md` compactado. Regla nueva en CLAUDE.md: máximo 3 cabeceras de sesión aquí — la más vieja se archiva al cerrar cada sesión.)_
+_Última actualización: 2026-07-17 (limpieza documental integrada con el estado de sesión 75: cabeceras s59-s71 y secciones cerradas → [`progress-archive.md`](progress-archive.md); `simulator-design` y `aop-canonical-design` → `docs/archive/`; `architecture-agent-v2.md` compactado. Regla en CLAUDE.md: máximo 3 cabeceras de sesión aquí — la más vieja se archiva al cerrar cada sesión.)_
+> _Sesión 74 (2026-06-27) — **ADRs de arquitectura + case study para portafolio.** Kenny va a usar el proyecto como portafolio (target: roles freelance). Creado `docs/adr/` con 7 ADRs en formato Nygard (Contexto → Decisión → Alternativas → Consecuencias): [0001] multi-tenant `tenant_id`+RLS, [0002] modelo de negocio Managed AI Service, [0003] agente como grafo LangGraph, [0004] AOPs editables en runtime, [0005] skills L1/L2/L3 + approval, [0006] LangSmith observabilidad, [0007] model routing por tarea. Más `docs/case-study-auyan.md`: writeup narrativo para la web con ángulo founder/cliente/inversor, cada decisión enlaza a su ADR. Cumple lo que CLAUDE.md ya prometía (`docs/adr/`); `CONTEXT.md` sigue pendiente. **Solo docs — cero código, cero secrets/PII.** PR aparte contra `develop`. Sesión 73 abajo.)_
+> _Sesión 73 (2026-06-27) — **LangSmith node-level tracing + fix crítico de seguridad.** Antes los traces de LangSmith solo mostraban `agent_conversation` → `agent_model_call` (tokens/costo agregados); el detalle nodo-por-nodo del grafo (select_aop, reason, execute_skill, supervise…) solo vivía en el dashboard de "Agent reasoning" (Supabase `reasoning_events`). [#237](https://github.com/Auyan-ai/platform/pull/237) MERGEADO: wrapper genérico `_traced` en `build_graph` emite un child run (`run_type=chain`) por cada nodo del grafo con nombre, duración y outputs allowlisteados — cero cambios en los nodos; `record_node_run` en `LangSmithClient`+`ObservabilityClient`; trace propagado vía `AgentState._trace_run_id/_trace_dotted_order` y `observability` en `AgentDependencies`. **🔴 Fix de seguridad [#238](https://github.com/Auyan-ai/platform/pull/238) MERGEADO (Kenny lo cazó en review):** el wrapper original mandaba el dict de output COMPLETO de los nodos sin allowlist a LangSmith (SaaS de terceros) → filtraba el **access token de Shopify descifrado** (`load_tenant_context.commerce_integration_ctx.credentials.token`) y **PII** (`load_conversation.conversation_history`/`end_customer`). El #237 alcanzó a mergearse y deployar con el leak antes del fix → el token estuvo en traces de los webhooks de prueba de hoy. Fix: **allowlist estricta** (`_NODE_OUTPUT_KEYS.get(name, [])` → nodo sin entrada emite `{}`, solo timing del span) + **redacción recursiva defensiva** (`_redact_dict` tacha token/credentials/secret/api_key/password/authorization) + 6 tests de regresión en `test_graph_tracing.py` (uno prueba que el token jamás aparece en el payload). 1323 verde, ruff/mypy limpios. **Verificado EN VIVO sobre Marea** (trace `f21ab9a7…`): child runs presentes, `execute_skill` muestra el tool call de Shopify, `load_tenant_context`/`load_conversation` sin credenciales ni PII. **🔴 PENDIENTE: rotar el access token de Shopify de Marea** (estuvo expuesto en LangSmith entre #237 y #238) → regenerar en Shopify + re-registrar con `railway run … configure_staging_integrations`. Aprendizaje guardado en memoria [[feedback_observability_no_secrets]]: observabilidad nunca exfiltra secrets/PII — allowlist, no denylist._
 > _Sesión 72 (2026-06-21) — **Sesión autónoma: 3 PRs MERGEADOS (Zendesk managed-auth, latencia del AOP returns, motor de Billing Bloque 2), suite 1306 verde.** Kenny pidió cerrar los 3 pendientes técnicos dejándole solo Customer Discovery; lo manual quedó en "Arranque sesión 73". [#232](https://github.com/Auyan-ai/platform/pull/232) **Zendesk dual-auth** (API token/Basic, espejo de la s69 de Gorgias) + provider `zendesk` en `configure_staging_integrations`: el enum `channel_type` ya tenía `zendesk` → **sin migración**; el outbound usa el shape estándar (`add_comment` público), **sin** la rareza `source.type`/`body_html` de Gorgias. [#233](https://github.com/Auyan-ai/platform/pull/233) **latencia HOPS por prompt**: el AOP `returns` ahora secuencia "el dato va primero, la afirmación después" (verificar la política en KB/`tenant_facts`/`get_shop_policies` ANTES de afirmar un plazo) → mata de raíz el reject+retry del supervisor; test de invariante en `test_canonical_aops`. [#234](https://github.com/Auyan-ai/platform/pull/234) **motor de Billing Bloque 2** (PRD §7 puntos 1+3): migración `resolution_events` (append-only) + `billing_subscriptions` (snapshot de floor/included/overage, RLS solo-lectura, campos `stripe_*` nullable), conteo por periodo mensual anclado con **ventana de reapertura** (§2.3), catálogo de tiers (números **PROVISIONALES**), `compute_period_usage`, hooks en `respond`/`reopen`, y `GET /billing/usage` + `PUT /billing/subscription`. **Stripe NO entró** (necesita key + dashboard → siguiente trozo aditivo). Suite **1306 verde**, ruff/mypy limpios. **#232/#233/#234 MERGEADOS.** **🔴 Pendiente: aplicar a mano las migraciones de billing (#234) + la del piso L3 (#231) + `add_gorgias_channel` en prod** (Railway no corre SQL). Ver "🚀 Arranque sesión 73" abajo.)_
-> _Sesión 71 — **Auditoría de robustez del grafo + cierre del hallazgo 🔴 L3-sin-approval (Opción B, 2 PRs TDD).** Re-auditoría 12-capas: núcleo sólido (`tool_choice` code-gated, `@guarded`, degradación elegante, prompt caching, anti-inyección RAG); el riesgo vive en los bordes. **🔴 Hallazgo:** una L3 destructiva con `is_enabled=True`+`human_approval_required=False` se ejecutaba SIN aprobación humana, confiando solo en el supervisor (sesgado a APROBAR) — el seed de Marea tenía `start_return`/`update_shipping_address` así. **Raíz:** `human_approval_required=False` era ambiguo (opt-out consciente vs default de fábrica), fail-open en schema/función/runtime. **PR1 (piso):** `_l3_requires_human_approval` en `execute_skill` (L3 exige approval salvo opt-out RECONOCIDO) + migración `l3_autonomy_acknowledged_at/_by` (NULL=fail-safe, sin backfill → Marea cae del lado seguro sola) + señal propagada modelo→query→`load_tenant_context`. **PR2 (flexibilidad B):** endpoint rechaza 422 si se desactiva el approval de una L3 sin `acknowledge_l3_autonomy=true`; `upsert` sella/limpia el acknowledgment. **1297 tests verde, ruff limpio.** **PENDIENTE BLOQUEANTE: aplicar la migración a staging a mano ANTES del deploy** (Railway no corre SQL → si no, `load_tenant_context` hace SELECT de columnas inexistentes y escala todos los turnos). **Backlog de la auditoría:** #2 race de concurrencia (sin lock por conversación; la idempotencia es por `message_id`, no serializa 2 mensajes distintos), #3 entrega outbound best-effort tras marcar resuelto/cerrar ticket. Ver "🚀 Arranque sesión 73" abajo.)_
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
 
 ---
 
-## 🚀 Empezar aquí — pendientes priorizados
+## 🚀 Arranque sesión 76 — el outreach manda
+
+**Modelo:** Sonnet para todo lo rutinario. Opus/Fable solo si vuelve a tocarse diseño del grafo, billing o RLS — que **no debería pasar este mes**.
+
+**Foco único: GTM.** Plan vivo en [`gtm-plan-2026-07.md`](gtm-plan-2026-07.md); targets en [`discovery-targets.md`](discovery-targets.md); registro en [`outreach-log.csv`](outreach-log.csv).
+
+1. **Formulario Tally** (9 preguntas de `customer-discovery.md` §6) — lo monta Kenny a mano, 10 min. Necesario antes de mandar mensajes que lo ofrezcan como fallback (el de Zapato Feroz no lo menciona → puede salir sin esperar).
+2. **Mandar el primer mensaje.** Redactados y listos en `discovery-targets.md`. Registrar fecha/persona/canal/variante en el CSV.
+3. **Cada viernes:** calcular tasas por cohorte/rol/variante. Si <20% de respuesta tras 15 mensajes → reescribir el mensaje, no insistir.
+4. **Decidir el overage (€0,20 vs €0,25)** antes de la primera llamada de oferta — hay inconsistencia entre `billing-manual.md` (€/ticket) y `billing-resolution-prd.md` (€/resolución, manda). Ancla: COGS real medido €0,071/resolución (s64).
+5. **Demo path (solo semana 3, contra un prospect real):** pulir las 2-3 pantallas que ese prospect vería (aprobaciones ✅ ya legible tras #241, conversaciones, razones de escalado). No pulir frontend antes: es build-first avoidance.
+
+**⚠️ El calendario del GTM arrancaba el 2-jul y quedó parado** (Kenny volvió el 16-jul; el GTM se movió a otro chat). Re-anclar las semanas del plan a la fecha real de arranque antes de usarlo como cronograma.
+
+**Track técnico — CONGELADO a propósito.** Solo se descongela si un prospect lo pide para SU piloto:
+- **Zendesk E2E:** parado por decisión de Kenny hasta que un cliente lo pida expresamente (código listo, #232).
+- **Latencia, billing (Stripe + suscripciones), backlog de la auditoría (#2 race de concurrencia, #3 outbound best-effort):** se mantienen como están. Detalle completo abajo en "Track técnico".
+- **🔴 Sigue vivo de la s73:** rotar el access token de Shopify de Marea (estuvo expuesto en LangSmith entre #237 y #238).
+
+---
+
+## Track técnico — pendientes priorizados (CONGELADO; referencia)
 
 **Modelo:** Sonnet para fixes acotados e integraciones; Opus para latencia (diseño del grafo), billing y RLS. Fable solo si Opus se queda corto (~2× el costo).
 
@@ -42,13 +64,14 @@ _Última actualización: 2026-07-17 (limpieza documental: cabeceras s59-s70 y se
 | Bloque 2 | Motor de billing por resolución mergeado (#234); Stripe pendiente (punto 4 arriba). Duet/Watchtower/Diagnostics sin arrancar. |
 | Onboarding | Fase 1 ✅ ([#137](https://github.com/Auyan-ai/platform/pull/137)). Fases 2-4 pendientes — plan en [`onboarding-system-plan.md`](onboarding-system-plan.md); deuda del portal en tabla abajo. |
 | Dogfood | **Marea Studio** verificado E2E: tenant `683246c2-10ce-4f6c-a299-5053f32f8c01` (slug `marea-studio`), pedido de pruebas #1181 (`order_id` interno `7133866033432`). Chatwoot de Marea/Purigu sin Teams → no setear `escalation_team_id`. |
-| Suite | 1306 tests verde, ruff/mypy limpios (s72). |
+| Suite | 1323 tests verde, ruff/mypy limpios (s73). |
+| Portafolio | ADRs de arquitectura en [`adr/`](adr/) (7, formato Nygard) + case study [`case-study-auyan.md`](case-study-auyan.md) (s74). |
 
 ---
 
 ## 🧭 Foco estratégico — Customer Discovery
 
-Regla dura (sesión 53, vigente): **el outreach manda**; no construir features nuevas sin conversaciones de discovery. Outreach activo desde julio 2026. Bifurcado en 2 cohortes según [`market-analysis-2026-06.md`](market-analysis-2026-06.md): 5 e-commerce escenario 4 (quemados de Gorgias/Permut/GuruSup) + 5 comercializadoras de energía independientes (driver Ley 10/2025, deadline 28-dic-2026). NO pivotar; el dato decide. Plan operativo completo (ICP, mensajes, formulario): [`customer-discovery.md`](customer-discovery.md).
+Regla dura (sesión 53, vigente): **el outreach manda**; no construir features nuevas sin conversaciones de discovery. **GTM arrancado (julio 2026):** plan vivo en [`gtm-plan-2026-07.md`](gtm-plan-2026-07.md), targets en [`discovery-targets.md`](discovery-targets.md), registro en [`outreach-log.csv`](outreach-log.csv). Bifurcado en 2 cohortes según [`market-analysis-2026-06.md`](market-analysis-2026-06.md): 5 e-commerce escenario 4 (quemados de Gorgias/Permut/GuruSup) + 5 comercializadoras de energía independientes (driver Ley 10/2025, deadline 28-dic-2026). NO pivotar; el dato decide. Plan operativo (ICP, mensajes, formulario): [`customer-discovery.md`](customer-discovery.md).
 
 ---
 
@@ -73,7 +96,7 @@ Regla dura (sesión 53, vigente): **el outreach manda**; no construir features n
 | Chatwoot Cloud | ✅ E2E verificado (Marea/Purigu). Registrar integraciones siempre vía `railway run … configure_staging_integrations` (cripto con la key de staging, si no InvalidTag/500). |
 | Gorgias | ✅ E2E en vivo (s69, Basic auth; HTTP Integration con trigger *ticket-message-created*). |
 | Zendesk | Código listo (#232, dual-auth). Falta E2E en vivo (punto 2 de Empezar aquí). |
-| Shopify test store | ✅ Órdenes reales `auyan-e2e` en Lunaria (#1001-#1003) y Marea (#1181). |
+| Shopify test store | ✅ Órdenes reales `auyan-e2e` en Lunaria (#1001-#1003) y Marea (#1181). **🔴 Rotar el access token de Marea** (expuesto en LangSmith entre #237 y #238): regenerar en Shopify + re-registrar con `railway run … configure_staging_integrations`. |
 | Postmark | Pendiente: dominio aún sin comprar → DKIM/SPF bloqueado; luego plug como SMTP de Supabase. |
 | Supabase Auth staging | Por confirmar: **Site URL** = `https://auyan-web-staging.up.railway.app` (si sigue en `localhost:3000` rompe magic links) + Redirect URLs. |
 | Weekly Reports cron | Falta `DATABASE_URL` en GitHub Actions para el workflow programado. |
@@ -108,7 +131,11 @@ No mover esto a "Empezar aquí" mientras Customer Discovery + onboarding sigan m
 - [`architecture-web.md`](architecture-web.md) — arquitectura de `apps/web`.
 - [`DESIGN.md`](DESIGN.md) — sistema de diseño visual.
 - [`customer-discovery.md`](customer-discovery.md) — plan de discovery (foco actual).
+- [`gtm-plan-2026-07.md`](gtm-plan-2026-07.md) — plan GTM julio 2026 (⚠️ re-anclar semanas: arrancaba 2-jul, quedó parado hasta 16-jul).
+- [`discovery-targets.md`](discovery-targets.md) — 10 targets con mensajes redactados.
+- [`outreach-log.csv`](outreach-log.csv) — registro de outreach (fecha/persona/canal/variante).
 - [`market-analysis-2026-06.md`](market-analysis-2026-06.md) — análisis de mercado, cohortes, Ley 10/2025.
+- [`adr/`](adr/) — 7 ADRs de arquitectura (formato Nygard) + [`case-study-auyan.md`](case-study-auyan.md) — portafolio.
 - [`billing-manual.md`](billing-manual.md) — pricing/tiers + runbook de cobro manual.
 - [`billing-resolution-prd.md`](billing-resolution-prd.md) — PRD del billing por resolución.
 - [`onboarding-system-plan.md`](onboarding-system-plan.md) — plan del onboarding (Fases 1-4).

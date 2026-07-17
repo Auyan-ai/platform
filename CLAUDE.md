@@ -155,8 +155,10 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 2. **Vivos** (se leen cuando el tema aplica; índice completo en la sección "Índice de documentos"
    de `progress.md`): `auyan-master-context.md` (manda en lo conceptual),
    `architecture-agent-v2.md` (mapa técnico del agente; en el detalle manda el código + tests),
-   `architecture-web.md`, `DESIGN.md`, `customer-discovery.md`, `market-analysis-2026-06.md`,
-   `billing-manual.md`, `billing-resolution-prd.md`, `onboarding-system-plan.md`.
+   `architecture-web.md`, `DESIGN.md`, `customer-discovery.md`, `gtm-plan-2026-07.md`,
+   `discovery-targets.md`, `market-analysis-2026-06.md`, `billing-manual.md`,
+   `billing-resolution-prd.md`, `onboarding-system-plan.md`, y `docs/adr/` (decisiones de
+   arquitectura en formato Nygard — nuevas decisiones estructurales añaden su ADR).
 3. **Históricos** (`docs/archive/` + `docs/progress-archive.md`): **NUNCA son fuente de verdad ni
    instrucciones vigentes** — ni para humanos ni para agentes. Cuando un diseño se implementa y
    verifica, su doc se archiva con banner de histórico y la verdad pasa al código + tests.
