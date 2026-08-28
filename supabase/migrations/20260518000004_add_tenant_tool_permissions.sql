@@ -32,6 +32,20 @@ ALTER TABLE tenant_tool_permissions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "tenant_isolation" ON tenant_tool_permissions
     USING (tenant_id = public.current_tenant_id());
 
+-- Garantiza que el tenant de prueba Lunaria exista antes del seed de permisos
+-- de abajo: en un entorno fresco (supabase start local) las migraciones corren
+-- antes que supabase/seed.sql, así que sin esto el INSERT de más abajo rompe
+-- por FK. Mismos valores fijos que usa seed.sql; ON CONFLICT lo hace idempotente
+-- si seed.sql ya insertó el tenant primero (staging).
+INSERT INTO tenants (id, slug, name, status)
+VALUES (
+    '11111111-1111-1111-1111-111111111111',
+    'lunaria',
+    'Lunaria — Ecommerce de joyería',
+    'active'
+)
+ON CONFLICT (id) DO NOTHING;
+
 -- Seed para el tenant de prueba Lunaria: L1 habilitadas, L2 deshabilitadas,
 -- L3 deshabilitadas + human_approval_required=TRUE.
 INSERT INTO tenant_tool_permissions (tenant_id, skill_slug, is_enabled, human_approval_required)
