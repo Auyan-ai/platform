@@ -147,10 +147,21 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - types/ → interfaces y tipos compartidos entre apps
 - utils/ → funciones utilitarias comunes
 
-### docs
-- auyan-master-context.md → fuente única de verdad del negocio + arquitectura post-pivot
-- architecture-agent-v2.md → detalle técnico del agente v2 (Skills, AOPs, Supervisor, Slow Agent)
-- progress.md → bitácora operativa de sprints terminados y próximos pasos
+### docs — convención documental (tres niveles)
+
+1. **Norte** (se leen siempre al arrancar): `CLAUDE.md` + `docs/progress.md`. Regla dura de
+   progress: máximo **3 cabeceras de sesión** — al cerrar cada sesión, la más vieja se mueve a
+   `progress-archive.md` en el mismo commit que actualiza progress.
+2. **Vivos** (se leen cuando el tema aplica; índice completo en la sección "Índice de documentos"
+   de `progress.md`): `auyan-master-context.md` (manda en lo conceptual),
+   `architecture-agent-v2.md` (mapa técnico del agente; en el detalle manda el código + tests),
+   `architecture-web.md`, `DESIGN.md`, `customer-discovery.md`, `gtm-plan-2026-07.md`,
+   `discovery-targets.md`, `market-analysis-2026-06.md`, `billing-manual.md`,
+   `billing-resolution-prd.md`, `onboarding-system-plan.md`, y `docs/adr/` (decisiones de
+   arquitectura en formato Nygard — nuevas decisiones estructurales añaden su ADR).
+3. **Históricos** (`docs/archive/` + `docs/progress-archive.md`): **NUNCA son fuente de verdad ni
+   instrucciones vigentes** — ni para humanos ni para agentes. Cuando un diseño se implementa y
+   verifica, su doc se archiva con banner de histórico y la verdad pasa al código + tests.
 
 ### Raíz del proyecto
 - CLAUDE.md → este archivo
@@ -169,7 +180,3 @@ Los issues y PRDs viven como GitHub Issues en `Auyan-ai/platform` (CLI `gh`).
 ### Triage labels
 
 Labels canónicos: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
-
-### Domain docs
-
-Single-context: un `CONTEXT.md` + `docs/adr/` en la raíz.
