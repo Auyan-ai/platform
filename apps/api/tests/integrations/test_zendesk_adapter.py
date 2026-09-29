@@ -9,15 +9,19 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
+import httpx
 import pytest
 from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.registry import IntegrationRegistry
 from apps.api.integrations.zendesk import (
+    ZENDESK_OAUTH_SCOPES,
     ZendeskAdapter,
     ZendeskClient,
+    clear_client_credentials_cache,
     verify_zendesk_signature,
 )
 
@@ -104,16 +108,20 @@ class TestZendeskClient:
         client = ZendeskClient("myco", oauth_token="tok")
         assert client.base_url == "https://myco.zendesk.com/api/v2"
 
-    def test_headers_include_bearer(self) -> None:
+    @pytest.mark.asyncio
+    async def test_headers_include_bearer(self) -> None:
         client = ZendeskClient("myco", oauth_token="mytoken")
-        assert client._headers()["Authorization"] == "Bearer mytoken"
-        assert client._headers()["Content-Type"] == "application/json"
+        headers = await client._headers()
+        assert headers["Authorization"] == "Bearer mytoken"
+        assert headers["Content-Type"] == "application/json"
 
-    def test_headers_basic_auth_with_api_token(self) -> None:
+    @pytest.mark.asyncio
+    async def test_headers_basic_auth_with_api_token(self) -> None:
         client = ZendeskClient("myco", email="agent@test.com", api_token="tok123")
         expected = base64.b64encode(b"agent@test.com/token:tok123").decode()
-        assert client._headers()["Authorization"] == f"Basic {expected}"
-        assert client._headers()["Content-Type"] == "application/json"
+        headers = await client._headers()
+        assert headers["Authorization"] == f"Basic {expected}"
+        assert headers["Content-Type"] == "application/json"
 
     def test_requires_some_auth(self) -> None:
         with pytest.raises(ValueError, match="oauth_token"):
@@ -278,9 +286,7 @@ class TestAdapterMethods:
 class TestVerifyZendeskSignature:
     def _make_sig(self, secret: str, timestamp: str, body: bytes) -> str:
         msg = timestamp.encode() + body
-        digest = hmac.new(
-            key=secret.encode(), msg=msg, digestmod=hashlib.sha256
-        ).digest()
+        digest = hmac.new(key=secret.encode(), msg=msg, digestmod=hashlib.sha256).digest()
         return base64.b64encode(digest).decode()
 
     def test_valid_signature(self) -> None:
@@ -316,3 +322,149 @@ class TestVerifyZendeskSignature:
             raw_body=b'{"ticket_id":"2"}',  # body alterado
             signature_header=sig,
         )
+
+
+# ---------------------------------------------------------------------------
+# OAuth client_credentials (reemplazo de los API tokens, deprecados por Zendesk)
+# ---------------------------------------------------------------------------
+
+
+class _ZendeskStub:
+    """Transport httpx que simula /oauth/tokens + /api/v2/tickets."""
+
+    def __init__(self, *, expires_in: int = 1800, ticket_401_once: bool = False) -> None:
+        self.token_requests: list[dict] = []
+        self.ticket_auth_headers: list[str] = []
+        self._expires_in = expires_in
+        self._ticket_401_once = ticket_401_once
+        self._issued = 0
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth/tokens":
+            self.token_requests.append(json.loads(request.content))
+            self._issued += 1
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": f"cc_token_{self._issued}",
+                    "token_type": "bearer",
+                    "expires_in": self._expires_in,
+                },
+            )
+        self.ticket_auth_headers.append(request.headers["Authorization"])
+        if self._ticket_401_once and len(self.ticket_auth_headers) == 1:
+            return httpx.Response(401, json={"error": "invalid_token"})
+        return httpx.Response(200, json={"ticket": {"id": 10}})
+
+    def transport(self) -> httpx.MockTransport:
+        return httpx.MockTransport(self.handler)
+
+
+@pytest.fixture(autouse=True)
+def _clear_token_cache() -> None:
+    clear_client_credentials_cache()
+
+
+class TestClientCredentials:
+    @pytest.mark.asyncio
+    async def test_fetches_token_with_client_credentials_grant(self) -> None:
+        stub = _ZendeskStub()
+        client = ZendeskClient(
+            "myco", client_id="auyan", client_secret="s3cret", transport=stub.transport()
+        )
+
+        await client.add_comment("10", "hola")
+
+        assert stub.token_requests == [
+            {
+                "grant_type": "client_credentials",
+                "client_id": "auyan",
+                "client_secret": "s3cret",
+                "scope": ZENDESK_OAUTH_SCOPES,
+            }
+        ]
+        assert stub.ticket_auth_headers == ["Bearer cc_token_1"]
+
+    @pytest.mark.asyncio
+    async def test_token_is_cached_across_clients(self) -> None:
+        """El adapter crea un ZendeskClient por llamada: el token se reutiliza."""
+        stub = _ZendeskStub()
+        for _ in range(3):
+            client = ZendeskClient(
+                "myco", client_id="auyan", client_secret="s3cret", transport=stub.transport()
+            )
+            await client.add_comment("10", "hola")
+
+        assert len(stub.token_requests) == 1
+        assert stub.ticket_auth_headers == ["Bearer cc_token_1"] * 3
+
+    @pytest.mark.asyncio
+    async def test_expired_token_is_refreshed(self) -> None:
+        # expires_in por debajo del margen de refresco → nunca se considera vigente.
+        stub = _ZendeskStub(expires_in=1)
+        for _ in range(2):
+            client = ZendeskClient(
+                "myco", client_id="auyan", client_secret="s3cret", transport=stub.transport()
+            )
+            await client.add_comment("10", "hola")
+
+        assert len(stub.token_requests) == 2
+        assert stub.ticket_auth_headers == ["Bearer cc_token_1", "Bearer cc_token_2"]
+
+    @pytest.mark.asyncio
+    async def test_401_invalidates_token_and_retries_once(self) -> None:
+        stub = _ZendeskStub(ticket_401_once=True)
+        client = ZendeskClient(
+            "myco", client_id="auyan", client_secret="s3cret", transport=stub.transport()
+        )
+
+        await client.add_comment("10", "hola")
+
+        assert len(stub.token_requests) == 2
+        assert stub.ticket_auth_headers == ["Bearer cc_token_1", "Bearer cc_token_2"]
+
+    @pytest.mark.asyncio
+    async def test_cache_is_isolated_per_subdomain(self) -> None:
+        """Dos tenants (subdomains distintos) nunca comparten token."""
+        stub = _ZendeskStub()
+        a = ZendeskClient(
+            "empresa-a", client_id="auyan", client_secret="a", transport=stub.transport()
+        )
+        b = ZendeskClient(
+            "empresa-b", client_id="auyan", client_secret="b", transport=stub.transport()
+        )
+
+        await a.add_comment("1", "hola")
+        await b.add_comment("2", "hola")
+
+        assert len(stub.token_requests) == 2
+        assert stub.ticket_auth_headers == ["Bearer cc_token_1", "Bearer cc_token_2"]
+
+    @pytest.mark.asyncio
+    async def test_token_endpoint_error_raises(self) -> None:
+        transport = httpx.MockTransport(
+            lambda request: httpx.Response(401, json={"error": "invalid_client"})
+        )
+        client = ZendeskClient("myco", client_id="auyan", client_secret="bad", transport=transport)
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.add_comment("10", "hola")
+
+    def test_rejects_partial_client_credentials(self) -> None:
+        with pytest.raises(ValueError, match="client_id"):
+            ZendeskClient("myco", client_id="auyan")
+
+    @pytest.mark.asyncio
+    async def test_adapter_passes_client_credentials(self) -> None:
+        ctx = IntegrationContext(
+            tenant_id=UUID("66666666-6666-6666-6666-666666666666"),
+            credentials={"client_id": "auyan", "client_secret": "s3cret"},
+            config={"subdomain": "empresa-d"},
+        )
+        adapter = ZendeskAdapter()
+        with patch("apps.api.integrations.zendesk.ZendeskClient") as MockClient:
+            MockClient.return_value.add_comment = AsyncMock(return_value={})
+            await adapter.send_outbound(ctx, "404", "hola")
+        call = MockClient.call_args
+        assert call.kwargs["client_id"] == "auyan"
+        assert call.kwargs["client_secret"] == "s3cret"
+        assert call.kwargs["subdomain"] == "empresa-d"

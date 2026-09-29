@@ -36,8 +36,11 @@ Variables esperadas en .env:
     GORGIAS_EMAIL              (Username del API Key — Settings → Account → REST API)
     GORGIAS_API_ACCESS_TOKEN   (Password / API Key)
     ZENDESK_SUBDOMAIN       (subdomain o host; ej. mareastudio o mareastudio.zendesk.com)
-    ZENDESK_EMAIL              (email del agente dueño del API token)
-    ZENDESK_API_TOKEN          (Admin Center → Apps and integrations → APIs → Zendesk API → Token)
+    ZENDESK_CLIENT_ID          (Admin Center → Apps and integrations → APIs → OAuth clients,
+                                tipo Confidential; es el "identificador único")
+    ZENDESK_CLIENT_SECRET      (secreto del OAuth client)
+      — legacy, solo cuentas previas al 2026-07-28 y hasta el 2027-04-30 —
+    ZENDESK_EMAIL + ZENDESK_API_TOKEN  (API token; se usan solo si no hay CLIENT_ID)
 
 Opcionales:
     CHATWOOT_WEBHOOK_SECRET_TOKEN
@@ -71,6 +74,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from apps.api.db.queries import get_tenant_by_id, get_tenant_by_slug, upsert_integration
+from apps.api.integrations.zendesk import ZendeskClient
 from apps.api.services.integrations_crypto import encrypt_credentials
 
 _ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
@@ -114,6 +118,7 @@ def redact_credentials(credentials: dict[str, Any]) -> dict[str, Any]:
             "api_key",
             "api_token",
             "oauth_token",
+            "client_secret",
             "webhook_signing_secret",
         }:
             text = str(value)
@@ -344,18 +349,23 @@ def _normalize_zendesk_subdomain(domain: str) -> str:
     return raw.removesuffix(".zendesk.com")
 
 
-async def _validate_zendesk(subdomain: str, email: str, api_token: str) -> dict[str, Any]:
-    """Valida las credenciales contra la API de Zendesk (API token / Basic auth).
+async def _validate_zendesk(subdomain: str, credentials: dict[str, Any]) -> dict[str, Any]:
+    """Valida las credenciales contra `users/me.json` de Zendesk.
 
-    Zendesk usa Basic auth con username `{email}/token` y password el api_token.
-    `users/me.json` confirma que las credenciales autentican sin requerir scope admin.
+    Usa el mismo ZendeskClient que el adapter: con client credentials esto prueba
+    también el intercambio de token contra `/oauth/tokens` y los scopes.
     """
-    url = f"https://{subdomain}.zendesk.com/api/v2/users/me.json"
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            url,
-            auth=(f"{email}/token", api_token),
-            headers={"Content-Type": "application/json"},
+    client = ZendeskClient(
+        subdomain,
+        email=credentials.get("email"),
+        api_token=credentials.get("api_token"),
+        client_id=credentials.get("client_id"),
+        client_secret=credentials.get("client_secret"),
+    )
+    async with httpx.AsyncClient() as http:
+        response = await http.get(
+            f"{client.base_url}/users/me.json",
+            headers=await client._headers(),
             timeout=15,
         )
     response.raise_for_status()
@@ -363,18 +373,30 @@ async def _validate_zendesk(subdomain: str, email: str, api_token: str) -> dict[
     return payload if isinstance(payload, dict) else {}
 
 
+def _zendesk_auth_credentials() -> dict[str, Any]:
+    """Client credentials si hay ZENDESK_CLIENT_ID; si no, el API token legacy."""
+    if _optional_env("ZENDESK_CLIENT_ID"):
+        return {
+            "client_id": _require_env("ZENDESK_CLIENT_ID"),
+            "client_secret": _require_env("ZENDESK_CLIENT_SECRET"),
+        }
+    return {
+        "email": _require_env("ZENDESK_EMAIL"),
+        "api_token": _require_env("ZENDESK_API_TOKEN"),
+    }
+
+
 async def build_zendesk_plan() -> IntegrationPlan:
     subdomain = _normalize_zendesk_subdomain(_require_env("ZENDESK_SUBDOMAIN"))
-    email = _require_env("ZENDESK_EMAIL")
-    api_token = _require_env("ZENDESK_API_TOKEN")
+    auth = _zendesk_auth_credentials()
     webhook_secret = _optional_env("ZENDESK_WEBHOOK_SIGNING_SECRET")
     escalation_group_id = _optional_env("ZENDESK_ESCALATION_GROUP_ID")
 
-    me = await _validate_zendesk(subdomain, email, api_token)
+    me = await _validate_zendesk(subdomain, auth)
     user_raw = me.get("user")
     user: dict[str, Any] = user_raw if isinstance(user_raw, dict) else {}
 
-    credentials: dict[str, Any] = {"email": email, "api_token": api_token}
+    credentials: dict[str, Any] = {**auth}
     if webhook_secret:
         credentials["webhook_signing_secret"] = webhook_secret
 
