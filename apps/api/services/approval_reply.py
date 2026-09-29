@@ -10,7 +10,7 @@ tal cual (fallback) — nunca jerga interna.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import anthropic
@@ -137,7 +137,26 @@ _SYSTEM = (
 )
 
 
-def fallback_message(skill_slug: str, *, success: bool, reject_comment: str | None = None) -> str:
+def action_details(skill_slug: str, output: dict[str, Any] | None) -> str | None:
+    """Resumen determinista de lo que hizo la skill, para repetírselo al cliente
+    (p. ej. la dirección nueva). None si no hay nada concreto que confirmar."""
+    if not output:
+        return None
+    if skill_slug == "shopify.update_shipping_address":
+        street = ", ".join(p for p in (output.get("new_address1"), output.get("new_address2")) if p)
+        locality = " ".join(p for p in (output.get("new_zip"), output.get("new_city")) if p)
+        address = ", ".join(p for p in (street, locality) if p)
+        return f"Nueva dirección de envío: {address}." if address else None
+    return None
+
+
+def fallback_message(
+    skill_slug: str,
+    *,
+    success: bool,
+    reject_comment: str | None = None,
+    output: dict[str, Any] | None = None,
+) -> str:
     """Mensaje limpio determinista (base para Haiku y fallback si el LLM no está)."""
     if reject_comment is not None:
         return (
@@ -146,7 +165,9 @@ def fallback_message(skill_slug: str, *, success: bool, reject_comment: str | No
         )
     if not success:
         return _FAILED
-    return _SKILL_DONE.get(skill_slug, _DEFAULT_DONE)
+    done = _SKILL_DONE.get(skill_slug, _DEFAULT_DONE)
+    details = action_details(skill_slug, output)
+    return f"{done} {details}" if details else done
 
 
 async def generate_customer_reply(
@@ -155,13 +176,21 @@ async def generate_customer_reply(
     *,
     success: bool,
     reject_comment: str | None = None,
+    output: dict[str, Any] | None = None,
     model: str = REPLY_MODEL,
     timeout_seconds: int = 15,
 ) -> str:
-    """Devuelve el mensaje al cliente. Usa Haiku para darle calidez; cae a plantilla."""
-    base = fallback_message(skill_slug, success=success, reject_comment=reject_comment)
+    """Devuelve el mensaje al cliente. Usa Haiku para darle calidez; cae a plantilla.
+
+    Los datos concretos de la acción (p. ej. la dirección nueva) NO pasan por el
+    LLM: se añaden literalmente al final, para que nunca se alteren.
+    """
+    details = action_details(skill_slug, output) if success else None
     if client is None:
-        return base
+        return fallback_message(
+            skill_slug, success=success, reject_comment=reject_comment, output=output
+        )
+    base = fallback_message(skill_slug, success=success, reject_comment=reject_comment)
     try:
         resp = await client.messages.create(
             model=model,
@@ -170,10 +199,15 @@ async def generate_customer_reply(
             messages=[{"role": "user", "content": base}],
             timeout=timeout_seconds,
         )
-        for block in resp.content:
-            if getattr(block, "type", None) == "text" and block.text.strip():
-                return block.text.strip()
-        return base
+        warm = next(
+            (
+                block.text.strip()
+                for block in resp.content
+                if getattr(block, "type", None) == "text" and block.text.strip()
+            ),
+            base,
+        )
     except Exception:
         logger.warning("approval_reply_generation_failed skill=%s", skill_slug, exc_info=True)
-        return base
+        warm = base
+    return f"{warm}\n\n{details}" if details else warm

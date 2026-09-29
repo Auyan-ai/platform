@@ -113,3 +113,33 @@ class TestGenerateCustomerReply:
 
         msg = await generate_customer_reply(client, "shopify.refund_partial", success=True)
         assert msg == "Hemos procesado el reembolso de tu pedido."
+
+
+# ----------------------------------------------------------------
+# Punto 3 del mini-sprint: la confirmación repite lo que se hizo
+# ----------------------------------------------------------------
+
+
+def test_address_confirmation_restates_new_address() -> None:
+    from apps.api.services.approval_reply import fallback_message
+
+    msg = fallback_message(
+        "shopify.update_shipping_address",
+        success=True,
+        output={
+            "new_address1": "Calle José Hierro, 18",
+            "new_address2": "Portal 5, 1ºA",
+            "new_zip": "28702",
+            "new_city": "San Sebastián de los Reyes",
+            "new_country": "Spain",
+        },
+    )
+    assert "Calle José Hierro, 18, Portal 5, 1ºA, 28702 San Sebastián de los Reyes" in msg
+
+
+def test_confirmation_without_output_keeps_generic_template() -> None:
+    from apps.api.services.approval_reply import fallback_message
+
+    assert fallback_message("shopify.update_shipping_address", success=True) == (
+        "Hemos actualizado la dirección de envío de tu pedido."
+    )

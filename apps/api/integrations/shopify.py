@@ -377,6 +377,7 @@ class ShopifyClient:
         order_id: int,
         *,
         address1: str,
+        address2: str | None = None,
         city: str,
         province: str,
         country: str | None,
@@ -392,6 +393,9 @@ class ShopifyClient:
         """
         shipping_address: dict[str, Any] = {
             "address1": address1,
+            # Siempre se envía: si el cambio no trae address2, se limpia la anterior
+            # (no debe quedar el piso de la dirección vieja).
+            "address2": address2 or "",
             "city": city,
             "province": province,
             "zip": zip_code,
@@ -591,6 +595,7 @@ class ShopifyAdapter:
         order_id: int,
         *,
         address1: str,
+        address2: str | None = None,
         city: str,
         province: str,
         zip_code: str,
@@ -627,6 +632,7 @@ class ShopifyAdapter:
         return await client.update_shipping_address(
             resolved_id,
             address1=address1,
+            address2=address2,
             city=city,
             province=province,
             country=resolved_country,

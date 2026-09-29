@@ -13,7 +13,9 @@ from apps.api.skills.registry import SkillRegistry
 
 class UpdateShippingAddressInput(SkillInput):
     order_id: int
+    # address1: calle y número. address2: piso, puerta, portal, escalera…
     address1: str
+    address2: str | None = None
     city: str
     province: str
     zip_code: str
@@ -29,6 +31,8 @@ class UpdateShippingAddressOutput(SkillOutput):
     success: bool
     order_id: int
     new_address1: str
+    new_address2: str | None = None
+    new_zip: str | None = None
     new_city: str
     new_country: str
 
@@ -57,6 +61,7 @@ class UpdateShippingAddress(Skill):
             ctx.integration_ctx,
             inputs.order_id,
             address1=inputs.address1,
+            address2=inputs.address2,
             city=inputs.city,
             province=inputs.province,
             country=inputs.country,
@@ -69,6 +74,8 @@ class UpdateShippingAddress(Skill):
             success=True,
             order_id=order["id"],
             new_address1=shipping.get("address1", inputs.address1),
+            new_address2=shipping.get("address2", inputs.address2),
+            new_zip=shipping.get("zip", inputs.zip_code),
             new_city=shipping.get("city", inputs.city),
             new_country=(
                 shipping.get("country") or shipping.get("country_code") or inputs.country or ""

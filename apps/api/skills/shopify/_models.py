@@ -19,6 +19,18 @@ class FulfillmentInfo(BaseModel):
     shipment_status: str | None = None
 
 
+class ShippingAddressInfo(BaseModel):
+    """Dirección de envío de un pedido. Solo campos de dirección: sin nombre ni
+    teléfono (el agente no los necesita para confirmar a dónde va el pedido)."""
+
+    address1: str | None = None
+    address2: str | None = None
+    city: str | None = None
+    zip: str | None = None
+    province: str | None = None
+    country: str | None = None
+
+
 class LineItemInfo(BaseModel):
     """Artículo de un pedido. El `line_item_id` es el que requiere start_return."""
 

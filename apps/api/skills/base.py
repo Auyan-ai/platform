@@ -38,6 +38,10 @@ class SkillContext:
     # Tipo Any porque las skills llaman métodos fuera del protocolo CommerceProvider
     # (get_order_by_name, get_policies, etc.) y solo existe un provider commerce.
     commerce_mock: Any = field(default=None)
+    # Email del cliente final de la conversación (end_customer). Las skills que
+    # exponen datos personales del pedido (p. ej. la dirección) lo comparan con
+    # el email del pedido: solo el dueño ve esos datos.
+    customer_email: str | None = field(default=None)
 
 
 class Skill(ABC):

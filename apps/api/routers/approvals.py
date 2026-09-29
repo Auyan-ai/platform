@@ -229,7 +229,11 @@ async def approve_action(
     # plantilla). output_data crudo queda solo en metadata, no se le muestra al cliente.
     anthropic_client = getattr(getattr(request.app.state, "agent_deps", None), "anthropic", None)
     result_message = await generate_customer_reply(
-        anthropic_client, approval.skill_slug, success=True, model=get_settings().reply_model
+        anthropic_client,
+        approval.skill_slug,
+        success=True,
+        output=output_data,
+        model=get_settings().reply_model,
     )
 
     # Marcar aprobada y añadir mensaje a la conversación

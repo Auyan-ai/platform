@@ -81,7 +81,17 @@ _NODE_OUTPUT_KEYS: dict[str, list[str]] = {
 # Keys sensibles que se redactan recursivamente como defensa en profundidad, por si
 # una key permitida llegara a anidar un secreto en el futuro.
 _REDACT_KEYS = frozenset(
-    {"token", "access_token", "credentials", "secret", "api_key", "password", "authorization"}
+    {
+        "token",
+        "access_token",
+        "credentials",
+        "secret",
+        "api_key",
+        "password",
+        "authorization",
+        # PII: la dirección de envío que devuelve get_order_status (tool_results).
+        "shipping_address",
+    }
 )
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
-from apps.api.skills.shopify._models import FulfillmentInfo, LineItemInfo
+from apps.api.skills.shopify._models import FulfillmentInfo, LineItemInfo, ShippingAddressInfo
 from pydantic import Field
 
 
@@ -31,6 +31,15 @@ class OrderDetail(SkillOutput):
     fulfillments: list[FulfillmentInfo]
     # Artículos del pedido — el agente necesita line_item_id para start_return.
     line_items: list[LineItemInfo] = Field(default_factory=list)
+    # Dirección de envío: solo si quien escribe es el dueño del pedido (su email
+    # coincide con el del pedido). Si no, se retiene y `shipping_address_withheld`
+    # lo indica para que el agente lo explique sin revelarla.
+    shipping_address: ShippingAddressInfo | None = None
+    shipping_address_withheld: bool = False
+
+
+def _same_email(a: str | None, b: str | None) -> bool:
+    return bool(a and b and a.strip().casefold() == b.strip().casefold())
 
 
 @SkillRegistry.register
@@ -71,8 +80,7 @@ class GetOrderStatus(Skill):
             FulfillmentInfo(
                 status=f.get("status", ""),
                 tracking_number=f.get("tracking_number"),
-                tracking_url=(f.get("tracking_urls") or [None])[0]
-                or f.get("tracking_url"),
+                tracking_url=(f.get("tracking_urls") or [None])[0] or f.get("tracking_url"),
                 tracking_company=f.get("tracking_company"),
                 shipment_status=f.get("shipment_status"),
             )
@@ -99,6 +107,14 @@ class GetOrderStatus(Skill):
             for li in raw.get("line_items", [])
             if "id" in li
         ]
+        raw_address = raw.get("shipping_address") or None
+        order_email = raw.get("email") or (raw.get("customer") or {}).get("email")
+        is_owner = _same_email(ctx.customer_email, order_email)
+        shipping_address = (
+            ShippingAddressInfo(**{k: raw_address.get(k) for k in ShippingAddressInfo.model_fields})
+            if raw_address and is_owner
+            else None
+        )
         return OrderDetail(
             found=True,
             order_id=raw["id"],
@@ -112,4 +128,6 @@ class GetOrderStatus(Skill):
             delivered_at=delivered_at,
             fulfillments=fulfillments,
             line_items=line_items,
+            shipping_address=shipping_address,
+            shipping_address_withheld=bool(raw_address) and not is_owner,
         )

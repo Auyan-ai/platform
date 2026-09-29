@@ -65,6 +65,7 @@ def build_skill_context(state: AgentState) -> SkillContext:
         conversation_id=state["conversation_id"],
         integration_ctx=integration_ctx,
         commerce_mock=commerce_mock,
+        customer_email=(state.get("end_customer") or {}).get("email"),
     )
 
 
