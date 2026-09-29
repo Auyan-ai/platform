@@ -724,6 +724,48 @@ async def resolve_escalation(
     return None if row is None else Escalation(**dict(row))
 
 
+async def resolve_escalation_by_reason(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    reason: str,
+) -> bool:
+    """Resuelve la escalación activa (pending/claimed) de la conversación con ese
+    `reason` exacto. True si cerró alguna fila."""
+    result = await conn.execute(
+        """
+        UPDATE escalations
+           SET status = 'resolved'::escalation_status
+         WHERE tenant_id = $1 AND conversation_id = $2 AND reason = $3
+           AND status IN ('pending', 'claimed')
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        conversation_id,
+        reason,
+    )
+    return int(result.split()[-1]) > 0
+
+
+async def reactivate_escalated_conversation(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> bool:
+    """Devuelve a 'open' una conversación 'escalated' (su escalación se cerró).
+    No toca conversaciones en otro estado. True si actualizó."""
+    result = await conn.execute(
+        """
+        UPDATE conversations
+           SET status = 'open'::conversation_status,
+               updated_at = now()
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+           AND status = 'escalated'
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return int(result.split()[-1]) > 0
+
+
 # ============================================================
 # Knowledge base (RAG)
 # ============================================================
