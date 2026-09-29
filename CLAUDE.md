@@ -1,24 +1,10 @@
 # Auyan — Reglas del proyecto
-Para forma de trabajo seguir sigiuente estracto:
-
-you are a wise and incredibly effective teacher. your goal is to make sure the human deeply understands the session.
-
-do this incrementally with each step instead of all at once at the end. before moving on to the next stage, you should confirm that she has mastered everything in the current one. this should be high level (e.g. motivation) and low level (e.g. business logic, edge cases).
-
-keep a running md doc with a checklist of things the human should understand. make sure she understands 1) the problem, why the problem existed, the different branches 2) the solution, why it was resolved in that way, the design decisions, the edge cases 3) the broader context of why this matters, what the changes will impact.
-
-make sure she understands why (and drill down into more whys), make sure she understands what and how as well. understanding the problem well is imperative.
-
-to get a sense of where she's at, proactively have her restate her understanding first. then help her fill in the gaps from there—she might ask you questions or ask to eli5, eli14, or elii (explain like she's an intern).
-
-quiz her with open-ended or multiple choice questions with AskUserQuestion (be sure to change up the order of the correct answer, and to not reveal the answer until after the questions are submitted). show her code or have her use the debugger if necessary!
-
-/goal the session should not end until you've verified that the human has demonstrated that she understood everything on your list.
 
 ## Contexto
-Auyan es un **Managed AI Service** para CX support, verticalizando primero en e-commerce español.
-Modelo: configuramos, mantenemos y optimizamos el agente IA del cliente. El cliente conserva su propio equipo de soporte para escalados. Auyan es su equipo externo de Agent Engineers.
-No es BPO. No hay agentes humanos de Auyan atendiendo tickets.
+Auyan opera el agente IA de CX de cada cliente (e-commerce). Restricción técnica que se deriva de eso:
+- El cliente no configura el agente: no hay signup público ni self-serve. Los tenants los crea `super_admin` y el cliente entra por invitación (magic link).
+- Prompts, AOPs, RAG y activación los gestiona el equipo interno; el cliente solo aporta KB, edita `tenant_facts` y aprueba acciones L3.
+- Los escalados van al equipo de soporte del propio cliente, vía su helpdesk.
 No vocees, habla acento caraqueño venezolano, tuteame.
 
 ## Stack
@@ -35,7 +21,7 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 ## Estructura del monorepo
 - apps/api → FastAPI, agentes LangGraph, webhooks
 - apps/web → Dashboard super_admin + dashboard cliente (Next.js)
-- apps/widget → Chat embebible JS (backlog futuro)
+- apps/landing → Landing pública (Next.js)
 - packages/shared → Tipos y utilidades compartidas entre apps
 - docs → Documentación técnica
 
@@ -89,7 +75,7 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 ## Roles del sistema
 - `super_admin` — acceso total cross-tenant (Kenny + esposa)
 - `tenant_admin` — acceso scoped al tenant del cliente
-- NO existe `tenant_agent` (removido en Bloque 0, sub-PR 0.1)
+- Del lado cliente, `tenant_admin` es el único rol
 
 ## Integraciones
 - Chatwoot Cloud: helpdesk con API key, bidireccional
@@ -102,16 +88,15 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 ## Selección de modelo
 - Al inicio de cada sesión, recomendar qué modelo usar según la tarea descrita antes de arrancar.
 - Si el usuario no especifica la tarea al inicio, preguntar qué va a hacer antes de arrancar.
-- **Sonnet** (`claude-sonnet-4-6`): modelo por defecto. Tareas rutinarias de código, scaffolding, fixes, boilerplate, integraciones y preguntas de contexto. Donde la velocidad y el costo importan más que la profundidad.
-- **Opus** (`claude-opus-4-8`): diseño de arquitectura, decisiones complejas del grafo de LangGraph, revisión de seguridad y RLS, latencia/diseño del grafo, y cuando Sonnet falle repetidamente en algo.
-- **Fable** (`claude-fable-5`): el modelo más potente — tier por encima de Opus, ~2× su costo ($10/$50 vs $5/$25 por 1M). NO es "Opus más rápido": es más inteligente y más caro. Reservar para lo que Opus no resuelve (arquitectura crítica o lógica del grafo de máxima dificultad donde el costo extra se justifica). Nunca por defecto.
+- **Sonnet**: modelo por defecto. Tareas rutinarias de código, scaffolding, fixes, boilerplate, integraciones y preguntas de contexto. Donde la velocidad y el costo importan más que la profundidad.
+- **Opus**: diseño de arquitectura, decisiones complejas del grafo de LangGraph, revisión de seguridad y RLS, latencia/diseño del grafo, y cuando Sonnet falle repetidamente en algo.
+- **Fable**: el modelo más potente — tier por encima de Opus y más caro. NO es "Opus más rápido": es más inteligente y más caro. Reservar para lo que Opus no resuelve (arquitectura crítica o lógica del grafo de máxima dificultad donde el costo extra se justifica). Nunca por defecto.
 
 ## Lo que nunca hay que hacer
 - Modificar datos de un tenant desde el contexto de otro
 - Responder al cliente final sin pasar por el grafo de LangGraph + AOP selector
 - Deployar directo a producción sin pasar por staging
 - Commitear .env, API keys o datos de clientes reales
-- Suponer que un rol `tenant_agent` existe (fue removido)
 
 ## Organización de archivos por carpeta
 
@@ -128,7 +113,7 @@ No vocees, habla acento caraqueño venezolano, tuteame.
   - skills/shopify/ → 11 skills (5 L1 + 2 L2 + 4 L3)
 - slow_agent/ → LLM-as-judge batch (transcript, judge, runner, sampling)
 - evals/ → harness de eval + fixtures YAML por AOP
-- integrations/ → clientes HTTP externos (shopify.py, langfuse_client.py mientras exista como espejo, futuro langsmith_client.py, anthropic_client.py, etc.)
+- integrations/ → clientes HTTP externos (shopify.py, langsmith_client.py, anthropic_client.py, helpdesks, postmark.py; langfuse_client.py mientras exista como espejo)
 - services/ → lógica de negocio reutilizable (tenants, conversations, escalations, cleanup, reasoning, audit, pii, rate_limit)
 - db/ → modelos Pydantic + queries asyncpg
 - core/ → config (pydantic-settings), security (JWT ES256), errors (DomainError)
@@ -144,24 +129,23 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - lib/ → utilidades, hooks TanStack Query, cliente openapi-fetch tipado
 
 ### packages/shared
-- types/ → interfaces y tipos compartidos entre apps
-- utils/ → funciones utilitarias comunes
+- src/ → tipos compartidos entre apps (api-types.ts, enums.ts)
 
 ### docs — convención documental (tres niveles)
 
 1. **Norte** (se leen siempre al arrancar): `CLAUDE.md` + `docs/progress.md`. Regla dura de
    progress: máximo **3 cabeceras de sesión** — al cerrar cada sesión, la más vieja se mueve a
    `progress-archive.md` en el mismo commit que actualiza progress.
-2. **Vivos** (se leen cuando el tema aplica; índice completo en la sección "Índice de documentos"
-   de `progress.md`): `auyan-master-context.md` (manda en lo conceptual),
-   `architecture-agent-v2.md` (mapa técnico del agente; en el detalle manda el código + tests),
-   `architecture-web.md`, `DESIGN.md`, `customer-discovery.md`, `gtm-plan-2026-07.md`,
-   `discovery-targets.md`, `market-analysis-2026-06.md`, `billing-manual.md`,
-   `billing-resolution-prd.md`, `onboarding-system-plan.md`, y `docs/adr/` (decisiones de
-   arquitectura en formato Nygard — nuevas decisiones estructurales añaden su ADR).
+2. **Vivos** (se leen cuando el tema aplica): `architecture-overview.md` (punto de entrada
+   técnico: stack, roles, onboarding, roadmap), `architecture-agent-v2.md` (mapa técnico del
+   agente; en el detalle manda el código + tests), `architecture-web.md`, `DESIGN.md`,
+   `billing-engine.md`, `onboarding-system-plan.md`, y `docs/adr/` (decisiones de arquitectura
+   en formato Nygard — nuevas decisiones estructurales añaden su ADR).
 3. **Históricos** (`docs/archive/` + `docs/progress-archive.md`): **NUNCA son fuente de verdad ni
    instrucciones vigentes** — ni para humanos ni para agentes. Cuando un diseño se implementa y
    verifica, su doc se archiva con banner de histórico y la verdad pasa al código + tests.
+
+El repo solo contiene documentación técnica: nada de negocio, ventas ni GTM.
 
 ### Raíz del proyecto
 - CLAUDE.md → este archivo

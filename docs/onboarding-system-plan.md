@@ -8,7 +8,7 @@ _Cerrado vía /grill-me (sesión 56, 2026-05-31). Objetivo: dejar el onboarding 
 
 Auyan es un **Managed AI Service** fully-managed para CX e-commerce. Hoy **no existe ningún path de creación** de tenants ni usuarios: todo se hizo a mano por SQL + Supabase Auth dashboard. La meta es construir el onboarding completo que tendremos con clientes reales, con la **menor fricción posible**, **alta calidad** y **sin sobreingeniería**, y dogfoodearlo en una tienda Shopify nueva (completamente poblada) como primer caso real.
 
-**Posicionamiento que define el modelo:** somos managed (más cerca de Decagon/Sierra que de Gorgias self-serve). El cliente nos concede acceso a su información en un onboarding guiado, **no** en un signup público anónimo.
+**Restricción:** el cliente entra por un onboarding guiado por invitación, **no** por un signup público.
 
 ---
 
@@ -18,7 +18,7 @@ Auyan es un **Managed AI Service** fully-managed para CX e-commerce. Hoy **no ex
 |---|---|---|
 | 1 | Dónde vive el provisioning | **Service server-side** (usa `supabase_service_role_key`) + endpoint super_admin + botón "Nuevo cliente" en dashboard. Reusable y auditable. |
 | 2 | Modelo de entrada | **Portal por invitación / magic link** (no signup público). Ventas cierra → super_admin crea tenant → cliente recibe magic link. |
-| 3 | Tier trial / facturación menor | **Diferido.** Solo se añade columna `plan_tier` (`founding`/`standard`/`trial`) como semilla. El self-serve trial se diseña/construye en Bloque 2+. |
+| 3 | Tier trial / facturación menor | Solo existe la columna `plan_tier` (`founding`/`standard`/`trial`). No hay trial self-serve. |
 | 4 | Invite / primer login | **Supabase invite + magic link** (Admin API `inviteUserByEmail`/`generateLink`). Sin passwords nuestros. Email vía SMTP de Supabase ahora; migrable a Postmark. |
 | 5 | Acceso Shopify | **Custom app token pegado en el portal** (TLS + cifrado en `tenant_integrations`). Reusa el modelo de token estático actual; cero build de OAuth Shopify. |
 | 6 | Lifecycle del agente | **Auto hasta `building`, resto AIDE-gated.** `initial→discovery` (invite) y `discovery→building` (onboarding enviado + integraciones + KB) automáticos; `building→shadow→ramping→active` los aprueba el AIDE. |
@@ -109,8 +109,7 @@ Auyan es un **Managed AI Service** fully-managed para CX e-commerce. Hoy **no ex
 
 ## 7. Decisiones diferidas / huecos de producto conscientes
 
-- **Tier trial / self-serve público**: diferido a Bloque 2+. La arquitectura por invitación ya lo soporta (exponer el mismo service tras un signup con guardarraíles). Hoy solo la columna `plan_tier`.
-- **Shopify OAuth app (un clic)**: diferido. El token-paste cubre el primer tramo de clientes managed. Migrar a OAuth cuando el volumen self-serve lo justifique.
+- **Shopify OAuth app (un clic)**: diferido. El token-paste cubre el primer tramo de clientes managed. Migrar a OAuth cuando el volumen de clientes lo justifique.
 - **Email branded por Postmark**: el invite usa SMTP de Supabase ahora; migrar a plantilla Postmark cuando importe la marca/deliverability.
 - **Lifecycle por métricas**: descartado hoy (0 clientes para calibrar). Gating manual del AIDE.
 

@@ -5,8 +5,8 @@
 
 ## Contexto
 
-El modelo de negocio ([ADR 0002](0002-managed-ai-service-model.md)) promete
-**mejorar el agente cada semana**. Si cada ajuste de comportamiento (cambiar
+El equipo interno opera el agente de cada tenant y lo ajusta
+**cada semana**. Si cada ajuste de comportamiento (cambiar
 cuándo escala, afinar el tono, añadir una regla a las devoluciones) requiere un
 PR + review + deploy, la velocidad de iteración muere y la promesa comercial no
 se sostiene. Además distintos tenants necesitan comportamientos distintos para el

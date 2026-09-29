@@ -5052,7 +5052,7 @@ async def count_billable_resolutions(
     Una resolución cuenta si su resolved_at cae en el periodo y NO fue revertida, o
     fue revertida DESPUÉS de la ventana de reapertura (duró resuelta lo suficiente →
     resolución legítima). Si se revirtió DENTRO de la ventana no cuenta (mismo tema,
-    no estaba resuelto del todo) — PRD §2.3."""
+    no estaba resuelto del todo) — docs/billing-engine.md §2.3."""
     count = await conn.fetchval(
         """
         SELECT count(*)

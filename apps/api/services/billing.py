@@ -1,7 +1,7 @@
 """Billing por resolución — catálogo de tiers + cálculo de uso del periodo (Bloque 2).
 
 Sin imports de FastAPI; lanza DomainError que el handler global traduce a HTTP. La
-unidad de cobro es la resolución (PRD docs/billing-resolution-prd.md): el agente cerró
+unidad de cobro es la resolución (docs/billing-engine.md): el agente cerró
 la conversación sin escalar. Este módulo provee:
 - BILLING_TIERS: defaults del catálogo para crear suscripciones.
 - current_period_bounds: el periodo de facturación mensual anclado.
@@ -27,11 +27,11 @@ if TYPE_CHECKING:
 # Catálogo de tiers — DEFAULTS para CREAR suscripciones. No es la fuente de verdad de
 # un contrato vigente: cada suscripción guarda su propio snapshot de floor/included/
 # overage, así cambiar este catálogo no altera contratos ya firmados. Números del
-# PRD §4 (céntimos).
+# docs/billing-engine.md §4 (céntimos).
 #
 # ⚠️ PROVISIONALES — por validar con Founding Partners antes de fijarlos: el overage
 # exacto (€0,20 vs €0,25) y las resoluciones incluidas dependen del COGS real medido
-# en LangSmith (PRD §3.1, §6, decisiones abiertas). No tratar como verdad cerrada.
+# en LangSmith. No tratar como verdad cerrada.
 # `founding` se omite a propósito: tiene rampa per-cliente (se pasan valores explícitos).
 BILLING_TIERS: dict[BillingTier, dict[str, int]] = {
     "starter": {"floor_cents": 89_000, "included_resolutions": 1_000, "overage_cents": 25},
