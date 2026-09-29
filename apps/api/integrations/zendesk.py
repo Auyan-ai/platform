@@ -27,21 +27,8 @@ Config esperada en IntegrationContext:
         "escalation_group_id": "123"         # opcional — grupo al que asignar escalaciones
     }
 
-Payload esperado en el webhook de Zendesk (configurar en el Trigger de Zendesk):
-    {
-        "ticket_id":       "{{ticket.id}}",
-        "subject":         "{{ticket.title}}",
-        "content":         "{{ticket.latest_comment}}",
-        "requester_email": "{{ticket.requester.email}}",
-        "requester_name":  "{{ticket.requester.name}}",
-        "requester_id":    "{{ticket.requester.id}}",
-        "comment_id":      "{{ticket.latest_comment.id}}",
-        "author_id":       "{{ticket.latest_comment.author.id}}",
-        "subdomain":       "hardcoded-subdomain"
-    }
-
-    Nota: Zendesk no tiene variable {{subdomain}}.  El subdomain se hardcodea
-    en la configuración del Trigger una sola vez por cuenta.
+Payload del webhook: ver `routers/webhooks_zendesk.py`. Solo IDs; el contenido,
+el autor y el requester se leen de la API con `fetch_inbound_comment`.
 
 Verificación de firma HMAC:
     - Header X-Zendesk-Webhook-Signature (base64-HMAC-SHA256)
@@ -210,13 +197,25 @@ class ZendeskClient:
             "Content-Type": "application/json",
         }
 
-    async def _put_ticket(self, ticket_id: str, ticket: dict[str, Any]) -> dict[str, Any]:
-        """PUT /tickets/{id}. Con client credentials, un 401 invalida el token
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Request a la API v2. Con client credentials, un 401 invalida el token
         cacheado (revocado o rotado) y reintenta una sola vez con uno nuevo."""
-        url = f"{self.base_url}/tickets/{ticket_id}.json"
+        url = f"{self.base_url}{path}"
         async with httpx.AsyncClient(transport=self._transport) as client:
-            response = await client.put(
-                url, headers=await self._headers(), json={"ticket": ticket}, timeout=10
+            response = await client.request(
+                method,
+                url,
+                headers=await self._headers(),
+                json=json_body,
+                params=params,
+                timeout=10,
             )
             if response.status_code == 401 and self._uses_client_credentials:
                 logger.warning(
@@ -224,11 +223,35 @@ class ZendeskClient:
                     extra={"subdomain": self._subdomain},
                 )
                 self._invalidate_token()
-                response = await client.put(
-                    url, headers=await self._headers(), json={"ticket": ticket}, timeout=10
+                response = await client.request(
+                    method,
+                    url,
+                    headers=await self._headers(),
+                    json=json_body,
+                    params=params,
+                    timeout=10,
                 )
             response.raise_for_status()
-            return response.json()["ticket"]  # type: ignore[no-any-return]
+            return response.json()  # type: ignore[no-any-return]
+
+    async def _put_ticket(self, ticket_id: str, ticket: dict[str, Any]) -> dict[str, Any]:
+        data = await self._request(
+            "PUT", f"/tickets/{ticket_id}.json", json_body={"ticket": ticket}
+        )
+        return data["ticket"]  # type: ignore[no-any-return]
+
+    async def get_ticket_with_users(self, ticket_id: str) -> dict[str, Any]:
+        """Ticket + usuarios relacionados (requester, etc.) en una llamada."""
+        return await self._request("GET", f"/tickets/{ticket_id}.json", params={"include": "users"})
+
+    async def list_comments_desc(self, ticket_id: str) -> list[dict[str, Any]]:
+        """Comentarios del ticket, el más reciente primero (primera página)."""
+        data = await self._request(
+            "GET",
+            f"/tickets/{ticket_id}/comments.json",
+            params={"sort_order": "desc", "per_page": 100},
+        )
+        return list(data.get("comments") or [])
 
     # ── Comentarios / respuestas ──────────────────────────────────────────────
 
@@ -285,6 +308,44 @@ def verify_zendesk_signature(
     return hmac.compare_digest(expected, signature_header)
 
 
+# ─── Comentario inbound leído de la API ────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class ZendeskInboundComment:
+    """Comentario que disparó el webhook, con datos autoritativos de la API."""
+
+    ticket_id: str
+    comment_id: str
+    author_id: str
+    public: bool
+    content: str
+    requester_id: str
+    requester_email: str | None
+    requester_name: str | None
+    subject: str | None
+
+    @property
+    def from_requester(self) -> bool:
+        return self.author_id == self.requester_id
+
+
+def select_inbound_comment(
+    comments_desc: list[dict[str, Any]], comment_id: str | None
+) -> dict[str, Any] | None:
+    """El comentario indicado por el Trigger; si no viene (o no se encuentra), el
+    público más reciente."""
+    if comment_id is not None:
+        for comment in comments_desc:
+            if str(comment.get("id")) == comment_id:
+                return comment
+        logger.warning("zendesk_comment_id_not_found", extra={"comment_id": comment_id})
+    for comment in comments_desc:
+        if comment.get("public"):
+            return comment
+    return None
+
+
 # ─── Adapter stateless — implementa HelpdeskProvider ──────────────────────────
 
 
@@ -304,6 +365,39 @@ class ZendeskAdapter:
             api_token=creds.get("api_token"),
             client_id=creds.get("client_id"),
             client_secret=creds.get("client_secret"),
+        )
+
+    async def fetch_inbound_comment(
+        self, ctx: IntegrationContext, ticket_id: str, comment_id: str | None
+    ) -> ZendeskInboundComment | None:
+        """Lee de la API el comentario que disparó el webhook + su requester.
+
+        El payload del Trigger solo trae IDs: el texto libre rompe el JSON del
+        webhook (Zendesk no escapa los placeholders) y la API es la fuente de
+        verdad para el autor (anti-loop). None si el ticket no tiene comentarios.
+        """
+        client = self._client(ctx)
+        ticket_data = await client.get_ticket_with_users(ticket_id)
+        comment = select_inbound_comment(await client.list_comments_desc(ticket_id), comment_id)
+        if comment is None:
+            return None
+
+        ticket = ticket_data.get("ticket") or {}
+        requester_id = str(ticket.get("requester_id", ""))
+        requester = next(
+            (u for u in ticket_data.get("users") or [] if str(u.get("id")) == requester_id),
+            {},
+        )
+        return ZendeskInboundComment(
+            ticket_id=ticket_id,
+            comment_id=str(comment.get("id", "")),
+            author_id=str(comment.get("author_id", "")),
+            public=bool(comment.get("public")),
+            content=str(comment.get("plain_body") or comment.get("body") or ""),
+            requester_id=requester_id,
+            requester_email=requester.get("email"),
+            requester_name=requester.get("name"),
+            subject=ticket.get("subject") or None,
         )
 
     # ── MessageProvider ───────────────────────────────────────────────────────
