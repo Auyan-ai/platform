@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from apps.api.agents.state import AgentState
@@ -102,6 +102,27 @@ class _RunAccumulator:
     judge_model: str = DEFAULT_JUDGE_MODEL
     last_agent_messages: list[str] = field(default_factory=list)
 
+
+
+def sim_customer_email(run_id: object) -> str:
+    """Email del cliente sintético de una simulación (único por run)."""
+    return f"sim-{run_id}@simulator.auyan.internal"
+
+
+_ORDER_FIXTURE_KEYS = ("get_order_by_name", "get_order")
+
+
+def assign_mock_orders_to_customer(fixtures: dict[str, Any], email: str) -> dict[str, Any]:
+    """Los pedidos mock pertenecen al cliente simulado (mismo email), para que el
+    gate de ownership L3 (email cliente == email pedido) se comporte como con un
+    cliente real escribiendo desde su email. Un escenario que fije `email` en el
+    pedido (p. ej. para probar "no es el dueño") se respeta. No muta el original."""
+    shopify = dict((fixtures or {}).get("shopify") or {})
+    for key in _ORDER_FIXTURE_KEYS:
+        order = shopify.get(key)
+        if isinstance(order, dict) and "_error" not in order and not order.get("email"):
+            shopify[key] = {**order, "email": email}
+    return {**(fixtures or {}), "shopify": shopify}
 
 async def run_simulation(
     scenario_id: UUID,
@@ -333,7 +354,7 @@ async def _setup_run(
         end_customer = await create_end_customer(
             conn,
             tenant_id=tenant_id,
-            email=f"sim-{run_id}@simulator.auyan.internal",
+            email=sim_customer_email(run_id),
             full_name=f"[SIM] {profile.name}",
             metadata={"simulation": True, "profile_name": profile.name},
         )
@@ -372,7 +393,9 @@ async def _execute_loop(
 ) -> str:
     """Loop principal de la simulación. Retorna el termination_reason."""
     sim = UserSimulator(profile=profile, anthropic=anthropic)
-    fixtures = scenario.mock_fixtures
+    fixtures = assign_mock_orders_to_customer(
+        scenario.mock_fixtures, sim_customer_email(acc.run_id)
+    )
 
     # Turno 0: primer mensaje del cliente (sin LLM)
     first = sim.first_message()

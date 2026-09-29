@@ -149,6 +149,63 @@ async def _same_order_action(
     return await _refs_point_to_same_order(state, ref_a, ref_b)
 
 
+_OWNERSHIP_ERROR = (
+    "order_ownership_not_verified: por seguridad, las acciones sobre un pedido solo "
+    "se pueden pedir desde el email con el que se hizo la compra, y este mensaje no "
+    "viene de ese email. Explícaselo al cliente con amabilidad y pídele que escriba "
+    "desde el email de la compra. No reintentes la acción ni reveles el email del pedido."
+)
+
+
+def _same_email(a: str | None, b: str | None) -> bool:
+    return bool(a and b and a.strip().casefold() == b.strip().casefold())
+
+
+async def _l3_ownership_error(state: AgentState, raw_input: dict[str, Any]) -> str | None:
+    """Gate de ownership (código, no LLM) para skills L3 que actúan sobre un pedido.
+
+    Devuelve un error si el email del cliente de la conversación no coincide con el
+    email del pedido. Fail-closed: sin email del cliente, pedido no encontrado o
+    error resolviéndolo → bloquea. Skills sin `order_id` no se comprueban aquí.
+    Verificación por niveles (OTP, sesión firmada) → issue #257.
+    """
+    order_ref = _normalize_order_ref(raw_input.get("order_id"))
+    if order_ref is None:
+        return None
+    ctx = build_skill_context(state)
+    adapter: Any = ctx.commerce_mock
+    if adapter is None and ctx.integration_ctx is not None:
+        from apps.api.integrations.shopify import ShopifyAdapter
+
+        adapter = ShopifyAdapter()
+    order: dict[str, Any] | None = None
+    if adapter is not None:
+        try:
+            order = await adapter.get_order_by_name(ctx.integration_ctx, order_ref)
+            if not order:
+                order = await adapter.get_order(ctx.integration_ctx, order_ref)
+        except Exception:
+            logger.warning("l3_ownership_order_resolution_failed ref=%s", order_ref)
+            order = None
+    order_email = None
+    if order:
+        order_email = order.get("email") or (order.get("customer") or {}).get("email")
+    if _same_email(ctx.customer_email, order_email):
+        return None
+    logger.warning(
+        "l3_ownership_blocked",
+        extra={
+            "tenant_id": state.get("tenant_id"),
+            "conversation_id": state.get("conversation_id"),
+            "order_ref": order_ref,
+            "reason": "no_customer_email"
+            if not ctx.customer_email
+            else ("order_unresolved" if not order else "email_mismatch"),
+        },
+    )
+    return _OWNERSHIP_ERROR
+
+
 def _l3_requires_human_approval(skill_cls: type[Skill], perm: dict[str, Any]) -> bool:
     """Piso de seguridad para skills L3 (destructivas / irreversibles).
 
@@ -258,6 +315,31 @@ def make_execute_skill_node(
                     error=tier_error,
                 )
             )
+
+        # Ownership en código: una L3 sobre un pedido solo la pide su dueño (email).
+        if skill_cls.tier == "L3":
+            ownership_error = await _l3_ownership_error(state, raw_input)
+            if ownership_error is not None:
+                auditor.log(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    aop_slug=state.get("aop_slug") or "unknown",
+                    aop_version=state.get("aop_version") or 0,
+                    skill_slug=slug,
+                    skill_tier=skill_cls.tier,
+                    inputs_raw=raw_input,
+                    status="rejected_by_permissions",
+                    error_message="order_ownership_not_verified",
+                    langfuse_trace_id=state.get("langfuse_trace_id"),
+                )
+                return _append_and_finish(
+                    _error_entry(
+                        tool_use_id=tool_use_id,
+                        slug=slug,
+                        raw_input=raw_input,
+                        error=ownership_error,
+                    )
+                )
 
         # Piso L3: exige aprobación humana salvo opt-out explícito y reconocido.
         if _l3_requires_human_approval(skill_cls, perm):
