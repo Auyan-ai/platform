@@ -14,10 +14,21 @@ Payload esperado (configurar en el Zendesk Trigger → Webhook):
         "content":         "{{ticket.latest_comment_html_stripped}}",
         "requester_email": "{{ticket.requester.email}}",
         "requester_name":  "{{ticket.requester.name}}",
+        "requester_id":    "{{ticket.requester.id}}",
+        "comment_id":      "{{ticket.latest_comment.id}}",
+        "author_id":       "{{ticket.latest_comment.author.id}}",
         "subdomain":       "hardcoded-subdomain"
     }
 
     Nota: Zendesk no tiene variable {{subdomain}}. Se hardcodea una vez por cuenta.
+
+Idempotencia: por comentario (`zendesk:{ticket_id}:{comment_id}`). Sin `comment_id`
+se usa un hash del contenido — deduplica retries sin bloquear mensajes distintos
+del mismo ticket.
+
+Anti-loop: la respuesta pública del agente re-dispara el Trigger. Dos capas:
+la condición del Trigger (Current user = end user) y aquí, si el payload trae
+`author_id` + `requester_id`, se ignora todo comentario que no sea del requester.
 
 Seguridad HMAC:
     - Headers: X-Zendesk-Webhook-Signature + X-Zendesk-Webhook-Signature-Timestamp
@@ -27,6 +38,7 @@ Seguridad HMAC:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from typing import Annotated, Any
@@ -72,13 +84,46 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 def get_agent_service(request: Request) -> AgentService:
     svc = getattr(request.app.state, "agent_service", None)
     if svc is None:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE, detail="agent_service_not_ready"
-        )
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="agent_service_not_ready")
     return svc
 
 
 AgentServiceDep = Annotated["AgentService", Depends(get_agent_service)]
+
+
+def _placeholder_value(value: Any) -> str | None:
+    """Normaliza un campo del payload del Trigger.
+
+    Zendesk deja vacío un placeholder sin valor y manda literal uno que no
+    reconoce (`{{...}}`): ambos casos cuentan como ausente.
+    """
+    text = str(value if value is not None else "").strip()
+    if not text or "{{" in text:
+        return None
+    return text
+
+
+def _zendesk_idempotency_key(payload: dict[str, Any]) -> str | None:
+    """Clave de idempotencia por comentario (no por ticket)."""
+    ticket_id = _placeholder_value(payload.get("ticket_id"))
+    if ticket_id is None:
+        return None
+    comment_id = _placeholder_value(payload.get("comment_id"))
+    if comment_id is not None:
+        return f"zendesk:{ticket_id}:{comment_id}"
+    content = str(payload.get("content") or "").strip()
+    digest = hashlib.sha256(content.encode()).hexdigest()[:16]
+    return f"zendesk:{ticket_id}:c{digest}"
+
+
+def _is_from_requester(payload: dict[str, Any]) -> bool | None:
+    """True si el último comentario es del requester, False si es de otro usuario
+    (agente IA, agente humano), None si el payload no trae datos de autor."""
+    author_id = _placeholder_value(payload.get("author_id"))
+    requester_id = _placeholder_value(payload.get("requester_id"))
+    if author_id is None or requester_id is None:
+        return None
+    return author_id == requester_id
 
 
 @router.post(
@@ -104,6 +149,20 @@ async def zendesk_webhook(
     if not content.strip():
         return {"received": True, "processed": False}
 
+    # Anti-loop: sin efectos secundarios, así que va antes de resolver el tenant.
+    from_requester = _is_from_requester(payload)
+    if from_requester is False:
+        logger.info(
+            "zendesk_webhook_ignored_non_requester_comment",
+            extra={"subdomain": subdomain, "ticket_id": str(payload.get("ticket_id", ""))},
+        )
+        return {"received": True, "processed": False, "ignored": "non_requester_comment"}
+    if from_requester is None:
+        logger.warning(
+            "zendesk_webhook_without_author_data",
+            extra={"subdomain": subdomain, "ticket_id": str(payload.get("ticket_id", ""))},
+        )
+
     # 3. Resolver tenant por subdomain.
     async with bootstrap_connection() as conn:
         integration = await get_integration_by_zendesk_subdomain(conn, subdomain=subdomain)
@@ -118,9 +177,7 @@ async def zendesk_webhook(
             conn, tenant_id=tenant_id, integration_id=integration.id
         )
     if encrypted is None:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, detail="credentials_not_found"
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="credentials_not_found")
     crypto_key = get_integration_crypto_key(settings)
     credentials = json.loads(decrypt_credentials(encrypted, crypto_key).decode())
 
@@ -130,9 +187,7 @@ async def zendesk_webhook(
         sig_header = request.headers.get("X-Zendesk-Webhook-Signature", "")
         sig_ts = request.headers.get("X-Zendesk-Webhook-Signature-Timestamp", "")
         if not sig_header or not sig_ts:
-            raise HTTPException(
-                status.HTTP_401_UNAUTHORIZED, detail="missing_signature_headers"
-            )
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="missing_signature_headers")
         if not verify_zendesk_signature(
             signing_secret=signing_secret,
             timestamp=sig_ts,
@@ -170,9 +225,14 @@ async def zendesk_webhook(
             settings=settings,
         )
 
-    # 7. Idempotencia usando ticket_id de Zendesk.
+    # 7. Idempotencia por comentario de Zendesk.
     zendesk_ticket_id = str(payload.get("ticket_id", ""))
-    idempotency_key = f"zendesk:{zendesk_ticket_id}" if zendesk_ticket_id else None
+    idempotency_key = _zendesk_idempotency_key(payload)
+    if idempotency_key is not None and _placeholder_value(payload.get("comment_id")) is None:
+        logger.warning(
+            "zendesk_webhook_without_comment_id",
+            extra={"tenant_id": str(tenant_id), "ticket_id": zendesk_ticket_id},
+        )
     idempotency_claimed = False
 
     if idempotency_key:
