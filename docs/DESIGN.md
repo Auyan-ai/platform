@@ -11,7 +11,7 @@
 Toda decisión visual del producto pasa por acá. Si vas a tocar un componente, una página, o dudás entre dos opciones, **lee esto primero**. Si lo que vas a hacer no encaja con lo escrito, paramos, lo discutimos, y se actualiza el documento ANTES de tocar código.
 
 Convive con:
-- `docs/auyan-master-context.md` — fuente de verdad del negocio (sección 12 define las decisiones de UX).
+- `docs/architecture-overview.md` — visión general técnica (§4 define dashboards y niveles de edición).
 - `docs/architecture-web.md` — arquitectura técnica del frontend.
 - `CLAUDE.md` (raíz) — reglas operativas del proyecto.
 

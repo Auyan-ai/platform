@@ -1,6 +1,6 @@
 # Arquitectura — Web app operativa (`apps/web`)
 
-_Documento actualizado post-pivot el 2026-05-28. La fuente conceptual manda en [`docs/auyan-master-context.md`](auyan-master-context.md); el estado operativo manda en [`docs/progress.md`](progress.md). Este archivo describe la arquitectura real de `apps/web` después del pivot BPO → Managed AI Service._
+_Documento actualizado post-pivot el 2026-05-28. La visión general está en [`docs/architecture-overview.md`](architecture-overview.md); el estado operativo manda en [`docs/progress.md`](progress.md). Este archivo describe la arquitectura real de `apps/web` después del pivot BPO → Managed AI Service._
 
 ---
 
@@ -290,14 +290,14 @@ El plan Sprint 3 original queda histórico. El estado operativo vigente lo manda
 | 1.0 | ✅ completo | Design Sprint: `DESIGN.md`, tokens, primitives, refactor shell Mercury light. |
 | 1.1 | ✅ completo | `tenant_playbook` table + queries + UI super_admin editor. |
 | 1.2 | ✅ completo | `tenant_facts` table + form cliente + lectura del agente como contexto estructurado. |
-| 1.3 | ✅ completo | Onboarding wizard self-serve 9 pasos + `agent_lifecycle_state` + comunicaciones email. |
+| 1.3 | ✅ completo | Onboarding guiado por invitación (9 pasos) + `agent_lifecycle_state` + comunicaciones email. |
 | 1.4 | ✅ completo | KB drop-zone + cola pending review + UI super_admin procesamiento. |
 | 1.5 | ✅ completo | Reporte semanal automatizado: `weekly_reports` + cron lunes + UI aprobación + Postmark. |
 | 1.6 | ✅ completo | Dashboard cliente 7 secciones MVP con data viz. |
 | 1.7 | ✅ completo | Dashboard super_admin Home/Review Queue + filtros por rol. |
 | 1.8 | ✅ completo | `apps/landing` + Aceternity UI-style + páginas públicas + Plausible. |
 | 1.9 | ✅ completo | Email outbound general: templates editables + queue + retry logic + consola interna. |
-| 1.10 | ⏭️ operativo | Billing manual primeros 1–2 clientes; runbook base en `docs/billing-manual.md`; Stripe queda para Bloque 2. |
+| 1.10 | ⏭️ operativo | Facturación manual (fuera del producto) para los primeros clientes; Stripe queda para Bloque 2. |
 
 ---
 

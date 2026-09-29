@@ -18,27 +18,16 @@ _Última actualización: 2026-07-02 (sesión 75 — **Arranque de prospección: 
 > _Sesión 60 — **Fix #5 intent-switch continuity-aware** ([#167](https://github.com/Auyan-ai/platform/pull/167) MERGEADO, cierra 5/5 fixes de grafo) + **dogfood E2E sobre Marea** (Fix #5 multi-turno + order_status #1181 + returns/refunds + **Chatwoot real**) → destapó hallazgos #168 (política KB/facts) y #169 (token Shopify en claro), MERGEADOS._
 > _Sesión 59 — **AOPs canónicos + fixes de grafo**. (1) Diseñados y verificados uno a uno los 8 AOPs por defecto de e-commerce ES en [`docs/aop-canonical-design.md`](aop-canonical-design.md). (2) **PR #1 [#163](https://github.com/Auyan-ai/platform/pull/163) MERGEADO**: provisioning copy-on-create — cada tenant nace con sus 8 AOPs + permisos (L1/L2 auto, L3 con approval) vía hook en `provision_tenant`; `aops/canonical.py` es la fuente de verdad + `scripts/seed_canonical_aops.py` para backfill. (3) Fixes de grafo (PR #2): [#164](https://github.com/Auyan-ai/platform/pull/164) (cablear `confidence_threshold` + `require_supervision` por-AOP, antes muertos; guard anti prompt-injection) y [#165](https://github.com/Auyan-ai/platform/pull/165) (fecha/hora TZ-aware del tenant + dep `tzdata`) — **AMBOS ABIERTOS, esperan review/merge**. (4) **Backfill aplicado en staging**: Marea Studio (8 nuevos) y Lunaria (6 nuevos + returns/default actualizados a canónico, `consulta_envio` viejo desactivado) — los 8 canónicos activos + 11 permisos en ambos. PENDIENTE: **Fix #5 intent-switch en sesión nueva** — ver sección abajo)._
 
-> Historial completo en [`docs/progress-archive.md`](progress-archive.md). Contexto estratégico en [`docs/auyan-master-context.md`](auyan-master-context.md).
+> Historial completo en [`docs/progress-archive.md`](progress-archive.md).
 
 ---
 
-## 🚀 Arranque sesión 76 — el outreach manda
+## 🔄 Retomada (2026-09) — modelo managed, docs limpios
 
-**Modelo:** Sonnet para todo lo rutinario. Opus/Fable solo si vuelve a tocarse diseño del grafo, billing o RLS — que **no debería pasar este mes**.
+Kenny retoma el proyecto para validarlo como **Managed AI Service**: Auyan pone el producto y opera integraciones, errores y mejora de la tasa de resolución. Sin self-serve.
+El repo queda **solo con lo relacionado con código**: se eliminaron los docs de negocio/GTM (auditoría, market analysis, discovery, GTM plan, case study, billing manual, outreach log, master context, ADR 0002). Lo técnico del master context pasó a [`architecture-overview.md`](architecture-overview.md) y lo técnico del PRD de billing a [`billing-engine.md`](billing-engine.md).
 
-**Foco único: GTM.** Plan vivo en [`gtm-plan-2026-07.md`](gtm-plan-2026-07.md); targets en [`discovery-targets.md`](discovery-targets.md); registro en [`outreach-log.csv`](outreach-log.csv).
-
-1. **Formulario Tally** (9 preguntas de `customer-discovery.md` §6) — lo monta Kenny a mano, 10 min. Necesario antes de mandar mensajes que lo ofrezcan como fallback (el de Zapato Feroz no lo menciona → puede salir sin esperar).
-2. **Mandar el primer mensaje.** Redactados y listos en `discovery-targets.md`. Registrar fecha/persona/canal/variante en el CSV.
-3. **Cada viernes:** calcular tasas por cohorte/rol/variante. Si <20% de respuesta tras 15 mensajes → reescribir el mensaje, no insistir.
-4. **Decidir el overage (€0,20 vs €0,25)** antes de la primera llamada de oferta — hay inconsistencia entre `billing-manual.md` (€/ticket) y `billing-resolution-prd.md` (€/resolución, manda). Ancla: COGS real medido €0,071/resolución (s64).
-5. **Demo path (solo semana 3, contra un prospect real):** pulir las 2-3 pantallas que ese prospect vería (aprobaciones ✅ ya legible tras #241, conversaciones, razones de escalado). No pulir frontend antes: es build-first avoidance.
-
-**⚠️ El calendario del GTM arrancaba el 2-jul y quedó parado** (Kenny volvió el 16-jul; el GTM se movió a otro chat). Re-anclar las semanas del plan a la fecha real de arranque antes de usarlo como cronograma.
-
-**Track técnico — CONGELADO a propósito.** Solo se descongela si un prospect lo pide para SU piloto:
-- **Zendesk E2E:** parado por decisión de Kenny hasta que un cliente lo pida expresamente (código listo, #232).
-- **Latencia, billing (Stripe + suscripciones), backlog de la auditoría (#2 race de concurrencia, #3 outbound best-effort):** se mantienen como están. Detalle completo abajo en "Arranque sesión 73".
+**Track técnico:** se mantiene como estaba en "Arranque sesión 73" (abajo).
 - **🔴 Sigue vivo de la s73:** rotar el access token de Shopify de Marea (estuvo expuesto en LangSmith entre #237 y #238).
 
 ---
@@ -56,7 +45,6 @@ _Última actualización: 2026-07-02 (sesión 75 — **Arranque de prospección: 
 2. **🟠 Zendesk — verificación E2E en vivo** (CÓDIGO listo, [#232] mergeado: dual-auth API token/Basic + provider `zendesk` en `configure_staging_integrations`). Falta: crear API token en un Zendesk sandbox → `railway run … configure_staging_integrations --tenant marea-studio --only zendesk` (con la `INTEGRATIONS_SECRET_KEY` de staging, o InvalidTag/500) → configurar el Trigger→Webhook → probar resolución/cierre/reapertura/escalado. Confirmar el outbound (`add_comment` público) contra la API real, como se hizo con Gorgias. (El enum `channel_type` ya tenía `zendesk` → sin migración.)
 3. **🟡 Latencia — cerrar en vivo** (PROMPT listo, [#233] mergeado: el AOP `returns` verifica la política ANTES de afirmar plazos → mata el reject+retry del supervisor). Falta: `railway run -- … seed_canonical_aops --update` para que **Marea** herede el AOP nuevo → **curar `tenant_facts` de Marea** con la política de devoluciones (`return_window_days`, etc.) para que el agente la lea inyectada y se ahorre hasta el `get_shop_policies` → medir hops antes/después con `railway logs -d | grep llm_call` + traces. (Rollout de `smalltalk` a Lunaria/Purigu **descartado**: son simuladores, no aporta.)
 4. **🟡 Billing — activar** (MOTOR listo, [#234] mergeado: `resolution_events` + conteo con ventana §2.3 + tiers + `GET /usage` + `PUT /subscription` + hooks). Falta: aplicar la migración (ver arriba) → crear la suscripción de cada tenant real (`PUT /billing/subscription` super_admin, o `upsert_billing_subscription`; sin ella `GET /usage` da 404 honesto) → **Stripe = siguiente trozo de código** (subscription=suelo, metered=overage + webhook; necesita `STRIPE_API_KEY` + productos/precios en su dashboard) → medir **COGS real** en LangSmith antes de fijar el overage (€0,20 vs €0,25; ancla €0,071 s64).
-5. **🧭 Customer Discovery (foco estratégico, regla dura).** El [`market-analysis-2026-06.md`](market-analysis-2026-06.md) recomienda **bifurcar en 2 cohortes**: 5 e-commerce escenario 4 (quemados de Gorgias/Permut/GuruSup) + 5 comercializadoras de energía independientes (driver Ley 10/2025, deadline 28-dic-2026). NO pivotar; el dato decide. Pendientes de verificación antes de pitch: texto art. 2 Ley 10/2025, cliente Mundimoto↔Permut (sin fuente pública).
 
 **Hecho en sesión 72 (autónoma, 3 PRs MERGEADOS, suite 1306 verde):** ~~Zendesk E2E (código)~~ ✅ [#232] dual-auth API token/Basic (espejo de Gorgias) + provider `zendesk` en configure (el enum ya tenía zendesk → sin migración; outbound shape estándar) — falta E2E en vivo (punto 2); ~~Latencia HOPS (prompt)~~ ✅ [#233] el AOP returns secuencia "verificar antes de afirmar" → mata el reject+retry — falta re-seed Marea + curar facts + medir (punto 3); ~~Billing Bloque 2 (motor)~~ ✅ [#234] resolution_events + conteo con ventana §2.3 + tiers + endpoint + hooks — Stripe + aplicar migración + crear suscripciones = manual (punto 4). Rollout `smalltalk` descartado (simuladores). **Post-merge:** las 2 migraciones nuevas aplicadas a staging y el flujo completo verificado EN VIVO sobre Marea (turno de devoluciones: `respond` sin error → política real → `resolution_event` creado).
 **Hecho en sesión 71:** ~~Re-auditoría de robustez del grafo~~ ✅ + ~~hallazgo 🔴 L3-sin-approval cerrado~~ ✅ (PR1 piso `_l3_requires_human_approval` + migración `l3_autonomy_acknowledged_at/_by` NULL=fail-safe + propagación al state; PR2 endpoint 422 sin `acknowledge_l3_autonomy` + `upsert` sella/limpia). 1297 verde. **Falta:** correr la migración en staging + PR a develop. Backlog auditoría #2/#3 abierto (ver punto 0).
@@ -127,7 +115,7 @@ Target del dogfood: **Marea Studio** (`683246c2-10ce-4f6c-a299-5053f32f8c01`, sl
 | D | Mensaje al cliente = volcado crudo del output (slug + dict) → redactado con **Haiku** (`services/approval_reply`, fallback plantilla) | ✅ [#177](https://github.com/Auyan-ai/platform/pull/177) |
 | E | Los mensajes del flujo L3 (escalate "en revisión" + confirmación al aprobar) **no llegaban al cliente** en el widget. E1: webhooks solo entregaban en `respond`. E2: approve/reject no despachaban al helpdesk (`services/helpdesk_delivery`) | ⏳ [#178](https://github.com/Auyan-ai/platform/pull/178) ABIERTO |
 
-**Decisión de producto (quién aprueba L3):** ambos roles, cada uno desde su dashboard — `tenant_admin` los suyos vía `/clients`, `super_admin` vía el dashboard interno. La API ya aísla por tenant, así que **no** se añade `require_role` al router de approvals. (Auto-graduación de skills a automático y self-service de AOPs = roadmap.)
+**Decisión de producto (quién aprueba L3):** ambos roles, cada uno desde su dashboard — `tenant_admin` los suyos vía `/clients`, `super_admin` vía el dashboard interno. La API ya aísla por tenant, así que **no** se añade `require_role` al router de approvals. (Auto-graduación de skills a automático = roadmap.)
 
 **Operativo:** página de prueba del widget en `apps/api/scripts/chatwoot_widget_test.html` (websiteToken de Purigu; **sin commitear**). Servirla con `python3 -m http.server 8899 --directory apps/api/scripts` → `http://localhost:8899/chatwoot_widget_test.html`.
 
@@ -164,24 +152,6 @@ Target del dogfood: **Marea Studio** (`683246c2-10ce-4f6c-a299-5053f32f8c01`, sl
 
 ---
 
-## Foco actual — Customer Discovery (sesión 53)
-
-**Diagnóstico:** ~75k líneas, ~90% del stack, **0 clientes reales** entrevistados. Lunaria es simulador, no cliente. La ansiedad por la competencia (Sierra, Decagon, Permut, GuruSup, ElevenLabs) es síntoma: el diferenciador de Auyan no es la calidad del agente (table-stakes en 2026), es la **operación gestionada** del agente para el segmento.
-
-**Regla dura:** no tocar el agente hasta mandar 3 mensajes de descubrimiento. Interés ≠ demanda.
-
-**Objetivo de la semana:** 10 marcas ICP → 3 mensajes → 3 conversaciones.
-
-**ICP Starter:** Shopify España, 2,5–5 M€ facturación, 500–1.000 tickets/mes, ≥1 persona cuyo trabajo sea CX (filtro duro). Dos cohortes a partes iguales — **ya-usa-bot** (Gorgias AI / Tidio / Intercom Fin / Zendesk AI) vs **no-bot**; el contraste ES el mapa de mercado.
-
-Plan completo en [`docs/customer-discovery.md`](customer-discovery.md): reencuadre, mensaje de outreach verbatim, formulario de 9 preguntas, e hipótesis testeables de pricing / wedge / GTM.
-
-**✅ HECHO (sesión 75, 2026-07-02):** [`docs/discovery-targets.md`](discovery-targets.md) con 10 marcas reales, stack verificado por view-source (no inventado) + [`docs/gtm-plan-2026-07.md`](gtm-plan-2026-07.md) (plan de ejecución del mes) + [`docs/outreach-log.csv`](outreach-log.csv) (registro para medir el embudo). El objetivo de "10 marcas → 3 mensajes" de arriba se queda corto para cerrar cliente: el plan de julio lo sube a **30 mensajes** (ver el embudo en el GTM).
-
-**Seguridad:** repo `Auyan-ai/platform` ahora **privado** (antes público con docs de estrategia expuestos, 0 forks). `.gitignore` no borra historia ya commiteada — privado es el fix limpio.
-
----
-
 ## Sistema de onboarding productizado — Fase 1 cerrada
 
 **Plan completo:** [`docs/onboarding-system-plan.md`](onboarding-system-plan.md) (cerrado vía /grill-me sesión 56). Modelo: managed por invitación (no signup público), 4 fases, dogfood en tienda Shopify real (Marea Studio).
@@ -209,7 +179,7 @@ Plan completo en [`docs/customer-discovery.md`](customer-discovery.md): reencuad
 
 ---
 
-## Bloque 1 — Sprint A en progreso
+## Bloque 1 — Sprint A (técnico completo)
 
 ### Completado y archivado
 
@@ -225,23 +195,6 @@ Plan completo en [`docs/customer-discovery.md`](customer-discovery.md): reencuad
 | 1.7 | Review Queue interna cross-tenant | ✅ [PR #115](https://github.com/Auyan-ai/platform/pull/115) |
 | 1.8 | Landing pública `apps/landing` + Plausible | ✅ [PR #117](https://github.com/Auyan-ai/platform/pull/117) |
 | 1.9 | Email outbound general: templates + queue + retry + UI | ✅ [PR #119](https://github.com/Auyan-ai/platform/pull/119)–[#121](https://github.com/Auyan-ai/platform/pull/121) |
-
-### Sub-PR 1.10 — Billing manual primeros clientes
-
-**Objetivo:** cerrar operación manual de cobro para los primeros 1–2 clientes antes de abrir Stripe/Billing técnico en Bloque 2.
-
-Estado: runbook creado; bloqueado por inputs externos por cliente. No es el foco activo mientras se prioriza la verificación del agente.
-
-Runbook base:
-
-- [`docs/billing-manual.md`](billing-manual.md) — política Founding Partner, tiers, checklist por cliente y flujo factura + transferencia.
-
-Faltan inputs externos por cliente:
-
-1. Definir precio final acordado por cliente y responsable comercial.
-2. Confirmar datos fiscales y destinatario de facturación.
-3. Confirmar contacto operativo y fecha de inicio de servicio.
-4. Registrar factura manual enviada y estado de cobro fuera del producto.
 
 ### Nota viva — Shopify content import / KB bootstrap
 
@@ -358,9 +311,8 @@ No mover esto a "Siguiente paso" mientras Customer Discovery + onboarding sigan 
 ## Referencias rápidas
 
 - [`docs/progress-archive.md`](progress-archive.md) — historial completo.
-- [`docs/customer-discovery.md`](customer-discovery.md) — plan de descubrimiento de clientes (sesión 53).
-- [`docs/billing-manual.md`](billing-manual.md) — pricing, tiers, ICP y billing manual.
-- [`docs/auyan-master-context.md`](auyan-master-context.md) — fuente única de verdad negocio + producto.
+- [`docs/architecture-overview.md`](architecture-overview.md) — visión general técnica (punto de entrada).
+- [`docs/billing-engine.md`](billing-engine.md) — motor de billing por resolución.
 - [`docs/architecture-agent-v2.md`](architecture-agent-v2.md) — arquitectura técnica del agente.
 - [`docs/architecture-web.md`](architecture-web.md) — arquitectura dashboard web.
 - [`docs/DESIGN.md`](DESIGN.md) — sistema visual vigente.

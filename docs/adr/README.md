@@ -13,7 +13,7 @@ un ADR nuevo que la supersede y se actualiza el `Estado` del viejo.
 | # | Decisión | Estado |
 |---|----------|--------|
 | [0001](0001-multi-tenant-rls.md) | Multi-tenancy con `tenant_id` + Row Level Security (una sola base de datos) | Aceptada |
-| [0002](0002-managed-ai-service-model.md) | Modelo de negocio: Managed AI Service (no BPO, no SaaS self-serve) | Aceptada |
+| 0002 | _Retirado: era una decisión de negocio, no de arquitectura_ | — |
 | [0003](0003-langgraph-agent.md) | Agente como grafo de estados (LangGraph) en vez de prompt monolítico | Aceptada |
 | [0004](0004-aops-runtime-editable.md) | Comportamiento del agente en AOPs editables en runtime (no en código) | Aceptada |
 | [0005](0005-skills-tiered-l1-l2-l3.md) | Skills tipadas con niveles de riesgo L1/L2/L3 y approval humano | Aceptada |

@@ -414,7 +414,7 @@ class TenantFacts(_BaseModel):
 
 
 class TenantOnboarding(_BaseModel):
-    """Estado del wizard self-serve del cliente.
+    """Estado del wizard de onboarding guiado del cliente.
     `step_data` agrupa las respuestas por número de paso ("1".."9")."""
 
     tenant_id: UUID
@@ -654,7 +654,7 @@ class SimulationRun(_BaseModel):
 
 
 # ─── Billing por resolución (Bloque 2) ──────────────────────────────────────────
-# PRD: docs/billing-resolution-prd.md. La unidad de cobro es la resolución (el
+# Doc: docs/billing-engine.md. La unidad de cobro es la resolución (el
 # agente cerró la conversación sin escalar).
 
 BillingTier = Literal["starter", "growth", "scale", "founding"]
@@ -663,7 +663,7 @@ BillingTier = Literal["starter", "growth", "scale", "founding"]
 class ResolutionEvent(_BaseModel):
     """Una resolución cobrable (log append-only). `reverted_at` se anota si el cliente
     reabre el mismo thread; el conteo de billing decide si descuenta según la ventana
-    de reapertura (PRD §2.3) — la fila nunca se borra."""
+    de reapertura (docs/billing-engine.md §2.3) — la fila nunca se borra."""
 
     id: UUID
     tenant_id: UUID

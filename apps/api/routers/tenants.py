@@ -1260,7 +1260,7 @@ async def submit_my_tenant_onboarding(
 
 
 # ----------------------------------------------------------------
-# Integraciones del tenant (conexión self-service durante onboarding)
+# Integraciones del tenant (el cliente las conecta durante el onboarding guiado)
 # ----------------------------------------------------------------
 
 # El handler entrante sólo procesa message_created + incoming, así que ese es

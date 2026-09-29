@@ -16,9 +16,10 @@ quiz her with open-ended or multiple choice questions with AskUserQuestion (be s
 /goal the session should not end until you've verified that the human has demonstrated that she understood everything on your list.
 
 ## Contexto
-Auyan es un **Managed AI Service** para CX support, verticalizando primero en e-commerce español.
-Modelo: configuramos, mantenemos y optimizamos el agente IA del cliente. El cliente conserva su propio equipo de soporte para escalados. Auyan es su equipo externo de Agent Engineers.
-No es BPO. No hay agentes humanos de Auyan atendiendo tickets.
+Auyan opera el agente IA de CX de cada cliente (e-commerce). Restricción técnica que se deriva de eso:
+- El cliente no configura el agente: no hay signup público ni self-serve. Los tenants los crea `super_admin` y el cliente entra por invitación (magic link).
+- Prompts, AOPs, RAG y activación los gestiona el equipo interno; el cliente solo aporta KB, edita `tenant_facts` y aprueba acciones L3.
+- Los escalados van al equipo de soporte del propio cliente, vía su helpdesk.
 No vocees, habla acento caraqueño venezolano, tuteame.
 
 ## Stack
@@ -148,7 +149,9 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - utils/ → funciones utilitarias comunes
 
 ### docs
-- auyan-master-context.md → fuente única de verdad del negocio + arquitectura post-pivot
+- architecture-overview.md → punto de entrada técnico (stack, roles, onboarding, roadmap)
+- billing-engine.md → motor de billing por resolución
+- adr/ → decisiones de arquitectura
 - architecture-agent-v2.md → detalle técnico del agente v2 (Skills, AOPs, Supervisor, Slow Agent)
 - progress.md → bitácora operativa de sprints terminados y próximos pasos
 
@@ -172,4 +175,4 @@ Labels canónicos: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-h
 
 ### Domain docs
 
-Single-context: un `CONTEXT.md` + `docs/adr/` en la raíz.
+Decisiones en `docs/adr/`. Aún no existe `CONTEXT.md`.

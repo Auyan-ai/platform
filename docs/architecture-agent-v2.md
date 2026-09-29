@@ -1450,16 +1450,16 @@ El "Sprint 12 — Unified KB + Zendesk bidireccional + reapertura" fue **descart
 - **Unified KB** (pipeline humano→KB) se reformula como **drop-zone del cliente con curación Auyan** + tabla `tenant_playbook` (NO Notion). Va en Bloque 1.
 - **Reapertura de conversaciones** (`previous_conversation_id`) se mantiene como deuda técnica pequeña, queda en Bloque 4 backlog.
 
-El plan post-pivot se organiza en **Bloques 0-3** que reflejan el nuevo modelo Managed AI Service. Detalle completo en `docs/auyan-master-context.md` sección 18.
+El plan post-pivot se organiza en **Bloques 0-3** que reflejan el nuevo modelo Managed AI Service. Pendientes y backlog en `docs/architecture-overview.md` §5.
 
 ### Bloques post-pivot
 
 | Bloque | Foco | Entrega clave |
 |---|---|---|
 | **0** | Sanity check + fundación arquitectónica (3-4 sem) | Hard removal `tenant_agent`, framework adapters (`MessageProvider` + `HelpdeskProvider`), 4 adapters (Shopify + Chatwoot + Zendesk + Gorgias + Postmark outbound), roles internos estructura DB, AOPs `steps[]` opcional, **Simulator MVP con judge 4-dim**, validación E2E |
-| **1** | Sprint A — habilita vender (5-7 sem) | **Design Sprint** (DESIGN.md), onboarding self-serve 9 pasos, `tenant_playbook` + `tenant_facts`, reporte semanal automatizado, lifecycle phases + comunicaciones, KB drop-zone, dashboard cliente 7 secciones MVP, dashboard super_admin con Home/Review Queue, landing (`apps/landing` + Aceternity UI), email outbound |
+| **1** | Sprint A — habilita vender (5-7 sem) | **Design Sprint** (DESIGN.md), onboarding guiado por invitación (9 pasos), `tenant_playbook` + `tenant_facts`, reporte semanal automatizado, lifecycle phases + comunicaciones, KB drop-zone, dashboard cliente 7 secciones MVP, dashboard super_admin con Home/Review Queue, landing (`apps/landing` + Aceternity UI), email outbound |
 | **2** | Sprint Duet + Billing + UI pulida (6-8 sem) | Stripe Subscriptions + Tax + cupón FP, simulator auto-gen (personas + scenarios), bulk runner + scheduled nightly, **Diagnostic Tools** (Escalation Drivers + AOP Flow Analysis), **Watchtower** (rubrics custom), **AI Data Assistant cliente**, promotion gate robusto |
-| **3** | Producción A/B + canary + escala (6-8 sem) | `agent_traffic_splits` por (tenant, AOP_version), production A/B con métricas comparativas, **canary deployment 5%→25%→50%→100%**, rollback automático, overage automation, outcome guarantee auto, self-service upgrade/downgrade |
+| **3** | Producción A/B + canary + escala (6-8 sem) | `agent_traffic_splits` por (tenant, AOP_version), production A/B con métricas comparativas, **canary deployment 5%→25%→50%→100%**, rollback automático, overage automation |
 
 ### Backlog futuro (Bloque 4, no asignado)
 
@@ -1498,7 +1498,7 @@ Ver detalle en sección 20 abajo. Resumen:
 - ~~**Chatwoot self-hosted**~~ → descartado. Usamos Chatwoot Cloud; free/sandbox para verificación y paid si el cliente real lo necesita.
 - ~~**Shadow mode**~~ → internal notes en helpdesk del cliente (modelo Sierra/Decagon).
 - ~~**Activación gradual**~~ → por categoría, decisión Auyan no cliente.
-- ~~**Onboarding**~~ → 9 pasos self-serve + call AIDE opcional.
+- ~~**Onboarding**~~ → guiado por invitación (magic link), 9 pasos + call AIDE opcional.
 - ~~**"Biblia" del cliente**~~ → tabla `tenant_playbook` en DB, NO Notion.
 - ~~**Reporte semanal**~~ → email = resumen, dashboard = fuente completa, Kenny aprueba lunes 8am al inicio.
 - ~~**Dashboard cliente**~~ → 7 secciones MVP, "Insights" reemplaza "Conversaciones", AI Data Assistant a Bloque 2.
@@ -1508,7 +1508,7 @@ Ver detalle en sección 20 abajo. Resumen:
 - ~~**Tipos de test**~~ → Unit / Integration / Simulation.
 - ~~**AOPs steps[]**~~ → opcional preparado en Bloque 0 (data para Bloque 2 Flow Analysis).
 - ~~**`tenant_agent`**~~ → hard removal en Bloque 0.
-- ~~**Pricing/billing**~~ → Stripe Bloque 2; primer 1-2 clientes manual.
+- ~~**Pricing/billing**~~ → motor de medición por resolución (`docs/billing-engine.md`); Stripe Bloque 2.
 - ~~**Landing**~~ → `apps/landing` + Aceternity UI (no Tailwind UI).
 - ~~**Design Sprint**~~ → 1-2 semanas al inicio de Bloque 1.
 
@@ -1599,7 +1599,7 @@ _Última actualización: 2026-05-18 (sesión 19 — análisis context engineerin
 
 ## 20. Arquitectura post-pivot — decisiones técnicas del grill 2026-05-22
 
-Esta sección documenta los cambios arquitectónicos que entran con el pivot a Managed AI Service. Sobrescribe partes anteriores donde aplique. Para contexto de negocio ver `docs/auyan-master-context.md`.
+Esta sección documenta los cambios arquitectónicos que entran con el pivot a Managed AI Service. Sobrescribe partes anteriores donde aplique.
 
 ### 20.1 Patrón Adapter por tenant — refactor crítico Bloque 0
 
