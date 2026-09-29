@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 import pytest
+from apps.api.core.config import get_settings
 from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.zendesk import (
     ZendeskAdapter,
@@ -76,6 +77,8 @@ class TestParsePayload:
         app = FastAPI()
         app.include_router(router)
         app.state.agent_service = object()
+        # Sin .env (CI): Settings real falla por variables obligatorias.
+        app.dependency_overrides[get_settings] = lambda: object()
         with TestClient(app) as client:
             r = client.post(
                 "/webhooks/zendesk",
