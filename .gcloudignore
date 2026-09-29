@@ -1,0 +1,16 @@
+# Qué NO se sube a Cloud Build al desplegar el API en Cloud Run.
+# Hereda todo lo de .gitignore (.env*, .venv, node_modules…).
+#!include:.gitignore
+.git
+.github
+.claude
+apps/web
+apps/landing
+packages
+docs
+supabase
+**/tests
+**/.venv
+**/node_modules
+.env*
+!.env.example
