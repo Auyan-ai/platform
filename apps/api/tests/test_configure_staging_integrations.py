@@ -124,17 +124,15 @@ def test_normalize_zendesk_subdomain_accepts_host_or_url() -> None:
 
 
 @pytest.mark.asyncio
-async def test_build_zendesk_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_build_zendesk_plan_legacy_api_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ZENDESK_CLIENT_ID", raising=False)
     monkeypatch.setenv("ZENDESK_SUBDOMAIN", "https://mareastudio.zendesk.com/")
     monkeypatch.setenv("ZENDESK_EMAIL", "agent@marea.test")
     monkeypatch.setenv("ZENDESK_API_TOKEN", "zd_token_123")
     monkeypatch.setenv("ZENDESK_WEBHOOK_SIGNING_SECRET", "zd_webhook_secret")
     monkeypatch.setenv("ZENDESK_ESCALATION_GROUP_ID", "42")
-    monkeypatch.setattr(
-        script,
-        "_validate_zendesk",
-        _async_return({"user": {"email": "agent@marea.test", "name": "Agente"}}),
-    )
+    validate = AsyncMock(return_value={"user": {"email": "agent@marea.test", "name": "Agente"}})
+    monkeypatch.setattr(script, "_validate_zendesk", validate)
 
     plan = await script.build_zendesk_plan()
 
@@ -147,9 +145,53 @@ async def test_build_zendesk_plan(monkeypatch: pytest.MonkeyPatch) -> None:
         "api_token": "zd_token_123",
         "webhook_signing_secret": "zd_webhook_secret",
     }
+    # La validación no recibe el secreto del webhook, solo la auth.
+    validate.assert_awaited_once_with(
+        "mareastudio", {"email": "agent@marea.test", "api_token": "zd_token_123"}
+    )
     assert plan.config["subdomain"] == "mareastudio"
     assert plan.config["verified_as"] == "agent@marea.test"
     assert plan.config["escalation_group_id"] == "42"
+
+
+@pytest.mark.asyncio
+async def test_build_zendesk_plan_prefers_client_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ZENDESK_SUBDOMAIN", "auyan-marea")
+    monkeypatch.setenv("ZENDESK_CLIENT_ID", "auyan")
+    monkeypatch.setenv("ZENDESK_CLIENT_SECRET", "cc_secret")
+    # Si también hay API token legacy, gana client credentials.
+    monkeypatch.setenv("ZENDESK_EMAIL", "agent@marea.test")
+    monkeypatch.setenv("ZENDESK_API_TOKEN", "zd_token_123")
+    monkeypatch.delenv("ZENDESK_WEBHOOK_SIGNING_SECRET", raising=False)
+    monkeypatch.delenv("ZENDESK_ESCALATION_GROUP_ID", raising=False)
+    monkeypatch.setattr(
+        script, "_validate_zendesk", _async_return({"user": {"email": "admin@marea.test"}})
+    )
+
+    plan = await script.build_zendesk_plan()
+
+    assert plan.credentials == {"client_id": "auyan", "client_secret": "cc_secret"}
+    assert plan.config["subdomain"] == "auyan-marea"
+    assert "escalation_group_id" not in plan.config
+
+
+@pytest.mark.asyncio
+async def test_build_zendesk_plan_client_id_requires_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ZENDESK_SUBDOMAIN", "auyan-marea")
+    monkeypatch.setenv("ZENDESK_CLIENT_ID", "auyan")
+    monkeypatch.delenv("ZENDESK_CLIENT_SECRET", raising=False)
+
+    with pytest.raises(SystemExit):
+        await script.build_zendesk_plan()
+
+
+def test_redact_credentials_masks_client_secret() -> None:
+    redacted = script.redact_credentials({"client_id": "auyan", "client_secret": "cc_secret_abcd"})
+    assert redacted == {"client_id": "auyan", "client_secret": "***abcd"}
 
 
 @pytest.mark.asyncio
