@@ -2061,9 +2061,9 @@ async def upsert_tool_permission(
             (tenant_id, skill_slug, is_enabled, human_approval_required,
              threshold_override, enabled_at, enabled_by,
              l3_autonomy_acknowledged_at, l3_autonomy_acknowledged_by)
-        VALUES ($1, $2, $3, $4, $5, CASE WHEN $3 THEN NOW() ELSE NULL END, $6,
+        VALUES ($1, $2, $3, $4, $5, CASE WHEN $3 THEN NOW() ELSE NULL END, $6::uuid,
                 CASE WHEN $7 THEN NOW() ELSE NULL END,
-                CASE WHEN $7 THEN $6 ELSE NULL END)
+                CASE WHEN $7 THEN $6::uuid ELSE NULL END)
         ON CONFLICT (tenant_id, skill_slug)
         DO UPDATE SET
             is_enabled              = EXCLUDED.is_enabled,
