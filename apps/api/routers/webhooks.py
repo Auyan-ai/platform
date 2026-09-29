@@ -354,19 +354,14 @@ async def inbound(
 
 
 # ----------------------------------------------------------------
-# Stubs de webhooks específicos por canal (heredados de PR #4)
+# Stubs de webhooks específicos por canal (heredados de PR #4). Los canales
+# reales viven en su propio router (webhooks_chatwoot/_zendesk/_gorgias): NO
+# declarar aquí rutas que choquen con ellos — este router se registra primero
+# en main.py y un stub con el mismo path tapa al handler real.
 # Por ahora solo aceptan el payload y loguean. La integración real con cada
 # canal queda como deuda — debe terminar llamando al mismo flujo de `inbound`
 # (resolver tenant, persistir mensaje, invocar agent_service).
 # ----------------------------------------------------------------
-
-
-@router.post("/zendesk")
-async def zendesk_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, Any]:
-    payload = await request.json()
-    logger.info("zendesk_webhook_received", extra={"payload_keys": list(payload.keys())})
-    # TODO Sprint 2: procesar en background_tasks llamando a agent_service
-    return {"received": True}
 
 
 @router.post("/postmark")
