@@ -1,0 +1,19 @@
+# Qué NO se sube a Vercel (apps/web). Solo hace falta apps/web + packages/shared
+# + manifiestos del workspace pnpm.
+.env*
+!.env.example
+**/.env*
+!**/.env*.example
+/.venv
+**/.venv
+/apps/api
+/apps/landing
+/supabase
+/docs
+/.github
+/.claude
+/.gcloudignore
+/Dockerfile
+/docker-compose.yml
+**/node_modules
+**/.next

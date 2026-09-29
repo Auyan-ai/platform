@@ -244,3 +244,6 @@ apps/web/.env*.local
 apps/landing/.env.local
 apps/landing/.env*.local
 .gstack/
+
+# Vercel CLI (vercel link)
+.vercel
