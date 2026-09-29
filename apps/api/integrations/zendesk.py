@@ -57,6 +57,7 @@ from apps.api.integrations.base import (
     IntegrationContext,
 )
 from apps.api.integrations.registry import IntegrationRegistry
+from apps.api.services.inbound_text import clean_inbound_text
 
 logger = logging.getLogger(__name__)
 
@@ -393,7 +394,10 @@ class ZendeskAdapter:
             comment_id=str(comment.get("id", "")),
             author_id=str(comment.get("author_id", "")),
             public=bool(comment.get("public")),
-            content=str(comment.get("plain_body") or comment.get("body") or ""),
+            content=clean_inbound_text(
+                str(comment.get("body") or comment.get("plain_body") or ""),
+                sender_name=requester.get("name"),
+            ),
             requester_id=requester_id,
             requester_email=requester.get("email"),
             requester_name=requester.get("name"),
