@@ -1,7 +1,9 @@
 """Nodo: respond.
 
 Persiste el mensaje outbound del agente y actualiza `conversations.last_message_at`.
-NO envía la respuesta al canal — eso lo hace el caller post-grafo.
+NO envía la respuesta al canal ni marca la resolución: solo decide si la respuesta
+resuelve (`resolves_on_delivery`). El caller post-grafo entrega la respuesta y, solo
+si llegó, marca `resolved` + billing + cierre (`services.agent_resolution`).
 """
 
 from __future__ import annotations
@@ -13,12 +15,7 @@ from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
-from apps.api.db.queries import (
-    insert_message,
-    insert_resolution_event,
-    mark_conversation_resolved,
-    update_conversation_last_message,
-)
+from apps.api.db.queries import insert_message, update_conversation_last_message
 
 
 def make_respond_node(
@@ -47,8 +44,8 @@ def make_respond_node(
         }
 
         # El agente resuelve salvo que su respuesta pida más datos al cliente
-        # (pregunta de clarificación). Resolución autónoma = responder sin esperar
-        # al cliente; el ticket externo lo cierra el caller tras entregar la respuesta.
+        # (pregunta de clarificación). La resolución se materializa fuera del grafo,
+        # solo tras confirmar que la respuesta llegó al cliente.
         resolves = not state.get("awaiting_customer_reply", False)
 
         async with tenant_scope(tenant_id) as conn:
@@ -62,12 +59,6 @@ def make_respond_node(
                 metadata=metadata,
             )
             await update_conversation_last_message(conn, tenant_id, conversation_id)
-            resolved = False
-            if resolves:
-                resolved = await mark_conversation_resolved(conn, tenant_id, conversation_id)
-                if resolved:
-                    # Billing por resolución: log append-only de la resolución cobrable.
-                    await insert_resolution_event(conn, tenant_id, conversation_id)
 
         tracker.emit(
             tenant_id=state["tenant_id"],
@@ -75,10 +66,10 @@ def make_respond_node(
             phase="response",
             event_type="choice",
             label="Agent responded",
-            detail={"message_id": str(msg.id), "resolved": resolved},
+            detail={"message_id": str(msg.id), "resolves_on_delivery": resolves},
             status="done",
         )
 
-        return {"output_message_id": str(msg.id), "conversation_resolved": resolved}
+        return {"output_message_id": str(msg.id), "resolves_on_delivery": resolves}
 
     return _node

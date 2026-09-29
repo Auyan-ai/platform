@@ -120,7 +120,7 @@ def _fake_agent_outcome() -> object:
     return AgentOutcome(
         decision="respond", response_text="ok", escalation_reason=None,
         output_message_id=str(OUTBOUND_MSG_ID), escalation_id=None,
-        resolved=False,
+        resolves_on_delivery=False,
         trace_id="trace-1", confidence=0.9, tokens_in=10, tokens_out=5,
         cost_usd=0.0001, model_used="claude-sonnet-4-6", error=None,
     )

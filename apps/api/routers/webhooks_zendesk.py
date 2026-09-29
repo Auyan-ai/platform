@@ -64,8 +64,8 @@ from apps.api.db.queries import (
 )
 from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.zendesk import ZendeskAdapter, verify_zendesk_signature
+from apps.api.services.agent_resolution import finalize_agent_resolution, send_agent_reply
 from apps.api.services.conversations import reopen_if_resolved
-from apps.api.services.helpdesk_closure import close_external_helpdesk_ticket_safe
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
 from apps.api.services.integrations_crypto import decrypt_credentials, get_integration_crypto_key
 from apps.api.services.message_cap import enforce_message_cap
@@ -342,18 +342,22 @@ async def zendesk_webhook(
 
     # 10. Enviar el mensaje del agente de vuelta a Zendesk. Incluye el caso escalate
     #     (mensaje "en revisión"), no solo respond.
+    delivered = False
     if outcome.response_text:
-        try:
-            await adapter.send_outbound(ctx, zendesk_ticket_id, outcome.response_text)
-        except Exception as exc:
-            logger.error(
-                "zendesk_send_outbound_failed",
-                extra={"error": str(exc), "tenant_id": str(tenant_id)},
-            )
+        delivered = await send_agent_reply(
+            adapter,
+            ctx,
+            zendesk_ticket_id,
+            outcome.response_text,
+            tenant_id=tenant_id,
+            provider="zendesk",
+        )
 
-    if outcome.resolved:
-        await close_external_helpdesk_ticket_safe(
-            tenant_id=tenant_id, conversation=conversation, settings=settings
+    # Resolución autónoma: solo si la respuesta llegó al cliente se marca
+    # 'resolved' + billing + cierre del ticket externo.
+    if outcome.resolves_on_delivery:
+        await finalize_agent_resolution(
+            tenant_id=tenant_id, conversation=conversation, delivered=delivered, settings=settings
         )
 
     # Escalado: nota interna con el motivo + asignación al equipo CX del cliente.

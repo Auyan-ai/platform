@@ -91,7 +91,7 @@ def _outcome_respond() -> AgentOutcome:
         escalation_reason=None,
         output_message_id=str(OUTBOUND_MSG_ID),
         escalation_id=None,
-        resolved=False,
+        resolves_on_delivery=False,
         trace_id="trace-1",
         confidence=0.92,
         tokens_in=120,
