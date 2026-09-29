@@ -7,28 +7,24 @@ Flujo:
 4. Ejecutar flujo inbound estándar (customer, conversación, mensaje, agente).
 5. Si el agente responde: send_outbound al adapter de Zendesk.
 
-Payload esperado (configurar en el Zendesk Trigger → Webhook):
+Payload esperado (configurar en el Zendesk Trigger → Webhook). SOLO IDs:
     {
-        "ticket_id":       "{{ticket.id}}",
-        "subject":         "{{ticket.title}}",
-        "content":         "{{ticket.latest_comment_html_stripped}}",
-        "requester_email": "{{ticket.requester.email}}",
-        "requester_name":  "{{ticket.requester.name}}",
-        "requester_id":    "{{ticket.requester.id}}",
-        "comment_id":      "{{ticket.latest_comment.id}}",
-        "author_id":       "{{ticket.latest_comment.author.id}}",
-        "subdomain":       "hardcoded-subdomain"
+        "ticket_id":  "{{ticket.id}}",
+        "comment_id": "{% for c in ticket.comments limit:1 %}{{c.id}}{% endfor %}",
+        "subdomain":  "hardcoded-subdomain"
     }
 
-    Nota: Zendesk no tiene variable {{subdomain}}. Se hardcodea una vez por cuenta.
+    Nada de texto libre en el payload: Zendesk no escapa los placeholders y un
+    comentario con comillas/saltos de línea rompe el JSON. El contenido, el autor
+    y el requester se leen de la API (`ZendeskAdapter.fetch_inbound_comment`).
+    Zendesk no tiene variable {{subdomain}}: se hardcodea una vez por cuenta.
+    Campos extra del payload (content, requester_*…) se ignoran.
 
-Idempotencia: por comentario (`zendesk:{ticket_id}:{comment_id}`). Sin `comment_id`
-se usa un hash del contenido — deduplica retries sin bloquear mensajes distintos
-del mismo ticket.
+Idempotencia: por comentario (`zendesk:{ticket_id}:{comment_id}`, id real de la API).
 
-Anti-loop: la respuesta pública del agente re-dispara el Trigger. Dos capas:
-la condición del Trigger (Current user = end user) y aquí, si el payload trae
-`author_id` + `requester_id`, se ignora todo comentario que no sea del requester.
+Anti-loop: la respuesta pública del agente re-dispara el Trigger. Dos capas: la
+condición del Trigger (Current user = end user) y aquí se ignora todo comentario
+cuyo autor (según la API) no sea el requester, o que no sea público.
 
 Seguridad HMAC:
     - Headers: X-Zendesk-Webhook-Signature + X-Zendesk-Webhook-Signature-Timestamp
@@ -38,7 +34,6 @@ Seguridad HMAC:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from typing import Annotated, Any
@@ -62,8 +57,12 @@ from apps.api.db.queries import (
     try_insert_idempotency_key,
     update_conversation_last_message,
 )
-from apps.api.integrations.base import IntegrationContext
-from apps.api.integrations.zendesk import ZendeskAdapter, verify_zendesk_signature
+from apps.api.integrations.base import InboundMessage, IntegrationContext
+from apps.api.integrations.zendesk import (
+    ZendeskAdapter,
+    ZendeskInboundComment,
+    verify_zendesk_signature,
+)
 from apps.api.services.agent_resolution import finalize_agent_resolution, send_agent_reply
 from apps.api.services.conversations import reopen_if_resolved
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
@@ -95,35 +94,32 @@ def _placeholder_value(value: Any) -> str | None:
     """Normaliza un campo del payload del Trigger.
 
     Zendesk deja vacío un placeholder sin valor y manda literal uno que no
-    reconoce (`{{...}}`): ambos casos cuentan como ausente.
+    reconoce (`{{...}}` / `{%...%}`): ambos casos cuentan como ausente.
     """
     text = str(value if value is not None else "").strip()
-    if not text or "{{" in text:
+    if not text or "{{" in text or "{%" in text:
         return None
     return text
 
 
-def _zendesk_idempotency_key(payload: dict[str, Any]) -> str | None:
-    """Clave de idempotencia por comentario (no por ticket)."""
-    ticket_id = _placeholder_value(payload.get("ticket_id"))
-    if ticket_id is None:
+def _parse_payload(raw_body: bytes) -> dict[str, Any] | None:
+    """JSON del webhook; None si no es un objeto JSON válido."""
+    try:
+        payload = json.loads(raw_body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return None
-    comment_id = _placeholder_value(payload.get("comment_id"))
-    if comment_id is not None:
-        return f"zendesk:{ticket_id}:{comment_id}"
-    content = str(payload.get("content") or "").strip()
-    digest = hashlib.sha256(content.encode()).hexdigest()[:16]
-    return f"zendesk:{ticket_id}:c{digest}"
+    return payload if isinstance(payload, dict) else None
 
 
-def _is_from_requester(payload: dict[str, Any]) -> bool | None:
-    """True si el último comentario es del requester, False si es de otro usuario
-    (agente IA, agente humano), None si el payload no trae datos de autor."""
-    author_id = _placeholder_value(payload.get("author_id"))
-    requester_id = _placeholder_value(payload.get("requester_id"))
-    if author_id is None or requester_id is None:
-        return None
-    return author_id == requester_id
+def _ignore_reason(comment: ZendeskInboundComment) -> str | None:
+    """Motivo para no procesar el comentario, o None si es del cliente final."""
+    if not comment.public:
+        return "private_comment"
+    if not comment.from_requester:
+        return "non_requester_comment"
+    if not comment.content.strip():
+        return "empty_content"
+    return None
 
 
 @router.post(
@@ -137,31 +133,18 @@ async def zendesk_webhook(
     agent_service: AgentServiceDep,
 ) -> dict[str, Any]:
     raw_body = await request.body()
-    payload: dict[str, Any] = await request.json()
+    payload = _parse_payload(raw_body)
+    if payload is None:
+        logger.warning("zendesk_webhook_invalid_json", extra={"body_bytes": len(raw_body)})
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="invalid_json")
 
-    # 1. Extraer subdomain para resolver el tenant.
-    subdomain: str = payload.get("subdomain", "").strip()
+    # 1. Extraer subdomain para resolver el tenant + ticket_id.
+    subdomain: str = str(payload.get("subdomain") or "").strip()
     if not subdomain:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="missing_subdomain")
-
-    # 2. Validar que hay contenido útil.
-    content = payload.get("content") or ""
-    if not content.strip():
-        return {"received": True, "processed": False}
-
-    # Anti-loop: sin efectos secundarios, así que va antes de resolver el tenant.
-    from_requester = _is_from_requester(payload)
-    if from_requester is False:
-        logger.info(
-            "zendesk_webhook_ignored_non_requester_comment",
-            extra={"subdomain": subdomain, "ticket_id": str(payload.get("ticket_id", ""))},
-        )
-        return {"received": True, "processed": False, "ignored": "non_requester_comment"}
-    if from_requester is None:
-        logger.warning(
-            "zendesk_webhook_without_author_data",
-            extra={"subdomain": subdomain, "ticket_id": str(payload.get("ticket_id", ""))},
-        )
+    zendesk_ticket_id = _placeholder_value(payload.get("ticket_id"))
+    if zendesk_ticket_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="missing_ticket_id")
 
     # 3. Resolver tenant por subdomain.
     async with bootstrap_connection() as conn:
@@ -225,37 +208,61 @@ async def zendesk_webhook(
             settings=settings,
         )
 
-    # 7. Idempotencia por comentario de Zendesk.
-    zendesk_ticket_id = str(payload.get("ticket_id", ""))
-    idempotency_key = _zendesk_idempotency_key(payload)
-    if idempotency_key is not None and _placeholder_value(payload.get("comment_id")) is None:
+    # 7. Leer el comentario de la API (fuente de verdad de contenido y autor).
+    adapter = ZendeskAdapter()
+    trigger_comment_id = _placeholder_value(payload.get("comment_id"))
+    if trigger_comment_id is None:
         logger.warning(
             "zendesk_webhook_without_comment_id",
             extra={"tenant_id": str(tenant_id), "ticket_id": zendesk_ticket_id},
         )
+    comment = await adapter.fetch_inbound_comment(ctx, zendesk_ticket_id, trigger_comment_id)
+    if comment is None:
+        logger.warning(
+            "zendesk_webhook_comment_not_found",
+            extra={"tenant_id": str(tenant_id), "ticket_id": zendesk_ticket_id},
+        )
+        return {"received": True, "processed": False, "ignored": "comment_not_found"}
+    ignore_reason = _ignore_reason(comment)
+    if ignore_reason is not None:
+        logger.info(
+            "zendesk_webhook_ignored",
+            extra={
+                "tenant_id": str(tenant_id),
+                "ticket_id": zendesk_ticket_id,
+                "comment_id": comment.comment_id,
+                "reason": ignore_reason,
+            },
+        )
+        return {"received": True, "processed": False, "ignored": ignore_reason}
+
+    # 8. Idempotencia por comentario de Zendesk.
+    idempotency_key = f"zendesk:{zendesk_ticket_id}:{comment.comment_id}"
     idempotency_claimed = False
 
-    if idempotency_key:
-        async with bootstrap_connection() as conn:
-            record = await try_insert_idempotency_key(
-                conn,
-                tenant_id=tenant_id,
-                key=idempotency_key,
-                request_path="/webhooks/zendesk",
-            )
-            if record is None:
-                existing = await get_idempotency_record(
-                    conn, tenant_id=tenant_id, key=idempotency_key
-                )
-                if existing is not None and existing.status == "done":
-                    return {"received": True, "processed": False, "duplicate": True}
-                raise HTTPException(status.HTTP_409_CONFLICT, detail="idempotency_key_in_flight")
-            idempotency_claimed = True
+    async with bootstrap_connection() as conn:
+        record = await try_insert_idempotency_key(
+            conn,
+            tenant_id=tenant_id,
+            key=idempotency_key,
+            request_path="/webhooks/zendesk",
+        )
+        if record is None:
+            existing = await get_idempotency_record(conn, tenant_id=tenant_id, key=idempotency_key)
+            if existing is not None and existing.status == "done":
+                return {"received": True, "processed": False, "duplicate": True}
+            raise HTTPException(status.HTTP_409_CONFLICT, detail="idempotency_key_in_flight")
+        idempotency_claimed = True
 
-    # 8. Parsear payload con el adapter.
-    adapter = ZendeskAdapter()
-    inbound_msg_model = await adapter.parse_inbound_webhook(payload)
-
+    inbound_msg_model = InboundMessage(
+        external_id=zendesk_ticket_id,
+        channel="zendesk",
+        content=comment.content,
+        sender_email=comment.requester_email,
+        sender_name=comment.requester_name,
+        subject=comment.subject,
+        raw_payload=payload,
+    )
     customer_email: str | None = inbound_msg_model.sender_email
     customer_name: str | None = inbound_msg_model.sender_name
 
@@ -299,7 +306,11 @@ async def zendesk_webhook(
                 role="customer",
                 direction="inbound",
                 content=inbound_msg_model.content,
-                metadata={"channel": "zendesk", "zendesk_ticket_id": zendesk_ticket_id},
+                metadata={
+                    "channel": "zendesk",
+                    "zendesk_ticket_id": zendesk_ticket_id,
+                    "zendesk_comment_id": comment.comment_id,
+                },
             )
             await update_conversation_last_message(conn, tenant_id, conversation.id)
 
