@@ -1,19 +1,4 @@
 # Auyan — Reglas del proyecto
-Para forma de trabajo seguir sigiuente estracto:
-
-you are a wise and incredibly effective teacher. your goal is to make sure the human deeply understands the session.
-
-do this incrementally with each step instead of all at once at the end. before moving on to the next stage, you should confirm that she has mastered everything in the current one. this should be high level (e.g. motivation) and low level (e.g. business logic, edge cases).
-
-keep a running md doc with a checklist of things the human should understand. make sure she understands 1) the problem, why the problem existed, the different branches 2) the solution, why it was resolved in that way, the design decisions, the edge cases 3) the broader context of why this matters, what the changes will impact.
-
-make sure she understands why (and drill down into more whys), make sure she understands what and how as well. understanding the problem well is imperative.
-
-to get a sense of where she's at, proactively have her restate her understanding first. then help her fill in the gaps from there—she might ask you questions or ask to eli5, eli14, or elii (explain like she's an intern).
-
-quiz her with open-ended or multiple choice questions with AskUserQuestion (be sure to change up the order of the correct answer, and to not reveal the answer until after the questions are submitted). show her code or have her use the debugger if necessary!
-
-/goal the session should not end until you've verified that the human has demonstrated that she understood everything on your list.
 
 ## Contexto
 Auyan opera el agente IA de CX de cada cliente (e-commerce). Restricción técnica que se deriva de eso:
@@ -36,7 +21,7 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 ## Estructura del monorepo
 - apps/api → FastAPI, agentes LangGraph, webhooks
 - apps/web → Dashboard super_admin + dashboard cliente (Next.js)
-- apps/widget → Chat embebible JS (backlog futuro)
+- apps/landing → Landing pública (Next.js)
 - packages/shared → Tipos y utilidades compartidas entre apps
 - docs → Documentación técnica
 
@@ -90,7 +75,7 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 ## Roles del sistema
 - `super_admin` — acceso total cross-tenant (Kenny + esposa)
 - `tenant_admin` — acceso scoped al tenant del cliente
-- NO existe `tenant_agent` (removido en Bloque 0, sub-PR 0.1)
+- Del lado cliente, `tenant_admin` es el único rol
 
 ## Integraciones
 - Chatwoot Cloud: helpdesk con API key, bidireccional
@@ -103,16 +88,15 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 ## Selección de modelo
 - Al inicio de cada sesión, recomendar qué modelo usar según la tarea descrita antes de arrancar.
 - Si el usuario no especifica la tarea al inicio, preguntar qué va a hacer antes de arrancar.
-- **Sonnet** (`claude-sonnet-4-6`): modelo por defecto. Tareas rutinarias de código, scaffolding, fixes, boilerplate, integraciones y preguntas de contexto. Donde la velocidad y el costo importan más que la profundidad.
-- **Opus** (`claude-opus-4-8`): diseño de arquitectura, decisiones complejas del grafo de LangGraph, revisión de seguridad y RLS, latencia/diseño del grafo, y cuando Sonnet falle repetidamente en algo.
-- **Fable** (`claude-fable-5`): el modelo más potente — tier por encima de Opus, ~2× su costo ($10/$50 vs $5/$25 por 1M). NO es "Opus más rápido": es más inteligente y más caro. Reservar para lo que Opus no resuelve (arquitectura crítica o lógica del grafo de máxima dificultad donde el costo extra se justifica). Nunca por defecto.
+- **Sonnet**: modelo por defecto. Tareas rutinarias de código, scaffolding, fixes, boilerplate, integraciones y preguntas de contexto. Donde la velocidad y el costo importan más que la profundidad.
+- **Opus**: diseño de arquitectura, decisiones complejas del grafo de LangGraph, revisión de seguridad y RLS, latencia/diseño del grafo, y cuando Sonnet falle repetidamente en algo.
+- **Fable**: el modelo más potente — tier por encima de Opus y más caro. NO es "Opus más rápido": es más inteligente y más caro. Reservar para lo que Opus no resuelve (arquitectura crítica o lógica del grafo de máxima dificultad donde el costo extra se justifica). Nunca por defecto.
 
 ## Lo que nunca hay que hacer
 - Modificar datos de un tenant desde el contexto de otro
 - Responder al cliente final sin pasar por el grafo de LangGraph + AOP selector
 - Deployar directo a producción sin pasar por staging
 - Commitear .env, API keys o datos de clientes reales
-- Suponer que un rol `tenant_agent` existe (fue removido)
 
 ## Organización de archivos por carpeta
 
@@ -129,7 +113,7 @@ No vocees, habla acento caraqueño venezolano, tuteame.
   - skills/shopify/ → 11 skills (5 L1 + 2 L2 + 4 L3)
 - slow_agent/ → LLM-as-judge batch (transcript, judge, runner, sampling)
 - evals/ → harness de eval + fixtures YAML por AOP
-- integrations/ → clientes HTTP externos (shopify.py, langfuse_client.py mientras exista como espejo, futuro langsmith_client.py, anthropic_client.py, etc.)
+- integrations/ → clientes HTTP externos (shopify.py, langsmith_client.py, anthropic_client.py, helpdesks, postmark.py; langfuse_client.py mientras exista como espejo)
 - services/ → lógica de negocio reutilizable (tenants, conversations, escalations, cleanup, reasoning, audit, pii, rate_limit)
 - db/ → modelos Pydantic + queries asyncpg
 - core/ → config (pydantic-settings), security (JWT ES256), errors (DomainError)
@@ -145,8 +129,7 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - lib/ → utilidades, hooks TanStack Query, cliente openapi-fetch tipado
 
 ### packages/shared
-- types/ → interfaces y tipos compartidos entre apps
-- utils/ → funciones utilitarias comunes
+- src/ → tipos compartidos entre apps (api-types.ts, enums.ts)
 
 ### docs
 - architecture-overview.md → punto de entrada técnico (stack, roles, onboarding, roadmap)
