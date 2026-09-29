@@ -98,6 +98,13 @@ def _make_app(
         yield AsyncMock()
 
     monkeypatch.setattr("apps.api.routers.approvals.tenant_scope", _fake_scope)
+    # Defaults del cierre post-aprobación; los tests que lo verifican los sobrescriben.
+    monkeypatch.setattr(
+        "apps.api.routers.approvals.release_approval_escalation", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        "apps.api.routers.approvals.finalize_agent_resolution", AsyncMock(return_value=True)
+    )
     monkeypatch.setattr("apps.api.routers.tool_permissions.tenant_scope", _fake_scope)
     # El router llama get_settings() directo (reply_model); en tests no hay env real.
     monkeypatch.setattr("apps.api.routers.approvals.get_settings", lambda: FakeAuthSettings())
@@ -572,3 +579,130 @@ class TestUpdateToolPermission:
         )
 
         assert resp.status_code == 404
+
+
+# ----------------------------------------------------------------
+# Cierre de la escalación tras aprobar / rechazar (E2E pedido #1428)
+# ----------------------------------------------------------------
+
+
+def _patch_success_path(
+    monkeypatch: pytest.MonkeyPatch, *, channel: str, delivered: bool
+) -> tuple[AsyncMock, AsyncMock]:
+    from pydantic import BaseModel
+
+    class _FakeInput(BaseModel):
+        order_id: int
+
+    class _FakeOutput(BaseModel):
+        cancelled: bool = True
+
+    class _FakeSkill:
+        input_schema = _FakeInput
+
+        async def execute(self, ctx: Any, inputs: Any) -> _FakeOutput:
+            return _FakeOutput()
+
+    class _FakeMsg:
+        id = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
+
+    conversation = MagicMock()
+    conversation.channel = channel
+    for name, value in {
+        "get_pending_approval": AsyncMock(return_value=_sample_approval()),
+        "get_tenant_configuration": AsyncMock(return_value=None),
+        "build_commerce_integration_ctx": AsyncMock(return_value=None),
+        "resolve_pending_approval": AsyncMock(return_value=None),
+        "insert_message": AsyncMock(return_value=_FakeMsg()),
+        "update_conversation_last_message": AsyncMock(return_value=None),
+        "get_conversation": AsyncMock(return_value=conversation),
+        "deliver_message_to_helpdesk": AsyncMock(return_value=delivered),
+    }.items():
+        monkeypatch.setattr(f"apps.api.routers.approvals.{name}", value)
+    monkeypatch.setattr("apps.api.routers.approvals.SkillRegistry.get", lambda slug: _FakeSkill)
+    release = AsyncMock(return_value=True)
+    finalize = AsyncMock(return_value=True)
+    monkeypatch.setattr("apps.api.routers.approvals.release_approval_escalation", release)
+    monkeypatch.setattr("apps.api.routers.approvals.finalize_agent_resolution", finalize)
+    return release, finalize
+
+
+class TestCloseAfterApproval:
+    def _client(self, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+        # _make_app instala mocks por defecto: la app va primero, los parches después.
+        _app, client = _make_app(monkeypatch, approvals_router)
+        return client
+
+    def _approve(self, client: TestClient) -> Any:
+        return client.post(
+            f"/approvals/{APPROVAL_ID}/approve",
+            json={},
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+    def test_success_delivered_releases_escalation_and_resolves(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = self._client(monkeypatch)
+        release, finalize = _patch_success_path(monkeypatch, channel="zendesk", delivered=True)
+
+        resp = self._approve(client)
+
+        assert resp.status_code == 200
+        release.assert_awaited_once()
+        assert release.await_args.kwargs["approval_id"] == APPROVAL_ID
+        finalize.assert_awaited_once()
+        assert finalize.await_args.kwargs["delivered"] is True
+
+    def test_success_undelivered_does_not_resolve(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Confirmación sin entregar al helpdesk → no se resuelve ni se cierra el ticket."""
+        client = self._client(monkeypatch)
+        _release, finalize = _patch_success_path(monkeypatch, channel="zendesk", delivered=False)
+
+        self._approve(client)
+
+        assert finalize.await_args.kwargs["delivered"] is False
+
+    def test_channel_without_helpdesk_counts_as_delivered(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = self._client(monkeypatch)
+        _release, finalize = _patch_success_path(monkeypatch, channel="chat", delivered=False)
+
+        self._approve(client)
+
+        assert finalize.await_args.kwargs["delivered"] is True
+
+    def test_execution_failure_keeps_escalation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = self._client(monkeypatch)
+        release, finalize = _patch_success_path(monkeypatch, channel="zendesk", delivered=True)
+
+        class _Boom:
+            input_schema = MagicMock(model_validate=lambda raw: raw)
+
+            async def execute(self, ctx: Any, inputs: Any) -> Any:
+                raise RuntimeError("shopify 500")
+
+        monkeypatch.setattr("apps.api.routers.approvals.SkillRegistry.get", lambda slug: _Boom)
+
+        resp = self._approve(client)
+
+        assert resp.json()["execution_status"] == "failed"
+        release.assert_not_awaited()
+        finalize.assert_not_awaited()
+
+    def test_reject_releases_escalation_without_resolving(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client = self._client(monkeypatch)
+        release, finalize = _patch_success_path(monkeypatch, channel="zendesk", delivered=True)
+
+        resp = client.post(
+            f"/approvals/{APPROVAL_ID}/reject",
+            json={"comment": "fuera de plazo"},
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        release.assert_awaited_once()
+        finalize.assert_not_awaited()

@@ -4,8 +4,10 @@ Flujo:
   1. El agente detecta skill L3 + human_approval_required → crea pending_approval.
   2. Aparece en GET /approvals (filtrado por status=pending por defecto).
   3. El agente humano revisa los inputs (redactados) y aprueba o rechaza.
-  4. POST /approvals/{id}/approve → ejecuta la skill + inserta mensaje + cierra aprobación.
-  5. POST /approvals/{id}/reject → inserta mensaje de rechazo + cierra aprobación.
+  4. POST /approvals/{id}/approve → ejecuta la skill + inserta mensaje + cierra aprobación
+     + resuelve la escalación del gate y, si la confirmación llegó, la conversación.
+  5. POST /approvals/{id}/reject → inserta mensaje de rechazo + cierra aprobación
+     + resuelve la escalación del gate (la conversación vuelve a 'open').
 """
 
 from __future__ import annotations
@@ -29,7 +31,9 @@ from apps.api.db.queries import (
     resolve_pending_approval,
     update_conversation_last_message,
 )
+from apps.api.services.agent_resolution import finalize_agent_resolution
 from apps.api.services.approval_reply import generate_customer_reply
+from apps.api.services.approval_resolution import release_approval_escalation, reply_delivered
 from apps.api.services.commerce_context import build_commerce_integration_ctx
 from apps.api.services.helpdesk_delivery import deliver_message_to_helpdesk
 from apps.api.skills.base import SkillContext
@@ -256,13 +260,33 @@ async def approve_action(
             },
         )
         await update_conversation_last_message(conn, tenant_id, approval.conversation_id)
-        # Entregar el resultado al helpdesk del cliente (best-effort; el mensaje ya
-        # quedó en DB). Antes este mensaje nunca llegaba al widget/ticket del cliente.
+        # La decisión humana cierra la escalación del gate L3 (conversación → 'open').
+        await release_approval_escalation(
+            conn,
+            tenant_id=tenant_id,
+            conversation_id=approval.conversation_id,
+            approval_id=approval_id,
+        )
+        # Entregar el resultado al helpdesk del cliente (el mensaje ya quedó en DB).
         conversation = await get_conversation(conn, tenant_id, approval.conversation_id)
+        delivered = False
         if conversation is not None:
-            await deliver_message_to_helpdesk(
-                conn, tenant_id=tenant_id, conversation=conversation, content=result_message
+            delivered = reply_delivered(
+                conversation.channel,
+                delivered=await deliver_message_to_helpdesk(
+                    conn, tenant_id=tenant_id, conversation=conversation, content=result_message
+                ),
             )
+
+    # Acción ejecutada y confirmada → resolución (resolved + resolution event + cierre
+    # del ticket). Sin entrega confirmada queda abierta, igual que en el webhook.
+    if conversation is not None:
+        await finalize_agent_resolution(
+            tenant_id=tenant_id,
+            conversation=conversation,
+            delivered=delivered,
+            settings=get_settings(),
+        )
 
     return {
         "approval_id": str(approval_id),
@@ -330,6 +354,14 @@ async def reject_action(
             },
         )
         await update_conversation_last_message(conn, tenant_id, approval.conversation_id)
+        # Cierra la escalación del gate; la conversación vuelve a 'open' esperando al
+        # cliente (sin resolución: la acción no se hizo).
+        await release_approval_escalation(
+            conn,
+            tenant_id=tenant_id,
+            conversation_id=approval.conversation_id,
+            approval_id=approval_id,
+        )
         # Entregar el rechazo al helpdesk del cliente (best-effort).
         conversation = await get_conversation(conn, tenant_id, approval.conversation_id)
         if conversation is not None:
