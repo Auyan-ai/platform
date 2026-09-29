@@ -606,6 +606,15 @@ class TestL3HumanApprovalGate:
     """Cuando L3 + human_approval_required=True el nodo crea pending_approval."""
 
     @pytest.fixture(autouse=True)
+    def _owner_verified(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Estos tests cubren el gate de aprobación/deduplicación; el de ownership
+        # (email cliente == email pedido) tiene los suyos en test_l3_order_ownership.
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill._l3_ownership_error",
+            AsyncMock(return_value=None),
+        )
+
+    @pytest.fixture(autouse=True)
     def _register(self) -> Generator[None, None, None]:
         SkillRegistry._reset()
         SkillRegistry.register(L3Skill)
