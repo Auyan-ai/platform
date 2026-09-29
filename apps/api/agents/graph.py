@@ -73,7 +73,7 @@ _NODE_OUTPUT_KEYS: dict[str, list[str]] = {
     "reason": ["decision", "confidence", "pending_tool_call", "agent_response"],
     "execute_skill": ["tool_results", "pending_approval_id"],
     "supervise": ["supervisor_verdict", "supervisor_reason", "supervisor_reject_kind"],
-    "respond": ["output_message_id", "conversation_resolved"],
+    "respond": ["output_message_id", "resolves_on_delivery"],
     "escalate": ["escalation_id", "escalation_reason"],
     "handle_error": ["error"],
 }

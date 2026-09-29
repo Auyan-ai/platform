@@ -7,6 +7,7 @@ prueba al transporte HTTP + HMAC + payload + flujo del router.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import hmac
 import json
@@ -66,7 +67,7 @@ def _outcome_respond() -> AgentOutcome:
         escalation_reason=None,
         output_message_id=str(OUTBOUND_MSG_ID),
         escalation_id=None,
-        resolved=False,
+        resolves_on_delivery=False,
         trace_id="trace-1",
         confidence=0.92,
         tokens_in=120,
@@ -84,7 +85,7 @@ def _outcome_escalate() -> AgentOutcome:
         escalation_reason="out_of_scope",
         output_message_id=None,
         escalation_id=str(ESCALATION_ID),
-        resolved=False,
+        resolves_on_delivery=False,
         trace_id="trace-2",
         confidence=0.30,
         tokens_in=80,
@@ -197,6 +198,44 @@ class TestInboundEndpoint:
         assert body_out["output_message_id"] == str(OUTBOUND_MSG_ID)
         assert body_out["trace_id"] == "trace-1"
         service.process_inbound.assert_awaited_once()
+
+    def test_resolving_reply_finalizes_resolution_as_delivered(self, monkeypatch) -> None:
+        """El endpoint devuelve la respuesta en el body HTTP → cuenta como entregada."""
+        outcome = dataclasses.replace(_outcome_respond(), resolves_on_delivery=True)
+        service = AsyncMock()
+        service.process_inbound = AsyncMock(return_value=outcome)
+        _patch_db(monkeypatch)
+        finalize = AsyncMock(return_value=True)
+        monkeypatch.setattr(f"{ROUTER_MODULE}.finalize_agent_resolution", finalize)
+
+        body = json.dumps(_valid_payload()).encode()
+        with TestClient(_make_app(agent_service=service)) as client:
+            r = client.post(
+                "/webhooks/inbound",
+                content=body,
+                headers={"X-Auyan-Signature": _sign(body), "Content-Type": "application/json"},
+            )
+
+        assert r.status_code == 200
+        finalize.assert_awaited_once()
+        assert finalize.await_args.kwargs["delivered"] is True
+
+    def test_non_resolving_reply_does_not_finalize(self, monkeypatch) -> None:
+        service = AsyncMock()
+        service.process_inbound = AsyncMock(return_value=_outcome_respond())
+        _patch_db(monkeypatch)
+        finalize = AsyncMock()
+        monkeypatch.setattr(f"{ROUTER_MODULE}.finalize_agent_resolution", finalize)
+
+        body = json.dumps(_valid_payload()).encode()
+        with TestClient(_make_app(agent_service=service)) as client:
+            client.post(
+                "/webhooks/inbound",
+                content=body,
+                headers={"X-Auyan-Signature": _sign(body), "Content-Type": "application/json"},
+            )
+
+        finalize.assert_not_awaited()
 
     def test_happy_path_escalate(self, monkeypatch) -> None:
         service = AsyncMock()

@@ -35,9 +35,9 @@ class AgentOutcome:
     escalation_reason: str | None
     output_message_id: str | None
     escalation_id: str | None
-    # True si el agente resolvió la conversación autónomamente (status 'resolved').
-    # El caller cierra el ticket externo del helpdesk tras entregar la respuesta.
-    resolved: bool
+    # True si la respuesta resuelve la conversación. El caller la entrega y, solo
+    # si llegó, llama a services.agent_resolution.finalize_agent_resolution.
+    resolves_on_delivery: bool
     trace_id: str | None
     confidence: float | None
     tokens_in: int
@@ -124,7 +124,7 @@ class AgentService:
                 escalation_reason=None,
                 output_message_id=None,
                 escalation_id=None,
-                resolved=False,
+                resolves_on_delivery=False,
                 trace_id=trace_id,
                 confidence=None,
                 tokens_in=0,
@@ -156,7 +156,11 @@ class AgentService:
             escalation_reason=final_state.get("escalation_reason"),
             output_message_id=final_state.get("output_message_id"),
             escalation_id=final_state.get("escalation_id"),
-            resolved=bool(final_state.get("conversation_resolved", False)) and not error,
+            resolves_on_delivery=(
+                decision == "respond"
+                and bool(final_state.get("resolves_on_delivery", False))
+                and not error
+            ),
             trace_id=trace_id,
             confidence=final_state.get("confidence"),
             tokens_in=final_state.get("tokens_in", 0),

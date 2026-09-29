@@ -40,8 +40,8 @@ from apps.api.db.queries import (
     try_insert_idempotency_key,
     update_conversation_last_message,
 )
+from apps.api.services.agent_resolution import finalize_agent_resolution
 from apps.api.services.conversations import reopen_if_resolved
-from apps.api.services.helpdesk_closure import close_external_helpdesk_ticket_safe
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
@@ -301,11 +301,12 @@ async def inbound(
         },
     )
 
-    # Resolución autónoma: cerrar el ticket externo si hay helpdesk (no-op para
-    # canales de prueba sin helpdesk). Best-effort.
-    if outcome.resolved:
-        await close_external_helpdesk_ticket_safe(
-            tenant_id=tenant.id, conversation=conversation, settings=settings
+    # Resolución autónoma. Este endpoint entrega la respuesta en el propio body
+    # HTTP (canales de prueba chat/widget), así que cuenta como entregada; el
+    # cierre del ticket externo es no-op si no hay helpdesk.
+    if outcome.resolves_on_delivery:
+        await finalize_agent_resolution(
+            tenant_id=tenant.id, conversation=conversation, delivered=True, settings=settings
         )
 
     # Escalado: nota interna con el motivo + asignación al equipo CX del cliente,
