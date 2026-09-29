@@ -133,7 +133,7 @@ class HelpdeskProvider(MessageProvider, Protocol):
 - **4 dimensiones del LLM-as-judge**: Reasoning (¿siguió el AOP?), Knowledge (¿sin alucinar?),
   Tools (¿skills e inputs correctos?), Brand voice (¿tono y guardrails?).
 - **Tablas**: `user_profiles`, `simulation_scenarios`, `simulation_runs`.
-- Detalle en [`simulator-design.md`](simulator-design.md).
+- Código: `apps/api/simulator/` + `routers/simulations.py`.
 
 ### AOPs con `steps[]` opcional
 

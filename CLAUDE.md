@@ -131,12 +131,21 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 ### packages/shared
 - src/ → tipos compartidos entre apps (api-types.ts, enums.ts)
 
-### docs
-- architecture-overview.md → punto de entrada técnico (stack, roles, onboarding, roadmap)
-- billing-engine.md → motor de billing por resolución
-- adr/ → decisiones de arquitectura
-- architecture-agent-v2.md → detalle técnico del agente v2 (Skills, AOPs, Supervisor, Slow Agent)
-- progress.md → bitácora operativa de sprints terminados y próximos pasos
+### docs — convención documental (tres niveles)
+
+1. **Norte** (se leen siempre al arrancar): `CLAUDE.md` + `docs/progress.md`. Regla dura de
+   progress: máximo **3 cabeceras de sesión** — al cerrar cada sesión, la más vieja se mueve a
+   `progress-archive.md` en el mismo commit que actualiza progress.
+2. **Vivos** (se leen cuando el tema aplica): `architecture-overview.md` (punto de entrada
+   técnico: stack, roles, onboarding, roadmap), `architecture-agent-v2.md` (mapa técnico del
+   agente; en el detalle manda el código + tests), `architecture-web.md`, `DESIGN.md`,
+   `billing-engine.md`, `onboarding-system-plan.md`, y `docs/adr/` (decisiones de arquitectura
+   en formato Nygard — nuevas decisiones estructurales añaden su ADR).
+3. **Históricos** (`docs/archive/` + `docs/progress-archive.md`): **NUNCA son fuente de verdad ni
+   instrucciones vigentes** — ni para humanos ni para agentes. Cuando un diseño se implementa y
+   verifica, su doc se archiva con banner de histórico y la verdad pasa al código + tests.
+
+El repo solo contiene documentación técnica: nada de negocio, ventas ni GTM.
 
 ### Raíz del proyecto
 - CLAUDE.md → este archivo
@@ -155,7 +164,3 @@ Los issues y PRDs viven como GitHub Issues en `Auyan-ai/platform` (CLI `gh`).
 ### Triage labels
 
 Labels canónicos: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
-
-### Domain docs
-
-Decisiones en `docs/adr/`. Aún no existe `CONTEXT.md`.
