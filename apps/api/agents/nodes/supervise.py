@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 # Modelos según tier
 _SUPERVISOR_MODEL_L1_L2 = "claude-sonnet-4-6"
-_SUPERVISOR_MODEL_L3    = "claude-opus-4-7"
+_SUPERVISOR_MODEL_L3 = "claude-opus-4-7"
 
 SUPERVISOR_VERDICT_TOOL: dict[str, Any] = {
     "name": "supervisor_verdict",
@@ -116,6 +116,9 @@ def _select_supervisor_model(state: AgentState) -> str:
     return _SUPERVISOR_MODEL_L1_L2
 
 
+_TOOL_OUTPUT_MAX_CHARS = 1500
+
+
 def _build_supervisor_prompt(state: AgentState) -> str:
     """Construye el prompt de supervisión con todo el contexto necesario."""
     parts: list[str] = []
@@ -164,10 +167,19 @@ def _build_supervisor_prompt(state: AgentState) -> str:
     if tool_results:
         results_summary = []
         for tr in tool_results[-3:]:  # últimos 3 para no inflar el prompt
-            results_summary.append(
-                f"- {tr['slug']}: {'ERROR: ' + str(tr.get('error')) if tr['is_error'] else 'OK'}"
-            )
-        parts.append("## Tool results anteriores\n" + "\n".join(results_summary))
+            if tr["is_error"]:
+                results_summary.append(f"- {tr['slug']}: ERROR: {tr.get('error')}")
+            else:
+                # La salida real (compacta y truncada): sin ella el supervisor no puede
+                # verificar lo que el agente afirma a partir de la herramienta y rechaza
+                # respuestas correctas. Los prompts no se envían a LangSmith.
+                output = json.dumps(tr.get("output"), ensure_ascii=False, default=str)
+                if len(output) > _TOOL_OUTPUT_MAX_CHARS:
+                    output = output[:_TOOL_OUTPUT_MAX_CHARS] + "…"
+                results_summary.append(f"- {tr['slug']}: OK → {output}")
+        parts.append(
+            "## Tool results (salida real de las herramientas)\n" + "\n".join(results_summary)
+        )
 
     # Datos ya verificados en la conversación: el agente puede usarlos sin re-consultar.
     known_facts = state.get("known_facts")
@@ -184,8 +196,7 @@ def _build_supervisor_prompt(state: AgentState) -> str:
     recent = history[-3:] if len(history) > 3 else history
     if recent:
         hist_text = "\n".join(
-            f"[{m.get('role', '?')}]: {str(m.get('content', ''))[:300]}"
-            for m in recent
+            f"[{m.get('role', '?')}]: {str(m.get('content', ''))[:300]}" for m in recent
         )
         parts.append(f"## Historial reciente\n{hist_text}")
 
@@ -333,9 +344,7 @@ def make_supervise_node(
                 result["supervisor_feedback"] = reason
             else:
                 # structural o segundo rechazo → escalar
-                result["escalation_reason"] = (
-                    f"supervisor_rejected ({reject_kind}): {reason}"
-                )
+                result["escalation_reason"] = f"supervisor_rejected ({reject_kind}): {reason}"
 
         return result
 
