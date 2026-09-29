@@ -11,7 +11,7 @@ Payload esperado (configurar en el Zendesk Trigger → Webhook):
     {
         "ticket_id":       "{{ticket.id}}",
         "subject":         "{{ticket.title}}",
-        "content":         "{{ticket.latest_comment_html_stripped}}",
+        "content":         "{{ticket.latest_comment}}",
         "requester_email": "{{ticket.requester.email}}",
         "requester_name":  "{{ticket.requester.name}}",
         "requester_id":    "{{ticket.requester.id}}",
@@ -147,7 +147,13 @@ async def zendesk_webhook(
     # 2. Validar que hay contenido útil.
     content = payload.get("content") or ""
     if not content.strip():
-        return {"received": True, "processed": False}
+        # Suele ser un placeholder mal escrito en el body del Trigger (Zendesk
+        # renderiza vacío lo que no reconoce): nunca descartar en silencio.
+        logger.warning(
+            "zendesk_webhook_empty_content",
+            extra={"subdomain": subdomain, "ticket_id": str(payload.get("ticket_id", ""))},
+        )
+        return {"received": True, "processed": False, "ignored": "empty_content"}
 
     # Anti-loop: sin efectos secundarios, así que va antes de resolver el tenant.
     from_requester = _is_from_requester(payload)

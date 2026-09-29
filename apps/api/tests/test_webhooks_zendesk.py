@@ -81,3 +81,27 @@ class TestIsFromRequester:
         """Sin datos de autor se confía en la condición del Trigger (current user
         = end user); el router lo loguea como warning."""
         assert _is_from_requester(payload) is None
+
+
+class TestEmptyContent:
+    def test_empty_content_is_logged_not_silently_dropped(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Un placeholder inválido en el Trigger (p. ej. el inexistente
+        `latest_comment_html_stripped`) llega como content vacío: debe quedar un
+        warning, no un 200 mudo."""
+        from apps.api.routers.webhooks_zendesk import router
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        app = FastAPI()
+        app.include_router(router)
+        app.state.agent_service = object()
+        with TestClient(app) as client:
+            r = client.post(
+                "/webhooks/zendesk", json={"subdomain": "acme", "ticket_id": "2", "content": " "}
+            )
+
+        assert r.status_code == 200
+        assert r.json()["ignored"] == "empty_content"
+        assert "zendesk_webhook_empty_content" in caplog.text

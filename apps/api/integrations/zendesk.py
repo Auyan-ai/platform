@@ -31,7 +31,7 @@ Payload esperado en el webhook de Zendesk (configurar en el Trigger de Zendesk):
     {
         "ticket_id":       "{{ticket.id}}",
         "subject":         "{{ticket.title}}",
-        "content":         "{{ticket.latest_comment_html_stripped}}",
+        "content":         "{{ticket.latest_comment}}",
         "requester_email": "{{ticket.requester.email}}",
         "requester_name":  "{{ticket.requester.name}}",
         "requester_id":    "{{ticket.requester.id}}",
