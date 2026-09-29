@@ -6,6 +6,9 @@ El historial va aparte como `messages`.
 
 from __future__ import annotations
 
+import re
+from typing import Any
+
 
 def format_knowledge_chunks(chunks: list[dict]) -> str:
     """Formatea los chunks recuperados de la KB para inyectar en el system prompt."""
@@ -32,6 +35,45 @@ def _date_preamble(current_date: str) -> str:
 
 def _facts_block(known_facts: str) -> str:
     return f"## Datos ya verificados en esta conversación\n\n{known_facts}"
+
+
+# Nombre de pila "seguro": solo letras (con acentos), apóstrofo o guion, ≤30 chars.
+# El nombre viene de la cabecera del email (lo controla el remitente): nunca se
+# inyecta texto libre en el prompt.
+_FIRST_NAME = re.compile(r"^[^\W\d_](?:[^\W\d_]|['-]){0,29}$")
+_AGENT_ROLES = frozenset({"agent_ai", "agent_human"})
+
+
+def _safe_first_name(end_customer: dict[str, Any] | None) -> str | None:
+    full_name = str((end_customer or {}).get("full_name") or "").strip()
+    first = full_name.split()[0] if full_name else ""
+    return first if _FIRST_NAME.match(first) else None
+
+
+def conversation_context_block(
+    conversation_history: list[dict[str, Any]],
+    end_customer: dict[str, Any] | None,
+) -> str:
+    """Señal determinista (código, no LLM) de si toca saludar.
+
+    Primera respuesta = aún no hay ningún mensaje del agente (IA o humano) en la
+    conversación → saludo breve con el nombre de pila si es seguro usarlo. En las
+    siguientes, no repetir el saludo.
+    """
+    already_replied = any(m.get("role") in _AGENT_ROLES for m in conversation_history)
+    if already_replied:
+        return (
+            "## Contexto de la conversación\n\n"
+            "Ya saludaste al cliente en esta conversación: no repitas el saludo, "
+            "responde directamente."
+        )
+    name = _safe_first_name(end_customer)
+    greeting = f"'¡Hola, {name}!'" if name else "'¡Hola!'"
+    return (
+        "## Contexto de la conversación\n\n"
+        "Es tu PRIMERA respuesta en esta conversación: empieza con un saludo breve "
+        f"({greeting}) y a continuación responde a lo que pide el cliente."
+    )
 
 
 def _supervisor_feedback_block(feedback: str) -> str:
@@ -63,6 +105,7 @@ def build_system_blocks(
     current_date: str | None = None,
     known_facts: str | None = None,
     supervisor_feedback: str | None = None,
+    conversation_context: str | None = None,
 ) -> list[dict]:
     """Compone el system como bloques para Anthropic, optimizado para prompt caching.
 
@@ -88,6 +131,8 @@ def build_system_blocks(
     dynamic: list[str] = []
     if current_date:
         dynamic.append(_date_preamble(current_date))
+    if conversation_context:
+        dynamic.append(conversation_context)
     if known_facts:
         dynamic.append(_facts_block(known_facts))
     kb = _kb_wrapper(knowledge_chunks)
@@ -107,6 +152,7 @@ def build_system_prompt(
     current_date: str | None = None,
     known_facts: str | None = None,
     supervisor_feedback: str | None = None,
+    conversation_context: str | None = None,
 ) -> str:
     """Versión string del system prompt (AOP base + fecha + datos + RAG).
 
@@ -119,6 +165,7 @@ def build_system_prompt(
         current_date=current_date,
         known_facts=known_facts,
         supervisor_feedback=supervisor_feedback,
+        conversation_context=conversation_context,
     )
     return "\n\n---\n\n".join(b["text"] for b in blocks)
 

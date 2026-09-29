@@ -30,6 +30,7 @@ from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.prompts.builder import (
     build_message_history,
     build_system_blocks,
+    conversation_context_block,
 )
 from apps.api.agents.schemas import RESPOND_OR_ESCALATE_TOOL, AgentDecisionTool
 from apps.api.agents.state import AgentState
@@ -243,6 +244,9 @@ def make_reason_node(
             current_date=_tenant_now_str(state.get("tenant_facts")),
             known_facts=state.get("known_facts"),
             supervisor_feedback=state.get("supervisor_feedback"),
+            conversation_context=conversation_context_block(
+                state["conversation_history"], state.get("end_customer")
+            ),
         )
         messages = build_message_history(state["conversation_history"])
         messages = _append_tool_result_blocks(messages, state.get("tool_results", []))
