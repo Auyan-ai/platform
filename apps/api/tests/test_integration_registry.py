@@ -8,10 +8,13 @@ from apps.api.integrations.registry import IntegrationRegistry
 
 @pytest.fixture(autouse=True)
 def clean_registry():
-    """Limpia el registry antes y después de cada test."""
+    """Registry vacío durante el test y restaurado al terminar: los adapters reales
+    (registrados al importar su módulo) no deben desaparecer para el resto de la suite."""
+    saved = dict(IntegrationRegistry._registry)
     IntegrationRegistry._reset()
     yield
     IntegrationRegistry._reset()
+    IntegrationRegistry._registry.update(saved)
 
 
 class TestRegister:

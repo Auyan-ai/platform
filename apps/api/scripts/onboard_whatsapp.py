@@ -99,7 +99,7 @@ class ZernioIntegrationState:
     def redacted(self) -> dict[str, Any]:
         creds = redact_credentials(self.credentials)
         if creds.get("webhook_secret"):
-            creds["webhook_secret"] = "***"
+            creds["webhook_secret"] = "***"  # noqa: S105 — marcador de redacción
         return {"credentials": creds, "config": self.config, "is_active": self.is_active}
 
 
