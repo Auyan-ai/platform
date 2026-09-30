@@ -27,6 +27,14 @@ Kenny valida Auyan como **Managed AI Service** (Auyan pone el producto y opera i
 
 ---
 
+## ▶️ Arranque de la sesión 80 — implementar el Sprint 2 con Sonnet
+
+1. Leer `CLAUDE.md`, este archivo, [ADR 0010](adr/0010-whatsapp-zernio-handoff.md) y el [plan](whatsapp-zernio-plan.md) completo, en especial "Principio de determinismo". El plan manda: no re-decidir lo cerrado en la s79.
+2. Empezar por **PR-1** (refactor del resolutor de canal). No depende de C0 ni de Zernio.
+3. **PR-2 necesita C0.4** (el fixture real de la firma del webhook), y C0 lo hace Kenny. Si todavía no está, dejar PR-2 preparado con la verificación de firma aislada en una función y su test marcado como pendiente del fixture, y **no mergearlo** sin él.
+4. Consultar la API de Zernio con `raw.githubusercontent.com/zernio-dev/zernio-php` (ver el plan). `docs.zernio.com` está bloqueado desde el contenedor.
+5. Un PR por bloque contra `develop`, con la suite verde sin `.env` y `ruff`. Toda migración nueva se apunta en "🔴 Producción".
+
 ## 🚀 Próximos sprints (orden acordado s77)
 
 Zernio/WhatsApp **sube de prioridad** (antes iba después de JEV): en España la inmensa mayoría de marcas atiende por WhatsApp. El **widget de chat** también es requisito del piloto. JEV baja al final.

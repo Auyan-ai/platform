@@ -58,8 +58,22 @@ gana ninguna libertad nueva en este sprint.
 
 ## Hechos verificados de la API de Zernio
 
-Fuente: OpenAPI vía el SDK oficial `zernio-dev/zernio-php`. `docs.zernio.com` está bloqueado desde el
-contenedor de Claude.
+Fuente: OpenAPI vía el SDK oficial `zernio-dev/zernio-php`. `docs.zernio.com` y `zernio.com` están
+bloqueados desde el contenedor de Claude, y `github.com` también.
+
+**Cómo consultar la API desde el contenedor** (lo único alcanzable es `raw.githubusercontent.com`,
+con curl):
+- Índice de endpoints y modelos:
+  `https://raw.githubusercontent.com/zernio-dev/zernio-php/main/README.md`.
+- Un grupo de endpoints: `…/main/docs/Api/<Grupo>Api.md`. Por ejemplo `MessagesApi`,
+  `WebhooksApi`, `ConnectApi`, `ProfilesApi`, `APIKeysApi`, `WhatsAppApi`, `WhatsAppSandboxApi`,
+  `AccountsApi`.
+- Un modelo (payloads de webhooks y bodies): `…/main/docs/Model/<Modelo>.md`. Por ejemplo
+  `WebhookPayloadMessage`, `WebhookPayloadMessageMessage`, `WebhookPayloadMessageMessageSender`,
+  `WebhookPayloadMessageSent`, `WebhookPayloadMessageSentMessage`, `InboxWebhookAccount`,
+  `InboxWebhookConversation`, `WebhookPayloadMessageMetadata`, `SendInboxMessageRequest`,
+  `CreateApiKeyRequest`, `Webhook`.
+- Los `.md` vienen con entidades HTML (`&#x60;` = backtick): pasarlos por `html.unescape`.
 
 - Base: `https://zernio.com/api/v1`, `Authorization: Bearer <key>`. Los errores son JSON con `code`
   y `error`. Cada respuesta lleva `X-Request-Id`: loguearlo siempre.
