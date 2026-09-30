@@ -84,6 +84,7 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - Intercom: reactivo (si cliente lo pide)
 - Shopify: 11 skills implementadas — 5 L1 (lectura), 2 L2 (escritura reversible), 4 L3 (destructivas con approval)
 - Postmark: email saliente Auyan→cliente (reports, notificaciones)
+- WhatsApp vía Zernio: canal de mensajería, NO helpdesk (ADR 0010). Los escalados van por handoff al helpdesk del cliente. La key maestra de Zernio solo vive en scripts de operación (`.env.zernio` local), nunca en el runtime ni en `.env.staging`
 
 ## Selección de modelo
 - Al inicio de cada sesión, recomendar qué modelo usar según la tarea descrita antes de arrancar.

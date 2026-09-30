@@ -4,8 +4,9 @@ Una cuenta de Zernio de Auyan, un **profile por tenant** y una API key **limitad
 profile** (la única que ve el runtime). Este script usa la key MAESTRA (`ZERNIO_API_KEY`),
 que nunca entra en el runtime de la API.
 
-Uso (desde apps/api, con `.env.staging` cargado: DATABASE_URL, INTEGRATIONS_SECRET_KEY,
-ZERNIO_API_KEY y AUYAN_API_BASE_URL):
+Uso (desde apps/api, con `.env.staging` cargado —DATABASE_URL, INTEGRATIONS_SECRET_KEY y
+AUYAN_API_BASE_URL— y `.env.zernio` aparte con ZERNIO_API_KEY; nunca en `.env.staging`, que
+`deploy_cloud_run.sh` sube entero a Cloud Run):
 
     # 1. Profile + key limitada + webhook firmado; imprime el enlace del signup hospedado
     #    (co-branded) para mandárselo al cliente. Guarda la integración INACTIVA.
