@@ -43,6 +43,7 @@ from apps.api.db.queries import (
     mark_conversations_abandoned,
     mark_conversations_nudged,
 )
+from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.helpdesk_closure import close_external_helpdesk_ticket_safe
 from apps.api.services.helpdesk_delivery import deliver_message_to_helpdesk
 
@@ -209,6 +210,9 @@ async def _nudge_for_tenant(
         # Refinamiento Python: last_activity debe caer dentro de la ventana de su canal
         nudge_ids: list[UUID] = []
         for conv_id, channel, last_activity in candidates:
+            if is_messaging_channel(channel):
+                # WhatsApp: sin nudges (caerían fuera de la ventana de 24 h de Meta).
+                continue
             cutoff_min, cutoff_max = channel_ranges.get(channel, default_range)
             activity = last_activity.replace(tzinfo=UTC)
             if cutoff_min < activity <= cutoff_max:

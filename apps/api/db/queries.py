@@ -212,6 +212,66 @@ async def find_end_customer_by_email(
     return None if row is None else EndCustomer(**dict(row))
 
 
+async def find_end_customer_by_phone(
+    conn: asyncpg.Connection, tenant_id: UUID, phone: str
+) -> EndCustomer | None:
+    """Cliente por teléfono E.164 exacto (normalizar antes con `services.identity`)."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, email, phone, external_id, full_name, metadata
+          FROM end_customers
+         WHERE tenant_id = $1 AND phone = $2 AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        tenant_id,
+        phone,
+    )
+    return None if row is None else EndCustomer(**dict(row))
+
+
+async def find_end_customer_by_external_id(
+    conn: asyncpg.Connection, tenant_id: UUID, external_id: str
+) -> EndCustomer | None:
+    """Cliente por id externo del canal (p. ej. `wa:bsuid:<BSUID>` de WhatsApp)."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, email, phone, external_id, full_name, metadata
+          FROM end_customers
+         WHERE tenant_id = $1 AND external_id = $2 AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        tenant_id,
+        external_id,
+    )
+    return None if row is None else EndCustomer(**dict(row))
+
+
+async def fill_end_customer_identity(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    customer_id: UUID,
+    *,
+    phone: str | None = None,
+    external_id: str | None = None,
+) -> EndCustomer | None:
+    """Completa teléfono / external_id SOLO si estaban vacíos (nunca sobrescribe)."""
+    row = await conn.fetchrow(
+        """
+        UPDATE end_customers
+           SET phone       = COALESCE(phone, $3),
+               external_id = COALESCE(external_id, $4),
+               updated_at  = now()
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        RETURNING id, tenant_id, email, phone, external_id, full_name, metadata
+        """,
+        tenant_id,
+        customer_id,
+        phone,
+        external_id,
+    )
+    return None if row is None else EndCustomer(**dict(row))
+
+
 async def create_end_customer(
     conn: asyncpg.Connection,
     *,
@@ -287,6 +347,8 @@ async def find_conversation_by_external(
     channel: ChannelType,
     external_id: str,
 ) -> Conversation | None:
+    """La conversación MÁS RECIENTE del hilo externo. En helpdesks hay una por ticket;
+    en mensajería (WhatsApp) un chat acumula sesiones y manda la última."""
     row = await conn.fetchrow(
         """
         SELECT id, tenant_id, end_customer_id, channel, external_id,
@@ -295,6 +357,7 @@ async def find_conversation_by_external(
           FROM conversations
          WHERE tenant_id = $1 AND channel = $2::channel_type AND external_id = $3
            AND deleted_at IS NULL
+         ORDER BY created_at DESC
          LIMIT 1
         """,
         tenant_id,
@@ -3081,6 +3144,35 @@ async def get_integration_by_chatwoot_account(
     )
     return _single_integration_or_collision(
         rows, provider="chatwoot", lookup="account_id", value=account_id
+    )
+
+
+async def get_integration_by_zernio_account(
+    conn: asyncpg.Connection,
+    *,
+    account_id: str,
+) -> TenantIntegration | None:
+    """Integración Zernio por `accountId` (cross-tenant, para el webhook de Zernio).
+
+    Debe llamarse con bootstrap_connection(). Único por el índice
+    `tenant_integrations_unique_zernio_account`.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
+               enabled_at, enabled_by, created_at, updated_at
+          FROM tenant_integrations
+         WHERE provider    = 'zernio'
+           AND kind        = 'channel'
+           AND config->>'account_id' = $1
+           AND deleted_at IS NULL
+           AND is_active = TRUE
+         LIMIT 2
+        """,
+        account_id,
+    )
+    return _single_integration_or_collision(
+        rows, provider="zernio", lookup="account_id", value=account_id
     )
 
 

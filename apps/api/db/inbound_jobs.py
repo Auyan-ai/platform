@@ -79,6 +79,8 @@ async def lock_inbound_intake(
     channel: str,
     external_id: str,
     customer_email: str | None,
+    customer_phone: str | None = None,
+    customer_external_id: str | None = None,
 ) -> None:
     """Serializa intakes concurrentes que crearían el mismo cliente o conversación.
 
@@ -90,6 +92,10 @@ async def lock_inbound_intake(
     keys = [f"intake:{tenant_id}:conv:{channel}:{external_id}"]
     if customer_email:
         keys.append(f"intake:{tenant_id}:customer:{customer_email.strip().lower()}")
+    if customer_phone:
+        keys.append(f"intake:{tenant_id}:customer_phone:{customer_phone}")
+    if customer_external_id:
+        keys.append(f"intake:{tenant_id}:customer_ext:{customer_external_id}")
     for key in sorted(keys):
         await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))", key)
 

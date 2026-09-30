@@ -111,6 +111,8 @@ async def test_intake_locks_ticket_and_customer_before_creating(
         "channel": "zendesk",
         "external_id": "42",
         "customer_email": "cliente@test.com",
+        "customer_phone": None,
+        "customer_external_id": None,
     }
 
 

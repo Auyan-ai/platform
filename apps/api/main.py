@@ -58,6 +58,7 @@ from apps.api.routers.webhooks import router as webhooks_router
 from apps.api.routers.webhooks_chatwoot import router as webhooks_chatwoot_router
 from apps.api.routers.webhooks_gorgias import router as webhooks_gorgias_router
 from apps.api.routers.webhooks_zendesk import router as webhooks_zendesk_router
+from apps.api.routers.webhooks_zernio import router as webhooks_zernio_router
 from apps.api.services.aop_listener import AopCacheListener
 from apps.api.services.audit import AuditLogger
 from apps.api.services.cleanup import run_abandoned_cleanup
@@ -194,6 +195,7 @@ app.include_router(webhooks_router)
 app.include_router(webhooks_chatwoot_router)
 app.include_router(webhooks_zendesk_router)
 app.include_router(webhooks_gorgias_router)
+app.include_router(webhooks_zernio_router)
 app.include_router(oauth_zendesk_router)
 app.include_router(oauth_gorgias_router)
 app.include_router(users_router)
