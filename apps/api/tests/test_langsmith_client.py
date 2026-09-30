@@ -216,7 +216,9 @@ class TestTraceId:
             run_id=run_id,
             dotted_order="20260101T000000000000Z00000000-0000-0000-0000-000000000001",
         )
-        assert LangSmithClient(MagicMock(), project_name="auyan-test").trace_id(trace) == str(run_id)
+        assert LangSmithClient(MagicMock(), project_name="auyan-test").trace_id(trace) == str(
+            run_id
+        )
 
 
 class TestFlush:
@@ -240,3 +242,38 @@ class TestFlush:
         client = LangSmithClient(inner, project_name="auyan-test")
 
         await client.flush()
+
+
+def test_finalize_keeps_supabase_correlation_metadata() -> None:
+    """`update_run` reemplaza extra.metadata: el finalize debe reenviar tenant_id y
+    conversation_id o el run deja de correlacionar con Supabase (visto en staging)."""
+    inner = MagicMock()
+    client = LangSmithClient(inner, project_name="auyan-test")
+    trace = client.start_conversation_trace(
+        tenant_id="t-1",
+        conversation_id="c-1",
+        end_customer_id="cu-1",
+        channel="zendesk",
+        input_text="hola",
+    )
+    assert trace is not None
+
+    client.finalize_trace(
+        trace,
+        decision="respond",
+        confidence=0.9,
+        response_text="x",
+        escalation_reason=None,
+        tokens_in=10,
+        tokens_out=5,
+        cost_usd=0.001,
+        model="m",
+        error=None,
+    )
+
+    metadata = inner.update_run.call_args_list[-1].kwargs["extra"]["metadata"]
+    assert metadata["tenant_id"] == "t-1"
+    assert metadata["conversation_id"] == "c-1"
+    assert metadata["end_customer_id"] == "cu-1"
+    assert metadata["channel"] == "zendesk"
+    assert metadata["tokens_in"] == 10
