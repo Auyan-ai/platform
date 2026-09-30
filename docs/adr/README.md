@@ -21,6 +21,7 @@ un ADR nuevo que la supersede y se actualiza el `Estado` del viejo.
 | [0007](0007-model-routing.md) | Routing de modelos por tarea (Haiku/Sonnet/Opus) según costo-profundidad | Aceptada |
 | [0008](0008-inbound-queue-postgres.md) | Turnos inbound en una cola Postgres, serializados por conversación | Aceptada |
 | [0009](0009-cloud-run-vercel.md) | API en Cloud Run y dashboard en Vercel (sustituye a Railway); `min-instances` activable con el primer cliente de pago | Aceptada |
+| [0010](0010-whatsapp-zernio-handoff.md) | WhatsApp vía Zernio como canal desacoplado del helpdesk, con handoff modular al helpdesk del cliente | Propuesta |
 
 ## Estados posibles
 
