@@ -122,6 +122,14 @@ y el helpdesk del cliente recibe los handoffs a través de una interfaz común.*
    parcial como el de los helpdesks para que un id externo nunca apunte a dos tenants. La firma
    se valida con el secreto del tenant.
 
+10. **Integración determinista.** Todo lo que cambia estado, mueve datos o habla con un tercero
+    es código con tests, nunca una decisión del LLM. Eso cubre routing, sesiones, identidad,
+    ownership, ventana, plantillas, pendientes, handoff, silencio de la IA, dedupe y formato. El
+    LLM solo conserva lo que ya hacía (intención, redacción, pedir skills que pasan por gates y
+    decidir escalar, supervisado). Cuando no hay nada que razonar (imagen sin texto, audio
+    ilegible o demasiado largo, sticker) se manda un **mensaje fijo** del tenant y no se corre el
+    grafo. La transcripción de voz tiene que ser **literal**.
+
 ## Alternativas consideradas
 
 | Alternativa | Por qué se descartó |
@@ -141,7 +149,10 @@ y el helpdesk del cliente recibe los handoffs a través de una interfaz común.*
 **Positivas:**
 - WhatsApp funciona sin tocar el grafo. El agente recibe texto, con los audios ya transcritos.
 - El handoff se reutiliza para cualquier helpdesk y cualquier canal de mensajería futuro
-  (DMs de IG/FB por el mismo Zernio).
+  (DMs de Instagram, Facebook y TikTok por el mismo Zernio; análisis en el backlog del plan).
+  Lo que cambia por red es la política de ventana (Meta: 24 h + tag `HUMAN_AGENT` hasta 7 días
+  para humanos, sin plantillas), el formato y la identidad: esas redes no dan teléfono ni email,
+  así que las L3 quedan bloqueadas hasta que exista OTP.
 - Aislamiento por tenant: key limitada al profile, secreto de webhook propio e índice único por
   `accountId`.
 - El cliente conserva su número y Auyan no tiene que hacer trámites con Meta.

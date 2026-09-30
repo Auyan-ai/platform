@@ -16,12 +16,45 @@
 | Handoff | **Ticket en el helpdesk del cliente** (Zendesk en este sprint) **y** detección de la toma desde el móvil (coexistence). **Módulo agnóstico de helpdesk**: interfaz `HandoffTarget`, Zendesk primera implementación. |
 | Ventana de 24 h | **Patrón del sector** (Intercom/Zendesk/Gorgias): plantilla utility de re-enganche → el mensaje queda pendiente → se entrega cuando el comprador responde, más una nota interna en el ticket. |
 | Audios | **Se transcriben ya.** Proveedor elegido por **mini-benchmark en C0**, detrás de una interfaz `Transcriber`. |
-| Imágenes | Se **guardan** en Storage, el agente acusa recibo y van **adjuntas al ticket** si hay handoff. Sin visión. |
+| Imágenes | Se **guardan** en Storage y van **adjuntas al ticket** si hay handoff. El acuse de recibo es un **mensaje fijo**, no del LLM (ver "Principio de determinismo"). Sin visión. |
 | L3 por WhatsApp | Ownership por **email o teléfono** del pedido. Si no coincide o solo llega BSUID → **bloquear y ofrecer escalar**. **OTP → backlog post-piloto.** |
 | Sesiones | Conversación nueva sobre el mismo chat si la anterior está `closed`/`closed_abandoned`, o `resolved` hace más de `reopen_window_days` (7 por defecto). Si no, se reabre. |
 | Toma desde el móvil | El agente se calla hasta **12 h sin actividad humana** (configurable por tenant). |
 | Nudges | **Desactivados en WhatsApp.** |
 | E2E | **Sandbox de Zernio** durante el desarrollo, **número real de Marea** antes de cerrar el sprint. |
+
+## Principio de determinismo (regla dura de este sprint)
+
+Pedido de Kenny en la s79: la integración debe ser **lo más determinista posible**. El LLM no
+gana ninguna libertad nueva en este sprint.
+
+- **Todo lo que cambia estado, mueve datos o habla con un tercero es código con tests, nunca una
+  decisión del LLM.** Eso incluye:
+  - a qué tenant y conversación pertenece un mensaje (routing por `accountId`, sesiones);
+  - quién es el comprador (BSUID/teléfono) y si es dueño del pedido (gate L3);
+  - por dónde y a quién se entrega;
+  - si la ventana está abierta, qué plantilla se manda y cuándo se entrega un pendiente;
+  - cuándo se abre o se cierra un handoff y cuándo se calla la IA;
+  - deduplicación e idempotencia, formato de salida y cortes.
+- **El LLM solo hace lo que ya hacía:** decidir la intención (`select_aop`), redactar la
+  respuesta, pedir skills (que pasan por los gates de código y de aprobación) y decidir escalar,
+  supervisado.
+- **Mensajes fijos, no generados, cuando no hay nada que razonar.** Se configuran por tenant y
+  tienen un default en español:
+  - acuse de una imagen sin texto;
+  - audio que no se pudo transcribir o que supera la duración máxima;
+  - adjunto que no se pudo descargar;
+  - sticker o contenido sin texto.
+
+  En esos casos **no se corre el grafo**. Si la imagen llega **con texto**, el grafo corre sobre el
+  texto y el contenido lleva la marca `[adjuntó 1 imagen que no puedes ver; no describas su
+  contenido]`, para que el LLM no se invente lo que hay en la foto.
+- **Nada de resúmenes del LLM en el handoff.** La transcripción que va al ticket son los mensajes
+  literales, formateados por código. El único texto del LLM ahí es el motivo del escalado, como ya
+  pasa en Zendesk.
+- **La transcripción de voz tiene que ser literal.** Se descarta cualquier proveedor que reescriba,
+  resuma o "limpie" el texto: un número de pedido o un email mal reescrito es un error de
+  integración, no de estilo. Es criterio eliminatorio en el benchmark de C0.
 
 ## Hechos verificados de la API de Zernio
 
@@ -273,7 +306,11 @@ Convenciones que aplican a todos:
   lo usa en `send_outbound`. `Idempotency-Key` = `f"{message_id}:{n}"`: el worker pasa el id
   del mensaje persistido; ampliar la firma de `send_outbound` con
   `idempotency_key: str | None = None` en el Protocol, opcional para los helpdesks.
-- **Ventana** (`services/whatsapp_window.py`):
+- **Ventana** (`services/messaging_window.py`), con **nombre agnóstico de canal** para que el
+  omnicanal futuro (ver el backlog al final) solo añada políticas:
+  - `WINDOW_POLICIES: dict[ChannelType, WindowPolicy]`, donde `WindowPolicy` define la duración
+    y qué hacer fuera de la ventana. **Solo se implementa `whatsapp`**: 24 h y plantilla de
+    re-enganche.
   - `async def window_state(conn, *, tenant_id, conversation) -> WindowState(open: bool, closes_at: datetime | None)`,
     calculada con el **último mensaje inbound del comprador en ese chat de Zernio**. Es decir,
     todas las conversaciones de Auyan con el mismo `(channel, external_id)`, no solo la actual.
@@ -499,17 +536,23 @@ Convenciones que aplican a todos:
   2. **audio** → transcribir (máximo 5 min, configurable). El contenido del mensaje pasa a
      `"[Nota de voz] <transcripción>"`, con `metadata.transcription = {provider, model,
      duration_s, cost_usd}`, y el coste se suma a `UsageRecorder` del tenant;
-  3. **imagen/archivo** → se añade al contenido `"[El cliente envió una imagen]"` o `"[… un
-     archivo]"` para que el agente acuse recibo;
-  4. si falla la descarga o la transcripción → `logger.error`, el contenido dice que no se pudo
-     procesar y el agente pide que lo escriba. **No** se reintenta el job por esto.
+  3. **imagen/archivo con texto** → el grafo corre sobre el texto, con la marca `[adjuntó 1
+     imagen que no puedes ver; no describas su contenido]`;
+  4. **sin texto útil** (solo imagen o archivo, sticker, audio que no se pudo transcribir o que
+     supera la duración máxima, descarga fallida) → **mensaje fijo** del tenant
+     (`tenant_integrations.config.media_fallback_messages`, con defaults en español), decisión
+     `media_fallback` y **sin grafo**. Si falla algo → `logger.error`. **No** se reintenta el job
+     por esto.
 
   Si hay handoff, los adjuntos van al ticket (PR-4 ya recibe `attachments`).
 - **LangSmith:** child run `transcribe_audio` con provider, duración, latencia y coste, **sin**
   audio ni texto (el texto ya entra como contenido del turno, con las mismas reglas de PII).
-- **Tests:** audio → contenido transcrito y coste en uso; imagen → guardada y contenido marcado;
-  descarga fallida → contenido de fallback sin reintento; audio largo → no se transcribe;
-  sin proveedor → fallback; ruta con `tenant_id`.
+- **Tests:**
+  - audio → contenido transcrito y coste en uso;
+  - imagen **con** texto → guardada, marca "no puedes verla" y el grafo corre;
+  - imagen **sin** texto → mensaje fijo y **el grafo no se llama**;
+  - descarga fallida, audio largo o sin proveedor → mensaje fijo, sin grafo y sin reintento;
+  - ruta con `tenant_id`.
 - **ADR 0011** (proveedor de transcripción) se mergea con este PR.
 
 ### PR-8 (opcional, pequeño) · `feat(web):` WhatsApp y handoff en el inbox
@@ -547,7 +590,49 @@ Convenciones que aplican a todos:
 - OTP y verificación por niveles (#257, **backlog post-piloto**).
 - Visión de imágenes con Claude.
 - Handoff a Gorgias y Chatwoot (misma interfaz, cuando un cliente lo pida).
-- DMs de Instagram/Facebook, comentarios y reviews (mismo Zernio, otro sprint).
+- DMs de Instagram, Facebook y TikTok (ver "Backlog — omnicanal vía Zernio" abajo). Los
+  comentarios públicos y las reviews son otro producto (moderación pública).
 - Vista previa de adjuntos en el dashboard.
 - Serializar approvals con la cola (deuda de ADR 0008).
 - Política de retención GDPR de adjuntos y transcripciones (Sprint 4, #256).
+
+## Backlog — omnicanal vía Zernio (Instagram, Facebook Messenger, TikTok)
+
+**No entra en este sprint.** Kenny quiere una experiencia omnicanal de verdad; el widget y el
+email ya están resueltos aparte. Lo que construimos para WhatsApp está pensado para reusarse: el
+canal va desacoplado del helpdesk, el handoff pasa por `HandoffTarget` y la ventana tiene
+políticas por canal. Datos de la OpenAPI de Zernio, salvo lo marcado ⚠️, que hay que verificar.
+
+**Se reusa tal cual** (un solo webhook, el mismo adapter y los mismos eventos para todas las redes):
+`/webhooks/zernio`, `ZernioClient`/`ZernioAdapter` (mismo `POST …/messages`), intake + cola +
+dedupe por `event id`, sesiones, **handoff al helpdesk** (la IA calla, el humano responde desde
+Zendesk), descarga de adjuntos a Storage, transcripción de audios y mensajes fijos para lo que no
+es texto. El onboarding es el mismo profile por tenant: Zernio admite una cuenta por plataforma y
+profile, y se conecta por OAuth con `GET /v1/connect/{instagram|facebook|tiktok}`.
+
+| | Instagram DM | Facebook Messenger | TikTok DM |
+|---|---|---|---|
+| Ventana | 24 h de Meta. Fuera de ella **no hay plantillas**: las respuestas **humanas** salen con el tag `HUMAN_AGENT` (Instagram solo admite ese), válido **7 días** según la política de Meta. | Igual: 24 h + `HUMAN_AGENT` para el humano. Hay otros tags de Facebook, pero no los usaríamos. | ⚠️ Reglas de ventana y límites de envío sin verificar. La disponibilidad de la API de mensajes de TikTok para negocios en la UE también está por confirmar. |
+| Identidad | IGSID (id por cuenta). **Sin teléfono ni email.** | PSID (id por página). **Sin teléfono ni email.** | Id de TikTok. **Sin teléfono ni email.** |
+| Consecuencia L3 | El gate de ownership **nunca** coincide → las L3 se bloquean y se ofrece escalar (o seguir por email/WhatsApp). Las L1 no muestran datos personales. El **OTP del backlog post-piloto** es lo que lo desbloquearía. | Igual. | Igual. |
+| Adjuntos | URLs firmadas que **caducan** → descarga al llegar (mismo pipeline). | Igual. | Los no-texto llegan con `text` vacío + `tiktokMessageType` → mensaje fijo. |
+| Contenido propio | Respuestas a stories, menciones, reels compartidos, `noRenderableContent`. | Botones postback / quick replies. | `share_post`, stickers, emoji. |
+| Formato | Texto plano: no renderiza `*negrita*` de WhatsApp → formateador por canal. | Texto plano. | Texto plano. |
+| Toma humana desde la app nativa | ⚠️ Verificar si Zernio emite `message.sent` cuando la marca contesta desde la app de Instagram o Meta Business Suite. | ⚠️ Igual. | ⚠️ Igual. |
+
+**Cuidado propio de IG/FB:** al conectar la cuenta, Zernio **reproduce el historial previo** de DMs.
+Guard determinista: nunca contestar mensajes con `sentAt` anterior a la conexión, o de más de N
+minutos de antigüedad al llegar.
+
+**Trabajo estimado por red** (pequeño si el Sprint 2 se implementa como está):
+1. Valor en el enum `channel_type`: `instagram` ya existe; `messenger` y `tiktok` no → migración.
+2. Ruta en `DELIVERY_ROUTES`.
+3. `WindowPolicy` de la red.
+4. Formateador de texto plano.
+5. Mapeo de identidad.
+6. Guard de historial.
+7. Subcomando en `onboard_whatsapp.py`, que se renombraría a `onboard_messaging.py`.
+8. Tests y E2E.
+
+Orden sugerido: **Instagram → Facebook → TikTok**. En Instagram y Facebook la ventana y el tag
+`HUMAN_AGENT` son de Meta y están documentados; TikTok necesita un spike propio.
