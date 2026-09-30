@@ -25,7 +25,7 @@ from apps.api.integrations.registry import IntegrationRegistry
 
 logger = logging.getLogger(__name__)
 
-_API_VERSION = "2024-10"
+_API_VERSION = "2026-04"
 # Refrescamos el access_token 5min antes de que expire para evitar race conditions
 # entre "valido" en el check y "expirado" al hacer la llamada real a Shopify.
 _TOKEN_REFRESH_BUFFER_SECONDS = 300
@@ -517,7 +517,8 @@ class ShopifyClient:
         Returns solo existe en GraphQL (`returnCreate`; no hay recurso REST). La
         devolución se hace sobre el *fulfillment line item* → se busca el del
         `line_item_id` entre los returnable fulfillments del pedido (solo artículos
-        ya enviados y aún no devueltos). Scopes: `read_returns` + `write_returns`.
+        ya enviados y aún no devueltos). El motivo va en `returnReasonNote`.
+        Scopes: `read_returns` + `write_returns`.
         Devuelve `{"id": int, "status": str, "name": str}`.
         """
         order_gid = f"gid://shopify/Order/{order_id}"
@@ -537,9 +538,6 @@ class ShopifyClient:
             if quantity > int(match["quantity"]):
                 raise ShopifyActionError("return_quantity_exceeds_returnable")
 
-            reason_enum = reason.strip().upper().replace(" ", "_")
-            if reason_enum not in _RETURN_REASONS:
-                reason_enum = "OTHER"
             data = await self._graphql(
                 client,
                 _RETURN_CREATE_MUTATION,
@@ -550,7 +548,8 @@ class ShopifyClient:
                             {
                                 "fulfillmentLineItemId": match["fulfillmentLineItem"]["id"],
                                 "quantity": quantity,
-                                "returnReason": reason_enum,
+                                # `returnReason` (enum) está deprecado desde 2025; el
+                                # motivo va como nota libre.
                                 "returnReasonNote": reason[:255],
                             }
                         ],
@@ -571,21 +570,6 @@ class ShopifyClient:
 class ShopifyActionError(RuntimeError):
     """Shopify no permite la acción con el estado actual del pedido."""
 
-
-_RETURN_REASONS = frozenset(
-    {
-        "COLOR",
-        "DEFECTIVE",
-        "NOT_AS_DESCRIBED",
-        "OTHER",
-        "SIZE_TOO_LARGE",
-        "SIZE_TOO_SMALL",
-        "STYLE",
-        "UNKNOWN",
-        "UNWANTED",
-        "WRONG_ITEM",
-    }
-)
 
 _RETURNABLE_QUERY = """
 query Returnable($orderId: ID!) {

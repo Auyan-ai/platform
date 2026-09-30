@@ -14,7 +14,7 @@ import pytest
 import respx
 from apps.api.integrations.shopify import ShopifyActionError, ShopifyClient
 
-BASE = "https://marea.myshopify.com/admin/api/2024-10"
+BASE = "https://marea.myshopify.com/admin/api/2026-04"
 
 
 def _client() -> ShopifyClient:
@@ -109,28 +109,9 @@ async def test_start_return_uses_graphql_return_create() -> None:
     assert mutation["orderId"] == "gid://shopify/Order/7404799197464"
     item = mutation["returnLineItems"][0]
     assert item["fulfillmentLineItemId"] == "gid://shopify/FulfillmentLineItem/900"
-    assert (item["quantity"], item["returnReason"]) == (1, "DEFECTIVE")
-
-
-@respx.mock
-async def test_free_text_reason_maps_to_other_with_note() -> None:
-    created = {
-        "data": {
-            "returnCreate": {
-                "return": {"id": "gid://shopify/Return/1", "name": "R", "status": "REQUESTED"},
-                "userErrors": [],
-            }
-        }
-    }
-    route = respx.post(f"{BASE}/graphql.json").mock(
-        side_effect=[
-            httpx.Response(200, json=_returnable(5, 2)),
-            httpx.Response(200, json=created),
-        ]
-    )
-    await _client().start_return(1, line_item_id=5, quantity=2, reason="no me gustó el tono")
-    item = json.loads(route.calls[1].request.content)["variables"]["input"]["returnLineItems"][0]
-    assert (item["returnReason"], item["returnReasonNote"]) == ("OTHER", "no me gustó el tono")
+    assert (item["quantity"], item["returnReasonNote"]) == (1, "defective")
+    # `returnReason` (enum) está deprecado en 2026-04: no se manda.
+    assert "returnReason" not in item
 
 
 @respx.mock
