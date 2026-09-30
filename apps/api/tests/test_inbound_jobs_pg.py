@@ -46,6 +46,8 @@ create table end_customers (id uuid primary key);
 create table conversations (id uuid primary key);
 create table messages (
   id uuid primary key, tenant_id uuid, conversation_id uuid, role text,
+  direction text not null default 'inbound', author_user_id uuid,
+  attachments jsonb not null default '[]',
   content text not null default '', metadata jsonb not null default '{}',
   created_at timestamptz not null default clock_timestamp(), deleted_at timestamptz
 );
@@ -391,3 +393,31 @@ async def test_soft_deleted_or_expired_idempotency_key_can_be_reclaimed(pool: as
 
         await conn.execute("update idempotency_keys set expires_at = now() - interval '1 s'")
         assert await try_insert_idempotency_key(conn, tenant_id=t, key="k1", request_path="/p")
+
+
+async def test_history_bound_hides_later_customer_messages_only(pool: asyncpg.Pool) -> None:
+    """El turno de m1 no ve m2 (lo responde su propio turno), pero sí la respuesta del
+    agente que salió mientras esperaba en cola (si no, vuelve a saludar)."""
+    import json
+
+    from apps.api.db.queries import get_recent_messages
+
+    async with pool.acquire() as conn:
+        await conn.set_type_codec(
+            "jsonb", encoder=json.dumps, decoder=json.loads, schema="pg_catalog"
+        )
+        t, c, cu = await _seed_conversation(conn)
+        _, m0 = await _enqueue(conn, t, c, cu)
+        _, m1 = await _enqueue(conn, t, c, cu)
+        _, m2 = await _enqueue(conn, t, c, cu)
+        await conn.execute(
+            "insert into messages (id, tenant_id, conversation_id, role, direction, content)"
+            " values ($1, $2, $3, 'agent_ai', 'outbound', 'reply')",
+            uuid.uuid4(),
+            t,
+            c,
+        )
+        bounded = await get_recent_messages(conn, t, c, limit=20, up_to_message_id=m1)
+        assert [m.content for m in bounded] == [f"msg {m0}", f"msg {m1}", "reply"]
+        full = await get_recent_messages(conn, t, c, limit=20)
+        assert [m.content for m in full] == [f"msg {m0}", f"msg {m1}", f"msg {m2}", "reply"]

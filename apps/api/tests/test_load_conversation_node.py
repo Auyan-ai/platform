@@ -166,7 +166,7 @@ async def test_uses_history_limit_from_settings(fake_deps, monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_history_is_bounded_to_the_inbound_message(fake_deps, monkeypatch) -> None:
-    """El turno no ve mensajes posteriores a su inbound (los responde su propio turno)."""
+    """El turno no ve mensajes del cliente posteriores a su inbound (su propio turno)."""
     from tests.conftest import INBOUND_MSG_ID
 
     get_msgs_mock = AsyncMock(return_value=[])

@@ -520,8 +520,10 @@ async def get_recent_messages(
 ) -> list[Message]:
     """Últimos `limit` mensajes (excluye 'system' y soft-deleted), en orden cronológico ASC.
 
-    Con `up_to_message_id` se excluye todo lo posterior a ese mensaje: el turno de un
-    inbound no ve mensajes que llegaron después (los responde su propio turno).
+    Con `up_to_message_id` se excluyen los mensajes del CLIENTE posteriores a ese
+    mensaje (los responde su propio turno). Las respuestas del agente/humano se ven
+    siempre: si un turno anterior respondió mientras este esperaba en cola, el agente
+    debe saberlo (p. ej. para no volver a saludar).
     """
     rows = await conn.fetch(
         """
@@ -530,7 +532,7 @@ async def get_recent_messages(
           FROM messages
          WHERE tenant_id = $1 AND conversation_id = $2 AND deleted_at IS NULL
            AND role IN ('customer', 'agent_ai', 'agent_human')
-           AND ($4::uuid IS NULL OR created_at <= (
+           AND ($4::uuid IS NULL OR role <> 'customer' OR created_at <= (
                    SELECT m.created_at FROM messages m
                     WHERE m.id = $4::uuid AND m.tenant_id = $1))
          ORDER BY created_at DESC
@@ -874,9 +876,7 @@ async def create_knowledge_document_with_chunks(
     return document_id
 
 
-async def get_tenant_metrics(
-    conn: asyncpg.Connection, tenant_id: UUID
-) -> dict[str, int]:
+async def get_tenant_metrics(conn: asyncpg.Connection, tenant_id: UUID) -> dict[str, int]:
     """Conteos de conversaciones por status para un tenant.
 
     Devuelve un dict con claves: total, open, pending, escalated, resolved, closed.
@@ -2672,11 +2672,8 @@ async def get_proposals_metrics(
     accepted = data["approved"] + data["applied"]
     data["acceptance_rate"] = round(accepted / reviewed, 4) if reviewed > 0 else None
     cost = float(data["cost_usd_total"]) if data["cost_usd_total"] else 0.0
-    data["cost_per_accepted_proposal"] = (
-        round(cost / accepted, 4) if accepted > 0 else None
-    )
+    data["cost_per_accepted_proposal"] = round(cost / accepted, 4) if accepted > 0 else None
     return data
-
 
 
 # ============================================================
@@ -2783,7 +2780,6 @@ async def get_tenant_usage_range(
         days,
     )
     return [TenantUsageDaily(**dict(row)) for row in rows]
-
 
 
 async def get_tenant_usage_today(
@@ -3408,9 +3404,7 @@ async def get_integration_by_gorgias_domain(
         """,
         domain,
     )
-    return _single_integration_or_collision(
-        rows, provider="gorgias", lookup="domain", value=domain
-    )
+    return _single_integration_or_collision(rows, provider="gorgias", lookup="domain", value=domain)
 
 
 # ============================================================
@@ -3806,9 +3800,7 @@ async def list_runs_for_batch(
     return [SimulationRun(**dict(r)) for r in rows]
 
 
-async def get_tenant_sim_cost_cents_today(
-    conn: asyncpg.Connection, tenant_id: UUID
-) -> float:
+async def get_tenant_sim_cost_cents_today(conn: asyncpg.Connection, tenant_id: UUID) -> float:
     """Suma cost_cents de runs terminados del tenant en las últimas 24h. Para el cost cap."""
     row = await conn.fetchrow(
         """
@@ -3841,9 +3833,7 @@ async def get_global_sim_cost_cents_today(conn: asyncpg.Connection) -> float:
 # ============================================================
 
 
-async def get_tenant_playbook(
-    conn: asyncpg.Connection, tenant_id: UUID
-) -> TenantPlaybook | None:
+async def get_tenant_playbook(conn: asyncpg.Connection, tenant_id: UUID) -> TenantPlaybook | None:
     row = await conn.fetchrow(
         "SELECT * FROM tenant_playbook WHERE tenant_id = $1",
         tenant_id,
@@ -3927,9 +3917,7 @@ async def update_tenant_playbook_section(
 # ============================================================
 
 
-async def get_tenant_facts(
-    conn: asyncpg.Connection, tenant_id: UUID
-) -> TenantFacts | None:
+async def get_tenant_facts(conn: asyncpg.Connection, tenant_id: UUID) -> TenantFacts | None:
     row = await conn.fetchrow(
         "SELECT * FROM tenant_facts WHERE tenant_id = $1",
         tenant_id,
@@ -3940,6 +3928,7 @@ async def get_tenant_facts(
     # asyncpg devuelve JSONB como str cuando no hay codec registrado
     if isinstance(d.get("data"), str):
         import json as _json
+
         d["data"] = _json.loads(d["data"])
     return TenantFacts(**d)
 
