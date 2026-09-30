@@ -530,3 +530,45 @@ class TestRouteAfterSupervise:
 
     def test_error_goes_to_handle_error(self):
         assert self._route({"error": "something_failed"}) == "handle_error"
+
+
+# ----------------------------------------------------------------
+# El supervisor ve las salidas de las skills del turno (E2E ticket #3)
+# ----------------------------------------------------------------
+
+
+def test_supervisor_prompt_includes_tool_outputs() -> None:
+    """Regresión: el supervisor solo veía `- slug: OK` y rechazaba afirmaciones
+    respaldadas por la salida real (p. ej. shipping_address_withheld=true), lo que
+    escalaba respuestas correctas."""
+    from apps.api.agents.nodes.supervise import _build_supervisor_prompt
+
+    prompt = _build_supervisor_prompt(
+        {
+            "decision": "respond",
+            "agent_response": "Por seguridad no puedo mostrarte la dirección.",
+            "tool_results": [
+                {
+                    "slug": "shopify.get_order_status",
+                    "is_error": False,
+                    "output": {"found": True, "shipping_address_withheld": True},
+                }
+            ],
+        }
+    )
+    assert '"shipping_address_withheld": true' in prompt
+
+
+def test_supervisor_prompt_truncates_long_outputs() -> None:
+    from apps.api.agents.nodes.supervise import _build_supervisor_prompt
+
+    prompt = _build_supervisor_prompt(
+        {
+            "decision": "respond",
+            "tool_results": [
+                {"slug": "s", "is_error": False, "output": {"blob": "x" * 10_000}}
+            ],
+        }
+    )
+    assert len(prompt) < 5_000
+    assert "…" in prompt
