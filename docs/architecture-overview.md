@@ -25,7 +25,7 @@ RAG y activación del agente los gestiona el equipo interno.
 | Email saliente (Auyan→cliente) | Postmark |
 | Helpdesk del cliente | Chatwoot, Gorgias, Zendesk; Intercom reactivo |
 | Billing | Motor de medición propio ([`billing-engine.md`](billing-engine.md)); Stripe pendiente |
-| Deploy | Railway |
+| Deploy | API en Google Cloud Run (`europe-west3`) + dashboard en Vercel (desde s77; antes Railway) |
 
 ### Dominios
 
@@ -182,7 +182,7 @@ Campo opcional `steps[]` en el schema de AOP + eventos `step_entered`/`step_comp
 | Trazas de observabilidad | Staging traza datos test/autorizados en LangSmith; producción requiere redacción/retención formal antes de activar | Staging |
 | GDPR DPA | Firma en onboarding paso 7 | ✅ |
 | Right to erasure | Endpoint `DELETE /tenants/me/data` + cron purga 30d | Pendiente |
-| Servidores | EU (Supabase EU, Railway EU, Postmark EU) | ✅ |
+| Servidores | EU (Supabase EU `eu-central-1`, Cloud Run `europe-west3`, Postmark EU) | ✅ |
 
 ---
 

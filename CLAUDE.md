@@ -16,7 +16,7 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - Observabilidad: LangSmith como fuente primaria de staging/evals; Langfuse queda como espejo secundario existente mientras siga conectado
 - Helpdesks del cliente: Chatwoot Cloud / Gorgias / Zendesk / Intercom reactivo
 - Email saliente (Auyan→cliente): Postmark
-- Deploy: Railway
+- Deploy: API en Google Cloud Run (proyecto `auyan-510116`, `europe-west3`; `apps/api/scripts/deploy_cloud_run.sh`) + dashboard en Vercel (`apps/web`). Railway se abandonó en la sesión 77
 
 ## Estructura del monorepo
 - apps/api → FastAPI, agentes LangGraph, webhooks
@@ -35,7 +35,7 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - Soft delete siempre: columna deleted_at, nunca DELETE real
 - Timestamps en todas las tablas: created_at y updated_at
 - Migraciones versionadas en supabase/migrations/, nunca modificar tablas directamente en producción
-- Railway deploya código pero NO aplica SQL. Las migraciones se corren manualmente vía psql o Supabase SQL Editor
+- El deploy (Cloud Run / Vercel) NO aplica SQL. Las migraciones se corren manualmente vía psql o Supabase SQL Editor
 
 ## Reglas de código
 - Nunca hardcodear API keys ni secrets en el código

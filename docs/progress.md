@@ -58,7 +58,7 @@ Ya verificado en su OpenAPI (s76): webhook `message.received` con HMAC (`X-Zerni
 
 ### Transversal (encajar entre sprints)
 - [ ] **Postmark con `auyan.es`** (DKIM/SPF) + SMTP de Supabase (magic links sin spam) — lo necesita el OTP por email.
-- [ ] **ADR del cambio de plataforma** Railway → Cloud Run + Vercel, y actualizar `CLAUDE.md` (sección Stack y regla de migraciones: "Railway deploya…") + `architecture-overview.md` / `architecture-web.md` — **propuesta pendiente de aprobación de Kenny** (CLAUDE.md lo modifica él).
+- [ ] **ADR del cambio de plataforma** Railway → Cloud Run + Vercel. (~~Actualizar `CLAUDE.md` + `architecture-overview.md` / `architecture-web.md`~~ ✅ hecho al cierre de s77.)
 - [ ] **Onboarding del cliente en Zendesk:** crear un agente de servicio "Auyan AI" y el OAuth client con ese usuario (hoy las respuestas salen firmadas por quien creó el client). Documentar en la guía de onboarding junto con el body del Trigger (solo IDs).
 - [ ] **Supabase staging:** plan de pago o keep-alive antes del piloto.
 
