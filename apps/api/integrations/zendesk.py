@@ -68,8 +68,11 @@ logger = logging.getLogger(__name__)
 
 # ─── Token OAuth client_credentials (cache en proceso) ─────────────────────────
 
-# Scopes mínimos: comentar/actualizar tickets + `users/me` para validar al registrar.
-ZENDESK_OAUTH_SCOPES = "tickets:read tickets:write users:read"
+# Scopes mínimos: comentar/actualizar tickets + `users/me` para validar al registrar +
+# `users:write` para el handoff de WhatsApp (crear el requester con teléfono).
+ZENDESK_OAUTH_SCOPES = "tickets:read tickets:write users:read users:write"
+# Scopes del script de operación que crea los triggers del handoff (no del runtime).
+ZENDESK_ADMIN_SCOPES = "read write"
 # Se renueva el token este margen antes de su expiración real.
 _TOKEN_REFRESH_MARGIN_S = 60
 _DEFAULT_TOKEN_TTL_S = 1800
@@ -266,6 +269,18 @@ class ZendeskClient:
 
     # ── Handoff (Sprint 2) ────────────────────────────────────────────────────
 
+    async def list_comments_with_users(self, ticket_id: str) -> dict[str, Any]:
+        """Comentarios (el más reciente primero) + sus autores (`include=users`)."""
+        return await self._request(
+            "GET",
+            f"/tickets/{ticket_id}/comments.json",
+            params={"sort_order": "desc", "per_page": 100, "include": "users"},
+        )
+
+    async def get_me(self) -> dict[str, Any]:
+        data = await self._request("GET", "/users/me.json")
+        return data["user"]  # type: ignore[no-any-return]
+
     async def create_or_update_user(self, user: dict[str, Any]) -> dict[str, Any]:
         data = await self._request("POST", "/users/create_or_update.json", json_body={"user": user})
         return data["user"]  # type: ignore[no-any-return]
@@ -390,6 +405,20 @@ def select_inbound_comment(
         if comment.get("public"):
             return comment
     return None
+
+
+@dataclass(frozen=True)
+class ZendeskAgentComment:
+    """Comentario de un ticket de handoff, con su autor (para la vuelta a WhatsApp)."""
+
+    ticket_id: str
+    comment_id: str
+    author_id: str
+    author_name: str | None
+    author_role: str | None
+    public: bool
+    content: str
+    requester_id: str
 
 
 # ─── Adapter stateless — implementa HelpdeskProvider ──────────────────────────
@@ -545,6 +574,35 @@ class ZendeskAdapter:
         )
 
     # ── HandoffTarget (Sprint 2) ──────────────────────────────────────────────
+
+    async def fetch_handoff_comment(
+        self, ctx: IntegrationContext, ticket_id: str, comment_id: str | None
+    ) -> ZendeskAgentComment | None:
+        """Lee el comentario que disparó el trigger de handoff + su autor (de la API)."""
+        client = self._client(ctx)
+        ticket = (await client.get_ticket_with_users(ticket_id)).get("ticket") or {}
+        data = await client.list_comments_with_users(ticket_id)
+        comment = select_inbound_comment(list(data.get("comments") or []), comment_id)
+        if comment is None:
+            return None
+        author_id = str(comment.get("author_id", ""))
+        author = next(
+            (u for u in data.get("users") or [] if str(u.get("id")) == author_id), {}
+        )
+        return ZendeskAgentComment(
+            ticket_id=ticket_id,
+            comment_id=str(comment.get("id", "")),
+            author_id=author_id,
+            author_name=author.get("name"),
+            author_role=author.get("role"),
+            public=bool(comment.get("public")),
+            content=str(comment.get("plain_body") or comment.get("body") or "").strip(),
+            requester_id=str(ticket.get("requester_id", "")),
+        )
+
+    async def current_user_id(self, ctx: IntegrationContext) -> str:
+        """Id del usuario API con el que Auyan actúa en Zendesk (`config.api_user_id`)."""
+        return str((await self._client(ctx).get_me())["id"])
 
     async def open_handoff_ticket(
         self, ctx: IntegrationContext, req: HandoffRequest

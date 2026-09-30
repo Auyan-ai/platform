@@ -10,8 +10,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from apps.api.db.client import tenant_scope
-from apps.api.db.queries import find_outbound_message_by_platform_id, merge_message_metadata
+from apps.api.db.client import bootstrap_connection, tenant_scope
+from apps.api.db.queries import (
+    find_outbound_message_by_platform_id,
+    get_tenant_configuration,
+    merge_message_metadata,
+)
+from apps.api.services.handoff_events import handle_device_takeover, is_human_send
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -41,6 +46,10 @@ async def handle_zernio_status_event(
     message = event.message
     if event.event == "message.failed":
         return await _mark_failed(event, tenant_id=tenant_id)
+    if event.event == "message.sent" and is_human_send(event):
+        async with bootstrap_connection() as conn:
+            tenant_config = await get_tenant_configuration(conn, tenant_id)
+        return await handle_device_takeover(event, tenant_id=tenant_id, tenant_config=tenant_config)
     logger.info(
         "zernio_status_event",
         extra={

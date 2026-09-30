@@ -196,6 +196,7 @@ class TestZendeskRouter:
         intake = _patch_router_bootstrap(
             monkeypatch, self.MODULE, "get_integration_by_zendesk_subdomain"
         )
+        monkeypatch.setattr(f"{self.MODULE}._is_handoff_ticket", AsyncMock(return_value=False))
         comment = ZendeskInboundComment(
             ticket_id="42",
             comment_id="900",

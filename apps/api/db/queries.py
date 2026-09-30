@@ -886,6 +886,25 @@ async def close_handoff_row(
     return result == "UPDATE 1"
 
 
+async def reopen_handoff_row(
+    conn: asyncpg.Connection, tenant_id: UUID, handoff_id: UUID
+) -> bool:
+    """Reactiva un handoff cerrado (el equipo volvió a escribir en el ticket resuelto).
+
+    Lanza UniqueViolationError si la conversación ya tiene otro handoff activo.
+    """
+    result = await conn.execute(
+        """
+        UPDATE conversation_handoffs
+           SET status = 'active', closed_at = NULL, closed_reason = NULL
+         WHERE tenant_id = $1 AND id = $2 AND status = 'closed' AND deleted_at IS NULL
+        """,
+        tenant_id,
+        handoff_id,
+    )
+    return result == "UPDATE 1"
+
+
 async def touch_handoff_human_activity(
     conn: asyncpg.Connection,
     tenant_id: UUID,
