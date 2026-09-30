@@ -154,9 +154,15 @@ export function ConversationList({
                 {conv.subject ?? `Conversación ${conv.id.slice(0, 8)}`}
               </span>
 
-              <span className="shrink-0 text-xs text-foreground-muted">
-                {CHANNEL_LABELS[conv.channel]}
-              </span>
+              {conv.channel === 'whatsapp' ? (
+                <Badge variant="success" className="shrink-0">
+                  {CHANNEL_LABELS[conv.channel]}
+                </Badge>
+              ) : (
+                <span className="shrink-0 text-xs text-foreground-muted">
+                  {CHANNEL_LABELS[conv.channel]}
+                </span>
+              )}
 
               <span className="shrink-0 text-xs text-foreground-muted tabular-nums">
                 {relativeTime(conv.last_message_at)}
