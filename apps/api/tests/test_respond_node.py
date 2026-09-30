@@ -142,3 +142,17 @@ async def test_inserts_with_correct_role_and_direction(fake_deps, monkeypatch) -
     kwargs = insert_mock.await_args.kwargs
     assert kwargs["role"] == "agent_ai"
     assert kwargs["direction"] == "outbound"
+
+
+@pytest.mark.asyncio
+async def test_message_metadata_links_the_inbound_message(fake_deps, monkeypatch) -> None:
+    """La respuesta guarda su inbound: el worker no re-responde un turno reintentado."""
+    insert_mock = AsyncMock(return_value=make_message(id=OUTBOUND_MSG_ID))
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(f"{MODULE}.insert_message", insert_mock)
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    node = make_respond_node(fake_deps)
+
+    await node({**_state(), "inbound_message_id": "inbound-123"})
+
+    assert insert_mock.await_args.kwargs["metadata"]["inbound_message_id"] == "inbound-123"

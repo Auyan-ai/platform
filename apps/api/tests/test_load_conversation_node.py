@@ -162,3 +162,24 @@ async def test_uses_history_limit_from_settings(fake_deps, monkeypatch) -> None:
     # El call positional/keyword puede variar — chequeamos por kwargs
     call = get_msgs_mock.await_args
     assert call.kwargs.get("limit") == 7 or 7 in call.args
+
+
+@pytest.mark.asyncio
+async def test_history_is_bounded_to_the_inbound_message(fake_deps, monkeypatch) -> None:
+    """El turno no ve mensajes posteriores a su inbound (los responde su propio turno)."""
+    from tests.conftest import INBOUND_MSG_ID
+
+    get_msgs_mock = AsyncMock(return_value=[])
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(
+        f"{MODULE}.get_conversation", AsyncMock(return_value=make_conversation())
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.get_end_customer", AsyncMock(return_value=make_end_customer())
+    )
+    monkeypatch.setattr(f"{MODULE}.get_recent_messages", get_msgs_mock)
+    node = make_load_conversation_node(fake_deps)
+
+    await node({**_state(), "inbound_message_id": str(INBOUND_MSG_ID)})
+
+    assert get_msgs_mock.await_args.kwargs["up_to_message_id"] == INBOUND_MSG_ID

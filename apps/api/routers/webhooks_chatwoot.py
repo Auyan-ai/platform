@@ -5,8 +5,9 @@ Flujo:
 2. Filtrar: solo event=message_created + message_type=incoming.
 3. Resolver tenant por account_id (config de tenant_integrations, cross-tenant).
 4. Descifrar credenciales + validar firma HMAC de Chatwoot (si configurado).
-5. Ejecutar flujo inbound estándar (customer, conversación, mensaje, agente).
-6. Si el agente responde: send_outbound al adapter de Chatwoot.
+5. Persistir el mensaje + encolar el turno en una transacción → 200 inmediato.
+6. El grafo y la respuesta (adapter de Chatwoot) corren en el worker
+   (`services/inbound_worker.py`).
 
 Seguridad: si la integración tiene `webhook_secret_token` en sus credenciales,
 la request debe incluir `X-Chatwoot-Signature` + `X-Chatwoot-Timestamp`.
@@ -15,59 +16,32 @@ Sin token configurado se acepta el webhook sin validación de firma.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import logging
 from typing import Annotated, Any
 
-from apps.api.agents.service import AgentService
 from apps.api.core.config import Settings, get_settings
-from apps.api.db.client import bootstrap_connection, tenant_scope
+from apps.api.db.client import bootstrap_connection
 from apps.api.db.queries import (
-    complete_idempotency_key,
-    create_conversation,
-    create_end_customer,
-    delete_idempotency_key,
-    find_conversation_by_external,
-    find_end_customer_by_email,
-    get_idempotency_record,
     get_integration_by_chatwoot_account,
     get_integration_credentials_encrypted,
     get_tenant_by_id,
     get_tenant_configuration,
-    insert_message,
-    try_insert_idempotency_key,
-    update_conversation_last_message,
 )
-from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.chatwoot import ChatwootAdapter, verify_chatwoot_signature
-from apps.api.services.agent_resolution import finalize_agent_resolution, send_agent_reply
-from apps.api.services.conversations import reopen_if_resolved
-from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
+from apps.api.services.inbound_intake import notify_inbound_worker, persist_and_enqueue_inbound
 from apps.api.services.integrations_crypto import decrypt_credentials, get_integration_crypto_key
-from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
-from apps.api.services.usage import UsageRecorder, check_tenant_budget
+from apps.api.services.usage import check_tenant_budget
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
-_usage_recorder = UsageRecorder()
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
-
-
-def get_agent_service(request: Request) -> AgentService:
-    svc = getattr(request.app.state, "agent_service", None)
-    if svc is None:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE, detail="agent_service_not_ready"
-        )
-    return svc
-
-
-AgentServiceDep = Annotated["AgentService", Depends(get_agent_service)]
 
 
 @router.post(
@@ -78,7 +52,6 @@ AgentServiceDep = Annotated["AgentService", Depends(get_agent_service)]
 async def chatwoot_webhook(
     request: Request,
     settings: SettingsDep,
-    agent_service: AgentServiceDep,
 ) -> dict[str, Any]:
     raw_body = await request.body()
     payload: dict[str, Any] = await request.json()
@@ -111,9 +84,7 @@ async def chatwoot_webhook(
             conn, tenant_id=tenant_id, integration_id=integration.id
         )
     if encrypted is None:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, detail="credentials_not_found"
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="credentials_not_found")
     crypto_key = get_integration_crypto_key(settings)
     credentials = json.loads(decrypt_credentials(encrypted, crypto_key).decode())
 
@@ -138,16 +109,7 @@ async def chatwoot_webhook(
                     status.HTTP_401_UNAUTHORIZED, detail="missing_signature_headers"
                 )
             if not hmac.compare_digest(signature_token, signing_secret):
-                raise HTTPException(
-                    status.HTTP_401_UNAUTHORIZED, detail="invalid_signature_token"
-                )
-
-    # Construir IntegrationContext para usar el adapter.
-    ctx = IntegrationContext(
-        tenant_id=tenant_id,
-        credentials=credentials,
-        config=integration.config,
-    )
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="invalid_signature_token")
 
     # 5. Cargar tenant + rate limit + budget.
     async with bootstrap_connection() as conn:
@@ -171,167 +133,29 @@ async def chatwoot_webhook(
             settings=settings,
         )
 
-    # 6. Idempotencia usando el message_id de Chatwoot.
-    chatwoot_message_id = str(payload.get("id", ""))
-    idempotency_key = f"chatwoot:{chatwoot_message_id}" if chatwoot_message_id else None
-    idempotency_claimed = False
-
-    if idempotency_key:
-        async with bootstrap_connection() as conn:
-            record = await try_insert_idempotency_key(
-                conn,
-                tenant_id=tenant_id,
-                key=idempotency_key,
-                request_path="/webhooks/chatwoot",
-            )
-            if record is None:
-                existing = await get_idempotency_record(
-                    conn, tenant_id=tenant_id, key=idempotency_key
-                )
-                if existing is not None and existing.status == "done":
-                    return {"received": True, "processed": False, "duplicate": True}
-                raise HTTPException(status.HTTP_409_CONFLICT, detail="idempotency_key_in_flight")
-            idempotency_claimed = True
-
-    # 7. Extraer datos de la conversación y del sender.
-    adapter = ChatwootAdapter()
-    inbound_msg_model = await adapter.parse_inbound_webhook(payload)
-
-    chatwoot_conversation_id = str((payload.get("conversation") or {}).get("id", ""))
+    # 6. Persistir + encolar (idempotencia por mensaje, misma transacción) y ack.
+    #    El grafo corre en el worker (services/inbound_worker.py).
+    chatwoot_conversation_id = str((payload.get("conversation") or {}).get("id", "") or "")
     if not chatwoot_conversation_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="missing_conversation_id")
+    chatwoot_message_id = str(payload.get("id", "") or "")
+    # Sin id de mensaje: dedupe por hash del body.
+    dedupe_ref = chatwoot_message_id or hashlib.sha256(raw_body).hexdigest()
 
+    inbound_msg_model = await ChatwootAdapter().parse_inbound_webhook(payload)
     sender = payload.get("sender") or {}
-    customer_email: str | None = sender.get("email")
-    customer_name: str | None = sender.get("name")
-
-    cap_outcome = None
-    try:
-        async with tenant_scope(tenant_id) as conn:
-            # Upsert end_customer.
-            customer = None
-            if customer_email:
-                customer = await find_end_customer_by_email(conn, tenant_id, customer_email)
-            if customer is None:
-                customer = await create_end_customer(
-                    conn,
-                    tenant_id=tenant_id,
-                    email=customer_email,
-                    external_id=None,
-                    full_name=customer_name,
-                )
-
-            # Find-or-create conversación por external_id de Chatwoot.
-            conversation = await find_conversation_by_external(
-                conn, tenant_id, "chatwoot", chatwoot_conversation_id
-            )
-            if conversation is None:
-                conversation = await create_conversation(
-                    conn,
-                    tenant_id=tenant_id,
-                    end_customer_id=customer.id,
-                    channel="chatwoot",
-                    external_id=chatwoot_conversation_id,
-                    subject=None,
-                )
-            else:
-                # El cliente volvió a escribir: si estaba resuelta, reactivarla.
-                conversation = await reopen_if_resolved(conn, tenant_id, conversation)
-
-            inbound_db_msg = await insert_message(
-                conn,
-                tenant_id=tenant_id,
-                conversation_id=conversation.id,
-                role="customer",
-                direction="inbound",
-                content=inbound_msg_model.content,
-                metadata={"channel": "chatwoot", "chatwoot_message_id": chatwoot_message_id},
-            )
-            await update_conversation_last_message(conn, tenant_id, conversation.id)
-
-            cap_outcome = await enforce_message_cap(
-                conn,
-                tenant_id=tenant_id,
-                conversation_id=conversation.id,
-                inbound_message_id=inbound_db_msg.id,
-                tenant_config=tenant_config,
-                settings=settings,
-            )
-
-        # 8. Disparar el grafo.
-        if cap_outcome is not None:
-            outcome = cap_outcome
-        else:
-            outcome = await agent_service.process_inbound(
-                tenant_id=tenant_id,
-                conversation_id=conversation.id,
-                inbound_message_id=inbound_db_msg.id,
-                inbound_message_content=inbound_msg_model.content,
-                channel="chatwoot",
-                end_customer_id=customer.id,
-            )
-
-    except Exception:
-        if idempotency_key and idempotency_claimed:
-            async with bootstrap_connection() as conn:
-                await delete_idempotency_key(conn, tenant_id=tenant_id, key=idempotency_key)
-        raise
-
-    logger.info(
-        "chatwoot_inbound_processed",
-        extra={
-            "tenant_id": str(tenant_id),
-            "conversation_id": str(conversation.id),
-            "decision": outcome.decision,
-        },
-    )
-
-    # 9. Enviar el mensaje del agente de vuelta a Chatwoot. Incluye el caso escalate
-    #    (mensaje de cortesía "en revisión"), no solo respond — antes el cliente no
-    #    recibía nada cuando el agente escalaba.
-    delivered = False
-    if outcome.response_text:
-        delivered = await send_agent_reply(
-            adapter,
-            ctx,
-            chatwoot_conversation_id,
-            outcome.response_text,
-            tenant_id=tenant_id,
-            provider="chatwoot",
-        )
-
-    # Resolución autónoma: solo si la respuesta llegó al cliente se marca
-    # 'resolved' + billing + cierre del ticket externo.
-    if outcome.resolves_on_delivery:
-        await finalize_agent_resolution(
-            tenant_id=tenant_id, conversation=conversation, delivered=delivered, settings=settings
-        )
-
-    # Escalado: nota interna con el motivo + asignación al equipo CX del cliente.
-    # Solo al crear la escalación (no en cada mensaje posterior de una conversación
-    # ya escalada). Best-effort: no tumba el webhook si falla.
-    if outcome.escalation_created:
-        await push_escalation_to_helpdesk_safe(
-            tenant_id=tenant_id,
-            conversation=conversation,
-            reason=outcome.escalation_reason or "unspecified_escalation",
-        )
-
-    _usage_recorder.record(
+    result = await persist_and_enqueue_inbound(
         tenant_id=tenant_id,
-        tokens_in=outcome.tokens_in,
-        tokens_out=outcome.tokens_out,
-        cost_usd=outcome.cost_usd,
+        channel="chatwoot",
+        external_id=chatwoot_conversation_id,
+        idempotency_key=f"chatwoot:{dedupe_ref}",
+        request_path="/webhooks/chatwoot",
+        content=inbound_msg_model.content,
+        customer_email=sender.get("email"),
+        customer_name=sender.get("name"),
+        subject=None,
+        message_metadata={"channel": "chatwoot", "chatwoot_message_id": chatwoot_message_id},
     )
-
-    if idempotency_key and idempotency_claimed:
-        async with bootstrap_connection() as conn:
-            await complete_idempotency_key(
-                conn,
-                tenant_id=tenant_id,
-                key=idempotency_key,
-                response_status=200,
-                response_body={"ok": True, "decision": outcome.decision},
-            )
-
-    return {"ok": True, "decision": outcome.decision}
+    if not result.duplicate:
+        notify_inbound_worker(request)
+    return result.response()

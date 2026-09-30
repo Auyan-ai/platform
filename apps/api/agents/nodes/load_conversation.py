@@ -71,8 +71,13 @@ def make_load_conversation_node(
             if customer is None:
                 return {"error": "end_customer_not_found"}
 
+            inbound_id = state.get("inbound_message_id")
             messages = await get_recent_messages(
-                conn, tenant_id, conversation_id, limit=history_limit
+                conn,
+                tenant_id,
+                conversation_id,
+                limit=history_limit,
+                up_to_message_id=UUID(inbound_id) if inbound_id else None,
             )
             read_outputs = await get_recent_read_outputs_for_conversation(
                 conn, tenant_id, conversation_id

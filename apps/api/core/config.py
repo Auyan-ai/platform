@@ -129,6 +129,13 @@ class Settings(BaseSettings):
     # 900 = 15 minutos. Overrideable vía CLEANUP_INTERVAL_SECONDS en entorno.
     cleanup_interval_seconds: int = 900
 
+    # --- Worker de turnos inbound (cola `inbound_jobs`, #260) ---
+    # Turnos concurrentes por instancia (conversaciones distintas; la misma conversación
+    # nunca corre en paralelo). Sondeo de respaldo y lease con heartbeat, en segundos.
+    inbound_worker_concurrency: int = 2
+    inbound_worker_poll_seconds: float = 5.0
+    inbound_worker_lease_seconds: int = 120
+
     # --- Intent classifier (Sprint 7+) ---
     # Confidence mínima para usar el AOP seleccionado. Por debajo, se usa 'default'.
     intent_min_confidence: float = 0.60

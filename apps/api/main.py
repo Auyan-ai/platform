@@ -7,6 +7,7 @@ Lifespan ordenado:
         3. Construir clientes LLM (Anthropic, OpenAI) y observabilidad.
         4. Compilar el grafo + crear AgentService.
         5. Exponer en app.state.
+        6. Arrancar jobs de fondo (cleanup, AOP listener, worker de turnos inbound).
     shutdown:
         1. Flush de observabilidad (manda los traces pendientes).
         2. Cerrar pool de Postgres.
@@ -60,6 +61,7 @@ from apps.api.services.aop_listener import AopCacheListener
 from apps.api.services.audit import AuditLogger
 from apps.api.services.cleanup import run_abandoned_cleanup
 from apps.api.services.email_sender import EmailSender
+from apps.api.services.inbound_worker import InboundWorker
 from apps.api.services.reasoning import ReasoningTracker
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -139,10 +141,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     aop_listener = AopCacheListener()
     await aop_listener.start(str(settings.database_url))
 
+    # Turnos inbound de helpdesk: los webhooks encolan, este worker corre el grafo.
+    # Al arrancar también recoge jobs pendientes o huérfanos de una instancia anterior.
+    inbound_worker = InboundWorker(
+        agent_service=service,
+        settings=settings,
+        concurrency=settings.inbound_worker_concurrency,
+        poll_interval_seconds=settings.inbound_worker_poll_seconds,
+        lease_seconds=settings.inbound_worker_lease_seconds,
+    )
+    inbound_worker.start()
+    app.state.inbound_worker = inbound_worker
+
     try:
         yield
     finally:
         logger.info("shutdown_initiated")
+        # Primero el worker: libera el job en curso mientras el pool sigue vivo.
+        await inbound_worker.stop()
         cleanup_task.cancel()
         await asyncio.gather(cleanup_task, return_exceptions=True)
         await aop_listener.stop()

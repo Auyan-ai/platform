@@ -516,8 +516,13 @@ async def get_recent_messages(
     tenant_id: UUID,
     conversation_id: UUID,
     limit: int = 20,
+    up_to_message_id: UUID | None = None,
 ) -> list[Message]:
-    """Últimos `limit` mensajes (excluye 'system' y soft-deleted), en orden cronológico ASC."""
+    """Últimos `limit` mensajes (excluye 'system' y soft-deleted), en orden cronológico ASC.
+
+    Con `up_to_message_id` se excluye todo lo posterior a ese mensaje: el turno de un
+    inbound no ve mensajes que llegaron después (los responde su propio turno).
+    """
     rows = await conn.fetch(
         """
         SELECT id, tenant_id, conversation_id, role, direction,
@@ -525,12 +530,16 @@ async def get_recent_messages(
           FROM messages
          WHERE tenant_id = $1 AND conversation_id = $2 AND deleted_at IS NULL
            AND role IN ('customer', 'agent_ai', 'agent_human')
+           AND ($4::uuid IS NULL OR created_at <= (
+                   SELECT m.created_at FROM messages m
+                    WHERE m.id = $4::uuid AND m.tenant_id = $1))
          ORDER BY created_at DESC
          LIMIT $3
         """,
         tenant_id,
         conversation_id,
         limit,
+        up_to_message_id,
     )
     return [Message(**dict(r)) for r in reversed(rows)]
 
@@ -1758,24 +1767,34 @@ async def try_insert_idempotency_key(
 
     Devuelve el registro creado, o None si ya existe una key activa
     (conflicto UNIQUE — el llamador decide qué hacer).
-    """
-    import asyncpg as _asyncpg  # import local para evitar ciclo en TYPE_CHECKING
 
-    try:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO idempotency_keys (tenant_id, key, request_path)
-            VALUES ($1, $2, $3)
-            RETURNING id, tenant_id, key, request_path, status,
-                      response_status, response_body, created_at, expires_at
-            """,
-            tenant_id,
-            key,
-            request_path,
-        )
-    except _asyncpg.UniqueViolationError:
+    El `unique (tenant_id, key)` no distingue soft-deletes: una key borrada tras un
+    fallo (`delete_idempotency_key`) o expirada se REUTILIZA aquí. Sin esto el
+    reintento del proveedor chocaba con la fila borrada y quedaba en 409 para siempre.
+    """
+    row = await conn.fetchrow(
+        """
+        INSERT INTO idempotency_keys (tenant_id, key, request_path)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (tenant_id, key) DO UPDATE
+           SET request_path = EXCLUDED.request_path,
+               status = 'pending',
+               response_status = NULL,
+               response_body = NULL,
+               created_at = now(),
+               expires_at = now() + interval '24 hours',
+               deleted_at = NULL
+         WHERE idempotency_keys.deleted_at IS NOT NULL
+            OR idempotency_keys.expires_at <= now()
+        RETURNING id, tenant_id, key, request_path, status,
+                  response_status, response_body, created_at, expires_at
+        """,
+        tenant_id,
+        key,
+        request_path,
+    )
+    if row is None:
         return None
-    assert row is not None
     data = dict(row)
     data["response_body"] = dict(data["response_body"]) if data["response_body"] else None
     return IdempotencyRecord(**data)
