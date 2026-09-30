@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr = Field(..., description="API key de Anthropic")
     openai_api_key: SecretStr = Field(..., description="API key de OpenAI (embeddings)")
 
+    # --- Transcripción de notas de voz de WhatsApp (Sprint 2, PR-7; ADR 0011) ---
+    # Sin proveedor no se transcribe: el comprador recibe un mensaje fijo pidiéndole que
+    # escriba. El proveedor definitivo sale del mini-benchmark de C0 (ADR 0011).
+    transcription_provider: str | None = None  # "openai"
+    transcription_model: str = "gpt-4o-transcribe"
+    transcription_max_seconds: int = 300
+    transcription_cost_per_minute_usd: float = 0.006
+
     # --- Observability ---
     langsmith_api_key: SecretStr | None = None
     langsmith_project: str = "auyan-staging"

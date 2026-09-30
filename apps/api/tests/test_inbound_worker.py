@@ -11,6 +11,7 @@ from uuid import UUID
 import pytest
 from apps.api.agents.service import AgentOutcome
 from apps.api.db.inbound_jobs import ClaimedInboundJob
+from apps.api.services.inbound_media import MediaOutcome
 from apps.api.services.inbound_worker import (
     InboundJobError,
     InboundWorker,
@@ -389,11 +390,18 @@ def wa_mocks(turn_mocks: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> dic
     flush = AsyncMock(side_effect=lambda *a, **k: order.append("flush") or 1)
     deliver = AsyncMock(return_value="delivered")
     handoff = AsyncMock(return_value=None)
+    media = AsyncMock(return_value=MediaOutcome(texts=["¿dónde está mi pedido?"]))
+    monkeypatch.setattr(f"{MODULE}.process_inbound_media", media)
     monkeypatch.setattr(f"{MODULE}.flush_pending_messages", flush)
     monkeypatch.setattr(f"{MODULE}.deliver_to_customer", deliver)
     monkeypatch.setattr(f"{MODULE}.get_active_handoff_for_chat", handoff)
     turn_mocks.update(
-        flush=flush, deliver=deliver, order=order, wa_conversation=conversation, handoff=handoff
+        flush=flush,
+        deliver=deliver,
+        order=order,
+        wa_conversation=conversation,
+        handoff=handoff,
+        media=media,
     )
     return turn_mocks
 

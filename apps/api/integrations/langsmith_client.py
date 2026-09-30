@@ -101,6 +101,41 @@ class LangSmithClient:
         except Exception:
             logger.exception("langsmith_node_run_failed node=%s", node_name)
 
+    def record_standalone_run(
+        self,
+        *,
+        name: str,
+        run_type: str,
+        metadata: dict[str, Any],
+        start_time: datetime,
+        end_time: datetime,
+        outputs: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Run raíz fuera del grafo (p. ej. `transcribe_audio` en el worker), con la
+        metadata de correlación con Supabase (tenant_id, conversation_id, message_id)."""
+        if self._client is None:
+            return
+        run_id = uuid4()
+        try:
+            self._client.create_run(
+                id=run_id,
+                trace_id=run_id,
+                dotted_order=self._dotted_order_segment(start_time, run_id),
+                project_name=self._project_name,
+                name=name,
+                run_type=run_type,
+                inputs={"name": name},
+                start_time=start_time,
+                end_time=end_time,
+                outputs=outputs or {},
+                error=error,
+                extra={"metadata": metadata},
+                tags=["source:inbound_worker", name],
+            )
+        except Exception:
+            logger.exception("langsmith_standalone_run_failed name=%s", name)
+
     def _record_model_usage_run(
         self,
         trace: LangSmithTrace,

@@ -16,8 +16,10 @@ pasan a `superseded` con `superseded_by` → una sola respuesta a toda la ráfag
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
+
+from apps.api.db.models import Message
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -333,6 +335,56 @@ async def get_inbound_message_contents(
         message_ids,
     )
     return [str(r["content"]) for r in rows]
+
+
+async def get_inbound_messages(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    message_ids: list[UUID],
+) -> list[Message]:
+    """Mensajes inbound del turno (con adjuntos y metadata), en orden cronológico."""
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, conversation_id, role, direction,
+               author_user_id, content, attachments, metadata, created_at
+          FROM messages
+         WHERE tenant_id = $1 AND conversation_id = $2 AND id = ANY($3::uuid[])
+           AND deleted_at IS NULL
+         ORDER BY created_at ASC
+        """,
+        tenant_id,
+        conversation_id,
+        message_ids,
+    )
+    return [Message(**dict(r)) for r in rows]
+
+
+async def update_inbound_message_media(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    message_id: UUID,
+    content: str,
+    attachments: list[dict[str, Any]],
+    metadata_patch: dict[str, Any],
+) -> None:
+    """Guarda el resultado del procesado de adjuntos (contenido, adjuntos y metadata)."""
+    await conn.execute(
+        """
+        UPDATE messages
+           SET content = $3,
+               attachments = $4::jsonb,
+               metadata = COALESCE(metadata, '{}'::jsonb) || $5::jsonb
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        """,
+        tenant_id,
+        message_id,
+        content,
+        attachments,
+        metadata_patch,
+    )
 
 
 async def inbound_already_answered(

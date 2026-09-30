@@ -55,6 +55,10 @@ class AgentService:
         self._graph = graph
         self._observability = observability
 
+    @property
+    def observability(self) -> ObservabilityClient:
+        return self._observability
+
     async def process_inbound(
         self,
         *,

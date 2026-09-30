@@ -38,6 +38,7 @@ from apps.api.db.queries import (
 from apps.api.integrations.base import HandoffRequest, IntegrationContext, StoredAttachment
 from apps.api.integrations.registry import IntegrationRegistry
 from apps.api.services.integrations_crypto import decrypt_credentials, get_integration_crypto_key
+from apps.api.services.media_storage import download_attachment
 from apps.api.services.messaging_window import window_state
 
 if TYPE_CHECKING:
@@ -97,8 +98,6 @@ async def _load_attachment_bytes(attachments: list[StoredAttachment]) -> list[St
     """Carga de Storage los bytes de cada adjunto para subirlo al helpdesk (best-effort)."""
     if not attachments:
         return []
-    from apps.api.services.media_storage import download_attachment
-
     loaded: list[StoredAttachment] = []
     for attachment in attachments:
         try:

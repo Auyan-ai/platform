@@ -23,7 +23,7 @@ import asyncio
 import contextlib
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from apps.api.db.client import bootstrap_connection, tenant_scope
@@ -39,14 +39,18 @@ from apps.api.db.inbound_jobs import (
 )
 from apps.api.db.queries import (
     get_active_handoff_for_chat,
+    get_active_integration,
     get_conversation,
     get_tenant_configuration,
+    insert_message,
+    update_conversation_last_message,
 )
 from apps.api.services.agent_resolution import finalize_agent_resolution, send_agent_reply
 from apps.api.services.channel_delivery import deliver_to_customer, flush_pending_messages
 from apps.api.services.channel_routing import is_messaging_channel, load_delivery_client
 from apps.api.services.handoff import close_handoff, forward_customer_message
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
+from apps.api.services.inbound_media import fallback_message, process_inbound_media
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.usage import UsageRecorder
 
@@ -106,7 +110,13 @@ async def run_inbound_turn(
             raise InboundJobError("inbound_message_not_found")
 
     if is_messaging_channel(conversation.channel):
-        pre_graph_decision = await _messaging_pre_graph(job, conversation, contents)
+        pre_graph_decision, contents = await _messaging_pre_graph(
+            job,
+            conversation,
+            contents,
+            settings=settings,
+            observability=getattr(agent_service, "observability", None),
+        )
         if pre_graph_decision is not None:
             return pre_graph_decision
 
@@ -155,15 +165,33 @@ async def _messaging_pre_graph(
     job: ClaimedInboundJob,
     conversation: Conversation,
     contents: list[str],
-) -> str | None:
+    *,
+    settings: Settings,
+    observability: Any | None = None,
+) -> tuple[str | None, list[str]]:
     """Pasos deterministas previos al grafo en canales de mensajería (WhatsApp).
 
+    0. Adjuntos: descarga a Storage, transcripción de notas de voz y marca de "imagen que
+       no puedes ver" (`services.inbound_media`). Recalcula el contenido del turno.
     1. Entregar lo que esperaba la ventana (el comprador acaba de escribir: está abierta).
-    2. Handoff activo → la IA calla: `helpdesk` reenvía el mensaje al ticket
-       (`handoff_forwarded`); `device` vigente → `human_hold`; `device` vencido → se
-       cierra y sigue el grafo.
-    Devuelve la decisión si el turno termina aquí, o None para correr el grafo.
+    2. Handoff activo → la IA calla: `helpdesk` reenvía el mensaje (y sus adjuntos) al
+       ticket (`handoff_forwarded`); `device` vigente → `human_hold`; `device` vencido →
+       se cierra y sigue.
+    3. Sin texto útil (solo imagen, sticker, audio no transcrito…) → mensaje fijo del
+       tenant, sin grafo (`media_fallback`).
+    Devuelve (decisión si el turno termina aquí o None para correr el grafo, contenidos).
     """
+    media = await process_inbound_media(
+        job=job, conversation=conversation, settings=settings, observability=observability
+    )
+    if media.transcription_cost_usd > 0:
+        _usage_recorder.record(
+            tenant_id=job.tenant_id,
+            tokens_in=0,
+            tokens_out=0,
+            cost_usd=media.transcription_cost_usd,
+        )
+    contents = media.texts
     async with tenant_scope(job.tenant_id) as conn:
         await flush_pending_messages(conn, tenant_id=job.tenant_id, conversation=conversation)
         handoff = await get_active_handoff_for_chat(
@@ -174,23 +202,62 @@ async def _messaging_pre_graph(
             if expires_at is not None and expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=UTC)
             if expires_at is not None and expires_at > datetime.now(UTC):
-                return "human_hold"
+                return "human_hold", contents
             await close_handoff(
                 conn, tenant_id=job.tenant_id, handoff=handoff, reason="device_hold_expired"
             )
-            return None
-    if handoff is None:
-        return None
-    forwarded = await forward_customer_message(
-        tenant_id=job.tenant_id,
-        handoff=handoff,
-        content="\n\n".join(contents),
-        attachments=[],
-    )
-    if not forwarded:
-        # Queda visible en la cola: el mensaje no llegó al ticket (ya hay logger.error).
-        return "handoff_forward_failed"
-    return "handoff_forwarded"
+            handoff = None
+    if handoff is not None:
+        forwarded = await forward_customer_message(
+            tenant_id=job.tenant_id,
+            handoff=handoff,
+            content="\n\n".join(contents),
+            attachments=media.attachments,
+        )
+        # Si falla queda visible en la cola: el mensaje no llegó al ticket (logger.error).
+        return ("handoff_forwarded" if forwarded else "handoff_forward_failed"), contents
+    if media.fallback_kind is not None:
+        await _send_media_fallback(job, conversation, media.fallback_kind)
+        return "media_fallback", contents
+    return None, contents
+
+
+async def _send_media_fallback(
+    job: ClaimedInboundJob, conversation: Conversation, kind: str
+) -> None:
+    """Mensaje FIJO del tenant cuando no hay nada que razonar (sin grafo). Nunca lanza."""
+    extra = {"tenant_id": str(job.tenant_id), "job_id": str(job.id), "kind": kind}
+    try:
+        async with tenant_scope(job.tenant_id) as conn:
+            integration = await get_active_integration(
+                conn, tenant_id=job.tenant_id, kind="channel", provider="zernio"
+            )
+            content = fallback_message(kind, integration.config if integration else None)
+            message = await insert_message(
+                conn,
+                tenant_id=job.tenant_id,
+                conversation_id=conversation.id,
+                role="agent_ai",
+                direction="outbound",
+                content=content,
+                metadata={"fixed_message": kind},
+            )
+            await update_conversation_last_message(conn, job.tenant_id, conversation.id)
+        async with tenant_scope(job.tenant_id) as conn:
+            result = await deliver_to_customer(
+                conn,
+                tenant_id=job.tenant_id,
+                conversation=conversation,
+                content=content,
+                message_id=message.id,
+            )
+    except Exception:
+        logger.error("media_fallback_failed", extra=extra, exc_info=True)
+        return
+    if result != "delivered":
+        logger.error("media_fallback_not_delivered", extra={**extra, "result": result})
+    else:
+        logger.info("media_fallback_sent", extra=extra)
 
 
 async def _deliver_outcome(

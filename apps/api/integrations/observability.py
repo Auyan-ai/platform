@@ -141,6 +141,28 @@ class ObservabilityClient:
             error=error,
         )
 
+    def record_standalone_run(
+        self,
+        *,
+        name: str,
+        run_type: str,
+        metadata: dict[str, Any],
+        start_time: datetime,
+        end_time: datetime,
+        outputs: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Run fuera del grafo en LangSmith (fuente primaria). Salidas sin PII."""
+        self._primary.record_standalone_run(
+            name=name,
+            run_type=run_type,
+            metadata=metadata,
+            start_time=start_time,
+            end_time=end_time,
+            outputs=mask_pii_recursive(outputs) if outputs else outputs,
+            error=error,
+        )
+
     def trace_id(self, trace: ObservabilityTrace) -> str | None:
         primary_id = self._primary.trace_id(trace.primary)
         if primary_id is not None:
