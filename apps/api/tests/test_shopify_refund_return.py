@@ -48,6 +48,17 @@ async def test_refund_hangs_from_the_successful_sale_transaction() -> None:
 
 
 @respx.mock
+async def test_refund_omits_empty_gateway() -> None:
+    respx.get(f"{BASE}/orders/1001/transactions.json").respond(
+        200, json={"transactions": [{"id": 9, "kind": "sale", "status": "success", "gateway": ""}]}
+    )
+    refund = respx.post(f"{BASE}/orders/1001/refunds.json").respond(201, json={"refund": {"id": 1}})
+    await _client().refund_partial(1001, amount="5.00", currency="USD")
+    tx = json.loads(refund.calls.last.request.content)["refund"]["transactions"][0]
+    assert tx == {"parent_id": 9, "amount": "5.00", "kind": "refund"}
+
+
+@respx.mock
 async def test_refund_without_payment_raises_and_does_not_post() -> None:
     respx.get(f"{BASE}/orders/1001/transactions.json").respond(200, json={"transactions": []})
     refund = respx.post(f"{BASE}/orders/1001/refunds.json")

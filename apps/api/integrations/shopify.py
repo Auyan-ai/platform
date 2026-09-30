@@ -467,6 +467,14 @@ class ShopifyClient:
             )
             if parent is None:
                 raise ShopifyActionError("order_has_no_refundable_payment")
+            refund_tx: dict[str, Any] = {
+                "parent_id": parent["id"],
+                "amount": amount,
+                "kind": "refund",
+            }
+            # Pedidos creados por API (sin checkout) traen gateway vacío: no se envía.
+            if parent.get("gateway"):
+                refund_tx["gateway"] = parent["gateway"]
             response = await client.post(
                 f"{self._base_url}/orders/{order_id}/refunds.json",
                 headers=self._headers(),
@@ -474,14 +482,7 @@ class ShopifyClient:
                     "refund": {
                         "currency": currency,
                         "note": note,
-                        "transactions": [
-                            {
-                                "parent_id": parent["id"],
-                                "amount": amount,
-                                "kind": "refund",
-                                "gateway": parent["gateway"],
-                            }
-                        ],
+                        "transactions": [refund_tx],
                     }
                 },
                 timeout=15,
