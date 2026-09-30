@@ -1,122 +1,102 @@
 # Auyan — Estado actual
 
-_Última actualización: 2026-09-29 (sesión 76: planificación pre-piloto — E2E integraciones, JEV, Zernio. Cabecera s72 → [`progress-archive.md`](progress-archive.md).)_
+_Última actualización: 2026-09-30 (sesión 77: E2E en vivo de Zendesk, staging en Cloud Run + Vercel, seguridad L3. Cabecera s73 → [`progress-archive.md`](progress-archive.md).)_
+> _Sesión 77 (2026-09-29/30) — **E2E en vivo de Zendesk + migración de staging a Cloud Run/Vercel + seguridad L3. 14 PRs mergeados ([#247](https://github.com/Auyan-ai/platform/pull/247)–[#259](https://github.com/Auyan-ai/platform/pull/259)) + [#261](https://github.com/Auyan-ai/platform/pull/261) abierto.** Railway se quedó sin crédito → **API en Google Cloud Run** (`europe-west3`, junto al pooler de Supabase `eu-central-1`; secretos en Secret Manager; `apps/api/scripts/deploy_cloud_run.sh`) y **dashboard en Vercel** (#251). Supabase staging estaba **pausado** (free tier) → restaurado. **Zendesk E2E en vivo** sobre Marea: 7 bugs que nunca se habrían visto sin tráfico real — API tokens retirados por Zendesk → OAuth `client_credentials` (#247); un stub en `routers/webhooks.py` **tapaba el webhook real** (#250); idempotencia por ticket (solo 1er mensaje) + anti-loop (#248); placeholder inexistente y **JSON roto por texto sin escapar** → el Trigger manda solo IDs y el comentario se lee de la API (#252). Auditoría s71 #3 cerrada: **solo se resuelve/cobra tras confirmar la entrega outbound** (#249). **Escalación L3 se cierra sola** tras aprobar/rechazar (#253). Mini-sprint UX (#254): dirección actual solo al dueño del pedido, limpieza de firmas/`&nbsp;`, confirmación con la dirección nueva, `address2`. **🔴 Bug crítico** `upsert_tool_permission` fallaba SIEMPRE (tipo ambiguo `$6`) → no se podían crear tenants ni cambiar permisos (#255). **🔴 Hueco de seguridad:** se podía modificar un pedido ajeno sabiendo solo el número → **gate de ownership en código** para toda L3 sobre pedido (#259). #261: el supervisor no veía la salida de las skills (rechazaba respuestas correctas y escalaba) + saludo en la 1ª respuesta. Investigación de verificación de identidad (Decagon/Sierra/Intercom/Chatbase/Gorgias) → issues #256–#258, #260. Kenny compró el dominio **`auyan.es`**. **Zernio/WhatsApp pasa a prioridad** (la mayoría de marcas en España usan WhatsApp).)_
 > _Sesión 76 (2026-09-29) — **Planificación pre-piloto (solo docs, cero código).** Kenny define 3 frentes antes de firmar el primer piloto, en este orden: **A) E2E de integraciones** (piloto más probable sobre **Zendesk**, el único helpdesk sin E2E en vivo), **B) JEV** (clasificador tipado de TypeSafe, lanzado 2026-09-15) en `select_aop` en **shadow mode** primero, **C) Zernio** (API unificada de mensajería/redes, WhatsApp incluido) — **spike de descubrimiento a fondo** antes de diseñar; decisión tomada: los escalados de WhatsApp van por **handoff al helpdesk del cliente**. Plan detallado en "🚀 Empezar aquí — Plan pre-piloto" abajo. Implementación en sesiones siguientes._
 > _Sesión 74 (2026-06-27) — **ADRs de arquitectura + case study para portafolio.** Kenny va a usar el proyecto como portafolio (target: roles freelance). Creado `docs/adr/` con 7 ADRs en formato Nygard (Contexto → Decisión → Alternativas → Consecuencias): [0001] multi-tenant `tenant_id`+RLS, [0002] modelo de negocio Managed AI Service, [0003] agente como grafo LangGraph, [0004] AOPs editables en runtime, [0005] skills L1/L2/L3 + approval, [0006] LangSmith observabilidad, [0007] model routing por tarea. Más `docs/case-study-auyan.md`: writeup narrativo para la web con ángulo founder/cliente/inversor, cada decisión enlaza a su ADR. Cumple lo que CLAUDE.md ya prometía (`docs/adr/`); `CONTEXT.md` sigue pendiente. **Solo docs — cero código, cero secrets/PII.** PR aparte contra `develop`. Sesión 73 abajo.)_
-> _Sesión 73 (2026-06-27) — **LangSmith node-level tracing + fix crítico de seguridad.** Antes los traces de LangSmith solo mostraban `agent_conversation` → `agent_model_call` (tokens/costo agregados); el detalle nodo-por-nodo del grafo (select_aop, reason, execute_skill, supervise…) solo vivía en el dashboard de "Agent reasoning" (Supabase `reasoning_events`). [#237](https://github.com/Auyan-ai/platform/pull/237) MERGEADO: wrapper genérico `_traced` en `build_graph` emite un child run (`run_type=chain`) por cada nodo del grafo con nombre, duración y outputs allowlisteados — cero cambios en los nodos; `record_node_run` en `LangSmithClient`+`ObservabilityClient`; trace propagado vía `AgentState._trace_run_id/_trace_dotted_order` y `observability` en `AgentDependencies`. **🔴 Fix de seguridad [#238](https://github.com/Auyan-ai/platform/pull/238) MERGEADO (Kenny lo cazó en review):** el wrapper original mandaba el dict de output COMPLETO de los nodos sin allowlist a LangSmith (SaaS de terceros) → filtraba el **access token de Shopify descifrado** (`load_tenant_context.commerce_integration_ctx.credentials.token`) y **PII** (`load_conversation.conversation_history`/`end_customer`). El #237 alcanzó a mergearse y deployar con el leak antes del fix → el token estuvo en traces de los webhooks de prueba de hoy. Fix: **allowlist estricta** (`_NODE_OUTPUT_KEYS.get(name, [])` → nodo sin entrada emite `{}`, solo timing del span) + **redacción recursiva defensiva** (`_redact_dict` tacha token/credentials/secret/api_key/password/authorization) + 6 tests de regresión en `test_graph_tracing.py` (uno prueba que el token jamás aparece en el payload). 1323 verde, ruff/mypy limpios. **Verificado EN VIVO sobre Marea** (trace `f21ab9a7…`): child runs presentes, `execute_skill` muestra el tool call de Shopify, `load_tenant_context`/`load_conversation` sin credenciales ni PII. **🔴 PENDIENTE: rotar el access token de Shopify de Marea** (estuvo expuesto en LangSmith entre #237 y #238) → regenerar en Shopify + re-registrar con `railway run … configure_staging_integrations`. Aprendizaje guardado en memoria [[feedback_observability_no_secrets]]: observabilidad nunca exfiltra secrets/PII — allowlist, no denylist._
 
 > Historial completo en [`docs/progress-archive.md`](progress-archive.md).
 
 ---
 
-## 🔄 Retomada (2026-09) — modelo managed, repo solo técnico
+## 🔄 Contexto vigente
 
-Kenny retoma el proyecto para validarlo como **Managed AI Service**: Auyan pone el producto y opera integraciones, errores y mejora de la tasa de resolución. Sin self-serve.
+Kenny valida Auyan como **Managed AI Service** (Auyan pone el producto y opera integraciones, errores y tasa de resolución; sin self-serve). El repo solo contiene documentación técnica.
 
-El repo queda **solo con lo relacionado con código**: se eliminaron los docs de negocio/GTM (auditoría de viabilidad, market analysis, discovery, GTM plan, case study, billing manual, outreach log, master context, ADR 0002). Lo técnico del master context pasó a [`architecture-overview.md`](architecture-overview.md) y lo técnico del PRD de billing a [`billing-engine.md`](billing-engine.md).
+**Infra de staging (desde s77, Railway abandonado por falta de crédito):**
+| Pieza | Dónde | Notas |
+|---|---|---|
+| API | **Cloud Run** `auyan-api-staging` · `https://auyan-api-staging-350779301730.europe-west3.run.app` | Proyecto GCP `auyan-510116`. Deploy: `apps/api/scripts/deploy_cloud_run.sh [.env.staging]` desde la raíz (sensibles → Secret Manager; SA dedicada; `min=0`, `max=1`, `--no-cpu-throttling`). `.env.staging` local, fuera de git. |
+| Dashboard | **Vercel** `auyan-web-staging` · `https://auyan-web-staging.vercel.app` | Root `apps/web`, pnpm. `.vercelignore` en la raíz. |
+| DB | Supabase `johidurhcobdkpvlnowl` (`eu-central-1`) | ⚠️ **Free tier: se pausa tras 7 días sin actividad** (pasó en s77). Antes del piloto: plan de pago o keep-alive. |
+| Dominio | **`auyan.es`** (comprado s77) | Sin DNS configurado aún: `app-staging.`/`app.` → Vercel; API → ver custom domain en Cloud Run (`europe-west3` quizá no soporta domain mapping). Desbloquea Postmark. |
+| Logs | Cloud Run → Logs (`gcloud logging read …`) | Reemplaza `railway logs`. |
 
-**Track técnico:** se mantiene como está abajo en "Track técnico".
-- **🔴 Sigue vivo de la s73:** rotar el access token de Shopify de Marea (estuvo expuesto en LangSmith entre #237 y #238).
-
----
-
-## 🚀 Empezar aquí — Plan pre-piloto (s76, 2026-09-29)
-
-Orden acordado: **A → B → C**. Piloto más probable: cliente Shopify con **Zendesk**. El "Track técnico" de abajo queda como referencia; lo que se solapa (Zendesk E2E, backlog de auditoría) se ejecuta desde aquí.
-
-### A. E2E de integraciones — bloquea firmar el piloto
-
-**Modelo:** Sonnet para E2E y adapters; Opus para A2 (concurrencia).
-
-- **A0. Higiene previa:** 🔴 rotar el token de Shopify de Marea (s73) · confirmar Site URL + Redirect URLs de Supabase Auth staging (magic links del `tenant_admin`).
-- **A1. Zendesk E2E en vivo** (código listo en #232, nunca probado): sandbox Zendesk + API token → `railway run … configure_staging_integrations --tenant marea-studio --only zendesk` → Trigger→Webhook → batería A3.
-  - **Verificación extra:** ticket originado en **messaging/WhatsApp nativo de Zendesk** → ¿el `add_comment` público le llega al usuario final o hace falta Sunshine Conversations? Eso decide si el WhatsApp del piloto puede ir por Zendesk nativo sin Zernio (ver C1).
-- **A2. Cerrar el backlog de la auditoría s71** (con tráfico real deja de ser teórico): **#3** no marcar `resolved` ni cerrar el ticket hasta confirmar la entrega outbound; **#2** advisory lock por `(tenant_id, conversation_id)` para serializar mensajes seguidos. TDD.
-- **A3. Batería de escenarios común** — primero Zendesk, después regresión en Gorgias y Chatwoot:
-
-  | Escenario | Esperado |
-  |---|---|
-  | Consulta de pedido (L1 `get_order`) | responde con datos reales, resuelve, fila en `resolution_events` |
-  | Política (AOP `returns`) | responde desde `tenant_facts`/KB, sin reject+retry del supervisor |
-  | Acción L3 (cancelar/devolver) | approval pendiente → aprobar en el dashboard → se ejecuta en Shopify → confirma al cliente |
-  | Escalado | ticket asignado a humano + nota interna con contexto y **razón explícita** |
-  | Reapertura tras resolver | reabre dentro de la ventana §2.3, sin doble conteo en billing |
-  | Webhook duplicado (retry) | idempotente, una sola respuesta |
-  | 2 mensajes casi simultáneos | serializados (después de A2) |
-  | Fallo de outbound (credencial mala) | **no** se marca resuelto; error logueado y alertado |
-  | Trace | LangSmith correlaciona con conversación/audit log de Supabase; sin secrets ni PII |
-
-- **A4. Shopify:** las 11 skills (5 L1, 2 L2, 4 L3) contra la tienda de pruebas con órdenes seed (`seed_shopify_e2e_orders`).
-- **A5. Postmark:** sigue bloqueado por el dominio → fuera del piloto salvo que se compre antes.
-- **Entregable:** checklist reproducible por helpdesk (runbook o script `scripts/`, a decidir en la sesión) + resultado registrado aquí.
-
-### B. JEV en `select_aop` — shadow mode primero
-
-**Qué es:** JEV (TypeSafe) no genera texto; recibe estado + preguntas tipadas (`Choice` ≤255 opciones / `Score` / `Noul` sí-no) y devuelve **probabilidades calibradas** en ~100 ms, a ~$0,042/M tokens de input (output gratis). Contexto ~32k tokens, solo texto. Lanzado el 2026-09-15, en early access.
-**Por qué encaja:** hoy Haiku *inventa* la `confidence`; con JEV sería una probabilidad calibrada que alimenta directo la histéresis existente (`intent_min_confidence` / `intent_switch_threshold`).
-**Modelo:** Opus para el diseño (nodo del grafo), Sonnet para el cliente HTTP.
-
-- **B0. Spike (gate — si falla, se congela):** acceso a la API · calidad en **español** · **DPA / residencia UE / retención** (le mandaríamos mensajes del cliente final = PII; si no hay garantías → redactar con `services/pii` antes de enviar) · latencia real desde Railway.
-- **B1. Shadow:** `integrations/jev_client.py` (type hints, timeout corto, errores explícitos) + en `select_aop` JEV corre **en paralelo** a Haiku (`asyncio.gather`, sin sumar latencia). `Choice` sobre los slugs del catálogo del tenant + AOP previo + últimos 3 mensajes. Haiku sigue decidiendo. Persistir en `intent_classifier_runs` (migración: `jev_slug`, `jev_confidence`, `jev_distribution jsonb`, `jev_latency_ms`) + child run en LangSmith (allowlist, sin PII).
-- **B2. Medición:** acuerdo Haiku vs JEV, calibración (confianza vs acierto), coste y latencia. **Prerequisito:** arreglar las fixtures de eval huérfanas (deuda viva) — sin ellas no hay ground truth.
-- **B3. Switch:** flag por tenant (`intent_classifier: haiku | jev`), fallback a Haiku si JEV falla o hace timeout; recalibrar umbrales. Como JEV no da razonamiento en texto, la "razón" registrada es la distribución de probabilidades. **ADR nuevo** al hacer el switch.
-- **B4. Otros usos (cada uno con su propio shadow, solo después de B3):** filtro de prompt injection en el inbound (`Noul`; es filtro, **no** frontera de seguridad) · routing de modelo en `reason` (Haiku vs Sonnet según complejidad) · score de urgencia/riesgo de escalado · triage de sampling del `slow_agent`. **Descartado:** sustituir el approval L3 o decidir escalados solo con JEV (requieren razón explícita en texto).
-
-### C. Zernio — descubrimiento a fondo antes de diseñar
-
-**Decidido:** WhatsApp vía Zernio es un **canal de entrada**; al escalar se crea un ticket en el helpdesk del cliente (handoff) y la respuesta humana vuelve por WhatsApp vía Zernio. Se respeta la regla "escalados al helpdesk del cliente".
-**Kenny:** Zernio va más allá de WhatsApp (abre cuentas Meta Business, conecta ~17 plataformas, MCP con 280+ tools) → hay que mirarlo a fondo, puede aportar más.
-
-- **Ya verificado en su OpenAPI (s76):** webhook `message.received` firmado con HMAC (`X-Zernio-Signature`) · dedupe por `X-Zernio-Event-Id` · responder con `POST /v1/inbox/conversations/{id}/messages` · **templates obligatorios** con la ventana de 24 h cerrada · `profiles` (uno por tenant) y webhooks filtrables por `profileIds` · rate limit WhatsApp ~10 msg/min por destinatario · `thread-control` con Meta Business Agent (evitar dos IAs contestando) · onboarding WhatsApp por API (embedded signup, compra de número + KYC) · inbox unificado de DMs, comentarios y reviews · SDK Python oficial.
-- **C0. Spike:** evaluar el catálogo completo (onboarding Meta Business, DMs de IG/FB, comentarios, reviews de Google, MCP, precios) → doc de evaluación + **ADR** con qué adoptamos y qué no.
-- **C1. Preguntas a cerrar en el spike:**
-  - Handoff bidireccional: humano responde en Zendesk → ¿cómo vuelve a WhatsApp? (webhook del ticket → envío vía Zernio) y cómo se silencia el agente mientras el humano lleva la conversación.
-  - Zernio vs WhatsApp nativo del helpdesk (depende de A1): si el helpdesk del piloto ya lo trae, Zernio aporta sobre todo para clientes sin helpdesk y para canales sociales.
-  - Una cuenta Zernio de Auyan con un profile por tenant **vs** una cuenta por cliente (facturación, propiedad del número/WABA, offboarding).
-  - Aislamiento multi-tenant: mapeo `accountId`/`profileId` → `tenant_id`; credenciales cifradas como el resto.
-- **C2. Implementación (después de C0):** `integrations/zernio.py` (`MessageProvider`) + `routers/webhooks_zernio.py` (HMAC + dedupe) + migración del enum `channel_type` + provider en `configure_staging_integrations` + tests.
+- ~~🔴 Rotar el token de Shopify de Marea~~ → **descartado**: tienda demo sin datos reales (además la integración usa client credentials).
+- **Registrar integraciones** ya no usa `railway run`: `set -a; . ./.env.staging; . ./.env.zendesk; set +a` y `python -m scripts.configure_staging_integrations …` desde `apps/api` (con `--dry-run` primero).
 
 ---
 
-## Track técnico — pendientes priorizados (CONGELADO; referencia)
+## 🚀 Próximos sprints (orden acordado s77)
 
-**Modelo:** Sonnet para fixes acotados e integraciones; Opus para latencia (diseño del grafo), billing y RLS. Fable solo si Opus se queda corto (~2× el costo).
+Zernio/WhatsApp **sube de prioridad** (antes iba después de JEV): en España la inmensa mayoría de marcas atiende por WhatsApp. El **widget de chat** también es requisito del piloto. JEV baja al final.
 
-**Rama:** `develop` (sesión 72 mergeó #232–#234; sesión 71 mergeó #231). **Migraciones a mano** (Railway no corre SQL; [[reference_supabase_migrations]]):
-- ✅ **Staging al día — aplicadas y VERIFICADAS EN VIVO (s72):** `20260617000000_add_l3_autonomy_acknowledgement.sql` (#231) + `20260621000001_add_billing_resolution_events.sql` (#234). Verificación E2E sobre Marea (un turno de devoluciones vía `/webhooks/inbound`): `respond` **sin** `agent_error` (fix L3 OK, antes escalaba todos los turnos), respondió la política real ("30 días desde la recepción", returns #233) y dejó la fila en `resolution_events` (billing #234). Comando: `railway run bash -c 'psql "$DATABASE_URL" -f <migración>'` — comillas SIMPLES para que la var la expanda Railway, no tu shell (si no: `database "lider" does not exist`).
-- **🔴 PENDIENTE en PRODUCCIÓN:** cuando `develop` pase a `main`, aplicar a prod **las dos de arriba** + `add_gorgias_channel` (esta antes de que Gorgias salga en vivo allí). Lo aplicado arriba es **solo staging**.
+### Sprint 1 — Cerrar el bloque A (E2E + robustez) · Opus para concurrencia/async
+- [ ] **A2 #2 · Advisory lock** por `(tenant_id, conversation_id)` para 2 mensajes casi simultáneos. TDD.
+- [ ] **[#260](https://github.com/Auyan-ai/platform/issues/260) · Webhooks: ack inmediato + grafo en background** con cola duradera (Postgres `SKIP LOCKED` o Cloud Tasks). Un turno de 28 s provocó reintentos de Zendesk; si se acumulan, Zendesk puede desactivar el webhook. Encaja con el lock.
+- [ ] **A3 restante:** webhook duplicado, 2 mensajes simultáneos (tras el lock), fallo de outbound con credencial mala, trace LangSmith↔Supabase sin PII.
+- [ ] **Regresión** de la batería en **Gorgias y Chatwoot** (tras todos los cambios de s77).
+- [ ] **A4 · Shopify:** las 11 skills contra la tienda. Falta un pedido con **transacción real** (Bogus Gateway) para probar el **reembolso** (el #1428 se canceló pero no había cobro que devolver). La app de Marea necesita scopes `read_all_orders` (solo ve 60 días) y `read_locations` (el seed no puede crear pedidos con tracking).
+- [ ] Merge de **[#261](https://github.com/Auyan-ai/platform/pull/261)** (supervisor + saludo; ya en staging).
 
-**Pendientes (orden sugerido):**
-1. **🔴/🟠 Backlog de la auditoría de robustez (de la s71, #231).** El hallazgo 🔴 L3-sin-approval ya está cerrado y mergeado. Quedan: **#2 race de concurrencia** — no hay lock por conversación; la idempotencia es por `message_id` (Chatwoot/Gorgias), así que 2 mensajes distintos del mismo cliente casi a la vez corren `process_inbound` en paralelo sobre el mismo state (sin checkpointer) → fix sugerido: advisory lock por `(tenant_id, conversation_id)`. **#3 entrega outbound best-effort** — `respond` marca `resolved` + cierra el ticket externo aunque `send_outbound` falle (cliente sin respuesta, ticket cerrado); fix: no marcar resuelto/cerrar hasta confirmar entrega. Menor: `get_tool_permissions` en `db/queries.py` es código muerto (sin callers).
-2. **🟠 Zendesk — verificación E2E en vivo** (CÓDIGO listo, [#232] mergeado: dual-auth API token/Basic + provider `zendesk` en `configure_staging_integrations`). Falta: crear API token en un Zendesk sandbox → `railway run … configure_staging_integrations --tenant marea-studio --only zendesk` (con la `INTEGRATIONS_SECRET_KEY` de staging, o InvalidTag/500) → configurar el Trigger→Webhook → probar resolución/cierre/reapertura/escalado. Confirmar el outbound (`add_comment` público) contra la API real, como se hizo con Gorgias. (El enum `channel_type` ya tenía `zendesk` → sin migración.)
-3. **🟡 Latencia — cerrar en vivo** (PROMPT listo, [#233] mergeado: el AOP `returns` verifica la política ANTES de afirmar plazos → mata el reject+retry del supervisor). Falta: `railway run -- … seed_canonical_aops --update` para que **Marea** herede el AOP nuevo → **curar `tenant_facts` de Marea** con la política de devoluciones (`return_window_days`, etc.) para que el agente la lea inyectada y se ahorre hasta el `get_shop_policies` → medir hops antes/después con `railway logs -d | grep llm_call` + traces. (Rollout de `smalltalk` a Lunaria/Purigu **descartado**: son simuladores, no aporta.)
-4. **🟡 Billing — activar** (MOTOR listo, [#234] mergeado: `resolution_events` + conteo con ventana §2.3 + tiers + `GET /usage` + `PUT /subscription` + hooks). Falta: aplicar la migración (ver arriba) → crear la suscripción de cada tenant real (`PUT /billing/subscription` super_admin, o `upsert_billing_subscription`; sin ella `GET /usage` da 404 honesto) → **Stripe = siguiente trozo de código** (subscription=suelo, metered=overage + webhook; necesita `STRIPE_API_KEY` + productos/precios en su dashboard) → medir **COGS real** en LangSmith antes de fijar el overage (€0,20 vs €0,25; ancla €0,071 s64).
+### Sprint 2 — Zernio / WhatsApp (PRIORITARIO) · Opus diseño, Sonnet implementación
+Ya verificado en su OpenAPI (s76): webhook `message.received` con HMAC (`X-Zernio-Signature`), dedupe por `X-Zernio-Event-Id`, respuesta con `POST /v1/inbox/conversations/{id}/messages`, **templates obligatorios** fuera de la ventana de 24 h, `profiles` por tenant, rate limit ~10 msg/min por destinatario, `thread-control` con Meta Business Agent, onboarding WhatsApp por API, SDK Python.
+- [ ] **C0 · Spike** de catálogo + precios + **ADR** (qué adoptamos).
+- [ ] **C1 · Decisiones:** handoff bidireccional (escalado → ticket en el helpdesk del cliente → respuesta humana vuelve por WhatsApp; silenciar al agente mientras el humano lleva la conversación) · una cuenta Zernio con profile por tenant vs cuenta por cliente · mapeo `profileId → tenant_id` con credenciales cifradas.
+- [ ] **Identidad por teléfono:** el número de WhatsApp como identidad → ownership L3 por teléfono del pedido (primer paso de #257; si no coincide, OTP al email del pedido).
+- [ ] **C2 · Implementación:** `integrations/zernio.py` + `routers/webhooks_zernio.py` (HMAC + dedupe + ack rápido, patrón de #260) + migración del enum `channel_type` + provider en `configure_staging_integrations` + tests + E2E en vivo con un número de prueba.
 
-### Deuda técnica viva
+### Sprint 3 — Widget de chat + verificación de identidad · requisito del piloto
+- [ ] **[#258](https://github.com/Auyan-ai/platform/issues/258) · Widget de chat** en la tienda (decidir construir vs. usar el del helpdesk).
+- [ ] **[#257](https://github.com/Auyan-ai/platform/issues/257) · Verificación por niveles validada en código + OTP** (principio Decagon): resolutor de identidad antes de `reason`, ownership en código para cada skill sensible, OTP al email/teléfono **del pedido** (caducidad, intentos, auditoría), política por tenant y tier, sesión firmada (HMAC/JWT) para compradores logueados, lectura de `shop.customerAccountsV2`. ADR.
 
-- **Fixtures de eval huérfanas** (slugs legacy ≠ canónicos; `smalltalk` sin fixture) → el promote gate falla "sin fixtures" para los AOPs reales.
-- **Chip:** persistir `refresh_token` en el OAuth de Gorgias (`oauth_gorgias.py` lo descarta → la integración OAuth se cae al caducar; el canal vivo usa Basic auth).
-- Ticket de prueba 66116601 (Marea Gorgias) quedó `open` — residuo de debugging, cerrar a mano.
-- README no existe en develop (si se crea, SIN "BPO" — contradice el posicionamiento).
-- `get_tool_permissions` en `db/queries.py` es código muerto (sin callers).
+### Sprint 4 — Memoria del cliente cross-canal
+- [ ] **[#256](https://github.com/Auyan-ai/platform/issues/256):** resumen por conversación al cerrar (Haiku, sin PII sensible), identidad unificada email+teléfono (reusa la de sprints 2–3), inyección de los últimos 3–5 resúmenes, follow-ups de Zendesk, retención por tenant (GDPR). ADR.
+
+### Sprint 5 — JEV en `select_aop` (shadow mode)
+- [ ] Plan B de la s76 sin cambios (B0 spike → B1 shadow → B2 medición, con las fixtures de eval arregladas → B3 switch con flag + ADR).
+
+### Transversal (encajar entre sprints)
+- [ ] **Postmark con `auyan.es`** (DKIM/SPF) + SMTP de Supabase (magic links sin spam) — lo necesita el OTP por email.
+- [ ] **ADR del cambio de plataforma** Railway → Cloud Run + Vercel, y actualizar `CLAUDE.md` (sección Stack y regla de migraciones: "Railway deploya…") + `architecture-overview.md` / `architecture-web.md` — **propuesta pendiente de aprobación de Kenny** (CLAUDE.md lo modifica él).
+- [ ] **Onboarding del cliente en Zendesk:** crear un agente de servicio "Auyan AI" y el OAuth client con ese usuario (hoy las respuestas salen firmadas por quien creó el client). Documentar en la guía de onboarding junto con el body del Trigger (solo IDs).
+- [ ] **Supabase staging:** plan de pago o keep-alive antes del piloto.
 
 ---
 
-## Estado general
+## ✅ Hecho en s77 (E2E Zendesk sobre Marea, 2026-09-29/30)
 
-| Área | Estado |
+| Escenario de la batería A3 | Resultado en vivo |
 |---|---|
-| Bloque 0 | ✅ 0.1–0.10. El 0.11 quedó cerrado operativamente vía dogfood Marea (L1 + L3 + resolución autónoma + Gorgias, todo E2E en vivo); la corrida formal 25/25+judge sobre Lunaria queda relegada. |
-| Bloque 1 | ✅ 1.0–1.9 completados y archivados. |
-| Bloque 2 | Motor de billing por resolución mergeado (#234); Stripe pendiente (punto 4 arriba). Duet/Watchtower/Diagnostics sin arrancar. |
-| Onboarding | Fase 1 ✅ ([#137](https://github.com/Auyan-ai/platform/pull/137)). Fases 2-4 pendientes — plan en [`onboarding-system-plan.md`](onboarding-system-plan.md); deuda del portal en tabla abajo. |
-| Dogfood | **Marea Studio** verificado E2E: tenant `683246c2-10ce-4f6c-a299-5053f32f8c01` (slug `marea-studio`), pedido de pruebas #1181 (`order_id` interno `7133866033432`). Chatwoot de Marea/Purigu sin Teams → no setear `escalation_team_id`. |
-| Suite | 1323 tests verde, ruff/mypy limpios (s73). |
-| ADRs | Decisiones de arquitectura en [`adr/`](adr/) (formato Nygard). |
+| ~~Consulta de pedido (L1)~~ | ✅ datos reales de Shopify (#1428 "Pendientes Aurora 29,90") |
+| ~~Pedido inexistente / email sin pedidos~~ | ✅ pide confirmar, no inventa |
+| ~~Resolución + cobro~~ | ✅ ticket `solved` + `resolution_event` (solo tras entrega confirmada, #249) |
+| ~~Reapertura sin doble cobro~~ | ✅ `reverted_at` dentro de la ventana de 7 días |
+| ~~Acción L3 → aprobación → ejecución~~ | ✅ cancelación #1428 y cambio de dirección #1429 aprobados en el dashboard de Vercel y ejecutados en Shopify |
+| ~~Cierre tras aprobar~~ | ✅ escalación resuelta + ticket `solved` (#253) |
+| ~~Escalado con razón explícita~~ | ✅ nota interna + grupo + `pending` |
+| ~~Anti-loop~~ | ✅ la respuesta del agente no re-dispara el Trigger |
+| ~~Ownership / privacidad~~ | ✅ desde otro email: no muestra ni modifica la dirección (#254/#259) |
+
+Integraciones: ~~Zendesk E2E en vivo~~ ✅ (OAuth client_credentials, Trigger con body de solo IDs, firma HMAC). ~~Supabase Auth Site URL / Redirects~~ ✅ (apuntan a Vercel). ~~Auditoría s71 #3~~ ✅.
 
 ---
 
 ## Pendientes vivos
+
+### 🔴 Producción (cuando `develop` pase a `main`)
+Producción ya no puede ir en Railway: **definir su deploy** (Cloud Run `auyan-api` + Vercel prod, mismo script con otro `.env`) y aplicar a mano las migraciones: `l3_autonomy_acknowledgement` + `billing_resolution_events` + `add_gorgias_channel`.
+
+### Deuda técnica viva
+- **Tests de queries contra un Postgres real en CI**: todo va con mocks; el bug de #255 (tipo ambiguo en SQL) solo aparece al preparar la query.
+- **Labels canónicos** (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`) no existen en el repo; los issues de s77 usan `enhancement`.
+- **Fixtures de eval huérfanas** (slugs legacy ≠ canónicos; `smalltalk` sin fixture) → el promote gate falla "sin fixtures". Bloquea B2 (JEV).
+- **Gorgias OAuth:** persistir `refresh_token` (`oauth_gorgias.py` lo descarta).
+- `get_tool_permissions` en `db/queries.py` es código muerto.
+- `mypy` estricto tiene ~1.8k errores preexistentes (no está en CI); `db/queries.py`, `routers/webhooks_zendesk.py`, `agents/nodes/reason.py` y algunos tests sin `ruff format`.
+- Zendesk: el ticket **#2** de pruebas quedó `pending` (anterior a #253) → cerrar a mano.
+- Fallback de idempotencia de Zendesk por hash de contenido: si el Trigger no manda `comment_id` y el cliente repite exactamente el mismo texto en el mismo ticket, el 2º se descarta (hoy el Trigger sí manda `comment_id`).
+- Ventana de reapertura/billing: el cobro por resolución **no se activará con los primeros clientes** (decisión s77); se sigue registrando `resolution_events` como métrica de tasa de resolución.
 
 ### Deuda — Onboarding portal (Fase 2)
 
@@ -128,19 +108,20 @@ Orden acordado: **A → B → C**. Piloto más probable: cliente Shopify con **Z
 
 **Nota viva — Shopify content import (Fase 3):** importar pages/blogs/articles del Admin API (faq, devoluciones, envíos…) → markdown → cola `pending_review`. Reduce fricción del onboarding; no reemplaza el drop-zone.
 
-### Staging / servicios externos
 
-| Pendiente | Estado |
+---
+
+## Estado general
+
+| Área | Estado |
 |---|---|
-| Migraciones | ✅ Staging al día (s72). 🔴 En **producción** faltan al pasar develop→main: `l3_autonomy_acknowledgement` + `billing_resolution_events` + `add_gorgias_channel`. Railway no corre SQL — a mano ([[reference_supabase_migrations]]). |
-| LangSmith | ✅ Staging EU validado: `agent_conversation` + child runs por nodo (#237/#238), tokens/coste nativos. |
-| Chatwoot Cloud | ✅ E2E verificado (Marea/Purigu). Registrar integraciones siempre vía `railway run … configure_staging_integrations` (cripto con la key de staging, si no InvalidTag/500). |
-| Gorgias | ✅ E2E en vivo (s69, Basic auth; HTTP Integration con trigger *ticket-message-created*). |
-| Zendesk | Código listo (#232, dual-auth). Falta E2E en vivo (punto 2 de Empezar aquí). |
-| Shopify test store | ✅ Órdenes reales `auyan-e2e` en Lunaria (#1001-#1003) y Marea (#1181). **🔴 Rotar el access token de Marea** (expuesto en LangSmith entre #237 y #238): regenerar en Shopify + re-registrar con `railway run … configure_staging_integrations`. |
-| Postmark | Pendiente: dominio aún sin comprar → DKIM/SPF bloqueado; luego plug como SMTP de Supabase. |
-| Supabase Auth staging | Por confirmar: **Site URL** = `https://auyan-web-staging.up.railway.app` (si sigue en `localhost:3000` rompe magic links) + Redirect URLs. |
-| Weekly Reports cron | Falta `DATABASE_URL` en GitHub Actions para el workflow programado. |
+| Bloque 0 / 1 | ✅ completados y archivados. |
+| Bloque 2 | Motor de billing por resolución mergeado (#234); Stripe pendiente; sin cobro por resolución a los primeros clientes. |
+| Onboarding | Fase 1 ✅. Fases 2-4 pendientes ([`onboarding-system-plan.md`](onboarding-system-plan.md)). |
+| Dogfood | **Marea Studio** (`683246c2-10ce-4f6c-a299-5053f32f8c01`, slug `marea-studio`): Zendesk `auyan.zendesk.com` (trial) + Shopify `marea-studio-dbljzahy`. Pedidos de prueba: **#1428** (cancelado) y **#1429** (`kenny.medina@ahoracrypto.com`, dirección cambiada). AOPs canónicos re-sembrados en s77. |
+| Canales | Zendesk ✅ E2E en vivo (s77) · Gorgias ✅ (s69, falta regresión) · Chatwoot ✅ (falta regresión) · WhatsApp/Zernio ⏳ Sprint 2 · Widget ⏳ Sprint 3. |
+| Suite | 1407 tests verde (sin `.env`, como CI), ruff limpio. |
+| ADRs | [`adr/`](adr/) (formato Nygard). Pendientes: plataforma Cloud Run/Vercel, Zernio, verificación de identidad, memoria. |
 
 ---
 
