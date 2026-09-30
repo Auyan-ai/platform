@@ -125,6 +125,23 @@ con curl):
 
 ## C0 — Spike (manual, Kenny + sesión corta). Bloquea PR-2 (firma) y PR-7 (proveedor STT)
 
+**Herramientas para C0 y operación** (s79):
+- **MCP hospedado de Zernio** (`https://mcp.zernio.com/mcp`, más de 280 herramientas, OAuth).
+  Página: `zernio.com/claude`. Plugin oficial: `zernio-dev/zernio-claude-plugin`. En las sesiones
+  cloud se conecta como **conector de claude.ai** (`claude.ai/customize/connectors` → URL del MCP →
+  login OAuth con la cuenta de Auyan en Zernio), y las sesiones lo cargan **al arrancar**. Sirve
+  para C0: crear el profile de Marea, activar el sandbox, crear un webhook de prueba y mandar
+  `webhook.test`, e inspeccionar payloads reales.
+  - ⚠️ Tiene **el poder de la cuenta entera** (todos los profiles, es decir, todos los tenants).
+    Solo para operación y staging, **nunca** en el runtime de la API (ADR 0010: el runtime usa
+    keys limitadas por profile).
+  - Lo que se configure a mano con el MCP hay que reproducirlo después con
+    `scripts/onboard_whatsapp.py`, que es la fuente reproducible.
+- **Red del entorno cloud:** la política actual bloquea `zernio.com` (la API vive en
+  `https://zernio.com/api`), `mcp.zernio.com` y `docs.zernio.com`. Para correr desde una sesión
+  los scripts de onboarding o el E2E hay que añadir esos dominios a los permitidos del entorno.
+  Los tests no los necesitan: usan transport mock.
+
 1. **Cuenta y precios.** Crear la cuenta de Auyan en Zernio y confirmar en la web oficial:
    - precio por cuenta conectada y si el **Inbox add-on** es de pago (los endpoints de inbox dicen
      "Requires Inbox addon");
