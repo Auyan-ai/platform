@@ -130,7 +130,10 @@ async def run_inbound_turn(
             },
         )
 
-    await _deliver_outcome(job, conversation, outcome, settings=settings)
+    delivered = await _deliver_outcome(job, conversation, outcome, settings=settings)
+    if outcome.response_text and not delivered:
+        # Queda visible en la cola: el cliente NO recibió la respuesta.
+        return f"{outcome.decision}:undelivered"
     return outcome.decision
 
 
@@ -140,8 +143,10 @@ async def _deliver_outcome(
     outcome: AgentOutcome,
     *,
     settings: Settings,
-) -> None:
-    """Entrega + resolución + escalado + uso. Best-effort: nunca lanza."""
+) -> bool:
+    """Entrega + resolución + escalado + uso. Best-effort: nunca lanza.
+
+    Devuelve True si la respuesta llegó al helpdesk del cliente."""
     delivered = False
     if outcome.response_text:
         client = None
@@ -206,6 +211,7 @@ async def _deliver_outcome(
         tokens_out=outcome.tokens_out,
         cost_usd=outcome.cost_usd,
     )
+    return delivered
 
 
 def retry_delay_seconds(attempts: int) -> int:

@@ -190,7 +190,8 @@ async def test_message_cap_skips_graph_and_delivers_cap_outcome(turn_mocks: dict
 async def test_undelivered_reply_blocks_resolution(turn_mocks: dict[str, Any]) -> None:
     """Credencial mala / helpdesk caído: no se marca resuelta ni se cobra."""
     turn_mocks["send_agent_reply"].return_value = False
-    await run_inbound_turn(_job(), agent_service=_agent(), settings=FakeSettings())
+    decision = await run_inbound_turn(_job(), agent_service=_agent(), settings=FakeSettings())
+    assert decision == "respond:undelivered"
     assert turn_mocks["finalize_agent_resolution"].await_args.kwargs["delivered"] is False
 
 
@@ -209,7 +210,7 @@ async def test_post_graph_failures_never_raise(turn_mocks: dict[str, Any]) -> No
     turn_mocks["load_helpdesk_client"].side_effect = RuntimeError("bad creds")
     turn_mocks["finalize_agent_resolution"].side_effect = RuntimeError("db down")
     decision = await run_inbound_turn(_job(), agent_service=_agent(), settings=FakeSettings())
-    assert decision == "respond"
+    assert decision == "respond:undelivered"
 
 
 async def test_escalation_pushes_note_to_helpdesk(turn_mocks: dict[str, Any]) -> None:

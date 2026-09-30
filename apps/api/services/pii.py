@@ -6,7 +6,8 @@ Política (architecture-agent-v2.md § 11.3):
 - Nombre      → iniciales "J. P."
 - Dirección   → "<dirección>" (la calle es PII; ciudad/provincia/país se conservan)
 - Cód. postal → prefijo de 2 dígitos "28***" (en ES identifica provincia, no a la persona)
-- IDs, números de pedido, textos libres → sin cambio
+- IDs, números de pedido, textos libres → sin cambio (en el audit log; hacia
+  observabilidad el texto libre sí se enmascara: ver `mask_free_text_pii`)
 
 El hashing ocurre en Python para que el salt nunca aparezca en logs de Postgres.
 
@@ -104,3 +105,35 @@ def hash_inputs(inputs: dict[str, Any]) -> str:
     """sha256 del JSON canónico de los inputs originales (para forense)."""
     canonical = json.dumps(inputs, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+# ─── Texto libre hacia observabilidad (LangSmith / Langfuse) ─────────────────
+#
+# El mensaje del cliente y la respuesta del agente viajan tal cual a un SaaS de
+# terceros. Aquí no hay salt por tenant (es un camino síncrono sin DB): el email se
+# reemplaza por un marcador sin hash y el teléfono conserva los últimos 4 dígitos.
+# Números de pedido (#1429), importes e IDs cortos no se tocan.
+
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+# Teléfono: con prefijo internacional (+34 612 345 678) o 9 dígitos españoles que
+# empiezan por 6/7/8/9, admitiendo separadores de espacio, punto o guion.
+_PHONE_RE = re.compile(
+    r"(?<![\w#])(?:\+\d{1,3}[\s.-]?(?:\d[\s.-]?){8,12}\d|[6-9](?:[\s.-]?\d){8})(?![\w])"
+)
+
+
+def mask_free_text_pii(text: str) -> str:
+    """Enmascara emails y teléfonos en texto libre destinado a observabilidad."""
+    masked = _EMAIL_RE.sub("<email>", text)
+    return _PHONE_RE.sub(lambda m: _redact_phone(m.group(0)), masked)
+
+
+def mask_pii_recursive(value: Any) -> Any:
+    """`mask_free_text_pii` aplicado a todos los strings de una estructura JSON-like."""
+    if isinstance(value, str):
+        return mask_free_text_pii(value)
+    if isinstance(value, dict):
+        return {k: mask_pii_recursive(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [mask_pii_recursive(v) for v in value]
+    return value

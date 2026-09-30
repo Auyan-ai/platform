@@ -2,6 +2,11 @@
 
 LangSmith es el provider primario. Langfuse puede seguir activo como espejo
 secundario para compatibilidad durante la transición.
+
+Todo el texto libre que sale hacia estos SaaS (mensaje del cliente, respuesta,
+motivo de escalado, outputs de nodos) pasa por `services.pii.mask_*`: emails y
+teléfonos que escriba el cliente no llegan a terceros. La correlación con Supabase
+va por IDs (tenant_id, conversation_id) en metadata.
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ from typing import Any
 
 from apps.api.integrations.langfuse_client import LangfuseClient
 from apps.api.integrations.langsmith_client import LangSmithClient, LangSmithTrace
+from apps.api.services.pii import mask_free_text_pii, mask_pii_recursive
 
 
 @dataclass(frozen=True)
@@ -50,6 +56,7 @@ class ObservabilityClient:
         channel: str,
         input_text: str,
     ) -> ObservabilityTrace:
+        input_text = mask_free_text_pii(input_text)
         primary = self._primary.start_conversation_trace(
             tenant_id=tenant_id,
             conversation_id=conversation_id,
@@ -82,6 +89,9 @@ class ObservabilityClient:
         model: str | None,
         error: str | None,
     ) -> None:
+        response_text = mask_free_text_pii(response_text) if response_text else response_text
+        if escalation_reason:
+            escalation_reason = mask_free_text_pii(escalation_reason)
         self._primary.finalize_trace(
             trace.primary,
             decision=decision,
@@ -127,7 +137,7 @@ class ObservabilityClient:
             node_name=node_name,
             start_time=start_time,
             end_time=end_time,
-            outputs=outputs,
+            outputs=mask_pii_recursive(outputs) if outputs else outputs,
             error=error,
         )
 
