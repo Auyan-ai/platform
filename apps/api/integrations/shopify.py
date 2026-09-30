@@ -59,19 +59,37 @@ def _token_cache_set(tenant_id: UUID, token: str, expires_at: _dt.datetime) -> N
 # como lo escribe el cliente (normalmente en español), así que normalizamos aquí.
 # Auyan es ES-first; cubrimos España + destinos de envío habituales (UE + comunes).
 _COUNTRY_TO_ISO2: dict[str, str] = {
-    "españa": "ES", "espana": "ES", "spain": "ES",
+    "españa": "ES",
+    "espana": "ES",
+    "spain": "ES",
     "portugal": "PT",
-    "francia": "FR", "france": "FR",
-    "italia": "IT", "italy": "IT",
-    "alemania": "DE", "germany": "DE", "deutschland": "DE",
+    "francia": "FR",
+    "france": "FR",
+    "italia": "IT",
+    "italy": "IT",
+    "alemania": "DE",
+    "germany": "DE",
+    "deutschland": "DE",
     "andorra": "AD",
-    "reino unido": "GB", "united kingdom": "GB", "uk": "GB",
-    "irlanda": "IE", "ireland": "IE",
-    "países bajos": "NL", "paises bajos": "NL", "holanda": "NL", "netherlands": "NL",
-    "bélgica": "BE", "belgica": "BE", "belgium": "BE",
-    "suiza": "CH", "switzerland": "CH",
-    "estados unidos": "US", "united states": "US", "usa": "US",
-    "méxico": "MX", "mexico": "MX",
+    "reino unido": "GB",
+    "united kingdom": "GB",
+    "uk": "GB",
+    "irlanda": "IE",
+    "ireland": "IE",
+    "países bajos": "NL",
+    "paises bajos": "NL",
+    "holanda": "NL",
+    "netherlands": "NL",
+    "bélgica": "BE",
+    "belgica": "BE",
+    "belgium": "BE",
+    "suiza": "CH",
+    "switzerland": "CH",
+    "estados unidos": "US",
+    "united states": "US",
+    "usa": "US",
+    "méxico": "MX",
+    "mexico": "MX",
 }
 
 
@@ -224,9 +242,7 @@ class ShopifyClient:
             orders: list[dict[str, Any]] = response.json()["orders"]
             return orders[0] if orders else None
 
-    async def get_orders_by_email(
-        self, email: str, *, limit: int = 10
-    ) -> list[dict[str, Any]]:
+    async def get_orders_by_email(self, email: str, *, limit: int = 10) -> list[dict[str, Any]]:
         """Devuelve hasta `limit` pedidos del email dado (más recientes primero)."""
         async with httpx.AsyncClient() as client:
             response = await client.get(
@@ -242,9 +258,7 @@ class ShopifyClient:
     # Products
     # ----------------------------------------------------------------
 
-    async def search_products(
-        self, query: str, *, limit: int = 10
-    ) -> list[dict[str, Any]]:
+    async def search_products(self, query: str, *, limit: int = 10) -> list[dict[str, Any]]:
         """Busca productos activos por título/keyword."""
         async with httpx.AsyncClient() as client:
             response = await client.get(
@@ -429,8 +443,30 @@ class ShopifyClient:
         currency: str,
         note: str = "",
     ) -> dict[str, Any]:
-        """Crea un reembolso parcial en un pedido. Acción L3."""
+        """Crea un reembolso parcial en un pedido. Acción L3.
+
+        Shopify exige que la transacción de reembolso cuelgue (`parent_id`) de la
+        transacción de cobro (`sale`/`capture`) y use su mismo gateway: con
+        `parent_id` nulo el reembolso de un pedido cobrado se rechaza.
+        """
         async with httpx.AsyncClient() as client:
+            tx_resp = await client.get(
+                f"{self._base_url}/orders/{order_id}/transactions.json",
+                headers=self._headers(),
+                timeout=15,
+            )
+            tx_resp.raise_for_status()
+            transactions: list[dict[str, Any]] = tx_resp.json()["transactions"]
+            parent = next(
+                (
+                    t
+                    for t in reversed(transactions)
+                    if t.get("kind") in ("sale", "capture") and t.get("status") == "success"
+                ),
+                None,
+            )
+            if parent is None:
+                raise ShopifyActionError("order_has_no_refundable_payment")
             response = await client.post(
                 f"{self._base_url}/orders/{order_id}/refunds.json",
                 headers=self._headers(),
@@ -440,10 +476,10 @@ class ShopifyClient:
                         "note": note,
                         "transactions": [
                             {
-                                "parent_id": None,
+                                "parent_id": parent["id"],
                                 "amount": amount,
                                 "kind": "refund",
-                                "gateway": "manual",
+                                "gateway": parent["gateway"],
                             }
                         ],
                     }
@@ -453,6 +489,21 @@ class ShopifyClient:
             response.raise_for_status()
             return response.json()["refund"]  # type: ignore[no-any-return]
 
+    async def _graphql(
+        self, client: httpx.AsyncClient, query: str, variables: dict[str, Any]
+    ) -> dict[str, Any]:
+        response = await client.post(
+            f"{self._base_url}/graphql.json",
+            headers=self._headers(),
+            json={"query": query, "variables": variables},
+            timeout=15,
+        )
+        response.raise_for_status()
+        body = response.json()
+        if body.get("errors"):
+            raise ShopifyActionError(f"graphql_errors: {body['errors']}")
+        return body["data"]  # type: ignore[no-any-return]
+
     async def start_return(
         self,
         order_id: int,
@@ -461,29 +512,104 @@ class ShopifyClient:
         quantity: int,
         reason: str = "other",
     ) -> dict[str, Any]:
-        """Inicia el proceso de devolución de un artículo. Acción L3.
+        """Inicia la devolución de un artículo. Acción L3.
 
-        Usa la API de Returns de Shopify (REST Admin 2024-10+).
+        Returns solo existe en GraphQL (`returnCreate`; no hay recurso REST). La
+        devolución se hace sobre el *fulfillment line item* → se busca el del
+        `line_item_id` entre los returnable fulfillments del pedido (solo artículos
+        ya enviados y aún no devueltos). Scopes: `read_returns` + `write_returns`.
+        Devuelve `{"id": int, "status": str, "name": str}`.
         """
+        order_gid = f"gid://shopify/Order/{order_id}"
+        line_item_gid = f"gid://shopify/LineItem/{line_item_id}"
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self._base_url}/orders/{order_id}/returns.json",
-                headers=self._headers(),
-                json={
-                    "return": {
-                        "line_items": [
+            data = await self._graphql(client, _RETURNABLE_QUERY, {"orderId": order_gid})
+            match = None
+            for fulfillment in data["returnableFulfillments"]["nodes"]:
+                for item in fulfillment["returnableFulfillmentLineItems"]["nodes"]:
+                    if item["fulfillmentLineItem"]["lineItem"]["id"] == line_item_gid:
+                        match = item
+                        break
+                if match:
+                    break
+            if match is None:
+                raise ShopifyActionError("line_item_not_returnable")
+            if quantity > int(match["quantity"]):
+                raise ShopifyActionError("return_quantity_exceeds_returnable")
+
+            reason_enum = reason.strip().upper().replace(" ", "_")
+            if reason_enum not in _RETURN_REASONS:
+                reason_enum = "OTHER"
+            data = await self._graphql(
+                client,
+                _RETURN_CREATE_MUTATION,
+                {
+                    "input": {
+                        "orderId": order_gid,
+                        "returnLineItems": [
                             {
-                                "line_item_id": line_item_id,
+                                "fulfillmentLineItemId": match["fulfillmentLineItem"]["id"],
                                 "quantity": quantity,
-                                "return_reason_notes": reason,
+                                "returnReason": reason_enum,
+                                "returnReasonNote": reason[:255],
                             }
-                        ]
+                        ],
                     }
                 },
-                timeout=15,
             )
-            response.raise_for_status()
-            return response.json()["return"]  # type: ignore[no-any-return]
+            result = data["returnCreate"]
+            if result["userErrors"]:
+                raise ShopifyActionError(f"return_create_failed: {result['userErrors']}")
+            ret = result["return"]
+            return {
+                "id": int(str(ret["id"]).rsplit("/", 1)[-1]),
+                "status": str(ret["status"]).lower(),
+                "name": ret.get("name"),
+            }
+
+
+class ShopifyActionError(RuntimeError):
+    """Shopify no permite la acción con el estado actual del pedido."""
+
+
+_RETURN_REASONS = frozenset(
+    {
+        "COLOR",
+        "DEFECTIVE",
+        "NOT_AS_DESCRIBED",
+        "OTHER",
+        "SIZE_TOO_LARGE",
+        "SIZE_TOO_SMALL",
+        "STYLE",
+        "UNKNOWN",
+        "UNWANTED",
+        "WRONG_ITEM",
+    }
+)
+
+_RETURNABLE_QUERY = """
+query Returnable($orderId: ID!) {
+  returnableFulfillments(orderId: $orderId, first: 20) {
+    nodes {
+      returnableFulfillmentLineItems(first: 100) {
+        nodes {
+          quantity
+          fulfillmentLineItem { id lineItem { id } }
+        }
+      }
+    }
+  }
+}
+"""
+
+_RETURN_CREATE_MUTATION = """
+mutation ReturnCreate($input: ReturnInput!) {
+  returnCreate(returnInput: $input) {
+    return { id name status }
+    userErrors { field message }
+  }
+}
+"""
 
 
 # ─── Adapter stateless — implementa CommerceProvider ──────────────────────────

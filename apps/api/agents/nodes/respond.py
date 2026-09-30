@@ -35,6 +35,9 @@ def make_respond_node(
             return {"error": "respond_without_text"}
 
         metadata = {
+            # Enlaza la respuesta con el inbound que la originó: el worker lo usa para
+            # no responder dos veces si reintenta un turno que ya había respondido.
+            "inbound_message_id": state.get("inbound_message_id"),
             "langfuse_trace_id": state.get("langfuse_trace_id"),
             "model": state.get("model_used"),
             "prompt_tokens": state.get("tokens_in", 0),

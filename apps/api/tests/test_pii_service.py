@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 
-from apps.api.services.pii import hash_inputs, redact_inputs
+import pytest
+from apps.api.services.pii import hash_inputs, mask_free_text_pii, redact_inputs
 
 SALT = "deadbeefdeadbeefdeadbeefdeadbeef"
 
@@ -116,3 +117,22 @@ class TestHashInputs:
         canonical = json.dumps(inputs, sort_keys=True, default=str)
         expected = hashlib.sha256(canonical.encode()).hexdigest()
         assert hash_inputs(inputs) == expected
+
+
+class TestMaskFreeTextPii:
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("soy juan.perez+1@gmail.com", "soy <email>"),
+            ("móvil 612 345 678", "móvil ***-5678"),
+            ("llámame al +34 612-345-678", "llámame al ***-5678"),
+            ("tel 912345678.", "tel ***-5678."),
+            # No son PII: pedidos, importes, tracking, códigos postales, IDs.
+            ("pedido #1429 por 49.90 €", "pedido #1429 por 49.90 €"),
+            ("tracking 17457464312088", "tracking 17457464312088"),
+            ("CP 28013", "CP 28013"),
+            ("pedido #612345678", "pedido #612345678"),
+        ],
+    )
+    def test_masks_emails_and_phones_only(self, text: str, expected: str) -> None:
+        assert mask_free_text_pii(text) == expected

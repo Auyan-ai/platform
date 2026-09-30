@@ -19,6 +19,7 @@ un ADR nuevo que la supersede y se actualiza el `Estado` del viejo.
 | [0005](0005-skills-tiered-l1-l2-l3.md) | Skills tipadas con niveles de riesgo L1/L2/L3 y approval humano | Aceptada |
 | [0006](0006-langsmith-observability.md) | LangSmith como fuente primaria de observabilidad | Aceptada |
 | [0007](0007-model-routing.md) | Routing de modelos por tarea (Haiku/Sonnet/Opus) según costo-profundidad | Aceptada |
+| [0008](0008-inbound-queue-postgres.md) | Turnos inbound en una cola Postgres, serializados por conversación | Aceptada |
 
 ## Estados posibles
 

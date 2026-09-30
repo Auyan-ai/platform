@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
@@ -27,6 +27,9 @@ class LangSmithTrace:
 
     run_id: UUID
     dotted_order: str
+    # Metadata de correlación con Supabase (tenant_id, conversation_id…). Se reenvía al
+    # finalizar: `update_run` REEMPLAZA extra.metadata, y sin esto se perdía.
+    metadata: dict[str, Any] = field(default_factory=dict, compare=False, hash=False)
 
 
 class LangSmithClient:
@@ -176,6 +179,12 @@ class LangSmithClient:
         run_id = uuid4()
         start_time = datetime.now(UTC)
         dotted_order = self._dotted_order_segment(start_time, run_id)
+        correlation: dict[str, Any] = {
+            "tenant_id": tenant_id,
+            "conversation_id": conversation_id,
+            "end_customer_id": end_customer_id,
+            "channel": channel,
+        }
         try:
             self._client.create_run(
                 id=run_id,
@@ -187,16 +196,9 @@ class LangSmithClient:
                 inputs={"message": input_text},
                 start_time=start_time,
                 tags=[f"tenant:{tenant_id}", f"channel:{channel}", "source:agent_service"],
-                extra={
-                    "metadata": {
-                        "tenant_id": tenant_id,
-                        "conversation_id": conversation_id,
-                        "end_customer_id": end_customer_id,
-                        "channel": channel,
-                    }
-                },
+                extra={"metadata": correlation},
             )
-            return LangSmithTrace(run_id=run_id, dotted_order=dotted_order)
+            return LangSmithTrace(run_id=run_id, dotted_order=dotted_order, metadata=correlation)
         except Exception:
             logger.exception("langsmith_trace_start_failed")
             return None
@@ -246,6 +248,7 @@ class LangSmithClient:
                 error=error,
                 extra={
                     "metadata": {
+                        **trace.metadata,
                         "confidence": confidence,
                         "tokens_in": tokens_in,
                         "tokens_out": tokens_out,

@@ -4,8 +4,9 @@ Flujo:
 1. Recibir POST de Zendesk (disparado por un Trigger configurado en la cuenta).
 2. Extraer subdomain del payload para resolver el tenant.
 3. Descifrar credenciales + validar X-Zendesk-Webhook-Signature (si configurado).
-4. Ejecutar flujo inbound estándar (customer, conversación, mensaje, agente).
-5. Si el agente responde: send_outbound al adapter de Zendesk.
+4. Leer el comentario de la API, filtrar (solo públicos del requester).
+5. Persistir el mensaje + encolar el turno en una transacción → 200 inmediato.
+   El grafo y la respuesta al ticket corren en el worker (`services/inbound_worker.py`).
 
 Payload esperado (configurar en el Zendesk Trigger → Webhook). SOLO IDs:
     {
@@ -20,7 +21,9 @@ Payload esperado (configurar en el Zendesk Trigger → Webhook). SOLO IDs:
     Zendesk no tiene variable {{subdomain}}: se hardcodea una vez por cuenta.
     Campos extra del payload (content, requester_*…) se ignoran.
 
-Idempotencia: por comentario (`zendesk:{ticket_id}:{comment_id}`, id real de la API).
+Idempotencia: por comentario (`zendesk:{ticket_id}:{comment_id}`, id real de la API),
+reclamada en la misma transacción que persiste y encola: un reintento de Zendesk
+(incluso concurrente) sale como duplicado; si la transacción cae, se reprocesa limpio.
 
 Anti-loop: la respuesta pública del agente re-dispara el Trigger. Dos capas: la
 condición del Trigger (Current user = end user) y aquí se ignora todo comentario
@@ -38,56 +41,31 @@ import json
 import logging
 from typing import Annotated, Any
 
-from apps.api.agents.service import AgentService
 from apps.api.core.config import Settings, get_settings
-from apps.api.db.client import bootstrap_connection, tenant_scope
+from apps.api.db.client import bootstrap_connection
 from apps.api.db.queries import (
-    complete_idempotency_key,
-    create_conversation,
-    create_end_customer,
-    delete_idempotency_key,
-    find_conversation_by_external,
-    find_end_customer_by_email,
-    get_idempotency_record,
     get_integration_by_zendesk_subdomain,
     get_integration_credentials_encrypted,
     get_tenant_by_id,
     get_tenant_configuration,
-    insert_message,
-    try_insert_idempotency_key,
-    update_conversation_last_message,
 )
-from apps.api.integrations.base import InboundMessage, IntegrationContext
+from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.zendesk import (
     ZendeskAdapter,
     ZendeskInboundComment,
     verify_zendesk_signature,
 )
-from apps.api.services.agent_resolution import finalize_agent_resolution, send_agent_reply
-from apps.api.services.conversations import reopen_if_resolved
-from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
+from apps.api.services.inbound_intake import notify_inbound_worker, persist_and_enqueue_inbound
 from apps.api.services.integrations_crypto import decrypt_credentials, get_integration_crypto_key
-from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
-from apps.api.services.usage import UsageRecorder, check_tenant_budget
+from apps.api.services.usage import check_tenant_budget
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
-_usage_recorder = UsageRecorder()
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
-
-
-def get_agent_service(request: Request) -> AgentService:
-    svc = getattr(request.app.state, "agent_service", None)
-    if svc is None:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail="agent_service_not_ready")
-    return svc
-
-
-AgentServiceDep = Annotated["AgentService", Depends(get_agent_service)]
 
 
 def _placeholder_value(value: Any) -> str | None:
@@ -130,7 +108,6 @@ def _ignore_reason(comment: ZendeskInboundComment) -> str | None:
 async def zendesk_webhook(
     request: Request,
     settings: SettingsDep,
-    agent_service: AgentServiceDep,
 ) -> dict[str, Any]:
     raw_body = await request.body()
     payload = _parse_payload(raw_body)
@@ -236,165 +213,25 @@ async def zendesk_webhook(
         )
         return {"received": True, "processed": False, "ignored": ignore_reason}
 
-    # 8. Idempotencia por comentario de Zendesk.
-    idempotency_key = f"zendesk:{zendesk_ticket_id}:{comment.comment_id}"
-    idempotency_claimed = False
-
-    async with bootstrap_connection() as conn:
-        record = await try_insert_idempotency_key(
-            conn,
-            tenant_id=tenant_id,
-            key=idempotency_key,
-            request_path="/webhooks/zendesk",
-        )
-        if record is None:
-            existing = await get_idempotency_record(conn, tenant_id=tenant_id, key=idempotency_key)
-            if existing is not None and existing.status == "done":
-                return {"received": True, "processed": False, "duplicate": True}
-            raise HTTPException(status.HTTP_409_CONFLICT, detail="idempotency_key_in_flight")
-        idempotency_claimed = True
-
-    inbound_msg_model = InboundMessage(
-        external_id=zendesk_ticket_id,
+    # 8. Persistir + encolar (idempotencia por comentario, misma transacción) y ack.
+    #    El grafo corre en el worker (services/inbound_worker.py): Zendesk corta a
+    #    ~10 s y reintenta, y un turno con supervisor puede tardar más.
+    result = await persist_and_enqueue_inbound(
+        tenant_id=tenant_id,
         channel="zendesk",
+        external_id=zendesk_ticket_id,
+        idempotency_key=f"zendesk:{zendesk_ticket_id}:{comment.comment_id}",
+        request_path="/webhooks/zendesk",
         content=comment.content,
-        sender_email=comment.requester_email,
-        sender_name=comment.requester_name,
+        customer_email=comment.requester_email,
+        customer_name=comment.requester_name,
         subject=comment.subject,
-        raw_payload=payload,
-    )
-    customer_email: str | None = inbound_msg_model.sender_email
-    customer_name: str | None = inbound_msg_model.sender_name
-
-    cap_outcome = None
-    try:
-        async with tenant_scope(tenant_id) as conn:
-            # Upsert end_customer.
-            customer = None
-            if customer_email:
-                customer = await find_end_customer_by_email(conn, tenant_id, customer_email)
-            if customer is None:
-                customer = await create_end_customer(
-                    conn,
-                    tenant_id=tenant_id,
-                    email=customer_email,
-                    external_id=None,
-                    full_name=customer_name,
-                )
-
-            # Find-or-create conversación por ticket_id de Zendesk.
-            conversation = await find_conversation_by_external(
-                conn, tenant_id, "zendesk", zendesk_ticket_id
-            )
-            if conversation is None:
-                conversation = await create_conversation(
-                    conn,
-                    tenant_id=tenant_id,
-                    end_customer_id=customer.id,
-                    channel="zendesk",
-                    external_id=zendesk_ticket_id,
-                    subject=inbound_msg_model.subject,
-                )
-            else:
-                # El cliente volvió a escribir: si estaba resuelta, reactivarla.
-                conversation = await reopen_if_resolved(conn, tenant_id, conversation)
-
-            inbound_db_msg = await insert_message(
-                conn,
-                tenant_id=tenant_id,
-                conversation_id=conversation.id,
-                role="customer",
-                direction="inbound",
-                content=inbound_msg_model.content,
-                metadata={
-                    "channel": "zendesk",
-                    "zendesk_ticket_id": zendesk_ticket_id,
-                    "zendesk_comment_id": comment.comment_id,
-                },
-            )
-            await update_conversation_last_message(conn, tenant_id, conversation.id)
-
-            cap_outcome = await enforce_message_cap(
-                conn,
-                tenant_id=tenant_id,
-                conversation_id=conversation.id,
-                inbound_message_id=inbound_db_msg.id,
-                tenant_config=tenant_config,
-                settings=settings,
-            )
-
-        # 9. Disparar el grafo.
-        if cap_outcome is not None:
-            outcome = cap_outcome
-        else:
-            outcome = await agent_service.process_inbound(
-                tenant_id=tenant_id,
-                conversation_id=conversation.id,
-                inbound_message_id=inbound_db_msg.id,
-                inbound_message_content=inbound_msg_model.content,
-                channel="zendesk",
-                end_customer_id=customer.id,
-            )
-
-    except Exception:
-        if idempotency_key and idempotency_claimed:
-            async with bootstrap_connection() as conn:
-                await delete_idempotency_key(conn, tenant_id=tenant_id, key=idempotency_key)
-        raise
-
-    logger.info(
-        "zendesk_inbound_processed",
-        extra={
-            "tenant_id": str(tenant_id),
-            "conversation_id": str(conversation.id),
-            "decision": outcome.decision,
+        message_metadata={
+            "channel": "zendesk",
+            "zendesk_ticket_id": zendesk_ticket_id,
+            "zendesk_comment_id": comment.comment_id,
         },
     )
-
-    # 10. Enviar el mensaje del agente de vuelta a Zendesk. Incluye el caso escalate
-    #     (mensaje "en revisión"), no solo respond.
-    delivered = False
-    if outcome.response_text:
-        delivered = await send_agent_reply(
-            adapter,
-            ctx,
-            zendesk_ticket_id,
-            outcome.response_text,
-            tenant_id=tenant_id,
-            provider="zendesk",
-        )
-
-    # Resolución autónoma: solo si la respuesta llegó al cliente se marca
-    # 'resolved' + billing + cierre del ticket externo.
-    if outcome.resolves_on_delivery:
-        await finalize_agent_resolution(
-            tenant_id=tenant_id, conversation=conversation, delivered=delivered, settings=settings
-        )
-
-    # Escalado: nota interna con el motivo + asignación al equipo CX del cliente.
-    # Solo al crear la escalación. Best-effort.
-    if outcome.escalation_created:
-        await push_escalation_to_helpdesk_safe(
-            tenant_id=tenant_id,
-            conversation=conversation,
-            reason=outcome.escalation_reason or "unspecified_escalation",
-        )
-
-    _usage_recorder.record(
-        tenant_id=tenant_id,
-        tokens_in=outcome.tokens_in,
-        tokens_out=outcome.tokens_out,
-        cost_usd=outcome.cost_usd,
-    )
-
-    if idempotency_key and idempotency_claimed:
-        async with bootstrap_connection() as conn:
-            await complete_idempotency_key(
-                conn,
-                tenant_id=tenant_id,
-                key=idempotency_key,
-                response_status=200,
-                response_body={"ok": True, "decision": outcome.decision},
-            )
-
-    return {"ok": True, "decision": outcome.decision}
+    if not result.duplicate:
+        notify_inbound_worker(request)
+    return result.response()
