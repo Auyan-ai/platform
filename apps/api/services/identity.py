@@ -8,6 +8,8 @@ compara en E.164 exacto.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from typing import Any
 
 import phonenumbers
 
@@ -56,3 +58,82 @@ def phones_match(a: str | None, b: str | None, default_region: str = DEFAULT_PHO
     na = normalize_phone(a, default_region)
     nb = normalize_phone(b, default_region)
     return na is not None and na == nb
+
+
+# ─── Ownership de un pedido (gate L3 y privacidad de la dirección) ────────────
+
+
+@dataclass(frozen=True)
+class OwnershipCheck:
+    """Resultado del gate de ownership. `reason` nunca lleva PII (va a logs)."""
+
+    owner: bool
+    reason: str  # email_match | phone_match | order_unresolved | no_customer_identity |
+    #              email_mismatch | no_customer_phone | order_without_phone | phone_mismatch
+
+
+def order_phones(order: dict[str, Any], default_region: str = DEFAULT_PHONE_REGION) -> set[str]:
+    """Teléfonos del pedido en E.164: `phone`, `customer.phone` y los de las direcciones.
+
+    Cada teléfono de dirección se normaliza con el país de esa dirección.
+    """
+    customer = order.get("customer") or {}
+    candidates: list[tuple[Any, str]] = [
+        (order.get("phone"), default_region),
+        (customer.get("phone"), default_region),
+    ]
+    for key in ("shipping_address", "billing_address"):
+        address = order.get(key) or {}
+        region = str(address.get("country_code") or default_region)
+        candidates.append((address.get("phone"), region))
+    phones: set[str] = set()
+    for raw, region in candidates:
+        phone = normalize_phone(str(raw), region) if raw else None
+        if phone:
+            phones.add(phone)
+    return phones
+
+
+def _same_email(a: str | None, b: str | None) -> bool:
+    return bool(a and b and a.strip().casefold() == b.strip().casefold())
+
+
+def check_order_ownership(
+    order: dict[str, Any] | None,
+    *,
+    customer_email: str | None,
+    customer_phone: str | None,
+    default_region: str = DEFAULT_PHONE_REGION,
+) -> OwnershipCheck:
+    """¿El comprador de la conversación es el dueño del pedido? Fail-closed.
+
+    Pasa si coincide el email (como siempre) **o** el teléfono E.164 del comprador con
+    alguno del pedido. Sin identidad, pedido no resuelto o sin coincidencia → no dueño.
+    """
+    if not order:
+        return OwnershipCheck(False, "order_unresolved")
+    order_email = order.get("email") or (order.get("customer") or {}).get("email")
+    if _same_email(customer_email, order_email):
+        return OwnershipCheck(True, "email_match")
+    phone = normalize_phone(customer_phone, default_region)
+    if phone is not None:
+        phones = order_phones(order, default_region)
+        if phone in phones:
+            return OwnershipCheck(True, "phone_match")
+        return OwnershipCheck(False, "phone_mismatch" if phones else "order_without_phone")
+    if customer_email:
+        return OwnershipCheck(False, "email_mismatch")
+    if customer_phone:
+        return OwnershipCheck(False, "no_customer_phone")
+    return OwnershipCheck(False, "no_customer_identity")
+
+
+def default_phone_region(
+    tenant_config: dict[str, Any] | None, tenant_facts: dict[str, Any] | None
+) -> str:
+    """Región por defecto del tenant para teléfonos sin prefijo (determinista)."""
+    extra = (tenant_config or {}).get("extra") or {}
+    for value in (extra.get("phone_default_region"), (tenant_facts or {}).get("country_code")):
+        if isinstance(value, str) and len(value.strip()) == 2:
+            return value.strip().upper()
+    return DEFAULT_PHONE_REGION

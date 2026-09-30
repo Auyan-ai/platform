@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from apps.api.integrations.shopify import ShopifyAdapter
+from apps.api.services.identity import check_order_ownership
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._models import FulfillmentInfo, LineItemInfo, ShippingAddressInfo
@@ -36,10 +37,6 @@ class OrderDetail(SkillOutput):
     # lo indica para que el agente lo explique sin revelarla.
     shipping_address: ShippingAddressInfo | None = None
     shipping_address_withheld: bool = False
-
-
-def _same_email(a: str | None, b: str | None) -> bool:
-    return bool(a and b and a.strip().casefold() == b.strip().casefold())
 
 
 @SkillRegistry.register
@@ -108,8 +105,13 @@ class GetOrderStatus(Skill):
             if "id" in li
         ]
         raw_address = raw.get("shipping_address") or None
-        order_email = raw.get("email") or (raw.get("customer") or {}).get("email")
-        is_owner = _same_email(ctx.customer_email, order_email)
+        # Dueño por email o teléfono (mismo gate determinista que las L3).
+        is_owner = check_order_ownership(
+            raw,
+            customer_email=ctx.customer_email,
+            customer_phone=ctx.customer_phone,
+            default_region=ctx.phone_region,
+        ).owner
         shipping_address = (
             ShippingAddressInfo(**{k: raw_address.get(k) for k in ShippingAddressInfo.model_fields})
             if raw_address and is_owner
