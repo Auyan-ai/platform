@@ -518,7 +518,8 @@ class ShopifyClient:
         Returns solo existe en GraphQL (`returnCreate`; no hay recurso REST). La
         devolución se hace sobre el *fulfillment line item* → se busca el del
         `line_item_id` entre los returnable fulfillments del pedido (solo artículos
-        ya enviados y aún no devueltos). El motivo va en `returnReasonNote`.
+        ya enviados y aún no devueltos). El motivo se mapea a una definición de la
+        librería de Shopify (`returnReasonDefinitionId`) + `returnReasonNote` libre.
         Scopes: `read_returns` + `write_returns`.
         Devuelve `{"id": int, "status": str, "name": str}`.
         """
@@ -539,6 +540,14 @@ class ShopifyClient:
             if quantity > int(match["quantity"]):
                 raise ShopifyActionError("return_quantity_exceeds_returnable")
 
+            handle = return_reason_handle(reason)
+            reasons = await self._graphql(
+                client, _RETURN_REASON_QUERY, {"handles": [handle, _FALLBACK_REASON_HANDLE]}
+            )
+            ids = {n["handle"]: n["id"] for n in reasons["returnReasonDefinitions"]["nodes"]}
+            reason_id = ids.get(handle) or ids.get(_FALLBACK_REASON_HANDLE)
+            if reason_id is None:
+                raise ShopifyActionError("return_reason_definition_not_found")
             data = await self._graphql(
                 client,
                 _RETURN_CREATE_MUTATION,
@@ -549,8 +558,9 @@ class ShopifyClient:
                             {
                                 "fulfillmentLineItemId": match["fulfillmentLineItem"]["id"],
                                 "quantity": quantity,
-                                # `returnReason` (enum) está deprecado desde 2025; el
-                                # motivo va como nota libre.
+                                # Shopify exige motivo: `returnReason` (enum) está
+                                # deprecado → definición de su librería + nota libre.
+                                "returnReasonDefinitionId": reason_id,
                                 "returnReasonNote": reason[:255],
                             }
                         ],
@@ -571,6 +581,39 @@ class ShopifyClient:
 class ShopifyActionError(RuntimeError):
     """Shopify no permite la acción con el estado actual del pedido."""
 
+
+# Motivo libre del agente → handle de la librería de motivos de Shopify.
+_REASON_HANDLES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("small", "pequeñ", "corto", "estrech"), "too-small"),
+    (("large", "big", "grande", "largo", "ancho"), "too-big"),
+    (
+        ("defect", "damag", "broken", "roto", "rota", "dañad", "mancha", "tara"),
+        "damaged-or-defective",
+    ),
+    (("wrong", "equivocad", "incorrect"), "received-the-wrong-item"),
+    (("described", "descri", "different", "distint"), "item-not-as-described"),
+    (("unwanted", "changed", "mind", "no lo quiero", "arrepent", "cambi"), "changed-my-mind"),
+    (("style", "estilo"), "style"),
+    (("color", "colour"), "color"),
+    (("late", "tarde", "retras"), "arrived-late"),
+)
+_FALLBACK_REASON_HANDLE = "other-reason"
+
+
+def return_reason_handle(reason: str) -> str:
+    """Handle de la librería de motivos de devolución para un motivo en texto libre."""
+    text = reason.strip().lower().replace("_", " ")
+    for needles, handle in _REASON_HANDLES:
+        if any(n in text for n in needles):
+            return handle
+    return _FALLBACK_REASON_HANDLE
+
+
+_RETURN_REASON_QUERY = """
+query ReturnReasons($handles: [String!]) {
+  returnReasonDefinitions(handles: $handles, first: 5) { nodes { id handle } }
+}
+"""
 
 _RETURNABLE_QUERY = """
 query Returnable($orderId: ID!) {

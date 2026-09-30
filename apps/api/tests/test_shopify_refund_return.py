@@ -68,6 +68,16 @@ async def test_refund_without_payment_raises_and_does_not_post() -> None:
     assert not refund.called
 
 
+def _reasons(*handles: str) -> dict:
+    ids = {"too-small": 7, "damaged-or-defective": 6, "other-reason": 5}
+    nodes = [
+        {"id": f"gid://shopify/ReturnReasonDefinition/{ids[h]}", "handle": h}
+        for h in handles
+        if h in ids
+    ]
+    return {"data": {"returnReasonDefinitions": {"nodes": nodes}}}
+
+
 def _returnable(line_item: int, qty: int) -> dict:
     return {
         "data": {
@@ -105,6 +115,7 @@ async def test_start_return_uses_graphql_return_create() -> None:
     route = respx.post(f"{BASE}/graphql.json").mock(
         side_effect=[
             httpx.Response(200, json=_returnable(17457464312088, 1)),
+            httpx.Response(200, json=_reasons("damaged-or-defective", "other-reason")),
             httpx.Response(200, json=created),
         ]
     )
@@ -116,13 +127,17 @@ async def test_start_return_uses_graphql_return_create() -> None:
     assert out == {"id": 5001, "status": "open", "name": "#1429-R1"}
     first = json.loads(route.calls[0].request.content)
     assert first["variables"] == {"orderId": "gid://shopify/Order/7404799197464"}
-    mutation = json.loads(route.calls[1].request.content)["variables"]["input"]
+    reasons_query = json.loads(route.calls[1].request.content)["variables"]
+    assert reasons_query == {"handles": ["damaged-or-defective", "other-reason"]}
+    mutation = json.loads(route.calls[2].request.content)["variables"]["input"]
     assert mutation["orderId"] == "gid://shopify/Order/7404799197464"
     item = mutation["returnLineItems"][0]
     assert item["fulfillmentLineItemId"] == "gid://shopify/FulfillmentLineItem/900"
-    assert (item["quantity"], item["returnReasonNote"]) == (1, "defective")
-    # `returnReason` (enum) está deprecado en 2026-04: no se manda.
-    assert "returnReason" not in item
+    assert item["quantity"] == 1
+    # Shopify exige motivo (visto en A4): definición de su librería + nota libre.
+    assert item["returnReasonDefinitionId"] == "gid://shopify/ReturnReasonDefinition/6"
+    assert item["returnReasonNote"] == "defective"
+    assert "returnReason" not in item  # enum deprecado
 
 
 @respx.mock
@@ -146,6 +161,7 @@ async def test_user_errors_and_graphql_errors_raise() -> None:
     respx.post(f"{BASE}/graphql.json").mock(
         side_effect=[
             httpx.Response(200, json=_returnable(5, 1)),
+            httpx.Response(200, json=_reasons("other-reason")),
             httpx.Response(
                 200,
                 json={
@@ -167,3 +183,43 @@ async def test_user_errors_and_graphql_errors_raise() -> None:
     )
     with pytest.raises(ShopifyActionError, match="graphql_errors"):
         await _client().start_return(1, line_item_id=5, quantity=1)
+
+
+@respx.mock
+async def test_unknown_reason_falls_back_to_other() -> None:
+    created = {
+        "data": {
+            "returnCreate": {
+                "return": {"id": "gid://shopify/Return/1", "name": "R", "status": "OPEN"},
+                "userErrors": [],
+            }
+        }
+    }
+    route = respx.post(f"{BASE}/graphql.json").mock(
+        side_effect=[
+            httpx.Response(200, json=_returnable(5, 1)),
+            httpx.Response(200, json=_reasons("other-reason")),
+            httpx.Response(200, json=created),
+        ]
+    )
+    await _client().start_return(1, line_item_id=5, quantity=1, reason="no me convence")
+    item = json.loads(route.calls[2].request.content)["variables"]["input"]["returnLineItems"][0]
+    assert item["returnReasonDefinitionId"] == "gid://shopify/ReturnReasonDefinition/5"
+
+
+@pytest.mark.parametrize(
+    ("reason", "handle"),
+    [
+        ("size_too_small", "too-small"),
+        ("me queda pequeña", "too-small"),
+        ("SIZE_TOO_LARGE", "too-big"),
+        ("llegó roto", "damaged-or-defective"),
+        ("wrong_item", "received-the-wrong-item"),
+        ("changed my mind", "changed-my-mind"),
+        ("other", "other-reason"),
+    ],
+)
+def test_return_reason_handle(reason: str, handle: str) -> None:
+    from apps.api.integrations.shopify import return_reason_handle
+
+    assert return_reason_handle(reason) == handle
