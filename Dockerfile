@@ -14,6 +14,11 @@ RUN cd apps/api \
 # Copiar repo completo (imports son apps.api.*)
 COPY . .
 
+# Precompilar bytecode (dependencias + app). Poetry no genera los .pyc al instalar:
+# sin esto, cada arranque en frío de Cloud Run recompila langchain/langgraph/
+# anthropic/openai… con 1 vCPU (~14 s antes de que uvicorn escuche).
+RUN python -m compileall -q -j 0 /usr/local/lib/python3.12/site-packages /app/apps
+
 EXPOSE 8000
 
 CMD ["sh", "-c", "uvicorn apps.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

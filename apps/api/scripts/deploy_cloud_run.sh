@@ -9,6 +9,16 @@
 # deploy, las anteriores se destruyen) y el resto como env vars de Cloud Run.
 #
 # Overrides por entorno: GCP_PROJECT, GCP_REGION, SERVICE_NAME.
+#
+# Dimensionado de Cloud Run (variables del shell o del ENV_FILE; no llegan al API):
+#   CLOUD_RUN_MIN_INSTANCES  default 0 → se apaga sin tráfico (arranque en frío).
+#                            1 → instancia siempre encendida: sin arranque en frío y
+#                            el worker de la cola siempre vivo. ~63 USD/mes en
+#                            europe-west3 (1 vCPU + 1 GiB, facturación por instancia).
+#                            Activar en producción al firmar el primer cliente de pago.
+#   CLOUD_RUN_MAX_INSTANCES  default 1.
+#   CLOUD_RUN_CPU / CLOUD_RUN_MEMORY  default 1 / 1Gi. Con --no-cpu-throttling el
+#                            mínimo es 1 vCPU (fracciones exigen facturación por request).
 set -euo pipefail
 
 ENV_FILE="${1:-.env.staging}"
@@ -19,6 +29,9 @@ SERVICE="${SERVICE_NAME:-auyan-api-staging}"
 SA_NAME="${SERVICE}"
 SA_EMAIL="${SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
 SECRET_PREFIX="${SERVICE}"
+
+# Claves de despliegue: se leen del ENV_FILE pero no se pasan al contenedor.
+DEPLOY_KEYS=(CLOUD_RUN_MIN_INSTANCES CLOUD_RUN_MAX_INSTANCES CLOUD_RUN_CPU CLOUD_RUN_MEMORY)
 
 SECRET_KEYS=(
   DATABASE_URL
@@ -58,6 +71,21 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   [[ -z "$value" ]] && continue
   VARS["$key"]="$value"
 done < "$ENV_FILE"
+
+# Dimensionado: shell > ENV_FILE > default. Se sacan de VARS (no son config del API).
+declare -A DEPLOY=()
+for key in "${DEPLOY_KEYS[@]}"; do
+  DEPLOY["$key"]="${!key:-${VARS[$key]:-}}"
+  unset "VARS[$key]"
+done
+MIN_INSTANCES="${DEPLOY[CLOUD_RUN_MIN_INSTANCES]:-0}"
+MAX_INSTANCES="${DEPLOY[CLOUD_RUN_MAX_INSTANCES]:-1}"
+CPU="${DEPLOY[CLOUD_RUN_CPU]:-1}"
+MEMORY="${DEPLOY[CLOUD_RUN_MEMORY]:-1Gi}"
+for n in "$MIN_INSTANCES" "$MAX_INSTANCES"; do
+  [[ "$n" =~ ^[0-9]+$ ]] || { echo "CLOUD_RUN_MIN/MAX_INSTANCES debe ser un entero: $n" >&2; exit 1; }
+done
+echo "Cloud Run: min=${MIN_INSTANCES} max=${MAX_INSTANCES} cpu=${CPU} memory=${MEMORY}"
 
 # Service account dedicada (solo lee sus secretos).
 if ! gcloud iam service-accounts describe "$SA_EMAIL" --project "$PROJECT" >/dev/null 2>&1; then
@@ -102,8 +130,9 @@ done
 
 secrets_arg="$(IFS=,; echo "${SET_SECRETS[*]}")"
 
-# --no-cpu-throttling: el loop de cleanup, el listener NOTIFY de AOPs y las
-# simulaciones corren fuera del request. min-instances=0 → se apaga sin tráfico.
+# --no-cpu-throttling: el worker de la cola inbound, el loop de cleanup, el listener
+# NOTIFY de AOPs y las simulaciones corren fuera del request. --cpu-boost: CPU extra
+# durante el arranque (acorta el arranque en frío).
 gcloud run deploy "$SERVICE" \
   --project "$PROJECT" \
   --region "$REGION" \
@@ -111,10 +140,11 @@ gcloud run deploy "$SERVICE" \
   --service-account "$SA_EMAIL" \
   --allow-unauthenticated \
   --no-cpu-throttling \
-  --min-instances 0 \
-  --max-instances 1 \
-  --cpu 1 \
-  --memory 1Gi \
+  --cpu-boost \
+  --min-instances "$MIN_INSTANCES" \
+  --max-instances "$MAX_INSTANCES" \
+  --cpu "$CPU" \
+  --memory "$MEMORY" \
   --timeout 300 \
   --env-vars-file "$ENV_YAML" \
   --set-secrets "$secrets_arg" \
