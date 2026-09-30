@@ -6,14 +6,16 @@
 
 ## Requisitos
 
-- `.env.staging` (o el de producción) con `DATABASE_URL`, `INTEGRATIONS_SECRET_KEY`,
-  `AUYAN_API_BASE_URL` (URL pública de la API) y `ZERNIO_API_KEY` (**key maestra** de la cuenta
-  de Auyan en Zernio: solo scripts de operación, **nunca** el runtime).
+- `.env.staging` (o el de producción) con `DATABASE_URL`, `INTEGRATIONS_SECRET_KEY` y
+  `AUYAN_API_BASE_URL` (URL pública de la API).
+- `.env.zernio` **aparte**, local y fuera de git, con `ZERNIO_API_KEY` (**key maestra** de la
+  cuenta de Auyan en Zernio: solo scripts de operación, **nunca** el runtime). ⚠️ **No** la pongas
+  en `.env.staging`: `deploy_cloud_run.sh` sube todas sus variables a Cloud Run.
 - Red: la política del entorno cloud bloquea `zernio.com` por defecto. Para correr el script
   desde una sesión, añadir `zernio.com` a los dominios permitidos del entorno.
 - Migración `20261001000001_add_zernio_channel.sql` aplicada (y las del Sprint 2 que falten,
   ver "🔴 Producción" en `docs/progress.md`).
-- Desde `apps/api`: `set -a; . ../../.env.staging; set +a`.
+- Desde `apps/api`: `set -a; . ../../.env.staging; . ../../.env.zernio; set +a`.
 
 ## 1. Con el cliente (antes del script)
 
