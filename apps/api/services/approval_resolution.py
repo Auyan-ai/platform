@@ -2,8 +2,12 @@
 
 El gate L3 crea una escalación `awaiting_human_approval:{approval_id}` y deja la
 conversación 'escalated'. Al decidir el operador:
-- Aprobada + ejecutada + confirmación entregada → la escalación se resuelve, la
-  conversación vuelve a 'open' y se materializa la resolución autónoma
+- Aprobada + ejecutada → se resuelven TODAS las escalaciones abiertas de la
+  conversación (no solo la del gate): si el agente ya había escalado antes por la
+  misma petición (error, "pedido no entregado"…), el gate reutilizó esa escalación
+  y el ticket quedaba 'pending' para siempre (tickets #29/#31 del E2E A4). La
+  conversación vuelve a 'open' y, con la confirmación entregada, se materializa la
+  resolución autónoma
   (`services.agent_resolution.finalize_agent_resolution`: resolved + resolution
   event + cierre del ticket externo).
 - Rechazada → la escalación se resuelve y la conversación vuelve a 'open' a la
@@ -22,6 +26,7 @@ from apps.api.db.queries import (
     get_open_escalation_for_conversation,
     reactivate_escalated_conversation,
     resolve_escalation_by_reason,
+    resolve_open_escalations_for_conversation,
 )
 from apps.api.integrations.registry import IntegrationRegistry
 
@@ -51,6 +56,20 @@ async def release_approval_escalation(
     if await get_open_escalation_for_conversation(conn, tenant_id, conversation_id) is None:
         await reactivate_escalated_conversation(conn, tenant_id, conversation_id)
     return True
+
+
+async def release_escalations_after_executed_action(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    conversation_id: UUID,
+) -> int:
+    """Acción L3 aprobada y ejecutada: el humano revisó la conversación y la petición
+    quedó atendida → se cierran todas sus escalaciones abiertas y vuelve a 'open'.
+    Devuelve cuántas escalaciones cerró."""
+    closed = await resolve_open_escalations_for_conversation(conn, tenant_id, conversation_id)
+    await reactivate_escalated_conversation(conn, tenant_id, conversation_id)
+    return closed
 
 
 def reply_delivered(channel: str, *, delivered: bool) -> bool:

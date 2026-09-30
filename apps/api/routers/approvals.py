@@ -33,7 +33,11 @@ from apps.api.db.queries import (
 )
 from apps.api.services.agent_resolution import finalize_agent_resolution
 from apps.api.services.approval_reply import generate_customer_reply
-from apps.api.services.approval_resolution import release_approval_escalation, reply_delivered
+from apps.api.services.approval_resolution import (
+    release_approval_escalation,
+    release_escalations_after_executed_action,
+    reply_delivered,
+)
 from apps.api.services.commerce_context import build_commerce_integration_ctx
 from apps.api.services.helpdesk_delivery import deliver_message_to_helpdesk
 from apps.api.skills.base import SkillContext
@@ -264,12 +268,13 @@ async def approve_action(
             },
         )
         await update_conversation_last_message(conn, tenant_id, approval.conversation_id)
-        # La decisión humana cierra la escalación del gate L3 (conversación → 'open').
-        await release_approval_escalation(
+        # Acción ejecutada: se cierran todas las escalaciones abiertas de la
+        # conversación (la del gate y cualquier escalado previo por la misma
+        # petición) y vuelve a 'open'.
+        await release_escalations_after_executed_action(
             conn,
             tenant_id=tenant_id,
             conversation_id=approval.conversation_id,
-            approval_id=approval_id,
         )
         # Entregar el resultado al helpdesk del cliente (el mensaje ya quedó en DB).
         conversation = await get_conversation(conn, tenant_id, approval.conversation_id)
