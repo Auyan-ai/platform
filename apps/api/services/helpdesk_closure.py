@@ -18,6 +18,7 @@ from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.chatwoot import ChatwootAdapter
 from apps.api.integrations.gorgias import GorgiasAdapter
 from apps.api.integrations.zendesk import ZendeskAdapter
+from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.integrations_crypto import (
     decrypt_credentials,
     get_integration_crypto_key,
@@ -54,6 +55,14 @@ async def close_external_helpdesk_ticket(
     """
     provider = conversation.channel
     external_id = conversation.external_id
+    if is_messaging_channel(provider):
+        # En mensajería (WhatsApp) no hay ticket propio que cerrar: el cierre del
+        # ticket de handoff lo gestiona el módulo de handoff (ADR 0010).
+        logger.info(
+            "external_helpdesk_close_skipped_messaging_channel",
+            extra={"tenant_id": str(tenant_id), "conversation_id": str(conversation.id)},
+        )
+        return False
     external_status = _RESOLVED_STATUS_BY_PROVIDER.get(provider)
 
     if external_status is None or not external_id:

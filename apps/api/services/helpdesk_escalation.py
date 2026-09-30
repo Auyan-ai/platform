@@ -26,6 +26,7 @@ from apps.api.db.queries import (
 )
 from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.registry import IntegrationRegistry
+from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.integrations_crypto import (
     decrypt_credentials,
     get_integration_crypto_key,
@@ -56,6 +57,16 @@ async def push_escalation_to_helpdesk(
     provider = conversation.channel
     external_id = conversation.external_id
     if not external_id:
+        return False
+    if is_messaging_channel(provider):
+        # WhatsApp y otros canales de mensajería no escalan en su propio adapter: van
+        # por el handoff al helpdesk del cliente (ADR 0010).
+        logger.info(
+            "escalation_push_skipped_messaging_channel tenant_id=%s channel=%s conversation_id=%s",
+            tenant_id,
+            provider,
+            conversation.id,
+        )
         return False
     try:
         adapter_cls = IntegrationRegistry.get("helpdesk", provider)

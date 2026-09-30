@@ -83,7 +83,7 @@ def turn_mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "get_conversation": AsyncMock(return_value=conversation),
         "get_inbound_message_contents": AsyncMock(return_value=["¿dónde está mi pedido?"]),
         "enforce_message_cap": AsyncMock(return_value=None),
-        "load_helpdesk_client": AsyncMock(return_value=(adapter, ctx)),
+        "load_delivery_client": AsyncMock(return_value=(adapter, ctx)),
         "send_agent_reply": AsyncMock(return_value=True),
         "finalize_agent_resolution": AsyncMock(return_value=True),
         "push_escalation_to_helpdesk_safe": AsyncMock(return_value=True),
@@ -198,7 +198,7 @@ async def test_undelivered_reply_blocks_resolution(turn_mocks: dict[str, Any]) -
 async def test_missing_helpdesk_is_logged_and_not_delivered(
     turn_mocks: dict[str, Any], caplog: pytest.LogCaptureFixture
 ) -> None:
-    turn_mocks["load_helpdesk_client"].return_value = None
+    turn_mocks["load_delivery_client"].return_value = None
     await run_inbound_turn(_job(), agent_service=_agent(), settings=FakeSettings())
     turn_mocks["send_agent_reply"].assert_not_awaited()
     assert turn_mocks["finalize_agent_resolution"].await_args.kwargs["delivered"] is False
@@ -207,7 +207,7 @@ async def test_missing_helpdesk_is_logged_and_not_delivered(
 
 async def test_post_graph_failures_never_raise(turn_mocks: dict[str, Any]) -> None:
     """Tras el grafo la respuesta puede haber salido: nada debe provocar un reintento."""
-    turn_mocks["load_helpdesk_client"].side_effect = RuntimeError("bad creds")
+    turn_mocks["load_delivery_client"].side_effect = RuntimeError("bad creds")
     turn_mocks["finalize_agent_resolution"].side_effect = RuntimeError("db down")
     decision = await run_inbound_turn(_job(), agent_service=_agent(), settings=FakeSettings())
     assert decision == "respond:undelivered"

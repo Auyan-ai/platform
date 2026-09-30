@@ -38,7 +38,7 @@ from apps.api.db.inbound_jobs import (
 )
 from apps.api.db.queries import get_conversation, get_tenant_configuration
 from apps.api.services.agent_resolution import finalize_agent_resolution, send_agent_reply
-from apps.api.services.helpdesk_delivery import load_helpdesk_client
+from apps.api.services.channel_routing import load_delivery_client
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.usage import UsageRecorder
@@ -152,7 +152,7 @@ async def _deliver_outcome(
         client = None
         try:
             async with tenant_scope(job.tenant_id) as conn:
-                client = await load_helpdesk_client(
+                client = await load_delivery_client(
                     conn, tenant_id=job.tenant_id, conversation=conversation
                 )
         except Exception:
