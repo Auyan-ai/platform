@@ -47,6 +47,7 @@ def build_skill_context(state: AgentState) -> SkillContext:
     integration_ctx: IntegrationContext | None = None
     if commerce_data:
         from uuid import UUID as _UUID
+
         integration_ctx = IntegrationContext(
             tenant_id=_UUID(commerce_data["tenant_id"]),
             credentials=commerce_data["credentials"],
@@ -57,6 +58,7 @@ def build_skill_context(state: AgentState) -> SkillContext:
     commerce_mock: Any = None
     if state.get("simulation_mode"):
         from apps.api.simulator.mocks import MockShopifyAdapter
+
         shopify_fixtures = (state.get("simulation_fixtures") or {}).get("shopify", {})
         commerce_mock = MockShopifyAdapter(shopify_fixtures)
 
@@ -122,9 +124,7 @@ async def _refs_point_to_same_order(state: AgentState, ref_a: str, ref_b: str) -
         return False
 
 
-async def _same_order_action(
-    state: AgentState, existing_inputs: dict, new_inputs: dict
-) -> bool:
+async def _same_order_action(state: AgentState, existing_inputs: dict, new_inputs: dict) -> bool:
     """¿El nuevo tool call es la MISMA acción que un approval previo?
 
     Los campos que no son order_id deben coincidir exactamente (p.ej. la
@@ -244,22 +244,14 @@ def make_execute_skill_node(
 
         existing_results: list[dict[str, Any]] = list(state.get("tool_results", []))
         iter_count: int = state.get("tool_iterations", 0)
-        max_iter: int = state.get("max_tool_iterations") or 5
 
         def _append_and_finish(entry: dict[str, Any]) -> dict[str, Any]:
-            new_iter = iter_count + 1
-            result: dict[str, Any] = {
+            # Al llegar a `max_tool_iterations`, `reason` hace un último turno forzado a decidir.
+            return {
                 "tool_results": [*existing_results, entry],
                 "pending_tool_call": None,
-                "tool_iterations": new_iter,
+                "tool_iterations": iter_count + 1,
             }
-            # Si el routing va a hit el límite, dejamos lista la escalation_reason
-            # para que el nodo `escalate` tenga contexto.
-            if new_iter >= max_iter:
-                result["escalation_reason"] = (
-                    f"max_tool_iterations_exceeded ({new_iter}/{max_iter})"
-                )
-            return result
 
         # 1) Skill permitida por el AOP (lista vacía = ninguna, fail-safe).
         allowed = state.get("allowed_skills") or []
@@ -358,6 +350,7 @@ def make_execute_skill_node(
                 try:
                     # Obtener salt para redactar PII — usamos tenant_scope directamente.
                     from apps.api.db.queries import get_tenant_pii_salt
+
                     async with tenant_scope(tenant_id_uuid) as conn:
                         # Idempotencia del gate L3: si ya hay una aprobación reciente
                         # (pending o approved) para esta misma acción, la reusamos y

@@ -99,8 +99,7 @@ def _redact(value: object) -> object:
     """Reemplaza recursivamente valores bajo keys sensibles por '[REDACTED]'."""
     if isinstance(value, dict):
         return {
-            k: ("[REDACTED]" if k.lower() in _REDACT_KEYS else _redact(v))
-            for k, v in value.items()
+            k: ("[REDACTED]" if k.lower() in _REDACT_KEYS else _redact(v)) for k, v in value.items()
         }
     if isinstance(value, list):
         return [_redact(v) for v in value]
@@ -109,10 +108,7 @@ def _redact(value: object) -> object:
 
 def _redact_dict(data: dict[str, Any]) -> dict[str, Any]:
     """Variante tipada de `_redact` para outputs (siempre un dict en el top level)."""
-    return {
-        k: ("[REDACTED]" if k.lower() in _REDACT_KEYS else _redact(v))
-        for k, v in data.items()
-    }
+    return {k: ("[REDACTED]" if k.lower() in _REDACT_KEYS else _redact(v)) for k, v in data.items()}
 
 
 def _traced(
@@ -218,16 +214,15 @@ def route_after_execute_skill(state: AgentState) -> str:
     """Routing tras `execute_skill`.
 
     - pending_approval_id → skill L3 esperando aprobación humana → escalate.
-    - max_iter superado → escalate.
     - error de sistema → handle_error.
-    - resto → volver a reason (siguiente iteración del loop ReAct).
+    - resto → volver a reason. Si se agotaron las iteraciones, `reason` hace un
+      último turno forzado a decidir (respond/escalate) con lo ya obtenido: antes se
+      escalaba en seco y el cliente se quedaba sin respuesta (E2E A4, queja que usa
+      sus 4 tools previstas). El loop sigue acotado: ese turno no puede pedir skills.
     """
     if state.get("error"):
         return "handle_error"
     if state.get("pending_approval_id"):
-        return "escalate"
-    max_iter = state.get("max_tool_iterations") or DEFAULT_MAX_TOOL_ITERATIONS
-    if state.get("tool_iterations", 0) >= max_iter:
         return "escalate"
     return "reason"
 

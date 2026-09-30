@@ -59,22 +59,16 @@ class TestRouteAfterExecuteSkill:
         state = {"tool_iterations": 1, "max_tool_iterations": 5}
         assert route_after_execute_skill(state) == "reason"  # type: ignore[arg-type]
 
-    def test_max_iterations_escalates(self) -> None:
-        """Llegamos al límite del loop ReAct → escalate."""
+    def test_max_iterations_goes_to_final_reason_turn(self) -> None:
+        """Al límite del loop, `reason` hace un último turno forzado a decidir (no se
+        escala en seco: el cliente se quedaba sin respuesta)."""
         state = {"tool_iterations": 5, "max_tool_iterations": 5}
-        assert route_after_execute_skill(state) == "escalate"  # type: ignore[arg-type]
-
-    def test_above_max_iterations_escalates(self) -> None:
-        state = {"tool_iterations": 7, "max_tool_iterations": 5}
-        assert route_after_execute_skill(state) == "escalate"  # type: ignore[arg-type]
+        assert route_after_execute_skill(state) == "reason"  # type: ignore[arg-type]
 
     def test_error_routes_to_handle_error(self) -> None:
         state = {"error": "unexpected", "tool_iterations": 1, "max_tool_iterations": 5}
         assert route_after_execute_skill(state) == "handle_error"  # type: ignore[arg-type]
 
-    def test_uses_default_max_when_missing(self) -> None:
-        """Si max_tool_iterations no está en state, default a 5."""
-        state = {"tool_iterations": 4}
-        assert route_after_execute_skill(state) == "reason"  # type: ignore[arg-type]
-        state2 = {"tool_iterations": 5}
-        assert route_after_execute_skill(state2) == "escalate"  # type: ignore[arg-type]
+    def test_pending_approval_escalates(self) -> None:
+        state = {"pending_approval_id": "a-1", "tool_iterations": 1, "max_tool_iterations": 5}
+        assert route_after_execute_skill(state) == "escalate"  # type: ignore[arg-type]

@@ -129,38 +129,46 @@ class TestSelectReasonModel:
         return _select_reason_model(state, FakeSettings())  # type: ignore[arg-type]
 
     def test_simple_turn_uses_fast_model(self) -> None:
-        model = self._fn({
-            "model_used": "claude-sonnet-4-6",
-            "allowed_skills": [],
-            "tool_results": [],
-        })
+        model = self._fn(
+            {
+                "model_used": "claude-sonnet-4-6",
+                "allowed_skills": [],
+                "tool_results": [],
+            }
+        )
         assert model == "claude-haiku-4-5-20251001"
 
     def test_aop_with_skills_uses_tenant_model(self) -> None:
-        model = self._fn({
-            "model_used": "claude-sonnet-4-6",
-            "allowed_skills": ["shopify.get_order_status"],
-            "tool_results": [],
-        })
+        model = self._fn(
+            {
+                "model_used": "claude-sonnet-4-6",
+                "allowed_skills": ["shopify.get_order_status"],
+                "tool_results": [],
+            }
+        )
         assert model == "claude-sonnet-4-6"
 
     def test_prior_tool_results_force_tenant_model(self) -> None:
         # Venimos de un hop del loop ReAct: aunque el AOP no tenga skills ahora,
         # el turno ya tocó una herramienta → no degradar.
-        model = self._fn({
-            "model_used": "claude-sonnet-4-6",
-            "allowed_skills": [],
-            "tool_results": [{"slug": "x", "is_error": False}],
-        })
+        model = self._fn(
+            {
+                "model_used": "claude-sonnet-4-6",
+                "allowed_skills": [],
+                "tool_results": [{"slug": "x", "is_error": False}],
+            }
+        )
         assert model == "claude-sonnet-4-6"
 
     def test_pending_tool_call_forces_tenant_model(self) -> None:
-        model = self._fn({
-            "model_used": "claude-sonnet-4-6",
-            "allowed_skills": [],
-            "tool_results": [],
-            "pending_tool_call": {"slug": "x", "input": {}},
-        })
+        model = self._fn(
+            {
+                "model_used": "claude-sonnet-4-6",
+                "allowed_skills": [],
+                "tool_results": [],
+                "pending_tool_call": {"slug": "x", "input": {}},
+            }
+        )
         assert model == "claude-sonnet-4-6"
 
 
@@ -264,9 +272,7 @@ async def test_invalid_tool_output_sets_error(
     fake_deps, make_anthropic_response, monkeypatch
 ) -> None:
     """decision='respond' sin response_text → ValidationError → error en state."""
-    fake_response = make_anthropic_response(
-        {"decision": "respond", "confidence": 0.9}
-    )
+    fake_response = make_anthropic_response({"decision": "respond", "confidence": 0.9})
     monkeypatch.setattr(
         "apps.api.agents.nodes.reason.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
@@ -721,7 +727,9 @@ async def test_no_step_events_when_iteration_exceeds_steps(
     await node(state)
 
     tracker = fake_deps.reasoning_tracker
-    step_events = [e for e in tracker.events if e["event_type"] in ("step_entered", "step_completed")]
+    step_events = [
+        e for e in tracker.events if e["event_type"] in ("step_entered", "step_completed")
+    ]
     assert step_events == []
 
 
@@ -797,5 +805,86 @@ async def test_no_step_events_without_aop_steps(
     assert out["decision"] == "respond"
 
     tracker = fake_deps.reasoning_tracker
-    step_events = [e for e in tracker.events if e["event_type"] in ("step_entered", "step_completed")]
+    step_events = [
+        e for e in tracker.events if e["event_type"] in ("step_entered", "step_completed")
+    ]
     assert step_events == []
+
+
+class TestIterationsExhausted:
+    """Agotado `max_tool_iterations`, `reason` tiene un último turno forzado a decidir."""
+
+    @staticmethod
+    def _exhausted_state() -> dict:
+        return {
+            **_base_state(),
+            "allowed_skills": ["shopify.get_order_status"],
+            "tool_iterations": 4,
+            "max_tool_iterations": 4,
+        }
+
+    @pytest.mark.asyncio
+    async def test_forces_decide_tool_and_uses_its_answer(
+        self, fake_deps, make_anthropic_response, monkeypatch
+    ) -> None:
+        call = AsyncMock(
+            return_value=make_anthropic_response(
+                {
+                    "decision": "escalate",
+                    "confidence": 0.9,
+                    "response_text": "Siento mucho lo del bolso. Lo paso al equipo ya.",
+                    "escalation_reason": "Producto dañado, segunda incidencia",
+                }
+            )
+        )
+        monkeypatch.setattr("apps.api.agents.nodes.reason.call_claude_with_tools", call)
+
+        out = await make_reason_node(fake_deps)(self._exhausted_state())
+
+        from apps.api.agents.nodes.reason import DECIDE_TOOL_NAME
+
+        assert call.await_args.kwargs["tool_choice"] == {
+            "type": "tool",
+            "name": DECIDE_TOOL_NAME,
+        }
+        assert out["decision"] == "escalate"
+        assert "max_tool_iterations" not in (out.get("escalation_reason") or "")
+
+    @pytest.mark.asyncio
+    async def test_normal_turn_keeps_tool_choice_any(
+        self, fake_deps, make_anthropic_response, monkeypatch
+    ) -> None:
+        call = AsyncMock(
+            return_value=make_anthropic_response(
+                {"decision": "respond", "confidence": 0.9, "response_text": "ok"}
+            )
+        )
+        monkeypatch.setattr("apps.api.agents.nodes.reason.call_claude_with_tools", call)
+        await make_reason_node(fake_deps)({**self._exhausted_state(), "tool_iterations": 1})
+        assert call.await_args.kwargs["tool_choice"] == {"type": "any"}
+
+    @pytest.mark.asyncio
+    async def test_skill_call_despite_forcing_escalates_with_courtesy(
+        self, fake_deps, monkeypatch
+    ) -> None:
+        from apps.api.agents.nodes.reason import ITERATIONS_EXHAUSTED_MESSAGE
+
+        from tests.conftest import FakeAnthropicResponse
+
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.reason.call_claude_with_tools",
+            AsyncMock(
+                return_value=FakeAnthropicResponse(
+                    {"order_identifier": "#1"},
+                    tool_name="shopify_get_order_status",
+                    tool_id="toolu_x",
+                )
+            ),
+        )
+
+        out = await make_reason_node(fake_deps)(self._exhausted_state())
+
+        assert out["decision"] == "escalate"
+        assert out["escalation_reason"] == "max_tool_iterations_exceeded (4/4)"
+        assert out["agent_response"] == ITERATIONS_EXHAUSTED_MESSAGE
+        assert out["pending_tool_call"] is None
