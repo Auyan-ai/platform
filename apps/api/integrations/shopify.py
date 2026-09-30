@@ -13,6 +13,7 @@ Expone tres capas:
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import logging
 from collections import OrderedDict
@@ -25,7 +26,7 @@ from apps.api.integrations.registry import IntegrationRegistry
 
 logger = logging.getLogger(__name__)
 
-_API_VERSION = "2024-10"
+_API_VERSION = "2026-04"
 # Refrescamos el access_token 5min antes de que expire para evitar race conditions
 # entre "valido" en el check y "expirado" al hacer la llamada real a Shopify.
 _TOKEN_REFRESH_BUFFER_SECONDS = 300
@@ -375,16 +376,44 @@ class ShopifyClient:
         email: bool = True,
         refund: bool = False,
     ) -> dict[str, Any]:
-        """Cancela un pedido. Acción L3 — requiere supervisor Opus y aprobación humana."""
+        """Cancela un pedido. Acción L3 — requiere supervisor Opus y aprobación humana.
+
+        GraphQL `orderCancel`: el `cancel.json` de REST ignoraba en silencio
+        `"refund": true` (espera un objeto) → cancelaba SIN devolver el pago (visto en
+        A4). Con `refund` se reembolsa al método de pago original; siempre se repone
+        stock. La mutación es asíncrona: se espera a que el pedido figure cancelado y
+        se devuelve el pedido (REST) como antes.
+        """
+        reason_enum = reason.strip().upper()
+        if reason_enum not in _CANCEL_REASONS:
+            reason_enum = "OTHER"
+        variables: dict[str, Any] = {
+            "orderId": f"gid://shopify/Order/{order_id}",
+            "reason": reason_enum,
+            "restock": True,
+            "notifyCustomer": email,
+            "refundMethod": {"originalPaymentMethodsRefund": True} if refund else None,
+        }
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self._base_url}/orders/{order_id}/cancel.json",
-                headers=self._headers(),
-                json={"reason": reason, "email": email, "refund": refund},
-                timeout=15,
-            )
-            response.raise_for_status()
-            return response.json()["order"]  # type: ignore[no-any-return]
+            data = await self._graphql(client, _ORDER_CANCEL_MUTATION, variables)
+            errors = data["orderCancel"]["orderCancelUserErrors"]
+            if errors:
+                raise ShopifyActionError(f"order_cancel_failed: {errors}")
+            for attempt in range(_CANCEL_POLL_ATTEMPTS):
+                response = await client.get(
+                    f"{self._base_url}/orders/{order_id}.json",
+                    headers=self._headers(),
+                    timeout=15,
+                )
+                response.raise_for_status()
+                order: dict[str, Any] = response.json()["order"]
+                if order.get("cancelled_at"):
+                    return order
+                if attempt < _CANCEL_POLL_ATTEMPTS - 1:
+                    await asyncio.sleep(_CANCEL_POLL_SECONDS)
+            # El job sigue en curso: se devuelve el estado actual (cancelled=False)
+            # para no afirmar al cliente algo que Shopify aún no confirmó.
+            return order
 
     async def update_shipping_address(
         self,
@@ -467,6 +496,14 @@ class ShopifyClient:
             )
             if parent is None:
                 raise ShopifyActionError("order_has_no_refundable_payment")
+            refund_tx: dict[str, Any] = {
+                "parent_id": parent["id"],
+                "amount": amount,
+                "kind": "refund",
+            }
+            # Pedidos creados por API (sin checkout) traen gateway vacío: no se envía.
+            if parent.get("gateway"):
+                refund_tx["gateway"] = parent["gateway"]
             response = await client.post(
                 f"{self._base_url}/orders/{order_id}/refunds.json",
                 headers=self._headers(),
@@ -474,14 +511,7 @@ class ShopifyClient:
                     "refund": {
                         "currency": currency,
                         "note": note,
-                        "transactions": [
-                            {
-                                "parent_id": parent["id"],
-                                "amount": amount,
-                                "kind": "refund",
-                                "gateway": parent["gateway"],
-                            }
-                        ],
+                        "transactions": [refund_tx],
                     }
                 },
                 timeout=15,
@@ -517,7 +547,9 @@ class ShopifyClient:
         Returns solo existe en GraphQL (`returnCreate`; no hay recurso REST). La
         devolución se hace sobre el *fulfillment line item* → se busca el del
         `line_item_id` entre los returnable fulfillments del pedido (solo artículos
-        ya enviados y aún no devueltos). Scopes: `read_returns` + `write_returns`.
+        ya enviados y aún no devueltos). El motivo se mapea a una definición de la
+        librería de Shopify (`returnReasonDefinitionId`) + `returnReasonNote` libre.
+        Scopes: `read_returns` + `write_returns`.
         Devuelve `{"id": int, "status": str, "name": str}`.
         """
         order_gid = f"gid://shopify/Order/{order_id}"
@@ -537,9 +569,14 @@ class ShopifyClient:
             if quantity > int(match["quantity"]):
                 raise ShopifyActionError("return_quantity_exceeds_returnable")
 
-            reason_enum = reason.strip().upper().replace(" ", "_")
-            if reason_enum not in _RETURN_REASONS:
-                reason_enum = "OTHER"
+            handle = return_reason_handle(reason)
+            reasons = await self._graphql(
+                client, _RETURN_REASON_QUERY, {"handles": [handle, _FALLBACK_REASON_HANDLE]}
+            )
+            ids = {n["handle"]: n["id"] for n in reasons["returnReasonDefinitions"]["nodes"]}
+            reason_id = ids.get(handle) or ids.get(_FALLBACK_REASON_HANDLE)
+            if reason_id is None:
+                raise ShopifyActionError("return_reason_definition_not_found")
             data = await self._graphql(
                 client,
                 _RETURN_CREATE_MUTATION,
@@ -550,7 +587,9 @@ class ShopifyClient:
                             {
                                 "fulfillmentLineItemId": match["fulfillmentLineItem"]["id"],
                                 "quantity": quantity,
-                                "returnReason": reason_enum,
+                                # Shopify exige motivo: `returnReason` (enum) está
+                                # deprecado → definición de su librería + nota libre.
+                                "returnReasonDefinitionId": reason_id,
                                 "returnReasonNote": reason[:255],
                             }
                         ],
@@ -572,20 +611,57 @@ class ShopifyActionError(RuntimeError):
     """Shopify no permite la acción con el estado actual del pedido."""
 
 
-_RETURN_REASONS = frozenset(
-    {
-        "COLOR",
-        "DEFECTIVE",
-        "NOT_AS_DESCRIBED",
-        "OTHER",
-        "SIZE_TOO_LARGE",
-        "SIZE_TOO_SMALL",
-        "STYLE",
-        "UNKNOWN",
-        "UNWANTED",
-        "WRONG_ITEM",
-    }
+# Motivo libre del agente → handle de la librería de motivos de Shopify.
+_REASON_HANDLES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("small", "pequeñ", "corto", "estrech"), "too-small"),
+    (("large", "big", "grande", "largo", "ancho"), "too-big"),
+    (
+        ("defect", "damag", "broken", "roto", "rota", "dañad", "mancha", "tara"),
+        "damaged-or-defective",
+    ),
+    (("wrong", "equivocad", "incorrect"), "received-the-wrong-item"),
+    (("described", "descri", "different", "distint"), "item-not-as-described"),
+    (("unwanted", "changed", "mind", "no lo quiero", "arrepent", "cambi"), "changed-my-mind"),
+    (("style", "estilo"), "style"),
+    (("color", "colour"), "color"),
+    (("late", "tarde", "retras"), "arrived-late"),
 )
+_FALLBACK_REASON_HANDLE = "other-reason"
+
+
+def return_reason_handle(reason: str) -> str:
+    """Handle de la librería de motivos de devolución para un motivo en texto libre."""
+    text = reason.strip().lower().replace("_", " ")
+    for needles, handle in _REASON_HANDLES:
+        if any(n in text for n in needles):
+            return handle
+    return _FALLBACK_REASON_HANDLE
+
+
+_CANCEL_REASONS = frozenset({"CUSTOMER", "DECLINED", "FRAUD", "INVENTORY", "STAFF", "OTHER"})
+_CANCEL_POLL_ATTEMPTS = 8
+_CANCEL_POLL_SECONDS = 1.0
+
+_ORDER_CANCEL_MUTATION = """
+mutation OrderCancel(
+  $orderId: ID!, $reason: OrderCancelReason!, $restock: Boolean!,
+  $notifyCustomer: Boolean, $refundMethod: OrderCancelRefundMethodInput
+) {
+  orderCancel(
+    orderId: $orderId, reason: $reason, restock: $restock,
+    notifyCustomer: $notifyCustomer, refundMethod: $refundMethod
+  ) {
+    job { id done }
+    orderCancelUserErrors { field message code }
+  }
+}
+"""
+
+_RETURN_REASON_QUERY = """
+query ReturnReasons($handles: [String!]) {
+  returnReasonDefinitions(handles: $handles, first: 5) { nodes { id handle } }
+}
+"""
 
 _RETURNABLE_QUERY = """
 query Returnable($orderId: ID!) {

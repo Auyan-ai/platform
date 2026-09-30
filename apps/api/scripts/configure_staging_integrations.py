@@ -80,7 +80,7 @@ from apps.api.services.integrations_crypto import encrypt_credentials
 _ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(_ENV_FILE)
 
-SHOPIFY_API_VERSION = "2024-10"
+SHOPIFY_API_VERSION = "2026-04"
 DEFAULT_E2E_ORDER_TAG = "auyan-e2e"
 Provider = Literal["shopify", "chatwoot", "gorgias", "zendesk"]
 

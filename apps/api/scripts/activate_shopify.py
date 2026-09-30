@@ -36,7 +36,7 @@ ALLOWED_SKILLS = [
     "shopify.get_shop_policies",
 ]
 MAX_TOOL_ITERATIONS = 5
-SHOPIFY_API_VERSION = "2024-10"
+SHOPIFY_API_VERSION = "2026-04"
 
 
 async def _validate_shopify_creds(domain: str, token: str) -> dict:

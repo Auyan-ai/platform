@@ -43,6 +43,12 @@ logger = logging.getLogger(__name__)
 
 DECIDE_TOOL_NAME: str = RESPOND_OR_ESCALATE_TOOL["name"]
 
+# Cortesía al escalar por loop de tools sin decisión (caso defensivo, ver abajo).
+ITERATIONS_EXHAUSTED_MESSAGE: str = (
+    "Gracias por escribirnos. He pasado tu consulta a una persona del equipo, "
+    "que la revisará y te responderá lo antes posible."
+)
+
 # Zona horaria por defecto del vertical e-commerce ES. Cada tenant puede sobrescribirla
 # en tenant_facts["timezone"].
 _DEFAULT_TENANT_TZ = "Europe/Madrid"
@@ -187,9 +193,7 @@ def _handle_decide_tool(
 
     if decision == "respond" and parsed.confidence < threshold:
         decision = "escalate"
-        escalation_reason = (
-            f"low_confidence: {parsed.confidence:.2f} < threshold {threshold:.2f}"
-        )
+        escalation_reason = f"low_confidence: {parsed.confidence:.2f} < threshold {threshold:.2f}"
         agent_response = None
 
     return {
@@ -256,13 +260,23 @@ def make_reason_node(
 
         model = _select_reason_model(state, deps.settings)
 
+        # Iteraciones agotadas: último turno SOLO para decidir (respond/escalate) con
+        # lo ya obtenido. Las tools siguen definidas (el historial trae tool_use de
+        # skills) pero `tool_choice` fuerza el decide tool.
+        tool_iterations: int = state.get("tool_iterations", 0)
+        max_iterations: int = state.get("max_tool_iterations") or 5
+        iterations_exhausted = tool_iterations >= max_iterations
+        tool_choice: dict[str, Any] = (
+            {"type": "tool", "name": DECIDE_TOOL_NAME} if iterations_exhausted else {"type": "any"}
+        )
+
         response = await call_claude_with_tools(
             client=deps.anthropic,
             model=model,
             system=system_blocks,
             messages=messages,
             tools=tools,
-            tool_choice={"type": "any"},
+            tool_choice=tool_choice,
             max_retries=deps.settings.llm_max_retries,
             timeout_seconds=deps.settings.llm_timeout_seconds,
             cache=True,
@@ -291,6 +305,20 @@ def make_reason_node(
         }
 
         tool_name: str = tool_block.name
+
+        if iterations_exhausted and tool_name != DECIDE_TOOL_NAME:
+            # Defensa: forzado a decidir y aun así pidió otra skill → cortar el loop
+            # escalando, con un mensaje de cortesía para que el cliente no quede
+            # sin respuesta.
+            return {
+                "decision": "escalate",
+                "escalation_reason": (
+                    f"max_tool_iterations_exceeded ({tool_iterations}/{max_iterations})"
+                ),
+                "agent_response": ITERATIONS_EXHAUSTED_MESSAGE,
+                "pending_tool_call": None,
+                **tokens_update,
+            }
 
         # ¿Decide tool o skill tool?
         if tool_name == DECIDE_TOOL_NAME:

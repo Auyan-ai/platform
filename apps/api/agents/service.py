@@ -136,12 +136,15 @@ class AgentService:
 
         error = final_state.get("error")
         decision = "error" if error else final_state.get("decision", "error")
+        # Con error, `agent_response` es un borrador que no pasó (o hizo caer) al
+        # supervisor: NUNCA se entrega. handle_error ya escaló; responde el equipo.
+        response_text = None if error else final_state.get("agent_response")
 
         self._observability.finalize_trace(
             trace,
             decision=decision,
             confidence=final_state.get("confidence"),
-            response_text=final_state.get("agent_response"),
+            response_text=response_text,
             escalation_reason=final_state.get("escalation_reason"),
             tokens_in=final_state.get("tokens_in", 0),
             tokens_out=final_state.get("tokens_out", 0),
@@ -152,7 +155,7 @@ class AgentService:
 
         return AgentOutcome(
             decision=decision,
-            response_text=final_state.get("agent_response"),
+            response_text=response_text,
             escalation_reason=final_state.get("escalation_reason"),
             output_message_id=final_state.get("output_message_id"),
             escalation_id=final_state.get("escalation_id"),
