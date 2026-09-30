@@ -37,10 +37,15 @@ from apps.api.db.inbound_jobs import (
     inbound_already_answered,
     release_inbound_job,
 )
-from apps.api.db.queries import get_conversation, get_tenant_configuration
+from apps.api.db.queries import (
+    get_active_handoff_for_chat,
+    get_conversation,
+    get_tenant_configuration,
+)
 from apps.api.services.agent_resolution import finalize_agent_resolution, send_agent_reply
 from apps.api.services.channel_delivery import deliver_to_customer, flush_pending_messages
 from apps.api.services.channel_routing import is_messaging_channel, load_delivery_client
+from apps.api.services.handoff import close_handoff, forward_customer_message
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.usage import UsageRecorder
@@ -99,6 +104,13 @@ async def run_inbound_turn(
         )
         if not contents:
             raise InboundJobError("inbound_message_not_found")
+
+    if is_messaging_channel(conversation.channel):
+        pre_graph_decision = await _messaging_pre_graph(job, conversation, contents)
+        if pre_graph_decision is not None:
+            return pre_graph_decision
+
+    async with tenant_scope(job.tenant_id) as conn:
         cap_outcome = await enforce_message_cap(
             conn,
             tenant_id=job.tenant_id,
@@ -107,12 +119,6 @@ async def run_inbound_turn(
             tenant_config=tenant_config,
             settings=settings,
         )
-
-    if is_messaging_channel(conversation.channel):
-        # El comprador acaba de escribir: la ventana de 24 h está abierta → entregar lo
-        # que esperaba (confirmaciones L3, respuestas humanas) antes del nuevo turno.
-        async with tenant_scope(job.tenant_id) as conn:
-            await flush_pending_messages(conn, tenant_id=job.tenant_id, conversation=conversation)
 
     if cap_outcome is not None:
         outcome = cap_outcome
@@ -143,6 +149,48 @@ async def run_inbound_turn(
         # Queda visible en la cola: el cliente NO recibió la respuesta.
         return f"{outcome.decision}:undelivered"
     return outcome.decision
+
+
+async def _messaging_pre_graph(
+    job: ClaimedInboundJob,
+    conversation: Conversation,
+    contents: list[str],
+) -> str | None:
+    """Pasos deterministas previos al grafo en canales de mensajería (WhatsApp).
+
+    1. Entregar lo que esperaba la ventana (el comprador acaba de escribir: está abierta).
+    2. Handoff activo → la IA calla: `helpdesk` reenvía el mensaje al ticket
+       (`handoff_forwarded`); `device` vigente → `human_hold`; `device` vencido → se
+       cierra y sigue el grafo.
+    Devuelve la decisión si el turno termina aquí, o None para correr el grafo.
+    """
+    async with tenant_scope(job.tenant_id) as conn:
+        await flush_pending_messages(conn, tenant_id=job.tenant_id, conversation=conversation)
+        handoff = await get_active_handoff_for_chat(
+            conn, job.tenant_id, conversation.channel, str(conversation.external_id)
+        )
+        if handoff is not None and handoff.target == "device":
+            expires_at = handoff.expires_at
+            if expires_at is not None and expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at is not None and expires_at > datetime.now(UTC):
+                return "human_hold"
+            await close_handoff(
+                conn, tenant_id=job.tenant_id, handoff=handoff, reason="device_hold_expired"
+            )
+            return None
+    if handoff is None:
+        return None
+    forwarded = await forward_customer_message(
+        tenant_id=job.tenant_id,
+        handoff=handoff,
+        content="\n\n".join(contents),
+        attachments=[],
+    )
+    if not forwarded:
+        # Queda visible en la cola: el mensaje no llegó al ticket (ya hay logger.error).
+        return "handoff_forward_failed"
+    return "handoff_forwarded"
 
 
 async def _deliver_outcome(

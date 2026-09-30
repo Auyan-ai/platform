@@ -27,6 +27,7 @@ from apps.api.db.queries import (
 from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.registry import IntegrationRegistry
 from apps.api.services.channel_routing import is_messaging_channel
+from apps.api.services.handoff import is_approval_gate, open_handoff_safe
 from apps.api.services.integrations_crypto import (
     decrypt_credentials,
     get_integration_crypto_key,
@@ -118,6 +119,15 @@ async def push_escalation_to_helpdesk_safe(
     Para el camino post-grafo del webhook: el escalado interno ya quedó registrado;
     si el helpdesk falla, se loguea y se sigue (no tumba la request del webhook).
     """
+    if is_messaging_channel(conversation.channel):
+        # WhatsApp: el escalado abre el handoff al helpdesk primario del tenant. La
+        # puerta L3 no: se decide en el dashboard de Auyan y la IA sigue atendiendo.
+        if is_approval_gate(reason):
+            return False
+        return (
+            await open_handoff_safe(tenant_id=tenant_id, conversation=conversation, reason=reason)
+            is not None
+        )
     try:
         return await push_escalation_to_helpdesk(
             tenant_id=tenant_id,

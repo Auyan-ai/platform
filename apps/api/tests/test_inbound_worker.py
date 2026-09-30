@@ -388,9 +388,13 @@ def wa_mocks(turn_mocks: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> dic
     order: list[str] = []
     flush = AsyncMock(side_effect=lambda *a, **k: order.append("flush") or 1)
     deliver = AsyncMock(return_value="delivered")
+    handoff = AsyncMock(return_value=None)
     monkeypatch.setattr(f"{MODULE}.flush_pending_messages", flush)
     monkeypatch.setattr(f"{MODULE}.deliver_to_customer", deliver)
-    turn_mocks.update(flush=flush, deliver=deliver, order=order, wa_conversation=conversation)
+    monkeypatch.setattr(f"{MODULE}.get_active_handoff_for_chat", handoff)
+    turn_mocks.update(
+        flush=flush, deliver=deliver, order=order, wa_conversation=conversation, handoff=handoff
+    )
     return turn_mocks
 
 

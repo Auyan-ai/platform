@@ -27,6 +27,7 @@ from apps.api.db.models import (
     BillingTier,
     ChannelType,
     Conversation,
+    ConversationHandoff,
     ConversationJudgment,
     ConversationStatus,
     EndCustomer,
@@ -750,6 +751,188 @@ async def find_outbound_message_by_platform_id(
         platform_message_id,
     )
     return None if row is None else Message(**dict(row))
+
+
+# ============================================================
+# Handoffs (Sprint 2, ADR 0010)
+# ============================================================
+
+async def get_active_handoff(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> ConversationHandoff | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, conversation_id, target, helpdesk_provider, external_ticket_id,
+               status, reason, opened_at, last_human_at, expires_at, closed_at, closed_reason
+          FROM conversation_handoffs
+         WHERE tenant_id = $1 AND conversation_id = $2
+           AND status = 'active' AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return None if row is None else ConversationHandoff(**dict(row))
+
+
+async def get_active_handoff_for_chat(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    channel: ChannelType,
+    external_id: str,
+) -> ConversationHandoff | None:
+    """Handoff activo en CUALQUIER sesión del chat (la más reciente).
+
+    Si una sesión con handoff activo se cerró (cleanup) y el comprador vuelve a escribir,
+    la IA debe seguir callada mientras el ticket siga abierto.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT h.id, h.tenant_id, h.conversation_id, h.target, h.helpdesk_provider,
+               h.external_ticket_id, h.status, h.reason, h.opened_at, h.last_human_at,
+               h.expires_at, h.closed_at, h.closed_reason
+          FROM conversation_handoffs h
+          JOIN conversations c ON c.tenant_id = h.tenant_id AND c.id = h.conversation_id
+         WHERE h.tenant_id = $1
+           AND c.channel = $2::channel_type
+           AND c.external_id = $3
+           AND h.status = 'active'
+           AND h.deleted_at IS NULL
+         ORDER BY h.opened_at DESC
+         LIMIT 1
+        """,
+        tenant_id,
+        channel,
+        external_id,
+    )
+    return None if row is None else ConversationHandoff(**dict(row))
+
+
+async def get_handoff_by_ticket(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    helpdesk_provider: str,
+    external_ticket_id: str,
+) -> ConversationHandoff | None:
+    """Handoff (activo o cerrado) de un ticket del helpdesk."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, conversation_id, target, helpdesk_provider, external_ticket_id,
+               status, reason, opened_at, last_human_at, expires_at, closed_at, closed_reason
+          FROM conversation_handoffs
+         WHERE tenant_id = $1 AND helpdesk_provider = $2 AND external_ticket_id = $3
+           AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        tenant_id,
+        helpdesk_provider,
+        external_ticket_id,
+    )
+    return None if row is None else ConversationHandoff(**dict(row))
+
+
+async def insert_handoff(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    target: str,
+    reason: str,
+    helpdesk_provider: str | None = None,
+    external_ticket_id: str | None = None,
+    expires_at: datetime | None = None,
+    last_human_at: datetime | None = None,
+) -> ConversationHandoff:
+    """Abre un handoff. Lanza UniqueViolationError si ya hay uno activo."""
+    row = await conn.fetchrow(
+        """
+        INSERT INTO conversation_handoffs (
+            tenant_id, conversation_id, target, reason, helpdesk_provider,
+            external_ticket_id, expires_at, last_human_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id, tenant_id, conversation_id, target, helpdesk_provider, external_ticket_id,
+                  status, reason, opened_at, last_human_at, expires_at, closed_at, closed_reason
+        """,
+        tenant_id,
+        conversation_id,
+        target,
+        reason,
+        helpdesk_provider,
+        external_ticket_id,
+        expires_at,
+        last_human_at,
+    )
+    assert row is not None
+    return ConversationHandoff(**dict(row))
+
+
+async def close_handoff_row(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    handoff_id: UUID,
+    closed_reason: str,
+) -> bool:
+    """Cierra un handoff activo. True si estaba activo."""
+    result = await conn.execute(
+        """
+        UPDATE conversation_handoffs
+           SET status = 'closed', closed_at = now(), closed_reason = $3
+         WHERE tenant_id = $1 AND id = $2 AND status = 'active' AND deleted_at IS NULL
+        """,
+        tenant_id,
+        handoff_id,
+        closed_reason,
+    )
+    return result == "UPDATE 1"
+
+
+async def touch_handoff_human_activity(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    handoff_id: UUID,
+    *,
+    expires_at: datetime | None = None,
+) -> None:
+    """Registra actividad humana (y, en `device`, renueva el silencio de la IA)."""
+    await conn.execute(
+        """
+        UPDATE conversation_handoffs
+           SET last_human_at = now(),
+               expires_at = COALESCE($3, expires_at)
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        """,
+        tenant_id,
+        handoff_id,
+        expires_at,
+    )
+
+
+async def list_recent_messages(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    *,
+    limit: int = 20,
+) -> list[Message]:
+    """Últimos `limit` mensajes visibles (sin `system`), en orden cronológico."""
+    rows = await conn.fetch(
+        """
+        SELECT * FROM (
+            SELECT id, tenant_id, conversation_id, role, direction,
+                   author_user_id, content, attachments, metadata, created_at
+              FROM messages
+             WHERE tenant_id = $1 AND conversation_id = $2
+               AND deleted_at IS NULL AND role <> 'system'
+             ORDER BY created_at DESC, id DESC
+             LIMIT $3
+        ) recent
+        ORDER BY created_at, id
+        """,
+        tenant_id,
+        conversation_id,
+        limit,
+    )
+    return [Message(**dict(r)) for r in rows]
 
 
 # ============================================================

@@ -20,11 +20,13 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from apps.api.core.errors import ExternalIntegrationError
 from apps.api.db.queries import (
+    get_active_handoff_for_chat,
     get_end_customer,
     list_pending_window_messages,
     merge_message_metadata,
 )
 from apps.api.services.channel_routing import is_messaging_channel, load_delivery_client
+from apps.api.services.handoff import add_handoff_note
 from apps.api.services.messaging_window import window_state
 
 if TYPE_CHECKING:
@@ -41,6 +43,26 @@ DeliveryResult = Literal["delivered", "pending_window", "failed"]
 # `{{1}}` de la plantilla de re-enganche cuando no conocemos el nombre:
 # "Hola de nuevo, tenemos una respuesta sobre tu consulta…"
 REENGAGEMENT_FALLBACK_NAME = "de nuevo"
+
+NOTE_PENDING_WINDOW = (
+    "Ventana de WhatsApp cerrada: enviamos la plantilla de re-enganche; tu respuesta se "
+    "entregará cuando el cliente conteste."
+)
+NOTE_REENGAGEMENT_FAILED = (
+    "⚠️ Ventana de WhatsApp cerrada y NO se pudo enviar la plantilla de re-enganche "
+    "({code}). El mensaje no llegó al cliente."
+)
+
+
+async def _note_on_active_handoff(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation: Conversation, content: str
+) -> None:
+    """Si hay un handoff activo en el chat, deja la nota interna en su ticket."""
+    handoff = await get_active_handoff_for_chat(
+        conn, tenant_id, conversation.channel, str(conversation.external_id)
+    )
+    if handoff is not None:
+        await add_handoff_note(tenant_id=tenant_id, handoff=handoff, content=content)
 
 
 def _now_iso() -> str:
@@ -203,6 +225,12 @@ async def _park_until_customer_replies(
                     "delivery_error": {"code": _error_code(exc), "phase": "reengagement"},
                 },
             )
+            await _note_on_active_handoff(
+                conn,
+                tenant_id,
+                conversation,
+                NOTE_REENGAGEMENT_FAILED.format(code=_error_code(exc)),
+            )
             return "failed"
         template_ids = [result.message_id] if getattr(result, "message_id", None) else []
     await merge_message_metadata(
@@ -219,6 +247,7 @@ async def _park_until_customer_replies(
         "channel_delivery_pending_window",
         extra={**log_extra, "template_sent": bool(template_ids)},
     )
+    await _note_on_active_handoff(conn, tenant_id, conversation, NOTE_PENDING_WINDOW)
     return "pending_window"
 
 

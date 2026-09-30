@@ -40,6 +40,8 @@ def env(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "merge_message_metadata": AsyncMock(return_value=True),
         "list_pending_window_messages": AsyncMock(return_value=[]),
         "get_end_customer": AsyncMock(return_value=make_end_customer(full_name="Ana López")),
+        "get_active_handoff_for_chat": AsyncMock(return_value=None),
+        "add_handoff_note": AsyncMock(return_value=True),
     }
     for name, mock in m.items():
         monkeypatch.setattr(f"{MOD}.{name}", mock)
@@ -239,3 +241,21 @@ async def test_message_failed_marks_our_message(
     assert any(
         r.message == "zernio_message_failed" and r.levelname == "ERROR" for r in caplog.records
     )
+
+
+async def test_closed_window_with_active_handoff_leaves_internal_note(env: dict) -> None:
+    env["window_state"].return_value = WindowState(False, None)
+    env["get_active_handoff_for_chat"].return_value = MagicMock()
+    assert await _deliver() == "pending_window"
+    content = env["add_handoff_note"].await_args.kwargs["content"]
+    assert content == channel_delivery.NOTE_PENDING_WINDOW
+
+
+async def test_failed_template_with_active_handoff_warns_the_team(env: dict) -> None:
+    env["window_state"].return_value = WindowState(False, None)
+    env["get_active_handoff_for_chat"].return_value = MagicMock()
+    env["adapter"].send_reengagement_template.side_effect = ExternalIntegrationError(
+        "x", code="zernio_platform_api_error"
+    )
+    assert await _deliver() == "failed"
+    assert "zernio_platform_api_error" in env["add_handoff_note"].await_args.kwargs["content"]

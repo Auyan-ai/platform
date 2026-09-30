@@ -48,13 +48,17 @@ import logging
 import time
 from dataclasses import dataclass
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from apps.api.integrations.base import (
     ExternalTicketRef,
+    HandoffRequest,
+    HandoffTarget,
     HelpdeskProvider,
     InboundMessage,
     IntegrationContext,
+    StoredAttachment,
 )
 from apps.api.integrations.registry import IntegrationRegistry
 from apps.api.services.inbound_text import clean_inbound_text
@@ -259,6 +263,47 @@ class ZendeskClient:
     async def add_comment(self, ticket_id: str, body: str, public: bool = True) -> dict[str, Any]:
         """Agrega un comentario público o privado (nota interna) al ticket."""
         return await self._put_ticket(ticket_id, {"comment": {"body": body, "public": public}})
+
+    # ── Handoff (Sprint 2) ────────────────────────────────────────────────────
+
+    async def create_or_update_user(self, user: dict[str, Any]) -> dict[str, Any]:
+        data = await self._request("POST", "/users/create_or_update.json", json_body={"user": user})
+        return data["user"]  # type: ignore[no-any-return]
+
+    async def create_ticket(self, ticket: dict[str, Any]) -> dict[str, Any]:
+        data = await self._request("POST", "/tickets.json", json_body={"ticket": ticket})
+        return data["ticket"]  # type: ignore[no-any-return]
+
+    async def upload(self, filename: str, content: bytes, mime_type: str) -> str:
+        """Sube un adjunto (`POST /uploads`) y devuelve el token para el comentario."""
+        headers = await self._headers()
+        headers["Content-Type"] = mime_type or "application/octet-stream"
+        async with httpx.AsyncClient(transport=self._transport) as client:
+            response = await client.post(
+                f"{self.base_url}/uploads.json",
+                params={"filename": filename},
+                headers=headers,
+                content=content,
+                timeout=30,
+            )
+            response.raise_for_status()
+            return str(response.json()["upload"]["token"])
+
+    async def add_comment_as(
+        self,
+        ticket_id: str,
+        body: str,
+        *,
+        author_id: int | str | None,
+        public: bool,
+        uploads: list[str] | None = None,
+    ) -> dict[str, Any]:
+        comment: dict[str, Any] = {"body": body, "public": public}
+        if author_id is not None:
+            comment["author_id"] = int(author_id)
+        if uploads:
+            comment["uploads"] = uploads
+        return await self._put_ticket(ticket_id, {"comment": comment})
 
     # ── Gestión del ticket ────────────────────────────────────────────────────
 
@@ -499,6 +544,145 @@ class ZendeskAdapter:
             url=f"https://{subdomain}.zendesk.com/agent/tickets/{conversation_ref}",
         )
 
+    # ── HandoffTarget (Sprint 2) ──────────────────────────────────────────────
+
+    async def open_handoff_ticket(
+        self, ctx: IntegrationContext, req: HandoffRequest
+    ) -> ExternalTicketRef:
+        """Ticket nuevo con el requester de WhatsApp, nota privada con motivo, ventana y
+        transcripción literal, tags `auyan_handoff`/`auyan_whatsapp` y grupo de escalado."""
+        return await _zendesk_open_handoff_ticket(self, ctx, req)
+
+    async def append_customer_message(
+        self,
+        ctx: IntegrationContext,
+        ticket_ref: str,
+        content: str,
+        attachments: list[StoredAttachment],
+        *,
+        requester_ref: str | None = None,
+    ) -> None:
+        """Reenvía al ticket un mensaje del comprador llegado por WhatsApp."""
+        await _zendesk_append_customer_message(
+            self, ctx, ticket_ref, content, attachments, requester_ref
+        )
+
+
+# ─── HandoffTarget (Sprint 2): ticket de handoff desde WhatsApp ────────────────
+
+HANDOFF_TAGS = ["auyan_handoff", "auyan_whatsapp"]
+_MADRID = ZoneInfo("Europe/Madrid")
+
+
+def format_handoff_note(req: HandoffRequest) -> str:
+    """Primer comentario (privado) del ticket de handoff. Todo literal, sin resúmenes."""
+    lines = [f"🤝 Conversación de {req.channel_label} derivada por Auyan.", ""]
+    lines.append(f"Motivo: {req.reason}")
+    contact = [p for p in (req.customer_name, req.customer_phone, req.customer_email) if p]
+    if contact:
+        lines.append(f"Cliente: {' · '.join(contact)}")
+    if req.window_closes_at is not None:
+        local = req.window_closes_at.astimezone(_MADRID)
+        lines.append(
+            f"Ventana de {req.channel_label} abierta hasta el {local:%d/%m %H:%M} "
+            "(hora de Madrid). Después, la respuesta sale con una plantilla y se entrega "
+            "cuando el cliente conteste."
+        )
+    else:
+        lines.append(
+            f"Ventana de {req.channel_label} cerrada: la respuesta sale con una plantilla "
+            "y se entrega cuando el cliente conteste."
+        )
+    lines += [
+        "",
+        "Responde con un comentario PÚBLICO: le llega al cliente por "
+        f"{req.channel_label}. Las notas internas no salen. Marca el ticket como "
+        "resuelto para que Auyan vuelva a atender.",
+        "",
+        "— Conversación —",
+        req.transcript or "(sin mensajes)",
+    ]
+    return "\n".join(lines)
+
+
+async def _upload_all(client: ZendeskClient, attachments: list[StoredAttachment]) -> list[str]:
+    tokens: list[str] = []
+    for attachment in attachments:
+        if attachment.content is None:
+            logger.warning("zendesk_handoff_attachment_without_content")
+            continue
+        tokens.append(
+            await client.upload(attachment.filename, attachment.content, attachment.mime_type)
+        )
+    return tokens
+
+
+async def _zendesk_open_handoff_ticket(
+    adapter: ZendeskAdapter, ctx: IntegrationContext, req: HandoffRequest
+) -> ExternalTicketRef:
+    client = adapter._client(ctx)
+    user: dict[str, Any] = {
+        "name": req.customer_name or req.customer_phone or "Cliente de WhatsApp",
+        "external_id": req.customer_ref,
+        "role": "end-user",
+    }
+    if req.customer_phone:
+        user["phone"] = req.customer_phone
+    if req.customer_email:
+        user["email"] = req.customer_email
+    requester = await client.create_or_update_user(user)
+    ticket: dict[str, Any] = {
+        "requester_id": requester["id"],
+        "subject": req.subject,
+        "comment": {"body": format_handoff_note(req), "public": False},
+        "tags": HANDOFF_TAGS,
+    }
+    uploads = await _upload_all(client, req.attachments)
+    if uploads:
+        ticket["comment"]["uploads"] = uploads
+    group_id = ctx.config.get("escalation_group_id")
+    if group_id:
+        ticket["group_id"] = int(group_id)
+    created = await client.create_ticket(ticket)
+    ticket_id = str(created["id"])
+    subdomain = ctx.config["subdomain"]
+    return ExternalTicketRef(
+        provider="zendesk",
+        ticket_id=ticket_id,
+        url=f"https://{subdomain}.zendesk.com/agent/tickets/{ticket_id}",
+    )
+
+
+async def _zendesk_append_customer_message(
+    adapter: ZendeskAdapter,
+    ctx: IntegrationContext,
+    ticket_ref: str,
+    content: str,
+    attachments: list[StoredAttachment],
+    requester_ref: str | None,
+) -> None:
+    """Comentario PÚBLICO con autor = requester (el ticket se lee como una conversación).
+
+    Con `config.handoff_customer_messages_as_internal_note = true` va como nota interna
+    (por si la respuesta pública a un requester sin email molesta en la cuenta).
+    """
+    client = adapter._client(ctx)
+    as_note = bool(ctx.config.get("handoff_customer_messages_as_internal_note"))
+    author_id: str | None = requester_ref
+    if author_id is None and not as_note:
+        ticket = (await client.get_ticket_with_users(ticket_ref)).get("ticket") or {}
+        author_id = str(ticket.get("requester_id")) if ticket.get("requester_id") else None
+    uploads = await _upload_all(client, attachments)
+    body = content or "(adjunto)"
+    await client.add_comment_as(
+        ticket_ref,
+        f"💬 Cliente: {body}" if as_note else body,
+        author_id=None if as_note else author_id,
+        public=not as_note,
+        uploads=uploads,
+    )
+
 
 # Satisface el type-checker: ZendeskAdapter implementa HelpdeskProvider estructuralmente.
 _: HelpdeskProvider = ZendeskAdapter()  # type: ignore[assignment]
+__: HandoffTarget = ZendeskAdapter()  # type: ignore[assignment]
