@@ -8,6 +8,33 @@
 > bloque, cada uno contra `develop`. **Revisión con Opus** en PR-4/PR-5 (handoff y concurrencia) y
 > en PR-6 (seguridad L3), como pide `CLAUDE.md`.
 
+## Estado de implementación (s80)
+
+Implementado PR-1 a PR-8 (un commit por bloque, rama `ccr-7b4beddf-z9juh0`, PR único contra
+`develop`). Validado con la suite (sin `.env`), tests contra Postgres real y la prueba de
+humo `apps/api/scripts/smoke_whatsapp_flow.py` (7 escenarios de punta a punta con Zernio,
+Zendesk y Storage simulados). **Falta:** C0 (Kenny) y el E2E en vivo.
+
+Ajustes respecto del plan, todos menores y deterministas:
+- **Firma** confirmada en la documentación oficial de Zernio: `X-Zernio-Signature` = HMAC-SHA256
+  en hex del body crudo (alias legacy `X-Late-Signature`). El test contra el fixture real de C0.4
+  queda marcado como pendiente (se activa al guardar el fixture).
+- **Plantilla de re-enganche:** si no hay nombre, `{{1}}` = "de nuevo" ("Hola de nuevo, …") en vez
+  de "hola" ("Hola hola, …"). Se manda **una sola vez por chat** mientras haya pendientes.
+- **Sandbox (staging):** el sandbox compartido no tiene profile, así que una key limitada por
+  profile no lo ve: `onboard_whatsapp.py sandbox --staging` crea una key de alcance completo que
+  caduca a los 30 días. Solo staging.
+- **Handoff activo por chat**, no por conversación: si el cleanup cerró la sesión con el ticket aún
+  abierto, la IA sigue callada en la sesión nueva.
+- **Respuesta del equipo en un ticket ya resuelto:** se entrega y el handoff se **reabre** (el
+  humano retomó la conversación).
+- **Toma desde el inbox de Zernio** (`sentVia=human`) cuenta igual que la app del móvil.
+- **Zendesk:** el scope OAuth suma `users:write` (requester del handoff); el script de triggers
+  pide `read write` solo para operar.
+- **Transcripción:** adapter OpenAI provisional **apagado por defecto** (`TRANSCRIPTION_PROVIDER`
+  vacío → mensaje fijo). ADR 0011 queda en Propuesta hasta el benchmark.
+- **PR-8:** `api-types.ts` ya iba desfasado; solo se añadieron los esquemas nuevos.
+
 ## Decisiones cerradas con Kenny (s79)
 
 | Tema | Decisión |
