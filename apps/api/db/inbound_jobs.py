@@ -72,6 +72,28 @@ async def claim_webhook_idempotency_key(
     return row is not None
 
 
+async def lock_inbound_intake(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    channel: str,
+    external_id: str,
+    customer_email: str | None,
+) -> None:
+    """Serializa intakes concurrentes que crearían el mismo cliente o conversación.
+
+    Dos webhooks casi simultáneos del primer mensaje de un ticket hacían ambos
+    find → None → INSERT y el segundo chocaba con `uq_end_customers_email` /
+    `uq_conversations_external` (500). Con estos locks de transacción el segundo espera
+    al primero y encuentra lo que creó. Orden fijo de adquisición → sin deadlocks.
+    """
+    keys = [f"intake:{tenant_id}:conv:{channel}:{external_id}"]
+    if customer_email:
+        keys.append(f"intake:{tenant_id}:customer:{customer_email.strip().lower()}")
+    for key in sorted(keys):
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))", key)
+
+
 async def enqueue_inbound_job(
     conn: asyncpg.Connection,
     *,

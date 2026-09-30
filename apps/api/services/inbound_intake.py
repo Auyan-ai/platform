@@ -5,6 +5,8 @@ transacción (`tenant_scope`):
 
     1. Reclamar la key de idempotencia (ON CONFLICT: un reintento concurrente espera y
        sale como duplicado; si la transacción cae no queda key y el reintento reprocesa).
+       Luego advisory locks por ticket y por email: dos mensajes simultáneos del mismo
+       ticket nuevo no crean dos veces el cliente ni la conversación.
     2. Upsert del end_customer (por email).
     3. Find-or-create de la conversación por (channel, external_id); reabrir si estaba
        resuelta.
@@ -22,7 +24,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from apps.api.db.client import tenant_scope
-from apps.api.db.inbound_jobs import claim_webhook_idempotency_key, enqueue_inbound_job
+from apps.api.db.inbound_jobs import (
+    claim_webhook_idempotency_key,
+    enqueue_inbound_job,
+    lock_inbound_intake,
+)
 from apps.api.db.queries import (
     create_conversation,
     create_end_customer,
@@ -79,6 +85,13 @@ async def persist_and_enqueue_inbound(
             )
             return InboundIntakeResult(duplicate=True)
 
+        await lock_inbound_intake(
+            conn,
+            tenant_id=tenant_id,
+            channel=channel,
+            external_id=external_id,
+            customer_email=customer_email,
+        )
         customer = None
         if customer_email:
             customer = await find_end_customer_by_email(conn, tenant_id, customer_email)

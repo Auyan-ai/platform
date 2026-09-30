@@ -54,6 +54,7 @@ def intake_db(monkeypatch: pytest.MonkeyPatch) -> dict[str, AsyncMock]:
         "insert_message": AsyncMock(return_value=make_message(id=INBOUND_MSG_ID)),
         "update_conversation_last_message": AsyncMock(),
         "enqueue_inbound_job": AsyncMock(return_value=JOB_ID),
+        "lock_inbound_intake": AsyncMock(),
     }
     for name, mock in mocks.items():
         monkeypatch.setattr(f"{INTAKE}.{name}", mock)
@@ -98,6 +99,18 @@ async def test_new_message_is_persisted_and_enqueued(intake_db: dict[str, AsyncM
         "inbound_message_id": INBOUND_MSG_ID,
         "end_customer_id": CUSTOMER_ID,
         "channel": "zendesk",
+    }
+
+
+async def test_intake_locks_ticket_and_customer_before_creating(
+    intake_db: dict[str, AsyncMock],
+) -> None:
+    await _intake()
+    assert intake_db["lock_inbound_intake"].await_args.kwargs == {
+        "tenant_id": TENANT_ID,
+        "channel": "zendesk",
+        "external_id": "42",
+        "customer_email": "cliente@test.com",
     }
 
 

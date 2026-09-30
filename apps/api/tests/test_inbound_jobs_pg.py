@@ -421,3 +421,25 @@ async def test_history_bound_hides_later_customer_messages_only(pool: asyncpg.Po
         assert [m.content for m in bounded] == [f"msg {m0}", f"msg {m1}", "reply"]
         full = await get_recent_messages(conn, t, c, limit=20)
         assert [m.content for m in full] == [f"msg {m0}", f"msg {m1}", f"msg {m2}", "reply"]
+
+
+async def test_intake_lock_serializes_same_ticket(pool: asyncpg.Pool) -> None:
+    """Dos intakes del mismo ticket: el segundo espera a que el primero confirme."""
+    from apps.api.db.inbound_jobs import lock_inbound_intake
+
+    tenant_id = uuid.uuid4()
+    order: list[str] = []
+
+    async def _intake(name: str, email: str, hold: float) -> None:
+        async with pool.acquire() as conn, conn.transaction():
+            await lock_inbound_intake(
+                conn, tenant_id=tenant_id, channel="zendesk", external_id="7", customer_email=email
+            )
+            order.append(f"{name}:in")
+            await asyncio.sleep(hold)
+            order.append(f"{name}:out")
+
+    first = asyncio.create_task(_intake("a", "X@test.com", 0.3))
+    await asyncio.sleep(0.05)
+    await asyncio.gather(first, _intake("b", "x@test.com", 0))
+    assert order == ["a:in", "a:out", "b:in", "b:out"]
