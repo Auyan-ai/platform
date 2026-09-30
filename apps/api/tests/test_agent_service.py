@@ -107,6 +107,29 @@ class TestProcessInbound:
         assert outcome.escalation_id == "esc-fallback"
 
     @pytest.mark.asyncio
+    async def test_error_never_delivers_the_unsupervised_draft(self) -> None:
+        """Si el supervisor revienta tras un `reason` con borrador, el borrador NO se
+        entrega (visto en A4: llegó al cliente una propuesta de reembolso que nadie
+        aprobó). handle_error solo escala; el equipo humano responde."""
+        graph = AsyncMock()
+        graph.ainvoke = AsyncMock(
+            return_value={
+                "decision": "respond",
+                "agent_response": "¿Confirmas el reembolso de 10 USD?",
+                "error": "supervise: anthropic 400",
+                "escalation_id": "esc-1",
+                "escalation_created": True,
+            }
+        )
+        service = AgentService(graph=graph, observability=_fake_observability())
+
+        outcome = await service.process_inbound(**_kwargs())
+
+        assert outcome.decision == "error"
+        assert outcome.response_text is None
+        assert outcome.resolves_on_delivery is False
+
+    @pytest.mark.asyncio
     async def test_unhandled_graph_exception_yields_error_outcome(self) -> None:
         """Si el grafo lanza (no debería, los nodos están guarded), igual recuperamos."""
         graph = AsyncMock()
