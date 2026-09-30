@@ -33,6 +33,7 @@ from apps.api.agents.graph import build_graph
 from apps.api.agents.service import AgentService
 from apps.api.core.config import get_settings
 from apps.api.core.errors import UnhandledExceptionMiddleware, register_exception_handlers
+from apps.api.core.log_config import configure_logging
 from apps.api.db.client import close_pool, init_pool
 from apps.api.integrations.anthropic_client import build_anthropic_client
 from apps.api.integrations.langfuse_client import build_langfuse_client
@@ -89,10 +90,8 @@ async def _cleanup_loop(interval_seconds: int) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
-    logging.basicConfig(
-        level=settings.log_level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    # JSON con `severity` en Cloud Run (alertas por severidad + campos `extra`).
+    configure_logging(settings.log_level)
 
     logger.info("starting auyan-api env=%s", settings.app_env)
 

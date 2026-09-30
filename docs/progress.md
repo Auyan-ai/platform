@@ -61,9 +61,9 @@ Ya verificado en su OpenAPI (s76): webhook `message.received` con HMAC (`X-Zerni
 - [ ] **Postmark con `auyan.es`** (DKIM/SPF) + SMTP de Supabase (magic links sin spam) — lo necesita el OTP por email.
 - [x] ~~**ADR del cambio de plataforma** Railway → Cloud Run + Vercel~~ ✅ [ADR 0009](adr/0009-cloud-run-vercel.md) (s78). (`CLAUDE.md` + arquitectura ya actualizados al cierre de s77.)
 - [ ] **Onboarding del cliente en Zendesk:** crear un agente de servicio "Auyan AI" y el OAuth client con ese usuario (hoy las respuestas salen firmadas por quien creó el client). Documentar en la guía de onboarding junto con el body del Trigger (solo IDs).
-- [ ] **Supabase staging:** plan de pago o keep-alive antes del piloto.
+- [x] ~~**Supabase staging: keep-alive**~~ ✅ (s78) Cloud Scheduler `auyan-api-staging-keepalive`: `GET /health/ready` (consulta real a la base) a diario a las 06:00 Europe/Madrid → Supabase free no se pausa. Gratis (≤3 jobs).
 - [x] ~~**Cloud Run `min-instances`**~~ → **implementado, apagado** (decisión s78: no se paga hasta tener un cliente de pago). `CLOUD_RUN_MIN_INSTANCES` en el `.env` del entorno (default 0). **Al firmar el primer cliente de pago: `CLOUD_RUN_MIN_INSTANCES=1` en el `.env` de producción y redeploy** (~63 USD/mes en `europe-west3`; con CPU siempre asignada no se puede bajar de 1 vCPU). Gratis ya aplicado: bytecode precompilado en la imagen → arranque del contenedor **~15 s → ~10,7 s**. [ADR 0009](adr/0009-cloud-run-vercel.md).
-- [ ] **Alertas:** log-based alert en Cloud Monitoring para `severity>=ERROR` (`inbound_job_failed`, `agent_reply_delivery_failed`, `inbound_turn_graph_error`). Hoy los errores se loguean pero nadie recibe aviso.
+- [x] ~~**Alertas**~~ ✅ (s78) alerta en Cloud Monitoring con cualquier log `severity>=ERROR` del servicio → email a kennyrmv@gmail.com (máx. 1 cada 5 min, cierre automático a los 30 min). Requirió **logs JSON en Cloud Run** (`core/log_config.py`): antes los `logger.error` llegaban sin severidad (solo los tracebacks contaban como ERROR) y los `extra` (tenant_id, job_id…) se perdían. Todo con `apps/api/scripts/setup_cloud_run_ops.sh` (idempotente). **En producción: `ALERT_EMAIL=… SERVICE_NAME=auyan-api apps/api/scripts/setup_cloud_run_ops.sh`.**
 
 ---
 
