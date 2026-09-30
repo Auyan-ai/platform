@@ -58,10 +58,10 @@ Ya verificado en su OpenAPI (s76): webhook `message.received` con HMAC (`X-Zerni
 
 ### Transversal (encajar entre sprints)
 - [ ] **Postmark con `auyan.es`** (DKIM/SPF) + SMTP de Supabase (magic links sin spam) — lo necesita el OTP por email.
-- [ ] **ADR del cambio de plataforma** Railway → Cloud Run + Vercel. (~~Actualizar `CLAUDE.md` + `architecture-overview.md` / `architecture-web.md`~~ ✅ hecho al cierre de s77.)
+- [x] ~~**ADR del cambio de plataforma** Railway → Cloud Run + Vercel~~ ✅ [ADR 0009](adr/0009-cloud-run-vercel.md) (s78). (`CLAUDE.md` + arquitectura ya actualizados al cierre de s77.)
 - [ ] **Onboarding del cliente en Zendesk:** crear un agente de servicio "Auyan AI" y el OAuth client con ese usuario (hoy las respuestas salen firmadas por quien creó el client). Documentar en la guía de onboarding junto con el body del Trigger (solo IDs).
 - [ ] **Supabase staging:** plan de pago o keep-alive antes del piloto.
-- [ ] **Cloud Run `min-instances=1` antes del piloto** (decisión de coste de Kenny): con `min=0` el cold start es de ~14 s y Zendesk corta a ~10 s → el primer mensaje tras inactividad provoca un reintento (sale como duplicado, no se pierde nada). Además, jobs pendientes de una instancia apagada esperan a la siguiente petición.
+- [x] ~~**Cloud Run `min-instances`**~~ → **implementado, apagado** (decisión s78: no se paga hasta tener un cliente de pago). `CLOUD_RUN_MIN_INSTANCES` en el `.env` del entorno (default 0). **Al firmar el primer cliente de pago: `CLOUD_RUN_MIN_INSTANCES=1` en el `.env` de producción y redeploy** (~63 USD/mes en `europe-west3`; con CPU siempre asignada no se puede bajar de 1 vCPU). Gratis ya aplicado: bytecode precompilado en la imagen → arranque del contenedor **~15 s → ~10,7 s**. [ADR 0009](adr/0009-cloud-run-vercel.md).
 - [ ] **Alertas:** log-based alert en Cloud Monitoring para `severity>=ERROR` (`inbound_job_failed`, `agent_reply_delivery_failed`, `inbound_turn_graph_error`). Hoy los errores se loguean pero nadie recibe aviso.
 
 ---
