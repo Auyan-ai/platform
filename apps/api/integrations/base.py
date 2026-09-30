@@ -15,6 +15,7 @@ para esa integración específica. Los adapters son stateless; reciben ctx por l
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -57,15 +58,47 @@ class IntegrationContext:
     config: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class StoredAttachment:
+    """Adjunto del comprador ya guardado en Storage (bucket privado `conversation-media`)."""
+
+    path: str
+    mime_type: str
+    size: int
+    filename: str
+    kind: str = "file"  # image | audio | video | file | sticker
+    # Bytes cargados por el service layer justo antes de subirlos al helpdesk.
+    content: bytes | None = field(default=None, repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class HandoffRequest:
+    """Datos para abrir el ticket de handoff en el helpdesk del cliente (ADR 0010).
+
+    Todo es literal y formateado por código: la transcripción son los mensajes tal cual
+    y el único texto del LLM es `reason` (el motivo del escalado).
+    """
+
+    conversation_id: UUID
+    customer_name: str | None
+    customer_phone: str | None
+    customer_email: str | None
+    customer_ref: str  # "auyan:<end_customer_id>" → external_id del usuario en el helpdesk
+    subject: str
+    reason: str
+    transcript: str
+    window_closes_at: datetime | None
+    attachments: list[StoredAttachment]
+    channel_label: str  # "WhatsApp"
+
+
 # ─── Protocols ────────────────────────────────────────────────────────────────
 
 
 class MessageProvider(Protocol):
     """Canal bidireccional básico: recibe webhooks y envía mensajes."""
 
-    async def parse_inbound_webhook(
-        self, payload: dict[str, Any]
-    ) -> InboundMessage: ...
+    async def parse_inbound_webhook(self, payload: dict[str, Any]) -> InboundMessage: ...
 
     async def send_outbound(
         self,
@@ -73,7 +106,8 @@ class MessageProvider(Protocol):
         conversation_ref: str,
         content: str,
         attachments: list[dict[str, Any]] | None = None,
-    ) -> None: ...
+        idempotency_key: str | None = None,
+    ) -> Any: ...
 
 
 class HelpdeskProvider(MessageProvider, Protocol):
@@ -129,3 +163,31 @@ class CommerceProvider(Protocol):
         ctx: IntegrationContext,
         email: str,
     ) -> dict[str, Any] | None: ...
+
+
+class HandoffTarget(Protocol):
+    """Helpdesk que puede recibir un handoff desde un canal de mensajería.
+
+    Zendesk es la primera implementación; Gorgias/Chatwoot usarán la misma interfaz.
+    """
+
+    async def open_handoff_ticket(
+        self, ctx: IntegrationContext, req: HandoffRequest
+    ) -> ExternalTicketRef: ...
+
+    async def append_customer_message(
+        self,
+        ctx: IntegrationContext,
+        ticket_ref: str,
+        content: str,
+        attachments: list[StoredAttachment],
+        *,
+        requester_ref: str | None = None,
+    ) -> None: ...
+
+    async def add_internal_note(
+        self,
+        ctx: IntegrationContext,
+        ticket_ref: str,
+        content: str,
+    ) -> None: ...

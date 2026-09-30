@@ -247,3 +247,6 @@ apps/landing/.env*.local
 
 # Vercel CLI (vercel link)
 .vercel
+
+# Corpus del mini-benchmark de voz a texto (C0.5): voz real = PII, nunca se commitea.
+apps/api/stt_bench/

@@ -1444,6 +1444,7 @@ export interface components {
             conversation: components["schemas"]["ConversationOut"];
             /** Messages */
             messages: components["schemas"]["MessageOut"][];
+            active_handoff?: components["schemas"]["HandoffOut"] | null;
         };
         /** ConversationListResponse */
         ConversationListResponse: {
@@ -1636,6 +1637,24 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        HandoffOut: {
+            /**
+             * Target
+             * @enum {string}
+             */
+            target: "helpdesk" | "device";
+            /** Helpdesk Provider */
+            helpdesk_provider: string | null;
+            /** External Ticket Id */
+            external_ticket_id: string | null;
+            /**
+             * Opened At
+             * Format: date-time
+             */
+            opened_at: string;
+            /** Expires At */
+            expires_at: string | null;
+        };
         /** InboundResponse */
         InboundResponse: {
             /** Ok */
@@ -1658,6 +1677,14 @@ export interface components {
             trace_id?: string | null;
             /** Error */
             error?: string | null;
+        };
+        MessageAttachmentOut: {
+            /** Filename */
+            filename: string;
+            /** Kind */
+            kind: string;
+            /** Mime Type */
+            mime_type?: string | null;
         };
         /** MessageOut */
         MessageOut: {
@@ -1687,6 +1714,14 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** External Author */
+            external_author?: {
+                [key: string]: string | null;
+            } | null;
+            /** Attachments */
+            attachments?: components["schemas"]["MessageAttachmentOut"][];
+            /** Delivery */
+            delivery?: string | null;
         };
         /** OutboundEmailJobCreateRequest */
         OutboundEmailJobCreateRequest: {

@@ -98,3 +98,8 @@ class TestReplyDelivered:
     def test_channel_without_helpdesk_counts_as_delivered(self) -> None:
         """chat/widget de prueba: el mensaje en DB es la entrega (no hay helpdesk)."""
         assert approval_resolution.reply_delivered("chat", delivered=False) is True
+
+    def test_messaging_channel_requires_delivery(self) -> None:
+        """WhatsApp tiene ruta de entrega (Zernio): sin entrega confirmada no cuenta."""
+        assert approval_resolution.reply_delivered("whatsapp", delivered=False) is False
+        assert approval_resolution.reply_delivered("whatsapp", delivered=True) is True

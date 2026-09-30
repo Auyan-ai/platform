@@ -259,6 +259,7 @@ class GorgiasAdapter:
         conversation_ref: str,
         content: str,
         attachments: list[dict[str, Any]] | None = None,
+        idempotency_key: str | None = None,  # sin uso: los helpdesks no lo soportan
     ) -> None:
         """Envía un mensaje público al cliente en el ticket."""
         await self._client(ctx).send_message(int(conversation_ref), content)

@@ -111,6 +111,8 @@ async def test_intake_locks_ticket_and_customer_before_creating(
         "channel": "zendesk",
         "external_id": "42",
         "customer_email": "cliente@test.com",
+        "customer_phone": None,
+        "customer_external_id": None,
     }
 
 
@@ -194,6 +196,7 @@ class TestZendeskRouter:
         intake = _patch_router_bootstrap(
             monkeypatch, self.MODULE, "get_integration_by_zendesk_subdomain"
         )
+        monkeypatch.setattr(f"{self.MODULE}._is_handoff_ticket", AsyncMock(return_value=False))
         comment = ZendeskInboundComment(
             ticket_id="42",
             comment_id="900",

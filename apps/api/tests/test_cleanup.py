@@ -190,6 +190,33 @@ async def test_nudge_delivers_to_helpdesk() -> None:
 
 
 @pytest.mark.asyncio
+async def test_no_nudge_on_whatsapp() -> None:
+    """WhatsApp no recibe nudges: caerían fuera de la ventana de 24 h de Meta."""
+    config = make_tenant_configuration(extra={"nudge_enabled": True})
+    activity = (NOW - timedelta(hours=23)).replace(tzinfo=None)
+    candidates = [(CONV_A, "whatsapp", activity)]
+    insert_mock = AsyncMock()
+    deliver_mock = AsyncMock(return_value=True)
+
+    with (
+        patch("apps.api.services.cleanup.tenant_scope") as mock_scope,
+        patch("apps.api.services.cleanup.get_nudge_candidates", return_value=candidates),
+        patch("apps.api.services.cleanup.insert_message", insert_mock),
+        patch("apps.api.services.cleanup.deliver_message_to_helpdesk", deliver_mock),
+        patch("apps.api.services.cleanup.datetime") as mock_dt,
+    ):
+        mock_dt.now.return_value = NOW
+        mock_scope.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result = await _nudge_for_tenant(TENANT_ID, config)
+
+    assert result == 0
+    insert_mock.assert_not_awaited()
+    deliver_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_close_abandoned_filters_by_channel_timeout() -> None:
     """Un email con 50h de inactividad NO debería cerrarse (email timeout=72h)."""
     not_yet_stale = NOW - timedelta(hours=50)

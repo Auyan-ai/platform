@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from apps.api.core.config import Settings, get_settings
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
 from apps.api.db.client import tenant_scope
 from apps.api.db.models import ChannelType, ConversationStatus, EscalationStatus, MessageRole
+from apps.api.db.queries import get_active_handoff_for_chat
+from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.conversations import (
     close_conversation,
     escalate_conversation,
@@ -21,7 +23,7 @@ from apps.api.services.conversations import (
 from apps.api.services.helpdesk_closure import close_external_helpdesk_ticket
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -50,6 +52,14 @@ class ConversationOut(BaseModel):
     created_at: datetime | None
 
 
+class MessageAttachmentOut(BaseModel):
+    """Solo nombre y tipo: la vista previa (URL firmada) va aparte."""
+
+    filename: str
+    kind: str
+    mime_type: str | None = None
+
+
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -60,6 +70,44 @@ class MessageOut(BaseModel):
     author_user_id: UUID | None
     content: str
     created_at: datetime
+    # Autor de la marca fuera de Auyan (Zendesk, app de WhatsApp Business…): {provider, name}.
+    external_author: dict[str, str | None] | None = None
+    attachments: list[MessageAttachmentOut] = Field(default_factory=list)
+    # Estado de entrega en mensajería: delivered | pending_window | failed.
+    delivery: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_message(cls, data: Any) -> Any:
+        metadata = getattr(data, "metadata", None)
+        if not isinstance(metadata, dict):
+            return data
+        author = metadata.get("external_author")
+        raw_attachments = getattr(data, "attachments", None) or []
+        return {
+            "id": data.id,
+            "conversation_id": data.conversation_id,
+            "role": data.role,
+            "direction": data.direction,
+            "author_user_id": data.author_user_id,
+            "content": data.content,
+            "created_at": data.created_at,
+            "external_author": (
+                {"provider": author.get("provider"), "name": author.get("name")}
+                if isinstance(author, dict)
+                else None
+            ),
+            "attachments": [
+                {
+                    "filename": a.get("filename") or str(a.get("path", "")).rsplit("/", 1)[-1],
+                    "kind": a.get("kind") or "file",
+                    "mime_type": a.get("mime_type"),
+                }
+                for a in raw_attachments
+                if isinstance(a, dict) and (a.get("path") or a.get("filename"))
+            ],
+            "delivery": metadata.get("delivery"),
+        }
 
 
 class ConversationListResponse(BaseModel):
@@ -68,9 +116,22 @@ class ConversationListResponse(BaseModel):
     offset: int
 
 
+class HandoffOut(BaseModel):
+    """Handoff activo: un humano de la marca lleva la conversación y la IA calla."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    target: Literal["helpdesk", "device"]
+    helpdesk_provider: str | None
+    external_ticket_id: str | None
+    opened_at: datetime
+    expires_at: datetime | None
+
+
 class ConversationDetailResponse(BaseModel):
     conversation: ConversationOut
     messages: list[MessageOut]
+    active_handoff: HandoffOut | None = None
 
 
 class EscalationOut(BaseModel):
@@ -140,9 +201,15 @@ async def get_conversation(
         conv, messages = await get_conversation_detail(
             conn, tenant_id, conversation_id, include_system=include_system
         )
+        handoff = None
+        if is_messaging_channel(conv.channel) and conv.external_id:
+            handoff = await get_active_handoff_for_chat(
+                conn, tenant_id, conv.channel, conv.external_id
+            )
     return ConversationDetailResponse(
         conversation=ConversationOut.model_validate(conv),
         messages=[MessageOut.model_validate(m) for m in messages],
+        active_handoff=HandoffOut.model_validate(handoff) if handoff else None,
     )
 
 

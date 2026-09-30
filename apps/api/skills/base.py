@@ -42,6 +42,12 @@ class SkillContext:
     # exponen datos personales del pedido (p. ej. la dirección) lo comparan con
     # el email del pedido: solo el dueño ve esos datos.
     customer_email: str | None = field(default=None)
+    # Teléfono E.164 del cliente (WhatsApp) y canal de la conversación: el ownership de
+    # un pedido pasa por email O teléfono (`services.identity.check_order_ownership`).
+    customer_phone: str | None = field(default=None)
+    channel: str | None = field(default=None)
+    # Región por defecto para teléfonos sin prefijo (tenant_config/tenant_facts, "ES").
+    phone_region: str = field(default="ES")
 
 
 class Skill(ABC):

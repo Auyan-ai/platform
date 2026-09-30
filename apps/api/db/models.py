@@ -90,6 +90,28 @@ class Conversation(_BaseModel):
     created_at: datetime | None = None
 
 
+HandoffTarget = Literal["helpdesk", "device"]
+HandoffStatus = Literal["active", "closed"]
+
+
+class ConversationHandoff(_BaseModel):
+    """Período en que un humano de la marca lleva la conversación y la IA calla."""
+
+    id: UUID
+    tenant_id: UUID
+    conversation_id: UUID
+    target: HandoffTarget
+    helpdesk_provider: str | None = None
+    external_ticket_id: str | None = None
+    status: HandoffStatus
+    reason: str
+    opened_at: datetime
+    last_human_at: datetime | None = None
+    expires_at: datetime | None = None
+    closed_at: datetime | None = None
+    closed_reason: str | None = None
+
+
 class Message(_BaseModel):
     id: UUID
     tenant_id: UUID

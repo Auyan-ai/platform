@@ -29,6 +29,10 @@ Anti-loop: la respuesta pública del agente re-dispara el Trigger. Dos capas: la
 condición del Trigger (Current user = end user) y aquí se ignora todo comentario
 cuyo autor (según la API) no sea el requester, o que no sea público.
 
+Handoff de WhatsApp (Sprint 2): si el ticket pertenece a un handoff o el Trigger manda
+`"event": "handoff_*"` (triggers de `scripts/setup_zendesk_handoff_triggers.py`), el
+evento va a `services/handoff_events.handle_helpdesk_event` y nunca al intake normal.
+
 Seguridad HMAC:
     - Headers: X-Zendesk-Webhook-Signature + X-Zendesk-Webhook-Signature-Timestamp
     - Si webhook_signing_secret está en credentials, la firma se valida.
@@ -40,10 +44,13 @@ from __future__ import annotations
 import json
 import logging
 from typing import Annotated, Any
+from uuid import UUID
 
+import asyncpg
 from apps.api.core.config import Settings, get_settings
-from apps.api.db.client import bootstrap_connection
+from apps.api.db.client import bootstrap_connection, tenant_scope
 from apps.api.db.queries import (
+    get_handoff_by_ticket,
     get_integration_by_zendesk_subdomain,
     get_integration_credentials_encrypted,
     get_tenant_by_id,
@@ -55,6 +62,7 @@ from apps.api.integrations.zendesk import (
     ZendeskInboundComment,
     verify_zendesk_signature,
 )
+from apps.api.services.handoff_events import handle_helpdesk_event
 from apps.api.services.inbound_intake import notify_inbound_worker, persist_and_enqueue_inbound
 from apps.api.services.integrations_crypto import decrypt_credentials, get_integration_crypto_key
 from apps.api.services.rate_limit import enforce_rate_limit
@@ -87,6 +95,16 @@ def _parse_payload(raw_body: bytes) -> dict[str, Any] | None:
     except (json.JSONDecodeError, UnicodeDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
+
+
+async def _is_handoff_ticket(tenant_id: UUID, ticket_id: str) -> bool:
+    """¿El ticket es de un handoff de WhatsApp? Falla abierto si falta la migración."""
+    try:
+        async with tenant_scope(tenant_id) as conn:
+            return await get_handoff_by_ticket(conn, tenant_id, "zendesk", ticket_id) is not None
+    except asyncpg.UndefinedTableError:
+        logger.error("zendesk_webhook_handoff_table_missing", extra={"tenant_id": str(tenant_id)})
+        return False
 
 
 def _ignore_reason(comment: ZendeskInboundComment) -> str | None:
@@ -168,6 +186,23 @@ async def zendesk_webhook(
         tenant = await get_tenant_by_id(conn, tenant_id)
     if tenant is None or tenant.status != "active":
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="tenant_inactive")
+
+    # Handoff de WhatsApp (Sprint 2): los tickets de handoff van a su propio flujo y
+    # NUNCA al intake normal (anti-loop). Antes del rate limit/budget del agente: la
+    # respuesta de un humano sale aunque la IA del tenant haya agotado su presupuesto.
+    event_name = _placeholder_value(payload.get("event"))
+    if (event_name or "").startswith("handoff_") or await _is_handoff_ticket(
+        tenant_id, zendesk_ticket_id
+    ):
+        return await handle_helpdesk_event(
+            tenant_id=tenant_id,
+            provider="zendesk",
+            adapter=ZendeskAdapter(),
+            ctx=ctx,
+            ticket_id=zendesk_ticket_id,
+            comment_id=_placeholder_value(payload.get("comment_id")),
+            event=event_name,
+        )
 
     async with bootstrap_connection() as conn:
         tenant_config = await get_tenant_configuration(conn, tenant_id)

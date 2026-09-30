@@ -28,7 +28,7 @@ from apps.api.db.queries import (
     resolve_escalation_by_reason,
     resolve_open_escalations_for_conversation,
 )
-from apps.api.integrations.registry import IntegrationRegistry
+from apps.api.services.channel_routing import delivery_route
 
 if TYPE_CHECKING:
     import asyncpg
@@ -73,10 +73,9 @@ async def release_escalations_after_executed_action(
 
 
 def reply_delivered(channel: str, *, delivered: bool) -> bool:
-    """¿Llegó la confirmación al cliente? En canales sin helpdesk (chat/widget de
-    prueba) el mensaje persistido en DB es la entrega."""
-    try:
-        IntegrationRegistry.get("helpdesk", channel)
-    except ValueError:
+    """¿Llegó la confirmación al cliente? En canales sin ruta de entrega (chat/widget de
+    prueba) el mensaje persistido en DB es la entrega. En los que la tienen (helpdesk o
+    mensajería como WhatsApp) solo cuenta la entrega confirmada."""
+    if delivery_route(channel) is None:
         return True
     return delivered

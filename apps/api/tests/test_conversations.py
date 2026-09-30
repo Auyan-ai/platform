@@ -160,6 +160,79 @@ class TestGetConversation:
         assert body["conversation"]["id"] == str(CONVERSATION_ID)
         assert len(body["messages"]) == 2
 
+    def test_whatsapp_detail_has_handoff_author_and_attachments(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import ConversationHandoff
+
+        conv = make_conversation(channel="whatsapp", external_id="zconv-1")
+        msgs = [
+            make_message(
+                attachments=[{"path": "t/c/m/0.jpg", "filename": "0.jpg", "kind": "image",
+                              "mime_type": "image/jpeg"}],
+                metadata={"zernio_attachments": [{"url": "https://secret"}]},
+            ),
+            make_message(
+                id=OUTBOUND_MSG_ID,
+                role="agent_human",
+                direction="outbound",
+                metadata={
+                    "external_author": {"provider": "zendesk", "id": "42", "name": "Laura"},
+                    "delivery": "pending_window",
+                },
+            ),
+        ]
+        handoff = ConversationHandoff(
+            id=UUID(int=3),
+            tenant_id=TENANT_ID,
+            conversation_id=CONVERSATION_ID,
+            target="helpdesk",
+            helpdesk_provider="zendesk",
+            external_ticket_id="555",
+            status="active",
+            reason="persona",
+            opened_at=datetime.now(UTC),
+        )
+
+        async def _fake_detail(conn: Any, tenant_id: UUID, conversation_id: UUID, **kwargs: Any) -> Any:
+            return conv, msgs
+
+        monkeypatch.setattr("apps.api.routers.conversations.get_conversation_detail", _fake_detail)
+        monkeypatch.setattr(
+            "apps.api.routers.conversations.get_active_handoff_for_chat",
+            AsyncMock(return_value=handoff),
+        )
+        app = _make_app(monkeypatch)
+        resp = TestClient(app).get(
+            f"/conversations/{CONVERSATION_ID}",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+        body = resp.json()
+        assert body["active_handoff"]["external_ticket_id"] == "555"
+        assert body["messages"][0]["attachments"] == [
+            {"filename": "0.jpg", "kind": "image", "mime_type": "image/jpeg"}
+        ]
+        assert "secret" not in resp.text  # la URL de Zernio no sale
+        assert body["messages"][1]["external_author"] == {"provider": "zendesk", "name": "Laura"}
+        assert body["messages"][1]["delivery"] == "pending_window"
+
+    def test_helpdesk_detail_does_not_query_handoffs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        conv = make_conversation(channel="zendesk", external_id="42")
+
+        async def _fake_detail(conn: Any, tenant_id: UUID, conversation_id: UUID, **kwargs: Any) -> Any:
+            return conv, [make_message()]
+
+        lookup = AsyncMock()
+        monkeypatch.setattr("apps.api.routers.conversations.get_conversation_detail", _fake_detail)
+        monkeypatch.setattr("apps.api.routers.conversations.get_active_handoff_for_chat", lookup)
+        app = _make_app(monkeypatch)
+        resp = TestClient(app).get(
+            f"/conversations/{CONVERSATION_ID}",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+        assert resp.json()["active_handoff"] is None
+        lookup.assert_not_awaited()
+
     def test_not_found_returns_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
         async def _fake_detail(conn: Any, tenant_id: UUID, conversation_id: UUID, **kwargs: Any) -> Any:
             raise NotFoundError("not found", code="conversation_not_found")

@@ -27,6 +27,7 @@ from apps.api.db.models import (
     BillingTier,
     ChannelType,
     Conversation,
+    ConversationHandoff,
     ConversationJudgment,
     ConversationStatus,
     EndCustomer,
@@ -212,6 +213,66 @@ async def find_end_customer_by_email(
     return None if row is None else EndCustomer(**dict(row))
 
 
+async def find_end_customer_by_phone(
+    conn: asyncpg.Connection, tenant_id: UUID, phone: str
+) -> EndCustomer | None:
+    """Cliente por teléfono E.164 exacto (normalizar antes con `services.identity`)."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, email, phone, external_id, full_name, metadata
+          FROM end_customers
+         WHERE tenant_id = $1 AND phone = $2 AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        tenant_id,
+        phone,
+    )
+    return None if row is None else EndCustomer(**dict(row))
+
+
+async def find_end_customer_by_external_id(
+    conn: asyncpg.Connection, tenant_id: UUID, external_id: str
+) -> EndCustomer | None:
+    """Cliente por id externo del canal (p. ej. `wa:bsuid:<BSUID>` de WhatsApp)."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, email, phone, external_id, full_name, metadata
+          FROM end_customers
+         WHERE tenant_id = $1 AND external_id = $2 AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        tenant_id,
+        external_id,
+    )
+    return None if row is None else EndCustomer(**dict(row))
+
+
+async def fill_end_customer_identity(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    customer_id: UUID,
+    *,
+    phone: str | None = None,
+    external_id: str | None = None,
+) -> EndCustomer | None:
+    """Completa teléfono / external_id SOLO si estaban vacíos (nunca sobrescribe)."""
+    row = await conn.fetchrow(
+        """
+        UPDATE end_customers
+           SET phone       = COALESCE(phone, $3),
+               external_id = COALESCE(external_id, $4),
+               updated_at  = now()
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        RETURNING id, tenant_id, email, phone, external_id, full_name, metadata
+        """,
+        tenant_id,
+        customer_id,
+        phone,
+        external_id,
+    )
+    return None if row is None else EndCustomer(**dict(row))
+
+
 async def create_end_customer(
     conn: asyncpg.Connection,
     *,
@@ -287,6 +348,8 @@ async def find_conversation_by_external(
     channel: ChannelType,
     external_id: str,
 ) -> Conversation | None:
+    """La conversación MÁS RECIENTE del hilo externo. En helpdesks hay una por ticket;
+    en mensajería (WhatsApp) un chat acumula sesiones y manda la última."""
     row = await conn.fetchrow(
         """
         SELECT id, tenant_id, end_customer_id, channel, external_id,
@@ -295,6 +358,7 @@ async def find_conversation_by_external(
           FROM conversations
          WHERE tenant_id = $1 AND channel = $2::channel_type AND external_id = $3
            AND deleted_at IS NULL
+         ORDER BY created_at DESC
          LIMIT 1
         """,
         tenant_id,
@@ -581,6 +645,313 @@ async def insert_message(
     )
     assert row is not None
     return Message(**dict(row))
+
+
+async def merge_message_metadata(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    message_id: UUID,
+    patch: dict[str, Any],
+) -> bool:
+    """`metadata = metadata || patch` (claves de primer nivel). True si existía."""
+    result = await conn.execute(
+        """
+        UPDATE messages
+           SET metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        """,
+        tenant_id,
+        message_id,
+        patch,
+    )
+    return result == "UPDATE 1"
+
+
+async def get_last_customer_inbound_at(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    channel: ChannelType,
+    external_id: str,
+) -> datetime | None:
+    """Último mensaje del comprador en el hilo externo (todas las sesiones del chat).
+
+    Base de la ventana de 24 h de WhatsApp: cuenta el chat de Zernio, no la
+    conversación de Auyan.
+    """
+    value = await conn.fetchval(
+        """
+        SELECT max(m.created_at)
+          FROM messages m
+          JOIN conversations c
+            ON c.tenant_id = m.tenant_id AND c.id = m.conversation_id
+         WHERE m.tenant_id = $1
+           AND c.channel = $2::channel_type
+           AND c.external_id = $3
+           AND c.deleted_at IS NULL
+           AND m.deleted_at IS NULL
+           AND m.role = 'customer'
+           AND m.direction = 'inbound'
+        """,
+        tenant_id,
+        channel,
+        external_id,
+    )
+    return value  # type: ignore[no-any-return]
+
+
+async def list_pending_window_messages(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    channel: ChannelType,
+    external_id: str,
+) -> list[Message]:
+    """Salientes que esperan a que el comprador reabra la ventana, más viejos primero."""
+    rows = await conn.fetch(
+        """
+        SELECT m.id, m.tenant_id, m.conversation_id, m.role, m.direction,
+               m.author_user_id, m.content, m.attachments, m.metadata, m.created_at
+          FROM messages m
+          JOIN conversations c
+            ON c.tenant_id = m.tenant_id AND c.id = m.conversation_id
+         WHERE m.tenant_id = $1
+           AND c.channel = $2::channel_type
+           AND c.external_id = $3
+           AND c.deleted_at IS NULL
+           AND m.deleted_at IS NULL
+           AND m.direction = 'outbound'
+           AND m.metadata->>'delivery' = 'pending_window'
+         ORDER BY m.created_at, m.id
+        """,
+        tenant_id,
+        channel,
+        external_id,
+    )
+    return [Message(**dict(r)) for r in rows]
+
+
+async def find_outbound_message_by_platform_id(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    platform_message_id: str,
+) -> Message | None:
+    """Saliente enviado por Zernio con ese wamid (`metadata.zernio_platform_message_ids`)."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, conversation_id, role, direction,
+               author_user_id, content, attachments, metadata, created_at
+          FROM messages
+         WHERE tenant_id = $1
+           AND deleted_at IS NULL
+           AND direction = 'outbound'
+           AND metadata->'zernio_platform_message_ids' ? $2
+         ORDER BY created_at DESC
+         LIMIT 1
+        """,
+        tenant_id,
+        platform_message_id,
+    )
+    return None if row is None else Message(**dict(row))
+
+
+# ============================================================
+# Handoffs (Sprint 2, ADR 0010)
+# ============================================================
+
+async def get_active_handoff(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> ConversationHandoff | None:
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, conversation_id, target, helpdesk_provider, external_ticket_id,
+               status, reason, opened_at, last_human_at, expires_at, closed_at, closed_reason
+          FROM conversation_handoffs
+         WHERE tenant_id = $1 AND conversation_id = $2
+           AND status = 'active' AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return None if row is None else ConversationHandoff(**dict(row))
+
+
+async def get_active_handoff_for_chat(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    channel: ChannelType,
+    external_id: str,
+) -> ConversationHandoff | None:
+    """Handoff activo en CUALQUIER sesión del chat (la más reciente).
+
+    Si una sesión con handoff activo se cerró (cleanup) y el comprador vuelve a escribir,
+    la IA debe seguir callada mientras el ticket siga abierto.
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT h.id, h.tenant_id, h.conversation_id, h.target, h.helpdesk_provider,
+               h.external_ticket_id, h.status, h.reason, h.opened_at, h.last_human_at,
+               h.expires_at, h.closed_at, h.closed_reason
+          FROM conversation_handoffs h
+          JOIN conversations c ON c.tenant_id = h.tenant_id AND c.id = h.conversation_id
+         WHERE h.tenant_id = $1
+           AND c.channel = $2::channel_type
+           AND c.external_id = $3
+           AND h.status = 'active'
+           AND h.deleted_at IS NULL
+         ORDER BY h.opened_at DESC
+         LIMIT 1
+        """,
+        tenant_id,
+        channel,
+        external_id,
+    )
+    return None if row is None else ConversationHandoff(**dict(row))
+
+
+async def get_handoff_by_ticket(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    helpdesk_provider: str,
+    external_ticket_id: str,
+) -> ConversationHandoff | None:
+    """Handoff (activo o cerrado) de un ticket del helpdesk."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, conversation_id, target, helpdesk_provider, external_ticket_id,
+               status, reason, opened_at, last_human_at, expires_at, closed_at, closed_reason
+          FROM conversation_handoffs
+         WHERE tenant_id = $1 AND helpdesk_provider = $2 AND external_ticket_id = $3
+           AND deleted_at IS NULL
+         LIMIT 1
+        """,
+        tenant_id,
+        helpdesk_provider,
+        external_ticket_id,
+    )
+    return None if row is None else ConversationHandoff(**dict(row))
+
+
+async def insert_handoff(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    target: str,
+    reason: str,
+    helpdesk_provider: str | None = None,
+    external_ticket_id: str | None = None,
+    expires_at: datetime | None = None,
+    last_human_at: datetime | None = None,
+) -> ConversationHandoff:
+    """Abre un handoff. Lanza UniqueViolationError si ya hay uno activo."""
+    row = await conn.fetchrow(
+        """
+        INSERT INTO conversation_handoffs (
+            tenant_id, conversation_id, target, reason, helpdesk_provider,
+            external_ticket_id, expires_at, last_human_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id, tenant_id, conversation_id, target, helpdesk_provider, external_ticket_id,
+                  status, reason, opened_at, last_human_at, expires_at, closed_at, closed_reason
+        """,
+        tenant_id,
+        conversation_id,
+        target,
+        reason,
+        helpdesk_provider,
+        external_ticket_id,
+        expires_at,
+        last_human_at,
+    )
+    assert row is not None
+    return ConversationHandoff(**dict(row))
+
+
+async def close_handoff_row(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    handoff_id: UUID,
+    closed_reason: str,
+) -> bool:
+    """Cierra un handoff activo. True si estaba activo."""
+    result = await conn.execute(
+        """
+        UPDATE conversation_handoffs
+           SET status = 'closed', closed_at = now(), closed_reason = $3
+         WHERE tenant_id = $1 AND id = $2 AND status = 'active' AND deleted_at IS NULL
+        """,
+        tenant_id,
+        handoff_id,
+        closed_reason,
+    )
+    return result == "UPDATE 1"
+
+
+async def reopen_handoff_row(
+    conn: asyncpg.Connection, tenant_id: UUID, handoff_id: UUID
+) -> bool:
+    """Reactiva un handoff cerrado (el equipo volvió a escribir en el ticket resuelto).
+
+    Lanza UniqueViolationError si la conversación ya tiene otro handoff activo.
+    """
+    result = await conn.execute(
+        """
+        UPDATE conversation_handoffs
+           SET status = 'active', closed_at = NULL, closed_reason = NULL
+         WHERE tenant_id = $1 AND id = $2 AND status = 'closed' AND deleted_at IS NULL
+        """,
+        tenant_id,
+        handoff_id,
+    )
+    return result == "UPDATE 1"
+
+
+async def touch_handoff_human_activity(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    handoff_id: UUID,
+    *,
+    expires_at: datetime | None = None,
+) -> None:
+    """Registra actividad humana (y, en `device`, renueva el silencio de la IA)."""
+    await conn.execute(
+        """
+        UPDATE conversation_handoffs
+           SET last_human_at = now(),
+               expires_at = COALESCE($3, expires_at)
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        """,
+        tenant_id,
+        handoff_id,
+        expires_at,
+    )
+
+
+async def list_recent_messages(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    *,
+    limit: int = 20,
+) -> list[Message]:
+    """Últimos `limit` mensajes visibles (sin `system`), en orden cronológico."""
+    rows = await conn.fetch(
+        """
+        SELECT * FROM (
+            SELECT id, tenant_id, conversation_id, role, direction,
+                   author_user_id, content, attachments, metadata, created_at
+              FROM messages
+             WHERE tenant_id = $1 AND conversation_id = $2
+               AND deleted_at IS NULL AND role <> 'system'
+             ORDER BY created_at DESC, id DESC
+             LIMIT $3
+        ) recent
+        ORDER BY created_at, id
+        """,
+        tenant_id,
+        conversation_id,
+        limit,
+    )
+    return [Message(**dict(r)) for r in rows]
 
 
 # ============================================================
@@ -3081,6 +3452,35 @@ async def get_integration_by_chatwoot_account(
     )
     return _single_integration_or_collision(
         rows, provider="chatwoot", lookup="account_id", value=account_id
+    )
+
+
+async def get_integration_by_zernio_account(
+    conn: asyncpg.Connection,
+    *,
+    account_id: str,
+) -> TenantIntegration | None:
+    """Integración Zernio por `accountId` (cross-tenant, para el webhook de Zernio).
+
+    Debe llamarse con bootstrap_connection(). Único por el índice
+    `tenant_integrations_unique_zernio_account`.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
+               enabled_at, enabled_by, created_at, updated_at
+          FROM tenant_integrations
+         WHERE provider    = 'zernio'
+           AND kind        = 'channel'
+           AND config->>'account_id' = $1
+           AND deleted_at IS NULL
+           AND is_active = TRUE
+         LIMIT 2
+        """,
+        account_id,
+    )
+    return _single_integration_or_collision(
+        rows, provider="zernio", lookup="account_id", value=account_id
     )
 
 
