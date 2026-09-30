@@ -57,6 +57,7 @@ Ya verificado en su OpenAPI (s76): webhook `message.received` con HMAC (`X-Zerni
 - [ ] Plan B de la s76 sin cambios (B0 spike → B1 shadow → B2 medición, con las fixtures de eval arregladas → B3 switch con flag + ADR).
 
 ### Transversal (encajar entre sprints)
+- [ ] **App de Shopify de Auyan con OAuth (antes del 2º cliente).** La conexión actual (client credentials grant) **solo funciona si la app y la tienda son de la misma organización de Shopify** (doc oficial) → hoy cada cliente tendría que crear su propia app en su tienda, configurar scopes y pasarnos `client_id`/`client_secret`. Objetivo: una sola app de Auyan en el Dev Dashboard (distribución custom o pública) con OAuth *authorization code* (mismo patrón que `oauth_gorgias.py`/`oauth_zendesk.py`): scopes definidos una vez, el cliente instala y acepta; un scope nuevo = el cliente aprueba la actualización. El piloto puede ir con app por cliente.
 - [ ] **Postmark con `auyan.es`** (DKIM/SPF) + SMTP de Supabase (magic links sin spam) — lo necesita el OTP por email.
 - [x] ~~**ADR del cambio de plataforma** Railway → Cloud Run + Vercel~~ ✅ [ADR 0009](adr/0009-cloud-run-vercel.md) (s78). (`CLAUDE.md` + arquitectura ya actualizados al cierre de s77.)
 - [ ] **Onboarding del cliente en Zendesk:** crear un agente de servicio "Auyan AI" y el OAuth client con ese usuario (hoy las respuestas salen firmadas por quien creó el client). Documentar en la guía de onboarding junto con el body del Trigger (solo IDs).
