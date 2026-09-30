@@ -63,9 +63,7 @@ class IntegrationContext:
 class MessageProvider(Protocol):
     """Canal bidireccional básico: recibe webhooks y envía mensajes."""
 
-    async def parse_inbound_webhook(
-        self, payload: dict[str, Any]
-    ) -> InboundMessage: ...
+    async def parse_inbound_webhook(self, payload: dict[str, Any]) -> InboundMessage: ...
 
     async def send_outbound(
         self,
@@ -73,7 +71,8 @@ class MessageProvider(Protocol):
         conversation_ref: str,
         content: str,
         attachments: list[dict[str, Any]] | None = None,
-    ) -> None: ...
+        idempotency_key: str | None = None,
+    ) -> Any: ...
 
 
 class HelpdeskProvider(MessageProvider, Protocol):

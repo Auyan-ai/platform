@@ -24,6 +24,7 @@ import contextlib
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from apps.api.db.client import bootstrap_connection, tenant_scope
 from apps.api.db.inbound_jobs import (
@@ -38,7 +39,8 @@ from apps.api.db.inbound_jobs import (
 )
 from apps.api.db.queries import get_conversation, get_tenant_configuration
 from apps.api.services.agent_resolution import finalize_agent_resolution, send_agent_reply
-from apps.api.services.channel_routing import load_delivery_client
+from apps.api.services.channel_delivery import deliver_to_customer, flush_pending_messages
+from apps.api.services.channel_routing import is_messaging_channel, load_delivery_client
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.usage import UsageRecorder
@@ -106,6 +108,12 @@ async def run_inbound_turn(
             settings=settings,
         )
 
+    if is_messaging_channel(conversation.channel):
+        # El comprador acaba de escribir: la ventana de 24 h está abierta → entregar lo
+        # que esperaba (confirmaciones L3, respuestas humanas) antes del nuevo turno.
+        async with tenant_scope(job.tenant_id) as conn:
+            await flush_pending_messages(conn, tenant_id=job.tenant_id, conversation=conversation)
+
     if cap_outcome is not None:
         outcome = cap_outcome
     else:
@@ -148,7 +156,9 @@ async def _deliver_outcome(
 
     Devuelve True si la respuesta llegó al helpdesk del cliente."""
     delivered = False
-    if outcome.response_text:
+    if outcome.response_text and is_messaging_channel(conversation.channel):
+        delivered = await _deliver_messaging_reply(job, conversation, outcome)
+    elif outcome.response_text:
         client = None
         try:
             async with tenant_scope(job.tenant_id) as conn:
@@ -212,6 +222,42 @@ async def _deliver_outcome(
         cost_usd=outcome.cost_usd,
     )
     return delivered
+
+
+async def _deliver_messaging_reply(
+    job: ClaimedInboundJob,
+    conversation: Conversation,
+    outcome: AgentOutcome,
+) -> bool:
+    """WhatsApp: entrega con ventana, formato e `Idempotency-Key` = id del mensaje del
+    agente (un reintento del job nunca duplica el mensaje en el móvil). Nunca lanza."""
+    message_id = UUID(outcome.output_message_id) if outcome.output_message_id else None
+    try:
+        async with tenant_scope(job.tenant_id) as conn:
+            result = await deliver_to_customer(
+                conn,
+                tenant_id=job.tenant_id,
+                conversation=conversation,
+                content=str(outcome.response_text),
+                message_id=message_id,
+            )
+    except Exception:
+        logger.error(
+            "agent_reply_messaging_delivery_failed",
+            extra={"tenant_id": str(job.tenant_id), "job_id": str(job.id)},
+            exc_info=True,
+        )
+        return False
+    if result != "delivered":
+        logger.error(
+            "agent_reply_not_delivered",
+            extra={
+                "tenant_id": str(job.tenant_id),
+                "conversation_id": str(job.conversation_id),
+                "result": result,
+            },
+        )
+    return result == "delivered"
 
 
 def retry_delay_seconds(attempts: int) -> int:

@@ -646,6 +646,112 @@ async def insert_message(
     return Message(**dict(row))
 
 
+async def merge_message_metadata(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    message_id: UUID,
+    patch: dict[str, Any],
+) -> bool:
+    """`metadata = metadata || patch` (claves de primer nivel). True si existía."""
+    result = await conn.execute(
+        """
+        UPDATE messages
+           SET metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        """,
+        tenant_id,
+        message_id,
+        patch,
+    )
+    return result == "UPDATE 1"
+
+
+async def get_last_customer_inbound_at(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    channel: ChannelType,
+    external_id: str,
+) -> datetime | None:
+    """Último mensaje del comprador en el hilo externo (todas las sesiones del chat).
+
+    Base de la ventana de 24 h de WhatsApp: cuenta el chat de Zernio, no la
+    conversación de Auyan.
+    """
+    value = await conn.fetchval(
+        """
+        SELECT max(m.created_at)
+          FROM messages m
+          JOIN conversations c
+            ON c.tenant_id = m.tenant_id AND c.id = m.conversation_id
+         WHERE m.tenant_id = $1
+           AND c.channel = $2::channel_type
+           AND c.external_id = $3
+           AND c.deleted_at IS NULL
+           AND m.deleted_at IS NULL
+           AND m.role = 'customer'
+           AND m.direction = 'inbound'
+        """,
+        tenant_id,
+        channel,
+        external_id,
+    )
+    return value  # type: ignore[no-any-return]
+
+
+async def list_pending_window_messages(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    channel: ChannelType,
+    external_id: str,
+) -> list[Message]:
+    """Salientes que esperan a que el comprador reabra la ventana, más viejos primero."""
+    rows = await conn.fetch(
+        """
+        SELECT m.id, m.tenant_id, m.conversation_id, m.role, m.direction,
+               m.author_user_id, m.content, m.attachments, m.metadata, m.created_at
+          FROM messages m
+          JOIN conversations c
+            ON c.tenant_id = m.tenant_id AND c.id = m.conversation_id
+         WHERE m.tenant_id = $1
+           AND c.channel = $2::channel_type
+           AND c.external_id = $3
+           AND c.deleted_at IS NULL
+           AND m.deleted_at IS NULL
+           AND m.direction = 'outbound'
+           AND m.metadata->>'delivery' = 'pending_window'
+         ORDER BY m.created_at, m.id
+        """,
+        tenant_id,
+        channel,
+        external_id,
+    )
+    return [Message(**dict(r)) for r in rows]
+
+
+async def find_outbound_message_by_platform_id(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    platform_message_id: str,
+) -> Message | None:
+    """Saliente enviado por Zernio con ese wamid (`metadata.zernio_platform_message_ids`)."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, conversation_id, role, direction,
+               author_user_id, content, attachments, metadata, created_at
+          FROM messages
+         WHERE tenant_id = $1
+           AND deleted_at IS NULL
+           AND direction = 'outbound'
+           AND metadata->'zernio_platform_message_ids' ? $2
+         ORDER BY created_at DESC
+         LIMIT 1
+        """,
+        tenant_id,
+        platform_message_id,
+    )
+    return None if row is None else Message(**dict(row))
+
+
 # ============================================================
 # Escalations
 # ============================================================

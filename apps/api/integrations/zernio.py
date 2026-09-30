@@ -479,18 +479,47 @@ class ZernioAdapter:
         attachments: list[dict[str, Any]] | None = None,
         idempotency_key: str | None = None,
     ) -> list[ZernioSendResult]:
-        """Envía `content` como uno o varios textos (≤4 000 caracteres cada uno).
+        """Envía `content` con formato de WhatsApp, en uno o varios textos (≤4 000 c/u).
 
         `idempotency_key` (id del mensaje persistido) → `Idempotency-Key: {key}:{n}` por
         trozo: un reintento nunca duplica el mensaje en el móvil del comprador.
         """
+        # Import local: zernio_format depende de este módulo (cortes y límites).
+        from apps.api.integrations.zernio_format import to_whatsapp_messages
+
         client = self.client(ctx)
         account_id = self.account_id(ctx)
         results: list[ZernioSendResult] = []
-        for n, chunk in enumerate(split_for_whatsapp(content)):
+        for n, chunk in enumerate(to_whatsapp_messages(content)):
             key = f"{idempotency_key}:{n}" if idempotency_key else None
             results.append(await client.send_text(conversation_ref, account_id, chunk, key))
         return results
+
+    async def send_reengagement_template(
+        self,
+        ctx: IntegrationContext,
+        conversation_ref: str,
+        *,
+        first_name: str,
+        idempotency_key: str | None = None,
+    ) -> ZernioSendResult:
+        """Plantilla de re-enganche del tenant (`config.reengagement_template`), `{{1}}` =
+        nombre. Lanza ExternalIntegrationError si el tenant no la tiene configurada."""
+        template = ctx.config.get("reengagement_template") or {}
+        name, language = template.get("name"), template.get("language")
+        if not name or not language:
+            raise ExternalIntegrationError(
+                "tenant without reengagement template", code="zernio_no_reengagement_template"
+            )
+        components = [{"type": "body", "parameters": [{"type": "text", "text": first_name}]}]
+        return await self.client(ctx).send_template(
+            conversation_ref,
+            self.account_id(ctx),
+            str(name),
+            str(language),
+            components,
+            idempotency_key=idempotency_key,
+        )
 
 
 _: MessageProvider = ZernioAdapter()  # type: ignore[assignment]

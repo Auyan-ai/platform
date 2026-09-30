@@ -15,7 +15,8 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from apps.api.services.channel_routing import load_delivery_client
+from apps.api.services.channel_delivery import deliver_to_customer
+from apps.api.services.channel_routing import is_messaging_channel, load_delivery_client
 
 if TYPE_CHECKING:
     import asyncpg
@@ -33,13 +34,27 @@ async def deliver_message_to_helpdesk(
     tenant_id: UUID,
     conversation: Conversation,
     content: str,
+    message_id: UUID | None = None,
 ) -> bool:
-    """Empuja `content` al helpdesk del cliente para esta conversación.
+    """Empuja `content` al canal del cliente para esta conversación.
+
+    En canales de mensajería (WhatsApp) la entrega respeta la ventana de 24 h
+    (`services.channel_delivery`): con la ventana cerrada el mensaje queda pendiente
+    (`message_id` obligatorio para marcarlo) y devuelve False — pendiente NO es entregado.
 
     Devuelve True si se entregó. False (sin lanzar) si el canal no es un helpdesk
     (ej. `chat`/`widget` de prueba), no hay integración activa, o la llamada falla.
     Debe llamarse con un `conn` ya dentro de su `tenant_scope`.
     """
+    if is_messaging_channel(conversation.channel):
+        result = await deliver_to_customer(
+            conn,
+            tenant_id=tenant_id,
+            conversation=conversation,
+            content=content,
+            message_id=message_id,
+        )
+        return result == "delivered"
     try:
         client = await load_delivery_client(conn, tenant_id=tenant_id, conversation=conversation)
         if client is None:

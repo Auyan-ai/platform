@@ -376,3 +376,58 @@ async def test_claim_errors_do_not_kill_the_loop(worker_db: dict[str, AsyncMock]
     worker.start()
     await asyncio.wait_for(done.wait(), timeout=2)
     await worker.stop()
+
+
+# ─── WhatsApp: pendientes antes del grafo + entrega con ventana ────────────────
+
+
+@pytest.fixture
+def wa_mocks(turn_mocks: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    conversation = make_conversation(channel="whatsapp", external_id="zconv-1")
+    turn_mocks["get_conversation"].return_value = conversation
+    order: list[str] = []
+    flush = AsyncMock(side_effect=lambda *a, **k: order.append("flush") or 1)
+    deliver = AsyncMock(return_value="delivered")
+    monkeypatch.setattr(f"{MODULE}.flush_pending_messages", flush)
+    monkeypatch.setattr(f"{MODULE}.deliver_to_customer", deliver)
+    turn_mocks.update(flush=flush, deliver=deliver, order=order, wa_conversation=conversation)
+    return turn_mocks
+
+
+async def test_whatsapp_flushes_pending_before_the_graph(wa_mocks: dict[str, Any]) -> None:
+    agent = _agent()
+    agent.process_inbound.side_effect = lambda **_: wa_mocks["order"].append("graph") or _outcome()
+    await run_inbound_turn(_job(channel="whatsapp"), agent_service=agent, settings=FakeSettings())
+    assert wa_mocks["order"] == ["flush", "graph"]
+
+
+async def test_whatsapp_reply_goes_through_window_aware_delivery(
+    wa_mocks: dict[str, Any],
+) -> None:
+    msg_id = "aaaaaaaa-0000-0000-0000-000000000001"
+    agent = _agent(_outcome(output_message_id=msg_id))
+    decision = await run_inbound_turn(
+        _job(channel="whatsapp"), agent_service=agent, settings=FakeSettings()
+    )
+    assert decision == "respond"
+    kwargs = wa_mocks["deliver"].await_args.kwargs
+    assert kwargs["message_id"] == UUID(msg_id)
+    assert kwargs["content"] == "Tu pedido va en camino."
+    wa_mocks["send_agent_reply"].assert_not_awaited()
+    assert wa_mocks["finalize_agent_resolution"].await_args.kwargs["delivered"] is True
+
+
+async def test_whatsapp_pending_reply_is_undelivered(wa_mocks: dict[str, Any]) -> None:
+    wa_mocks["deliver"].return_value = "pending_window"
+    decision = await run_inbound_turn(
+        _job(channel="whatsapp"), agent_service=_agent(), settings=FakeSettings()
+    )
+    assert decision == "respond:undelivered"
+    assert wa_mocks["finalize_agent_resolution"].await_args.kwargs["delivered"] is False
+
+
+async def test_helpdesk_turn_does_not_flush(turn_mocks: dict[str, Any], monkeypatch) -> None:
+    flush = AsyncMock()
+    monkeypatch.setattr(f"{MODULE}.flush_pending_messages", flush)
+    await run_inbound_turn(_job(), agent_service=_agent(), settings=FakeSettings())
+    flush.assert_not_awaited()

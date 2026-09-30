@@ -427,6 +427,7 @@ class ZendeskAdapter:
         conversation_ref: str,
         content: str,
         attachments: list[dict[str, Any]] | None = None,
+        idempotency_key: str | None = None,  # sin uso: los helpdesks no lo soportan
     ) -> None:
         """Envía una respuesta pública al requester del ticket."""
         await self._client(ctx).add_comment(conversation_ref, content, public=True)

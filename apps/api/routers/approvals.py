@@ -283,7 +283,11 @@ async def approve_action(
             delivered = reply_delivered(
                 conversation.channel,
                 delivered=await deliver_message_to_helpdesk(
-                    conn, tenant_id=tenant_id, conversation=conversation, content=result_message
+                    conn,
+                    tenant_id=tenant_id,
+                    conversation=conversation,
+                    content=result_message,
+                    message_id=msg.id,
                 ),
             )
 
@@ -375,7 +379,11 @@ async def reject_action(
         conversation = await get_conversation(conn, tenant_id, approval.conversation_id)
         if conversation is not None:
             await deliver_message_to_helpdesk(
-                conn, tenant_id=tenant_id, conversation=conversation, content=reply
+                conn,
+                tenant_id=tenant_id,
+                conversation=conversation,
+                content=reply,
+                message_id=msg.id,
             )
 
     return {
