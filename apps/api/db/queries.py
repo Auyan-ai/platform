@@ -758,6 +758,25 @@ async def resolve_escalation_by_reason(
     return int(result.split()[-1]) > 0
 
 
+async def resolve_open_escalations_for_conversation(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> int:
+    """Resuelve TODAS las escalaciones activas (pending/claimed) de la conversación.
+    Devuelve cuántas cerró."""
+    result = await conn.execute(
+        """
+        UPDATE escalations
+           SET status = 'resolved'::escalation_status
+         WHERE tenant_id = $1 AND conversation_id = $2
+           AND status IN ('pending', 'claimed')
+           AND deleted_at IS NULL
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return int(result.split()[-1])
+
+
 async def reactivate_escalated_conversation(
     conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
 ) -> bool:

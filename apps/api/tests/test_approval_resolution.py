@@ -70,6 +70,26 @@ async def test_no_matching_escalation_is_noop(q: dict[str, AsyncMock]) -> None:
     q["reactivate"].assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_executed_action_closes_all_open_escalations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Acción ejecutada: se cierran todas (incluido un escalado previo por la misma
+    petición que el gate reutilizó) y la conversación vuelve a 'open'."""
+    resolve_all = AsyncMock(return_value=2)
+    reactivate = AsyncMock(return_value=True)
+    monkeypatch.setattr(f"{MODULE}.resolve_open_escalations_for_conversation", resolve_all)
+    monkeypatch.setattr(f"{MODULE}.reactivate_escalated_conversation", reactivate)
+
+    closed = await approval_resolution.release_escalations_after_executed_action(
+        AsyncMock(), tenant_id=TENANT_ID, conversation_id=CONVERSATION_ID
+    )
+
+    assert closed == 2
+    resolve_all.assert_awaited_once_with(ANY, TENANT_ID, CONVERSATION_ID)
+    reactivate.assert_awaited_once_with(ANY, TENANT_ID, CONVERSATION_ID)
+
+
 class TestReplyDelivered:
     def test_helpdesk_channel_uses_delivery_result(self) -> None:
         assert approval_resolution.reply_delivered("zendesk", delivered=True) is True

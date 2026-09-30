@@ -103,6 +103,10 @@ def _make_app(
         "apps.api.routers.approvals.release_approval_escalation", AsyncMock(return_value=True)
     )
     monkeypatch.setattr(
+        "apps.api.routers.approvals.release_escalations_after_executed_action",
+        AsyncMock(return_value=1),
+    )
+    monkeypatch.setattr(
         "apps.api.routers.approvals.finalize_agent_resolution", AsyncMock(return_value=True)
     )
     monkeypatch.setattr("apps.api.routers.tool_permissions.tenant_scope", _fake_scope)
@@ -275,9 +279,7 @@ class TestApproveAction:
             "apps.api.routers.approvals.resolve_pending_approval", AsyncMock(return_value=None)
         )
         insert_message_mock = AsyncMock(return_value=_FakeMsg())
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.insert_message", insert_message_mock
-        )
+        monkeypatch.setattr("apps.api.routers.approvals.insert_message", insert_message_mock)
         monkeypatch.setattr(
             "apps.api.routers.approvals.update_conversation_last_message",
             AsyncMock(return_value=None),
@@ -286,9 +288,7 @@ class TestApproveAction:
             "apps.api.routers.approvals.get_conversation", AsyncMock(return_value=MagicMock())
         )
         deliver_mock = AsyncMock(return_value=True)
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.deliver_message_to_helpdesk", deliver_mock
-        )
+        monkeypatch.setattr("apps.api.routers.approvals.deliver_message_to_helpdesk", deliver_mock)
 
         app, client = _make_app(monkeypatch, approvals_router)
         resp = client.post(
@@ -419,17 +419,11 @@ class TestApproveAction:
             lambda slug: _FakeSkill,
         )
         resolve_mock = AsyncMock(return_value=None)
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.resolve_pending_approval", resolve_mock
-        )
+        monkeypatch.setattr("apps.api.routers.approvals.resolve_pending_approval", resolve_mock)
         insert_message_mock = AsyncMock()
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.insert_message", insert_message_mock
-        )
+        monkeypatch.setattr("apps.api.routers.approvals.insert_message", insert_message_mock)
         deliver_mock = AsyncMock(return_value=True)
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.deliver_message_to_helpdesk", deliver_mock
-        )
+        monkeypatch.setattr("apps.api.routers.approvals.deliver_message_to_helpdesk", deliver_mock)
 
         app, client = _make_app(monkeypatch, approvals_router)
         resp = client.post(
@@ -522,9 +516,10 @@ class TestRejectAction:
         assert resp.json()["execution_status"] == "rejected"
         assert insert_message_mock.await_args.kwargs["author_user_id"] == USER_ID
         # Bug E: el rechazo se entrega al helpdesk del cliente.
-        assert deliver_mock.await_args.kwargs["content"] == insert_message_mock.await_args.kwargs[
-            "content"
-        ]
+        assert (
+            deliver_mock.await_args.kwargs["content"]
+            == insert_message_mock.await_args.kwargs["content"]
+        )
 
 
 # ----------------------------------------------------------------
@@ -620,9 +615,11 @@ def _patch_success_path(
     }.items():
         monkeypatch.setattr(f"apps.api.routers.approvals.{name}", value)
     monkeypatch.setattr("apps.api.routers.approvals.SkillRegistry.get", lambda slug: _FakeSkill)
-    release = AsyncMock(return_value=True)
+    release = AsyncMock(return_value=1)
     finalize = AsyncMock(return_value=True)
-    monkeypatch.setattr("apps.api.routers.approvals.release_approval_escalation", release)
+    monkeypatch.setattr(
+        "apps.api.routers.approvals.release_escalations_after_executed_action", release
+    )
     monkeypatch.setattr("apps.api.routers.approvals.finalize_agent_resolution", finalize)
     return release, finalize
 
@@ -649,8 +646,10 @@ class TestCloseAfterApproval:
         resp = self._approve(client)
 
         assert resp.status_code == 200
+        # Acción ejecutada → se cierran TODAS las escalaciones de la conversación
+        # (tickets #29/#31 del E2E A4 quedaban 'pending' por un escalado previo).
         release.assert_awaited_once()
-        assert release.await_args.kwargs["approval_id"] == APPROVAL_ID
+        assert release.await_args.kwargs["conversation_id"] == _sample_approval().conversation_id
         finalize.assert_awaited_once()
         assert finalize.await_args.kwargs["delivered"] is True
 
@@ -695,7 +694,9 @@ class TestCloseAfterApproval:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         client = self._client(monkeypatch)
-        release, finalize = _patch_success_path(monkeypatch, channel="zendesk", delivered=True)
+        release_all, finalize = _patch_success_path(monkeypatch, channel="zendesk", delivered=True)
+        release_own = AsyncMock(return_value=True)
+        monkeypatch.setattr("apps.api.routers.approvals.release_approval_escalation", release_own)
 
         resp = client.post(
             f"/approvals/{APPROVAL_ID}/reject",
@@ -704,5 +705,9 @@ class TestCloseAfterApproval:
         )
 
         assert resp.status_code == 200
-        release.assert_awaited_once()
+        # Rechazo: solo se cierra la escalación del gate; la acción no se hizo, así
+        # que un escalado previo sigue abierto para el equipo.
+        release_own.assert_awaited_once()
+        assert release_own.await_args.kwargs["approval_id"] == APPROVAL_ID
+        release_all.assert_not_awaited()
         finalize.assert_not_awaited()
