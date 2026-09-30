@@ -38,7 +38,7 @@ Post-pivot, Auyan **no hostea un BPO humano**. El cliente conserva su equipo CX.
 | Realtime (MVP) | Polling con TanStack Query (`refetchInterval`) | Supabase Realtime; SSE desde API | Realtime requiere RLS posicionadas — deuda no cerrada |
 | Tests | Vitest (unit/component) + Playwright (e2e crítico) | Jest, Cypress | Vitest es más rápido y coherente con el stack moderno |
 | Lint/format | Biome | ESLint + Prettier | Un solo binario, más rápido, menos config |
-| Despliegue | Railway, app separada | Vercel, Fly.io | Consistencia con `apps/api` |
+| Despliegue | Vercel (desde s77) | Railway (usado hasta s76), Fly.io | Next.js nativo, plan Hobby gratis para staging |
 
 ---
 
@@ -48,7 +48,7 @@ Post-pivot, Auyan **no hostea un BPO humano**. El cliente conserva su equipo CX.
 Next.js 15  +  TypeScript strict  +  Tailwind v4  +  shadcn/ui
 @supabase/ssr  +  TanStack Query v5  +  openapi-fetch  +  openapi-typescript
 react-hook-form + zod  |  Vitest + Playwright  |  Biome
-pnpm workspaces  |  Railway
+pnpm workspaces  |  Vercel
 ```
 
 ---
@@ -261,7 +261,7 @@ export function apiClient(jwt: string, tenantId?: string) {
 
 ```bash
 # apps/web/.env.local
-NEXT_PUBLIC_API_URL=http://localhost:8000                  # staging: https://platform-staging-fdb7.up.railway.app
+NEXT_PUBLIC_API_URL=http://localhost:8000                  # staging: https://auyan-api-staging-350779301730.europe-west3.run.app
 NEXT_PUBLIC_SUPABASE_URL=https://<proyecto>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon_key>
 ```
@@ -270,13 +270,14 @@ No usamos `SUPABASE_SERVICE_ROLE_KEY` en el web — todas las operaciones admin 
 
 ---
 
-## 11. Despliegue (Railway)
+## 11. Despliegue (Vercel)
 
-- App staging: `platform-web-staging` / `auyan-web-staging`.
-- Build context: repo root (Next.js + workspaces).
-- Build cmd: `pnpm install --frozen-lockfile && pnpm --filter @auyan/web build`.
-- Start cmd: `pnpm --filter @auyan/web start --port ${PORT}`.
-- Healthcheck: `GET /api/health` (Route Handler trivial).
+- Proyecto staging: `auyan-web-staging` (equipo `kenny-medinas-projects`) → `https://auyan-web-staging.vercel.app`.
+- Root Directory: `apps/web`; install `pnpm install --frozen-lockfile`, build `pnpm build`.
+- `.vercelignore` en la raíz: sube solo `apps/web` + `packages/shared` + manifiestos (nunca `.env*`, API, docs ni migraciones; patrones anclados con `/`).
+- Env vars (Production y Preview): `NEXT_PUBLIC_API_URL` (Cloud Run), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (pública por diseño; marcada `--type config`).
+- Deploy: `vercel deploy --prod --yes` desde la raíz (repo enlazado con `vercel link`; `.vercel/` ignorado por git).
+- El API debe incluir la URL de Vercel en `ALLOWED_ORIGINS` (CORS) y Supabase Auth debe tenerla como Site URL / Redirect URL (magic links).
 
 ---
 
