@@ -13,6 +13,7 @@ Expone tres capas:
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 import logging
 from collections import OrderedDict
@@ -375,16 +376,44 @@ class ShopifyClient:
         email: bool = True,
         refund: bool = False,
     ) -> dict[str, Any]:
-        """Cancela un pedido. Acción L3 — requiere supervisor Opus y aprobación humana."""
+        """Cancela un pedido. Acción L3 — requiere supervisor Opus y aprobación humana.
+
+        GraphQL `orderCancel`: el `cancel.json` de REST ignoraba en silencio
+        `"refund": true` (espera un objeto) → cancelaba SIN devolver el pago (visto en
+        A4). Con `refund` se reembolsa al método de pago original; siempre se repone
+        stock. La mutación es asíncrona: se espera a que el pedido figure cancelado y
+        se devuelve el pedido (REST) como antes.
+        """
+        reason_enum = reason.strip().upper()
+        if reason_enum not in _CANCEL_REASONS:
+            reason_enum = "OTHER"
+        variables: dict[str, Any] = {
+            "orderId": f"gid://shopify/Order/{order_id}",
+            "reason": reason_enum,
+            "restock": True,
+            "notifyCustomer": email,
+            "refundMethod": {"originalPaymentMethodsRefund": True} if refund else None,
+        }
         async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self._base_url}/orders/{order_id}/cancel.json",
-                headers=self._headers(),
-                json={"reason": reason, "email": email, "refund": refund},
-                timeout=15,
-            )
-            response.raise_for_status()
-            return response.json()["order"]  # type: ignore[no-any-return]
+            data = await self._graphql(client, _ORDER_CANCEL_MUTATION, variables)
+            errors = data["orderCancel"]["orderCancelUserErrors"]
+            if errors:
+                raise ShopifyActionError(f"order_cancel_failed: {errors}")
+            for attempt in range(_CANCEL_POLL_ATTEMPTS):
+                response = await client.get(
+                    f"{self._base_url}/orders/{order_id}.json",
+                    headers=self._headers(),
+                    timeout=15,
+                )
+                response.raise_for_status()
+                order: dict[str, Any] = response.json()["order"]
+                if order.get("cancelled_at"):
+                    return order
+                if attempt < _CANCEL_POLL_ATTEMPTS - 1:
+                    await asyncio.sleep(_CANCEL_POLL_SECONDS)
+            # El job sigue en curso: se devuelve el estado actual (cancelled=False)
+            # para no afirmar al cliente algo que Shopify aún no confirmó.
+            return order
 
     async def update_shipping_address(
         self,
@@ -608,6 +637,25 @@ def return_reason_handle(reason: str) -> str:
             return handle
     return _FALLBACK_REASON_HANDLE
 
+
+_CANCEL_REASONS = frozenset({"CUSTOMER", "DECLINED", "FRAUD", "INVENTORY", "STAFF", "OTHER"})
+_CANCEL_POLL_ATTEMPTS = 8
+_CANCEL_POLL_SECONDS = 1.0
+
+_ORDER_CANCEL_MUTATION = """
+mutation OrderCancel(
+  $orderId: ID!, $reason: OrderCancelReason!, $restock: Boolean!,
+  $notifyCustomer: Boolean, $refundMethod: OrderCancelRefundMethodInput
+) {
+  orderCancel(
+    orderId: $orderId, reason: $reason, restock: $restock,
+    notifyCustomer: $notifyCustomer, refundMethod: $refundMethod
+  ) {
+    job { id done }
+    orderCancelUserErrors { field message code }
+  }
+}
+"""
 
 _RETURN_REASON_QUERY = """
 query ReturnReasons($handles: [String!]) {

@@ -8,6 +8,7 @@ un recurso REST `orders/{id}/returns.json` que no existe.
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -223,3 +224,102 @@ def test_return_reason_handle(reason: str, handle: str) -> None:
     from apps.api.integrations.shopify import return_reason_handle
 
     assert return_reason_handle(reason) == handle
+
+
+# ─── cancel_order (GraphQL orderCancel) ──────────────────────────────────────
+# Antes: REST cancel.json con "refund": true → Shopify lo ignoraba y cancelaba sin
+# devolver el pago (visto en A4, pedido #1432 quedó `paid`).
+
+
+def _cancel_ok() -> dict:
+    return {
+        "data": {
+            "orderCancel": {
+                "job": {"id": "gid://shopify/Job/1", "done": False},
+                "orderCancelUserErrors": [],
+            }
+        }
+    }
+
+
+@respx.mock
+async def test_cancel_with_refund_uses_original_payment_method(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("apps.api.integrations.shopify.asyncio.sleep", AsyncMock())
+    mutation = respx.post(f"{BASE}/graphql.json").respond(200, json=_cancel_ok())
+    respx.get(f"{BASE}/orders/1432.json").mock(
+        side_effect=[
+            httpx.Response(200, json={"order": {"id": 1432, "cancelled_at": None}}),
+            httpx.Response(
+                200,
+                json={
+                    "order": {
+                        "id": 1432,
+                        "cancelled_at": "2026-09-30T10:00:00Z",
+                        "financial_status": "refunded",
+                    }
+                },
+            ),
+        ]
+    )
+
+    order = await _client().cancel_order(1432, reason="customer", email=True, refund=True)
+
+    assert order["financial_status"] == "refunded"
+    variables = json.loads(mutation.calls.last.request.content)["variables"]
+    assert variables == {
+        "orderId": "gid://shopify/Order/1432",
+        "reason": "CUSTOMER",
+        "restock": True,
+        "notifyCustomer": True,
+        "refundMethod": {"originalPaymentMethodsRefund": True},
+    }
+
+
+@respx.mock
+async def test_cancel_without_refund_and_unknown_reason() -> None:
+    mutation = respx.post(f"{BASE}/graphql.json").respond(200, json=_cancel_ok())
+    respx.get(f"{BASE}/orders/9.json").respond(
+        200, json={"order": {"id": 9, "cancelled_at": "2026-09-30T10:00:00Z"}}
+    )
+
+    await _client().cancel_order(9, reason="ya no lo quiero", email=False, refund=False)
+
+    variables = json.loads(mutation.calls.last.request.content)["variables"]
+    assert variables["reason"] == "OTHER"
+    assert variables["refundMethod"] is None
+    assert variables["notifyCustomer"] is False
+
+
+@respx.mock
+async def test_cancel_user_errors_raise_without_polling() -> None:
+    respx.post(f"{BASE}/graphql.json").respond(
+        200,
+        json={
+            "data": {
+                "orderCancel": {
+                    "job": None,
+                    "orderCancelUserErrors": [
+                        {"field": ["orderId"], "message": "Order already cancelled", "code": "X"}
+                    ],
+                }
+            }
+        },
+    )
+    poll = respx.get(f"{BASE}/orders/9.json")
+    with pytest.raises(ShopifyActionError, match="order_cancel_failed"):
+        await _client().cancel_order(9, refund=True)
+    assert not poll.called
+
+
+@respx.mock
+async def test_cancel_still_processing_reports_not_cancelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Si el job no termina a tiempo no se afirma la cancelación."""
+    monkeypatch.setattr("apps.api.integrations.shopify.asyncio.sleep", AsyncMock())
+    respx.post(f"{BASE}/graphql.json").respond(200, json=_cancel_ok())
+    respx.get(f"{BASE}/orders/9.json").respond(200, json={"order": {"id": 9, "cancelled_at": None}})
+    order = await _client().cancel_order(9, refund=True)
+    assert order["cancelled_at"] is None
