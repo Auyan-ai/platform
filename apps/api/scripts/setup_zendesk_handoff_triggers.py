@@ -139,6 +139,18 @@ def with_not_handoff_condition(trigger: dict[str, Any]) -> dict[str, Any] | None
     return {"all": [*all_conditions, NOT_HANDOFF_CONDITION], "any": conditions.get("any") or []}
 
 
+def inbound_trigger_update(trigger: dict[str, Any]) -> dict[str, Any] | None:
+    """Body del PUT al trigger de inbound; None si ya excluye el handoff.
+
+    Zendesk valida el trigger entero en el PUT: sin `actions` responde 422 ("debe contener
+    por lo menos una acción"), así que se reenvían las suyas tal cual.
+    """
+    conditions = with_not_handoff_condition(trigger)
+    if conditions is None:
+        return None
+    return {"trigger": {"conditions": conditions, "actions": trigger.get("actions") or []}}
+
+
 def find_auyan_webhook(webhooks: list[dict[str, Any]], api_base_url: str | None) -> dict | None:
     for webhook in webhooks:
         endpoint = str(webhook.get("endpoint") or "")
@@ -202,15 +214,9 @@ async def run(args: argparse.Namespace) -> None:
             else:
                 plan.append(("PUT", f"/triggers/{existing['id']}.json", {"trigger": definition}))
         for inbound in find_inbound_triggers(triggers, webhook_id):
-            conditions = with_not_handoff_condition(inbound)
-            if conditions is not None:
-                plan.append(
-                    (
-                        "PUT",
-                        f"/triggers/{inbound['id']}.json",
-                        {"trigger": {"conditions": conditions}},
-                    )
-                )
+            body = inbound_trigger_update(inbound)
+            if body is not None:
+                plan.append(("PUT", f"/triggers/{inbound['id']}.json", body))
         me = await client.get_me()
 
         for method, path, body in plan:

@@ -341,6 +341,22 @@ def test_inbound_trigger_gets_not_handoff_condition_once() -> None:
     assert triggers.with_not_handoff_condition(inbound) is None
 
 
+def test_inbound_trigger_update_keeps_actions() -> None:
+    # Zendesk responde 422 si el PUT no trae acciones: se reenvían las del trigger.
+    actions = [{"field": "notification_webhook", "value": ["wh-1", '{"ticket_id": 1}']}]
+    inbound = {
+        "id": 1,
+        "conditions": {"all": [{"field": "role", "operator": "is", "value": "end_user"}]},
+        "actions": actions,
+    }
+    body = triggers.inbound_trigger_update(inbound)
+    assert body is not None
+    assert body["trigger"]["actions"] == actions
+    assert triggers.NOT_HANDOFF_CONDITION in body["trigger"]["conditions"]["all"]
+    inbound["conditions"] = body["trigger"]["conditions"]
+    assert triggers.inbound_trigger_update(inbound) is None
+
+
 def test_find_auyan_webhook() -> None:
     webhooks = [
         {"id": "a", "endpoint": "https://otro.example/hook"},
