@@ -106,6 +106,8 @@ async def test_non_owner_on_whatsapp_gets_phone_note_without_email() -> None:
     assert "número de teléfono" in out.ownership_note
     assert "email" not in out.ownership_note
     assert "persona del equipo" in out.ownership_note
+    # s81: tras el fix el agente ya no prometía, pero sí en nombre del equipo.
+    assert "ni prometas que el equipo lo hará" in out.ownership_note
 
 
 @pytest.mark.asyncio
