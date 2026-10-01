@@ -10,6 +10,7 @@ from apps.api.scripts.onboard_whatsapp import (
     account_phone_of,
     api_key_request,
     connect_url_params,
+    handoff_target_warning,
     pick_whatsapp_account,
     reengagement_template_request,
     sandbox_account_id,
@@ -93,3 +94,10 @@ def test_cli_requires_staging_flag_to_exist_for_sandbox() -> None:
     assert args.staging is True and args.account_id is None
     args = _parse_args(["prepare", "--tenant", "marea", "--brand", "Marea", "--dry-run"])
     assert (args.command, args.dry_run, args.rotate_key) == ("prepare", True, False)
+
+
+def test_onboarding_warns_when_escalations_cannot_reach_a_person() -> None:
+    """s81: Marea tenía Chatwoot como helpdesk primario y el handoff fallaba en vivo."""
+    assert "no tiene helpdesk primario" in (handoff_target_warning(None) or "")
+    assert "no admite handoff" in (handoff_target_warning("chatwoot") or "")
+    assert handoff_target_warning("zendesk") is None

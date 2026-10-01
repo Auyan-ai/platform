@@ -43,6 +43,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import html
 import json
 import logging
 import time
@@ -391,6 +392,13 @@ class ZendeskInboundComment:
         return self.author_id == self.requester_id
 
 
+def comment_plain_text(comment: dict[str, Any]) -> str:
+    """Texto de un comentario sin entidades HTML: el `plain_body` de Zendesk trae `&nbsp;`
+    y se guardaba tal cual en el historial (s81)."""
+    raw = str(comment.get("plain_body") or comment.get("body") or "")
+    return html.unescape(raw).replace("\xa0", " ").strip()
+
+
 def select_inbound_comment(
     comments_desc: list[dict[str, Any]], comment_id: str | None
 ) -> dict[str, Any] | None:
@@ -597,7 +605,7 @@ class ZendeskAdapter:
             author_name=author.get("name"),
             author_role=author.get("role"),
             public=bool(comment.get("public")),
-            content=str(comment.get("plain_body") or comment.get("body") or "").strip(),
+            content=comment_plain_text(comment),
             requester_id=str(ticket.get("requester_id", "")),
             via_channel=(comment.get("via") or {}).get("channel"),
         )

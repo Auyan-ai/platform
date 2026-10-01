@@ -51,12 +51,14 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from apps.api.db.queries import (
+    get_primary_integration_for_kind,
     get_tenant_by_id,
     get_tenant_by_slug,
     list_integrations_for_tenant,
     soft_delete_integration,
     upsert_integration,
 )
+from apps.api.integrations import chatwoot, gorgias, zendesk  # noqa: F401  registran los helpdesks
 from apps.api.integrations.zernio import ZERNIO_API_BASE_URL
 from apps.api.scripts.configure_staging_integrations import (
     _connect_database,
@@ -65,6 +67,7 @@ from apps.api.scripts.configure_staging_integrations import (
     _require_env,
     redact_credentials,
 )
+from apps.api.services.handoff import supports_handoff
 from apps.api.services.identity import normalize_phone
 from apps.api.services.integrations_crypto import decrypt_credentials, encrypt_credentials
 
@@ -284,8 +287,32 @@ async def _save_state(
 # ─── Subcomandos ──────────────────────────────────────────────────────────────
 
 
+def handoff_target_warning(primary_helpdesk: str | None) -> str | None:
+    """Aviso si los escalados de WhatsApp no van a llegar a nadie (s81: Marea tenía Chatwoot
+    como helpdesk primario y el handoff fallaba en vivo). None si el handoff es posible."""
+    if primary_helpdesk is None:
+        return (
+            "⚠️  El tenant no tiene helpdesk primario: los escalados de WhatsApp no abrirán "
+            "handoff y solo quedarán en el dashboard."
+        )
+    if not supports_handoff(primary_helpdesk):
+        return (
+            f"⚠️  El helpdesk primario es {primary_helpdesk} y no admite handoff: los escalados "
+            "de WhatsApp fallarán. Marca como primario un helpdesk con handoff (hoy: zendesk)."
+        )
+    return None
+
+
+async def _warn_handoff_target(conn: Any, tenant_id: UUID) -> None:
+    primary = await get_primary_integration_for_kind(conn, tenant_id=tenant_id, kind="helpdesk")
+    warning = handoff_target_warning(primary.provider if primary else None)
+    if warning:
+        print(warning)
+
+
 async def cmd_prepare(args: argparse.Namespace, conn: Any, admin: ZernioAdmin, key: bytes) -> None:
     tenant_id = await _resolve_tenant_id(conn, args.tenant)
+    await _warn_handoff_target(conn, tenant_id)
     _, state = await _load_state(conn, tenant_id, key)
     api_base = _require_env("AUYAN_API_BASE_URL")
 
@@ -332,6 +359,7 @@ async def cmd_prepare(args: argparse.Namespace, conn: Any, admin: ZernioAdmin, k
 
 async def cmd_finalize(args: argparse.Namespace, conn: Any, admin: ZernioAdmin, key: bytes) -> None:
     tenant_id = await _resolve_tenant_id(conn, args.tenant)
+    await _warn_handoff_target(conn, tenant_id)
     current, state = await _load_state(conn, tenant_id, key)
     if current is None or not state.config.get("profile_id"):
         raise SystemExit("Primero `prepare`: el tenant no tiene integración de Zernio.")
@@ -373,6 +401,7 @@ async def cmd_sandbox(args: argparse.Namespace, conn: Any, admin: ZernioAdmin, k
     if not args.staging:
         raise SystemExit("El sandbox es solo para staging: añade --staging.")
     tenant_id = await _resolve_tenant_id(conn, args.tenant)
+    await _warn_handoff_target(conn, tenant_id)
     _, state = await _load_state(conn, tenant_id, key)
     phone = normalize_phone(args.phone)
     if phone is None:

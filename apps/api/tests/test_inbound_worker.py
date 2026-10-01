@@ -296,6 +296,40 @@ async def test_whatsapp_approval_gate_sends_no_ack(
     send_fixed.assert_not_awaited()
 
 
+async def test_whatsapp_escalation_retries_handoff_when_escalation_existed(
+    turn_mocks: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """s81: un handoff fallido dejaba la escalación abierta y ningún turno lo reintentaba."""
+    send_fixed = _whatsapp_escalation(turn_mocks, monkeypatch, delivered="delivered")
+    outcome = _outcome(
+        decision="escalate",
+        response_text=None,
+        resolves_on_delivery=False,
+        escalation_created=False,
+        escalation_reason="customer_requested_human",
+    )
+    await run_inbound_turn(
+        _job(channel="whatsapp"), agent_service=_agent(outcome), settings=FakeSettings()
+    )
+    kwargs = turn_mocks["push_escalation_to_helpdesk_safe"].await_args.kwargs
+    assert kwargs["reason"] == "customer_requested_human"
+    assert send_fixed.await_args.args[2] == "escalation_ack"
+
+
+async def test_helpdesk_existing_escalation_is_not_pushed_again(
+    turn_mocks: dict[str, Any],
+) -> None:
+    outcome = _outcome(
+        decision="escalate",
+        response_text="Lo reviso con el equipo.",
+        resolves_on_delivery=False,
+        escalation_created=False,
+        escalation_reason="Pide reembolso fuera de política",
+    )
+    await run_inbound_turn(_job(), agent_service=_agent(outcome), settings=FakeSettings())
+    turn_mocks["push_escalation_to_helpdesk_safe"].assert_not_awaited()
+
+
 async def test_helpdesk_escalation_sends_no_fixed_ack(
     turn_mocks: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:

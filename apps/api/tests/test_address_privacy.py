@@ -44,21 +44,22 @@ _ORDER: dict[str, Any] = {
 }
 
 
-def _ctx(customer_email: str | None, mock: Any) -> SkillContext:
+def _ctx(customer_email: str | None, mock: Any, **extra: Any) -> SkillContext:
     return SkillContext(
         tenant_id=str(TENANT_ID),
         conversation_id="c",
         integration_ctx=IntegrationContext(tenant_id=TENANT_ID, credentials={}, config={}),
         commerce_mock=mock,
         customer_email=customer_email,
+        **extra,
     )
 
 
-async def _status(customer_email: str | None) -> Any:
+async def _status(customer_email: str | None, **extra: Any) -> Any:
     mock = AsyncMock()
     mock.get_order_by_name = AsyncMock(return_value=_ORDER)
     return await GetOrderStatus().execute(
-        _ctx(customer_email, mock), GetOrderStatusInput(order_identifier="#1429")
+        _ctx(customer_email, mock, **extra), GetOrderStatusInput(order_identifier="#1429")
     )
 
 
@@ -80,6 +81,31 @@ async def test_non_owner_gets_address_withheld(email: str | None) -> None:
     assert out.shipping_address is None
     assert out.shipping_address_withheld is True
     assert out.found is True
+
+
+@pytest.mark.asyncio
+async def test_owner_is_verified_without_note() -> None:
+    out = await _status("kenny.medina@ahoracrypto.com")
+    assert out.ownership_verified is True
+    assert out.ownership_note is None
+
+
+@pytest.mark.asyncio
+async def test_non_owner_by_email_gets_note_against_promises() -> None:
+    """s81: sin aviso, el agente prometía un cambio que el gate L3 iba a bloquear."""
+    out = await _status("otro@example.com", channel="zendesk")
+    assert out.ownership_verified is False
+    assert "No ofrezcas ni prometas" in out.ownership_note
+    assert "email con el que hizo la compra" in out.ownership_note
+
+
+@pytest.mark.asyncio
+async def test_non_owner_on_whatsapp_gets_phone_note_without_email() -> None:
+    out = await _status(None, channel="whatsapp", customer_phone="+34610637711")
+    assert out.ownership_verified is False
+    assert "número de teléfono" in out.ownership_note
+    assert "email" not in out.ownership_note
+    assert "persona del equipo" in out.ownership_note
 
 
 @pytest.mark.asyncio

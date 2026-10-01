@@ -197,7 +197,7 @@ class TestAdapterMethods:
             "id": 9,
             "author_id": 5,
             "public": True,
-            "plain_body": "Hola",
+            "plain_body": "Hola, ¿en qué te ayudo?&nbsp;",
             "via": {"channel": "web", "source": {}},
         }
         with patch("apps.api.integrations.zendesk.ZendeskClient") as MockClient:
@@ -209,6 +209,8 @@ class TestAdapterMethods:
             result = await adapter.fetch_handoff_comment(_CTX, "10", "9")
         assert result is not None
         assert result.via_channel == "web" and result.author_name == "Laura"
+        # s81: el `&nbsp;` de Zendesk se guardaba tal cual en el historial.
+        assert result.content == "Hola, ¿en qué te ayudo?"
 
     @pytest.mark.asyncio
     async def test_add_internal_note(self) -> None:
