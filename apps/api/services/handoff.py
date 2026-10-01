@@ -56,6 +56,15 @@ class HandoffUnavailableError(RuntimeError):
     """El tenant no tiene un helpdesk primario que admita handoff."""
 
 
+def supports_handoff(provider: str) -> bool:
+    """¿El helpdesk `provider` (adapter registrado) puede recibir un handoff?"""
+    try:
+        adapter_cls = IntegrationRegistry.get("helpdesk", provider)
+    except ValueError:
+        return False
+    return hasattr(adapter_cls, "open_handoff_ticket")
+
+
 def is_approval_gate(reason: str | None) -> bool:
     """La puerta L3 no abre handoff: se decide en el dashboard de Auyan y la IA sigue."""
     return bool(reason) and str(reason).startswith(APPROVAL_GATE_PREFIX)

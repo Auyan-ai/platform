@@ -112,6 +112,16 @@ def test_returns_verifies_policy_before_claiming():
     assert "antes de afirmar" in body
 
 
+def test_order_change_never_promises_on_unverified_orders():
+    """s81: el guardrail decía «puedes seguir con el cambio» cuando la dirección venía
+    retenida, pero el gate L3 bloquea siempre ese caso → el agente prometía en falso."""
+    order_change = next(a for a in CANONICAL_AOPS if a["slug"] == "order_change")
+    guardrails = " ".join(order_change["frontmatter"]["guardrails"])
+    assert "ownership_verified: false" in guardrails
+    assert "NO ofrezcas ni prometas" in guardrails
+    assert "Puedes seguir con el cambio" not in guardrails
+
+
 def test_frontmatter_required_keys():
     for a in CANONICAL_AOPS:
         fm = a["frontmatter"]

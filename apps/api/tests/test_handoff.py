@@ -223,6 +223,14 @@ async def test_load_target_requires_handoff_support(monkeypatch: pytest.MonkeyPa
         await handoff_mod._load_handoff_target(AsyncMock(), TENANT_ID)
 
 
+def test_supports_handoff_by_provider() -> None:
+    from apps.api.integrations import chatwoot, zendesk  # noqa: F401  registran los adapters
+
+    assert handoff_mod.supports_handoff("zendesk") is True
+    assert handoff_mod.supports_handoff("chatwoot") is False
+    assert handoff_mod.supports_handoff("desconocido") is False
+
+
 # ─── Enrutado del escalado ────────────────────────────────────────────────────
 
 

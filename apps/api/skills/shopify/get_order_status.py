@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from apps.api.integrations.shopify import ShopifyAdapter
+from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.identity import check_order_ownership
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
@@ -37,6 +38,33 @@ class OrderDetail(SkillOutput):
     # lo indica para que el agente lo explique sin revelarla.
     shipping_address: ShippingAddressInfo | None = None
     shipping_address_withheld: bool = False
+    # Mismo gate determinista que las L3. Si es False, `ownership_note` le dice al agente
+    # qué NO puede ofrecer (s81: prometía un cambio que el gate L3 iba a bloquear).
+    ownership_verified: bool | None = None
+    ownership_note: str | None = None
+
+
+_NOT_OWNER_NOTE = (
+    "No se puede verificar que este pedido sea de quien escribe{why}. No ofrezcas ni "
+    "prometas cambiar, cancelar ni devolver este pedido (el sistema lo bloquearía) y no "
+    "compartas su dirección ni sus datos de contacto. Explícaselo con amabilidad y {next}."
+)
+
+
+def ownership_note(channel: str | None) -> str:
+    """Aviso para el agente cuando quien escribe no es el dueño del pedido, según el canal."""
+    if channel is not None and is_messaging_channel(channel):
+        return _NOT_OWNER_NOTE.format(
+            why=" desde este número de teléfono",
+            next="ofrécele pasar el caso a una persona del equipo",
+        )
+    return _NOT_OWNER_NOTE.format(
+        why=": el mensaje no viene del email de la compra",
+        next=(
+            "pídele que escriba desde el email con el que hizo la compra u ofrécele pasar "
+            "el caso a una persona del equipo"
+        ),
+    )
 
 
 @SkillRegistry.register
@@ -132,4 +160,6 @@ class GetOrderStatus(Skill):
             line_items=line_items,
             shipping_address=shipping_address,
             shipping_address_withheld=bool(raw_address) and not is_owner,
+            ownership_verified=is_owner,
+            ownership_note=None if is_owner else ownership_note(ctx.channel),
         )
