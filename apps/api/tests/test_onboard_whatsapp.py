@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from apps.api.scripts.onboard_whatsapp import (
     WEBHOOK_EVENTS,
     ZernioIntegrationState,
@@ -10,6 +11,7 @@ from apps.api.scripts.onboard_whatsapp import (
     account_phone_of,
     api_key_request,
     connect_url_params,
+    ensure_not_sandbox,
     handoff_target_warning,
     pick_whatsapp_account,
     reengagement_template_request,
@@ -101,3 +103,11 @@ def test_onboarding_warns_when_escalations_cannot_reach_a_person() -> None:
     assert "no tiene helpdesk primario" in (handoff_target_warning(None) or "")
     assert "no admite handoff" in (handoff_target_warning("chatwoot") or "")
     assert handoff_target_warning("zendesk") is None
+
+
+def test_prepare_refuses_a_tenant_with_the_sandbox_registered() -> None:
+    """s81: `prepare` habría reutilizado la key de alcance completo y el webhook sin filtro
+    del sandbox para el número real."""
+    with pytest.raises(SystemExit, match="offboard"):
+        ensure_not_sandbox(ZernioIntegrationState(config={"account_id": "a", "sandbox": True}))
+    ensure_not_sandbox(ZernioIntegrationState(config={"profile_id": "p1"}))

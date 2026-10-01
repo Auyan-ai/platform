@@ -46,8 +46,9 @@ class OrderDetail(SkillOutput):
 
 _NOT_OWNER_NOTE = (
     "No se puede verificar que este pedido sea de quien escribe{why}. No ofrezcas ni "
-    "prometas cambiar, cancelar ni devolver este pedido (el sistema lo bloquearía) y no "
-    "compartas su dirección ni sus datos de contacto. Explícaselo con amabilidad y {next}."
+    "prometas cambiar, cancelar ni devolver este pedido (el sistema lo bloquearía), ni "
+    "prometas que el equipo lo hará, y no compartas su dirección ni sus datos de contacto. "
+    "Explícaselo con amabilidad y {next}."
 )
 
 
