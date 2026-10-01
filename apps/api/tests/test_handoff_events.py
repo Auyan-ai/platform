@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -62,6 +63,7 @@ def _comment(**overrides: Any) -> ZendeskAgentComment:
         "public": True,
         "content": "Hola Ana, ya te hicimos el cambio.",
         "requester_id": "777",
+        "via_channel": "web",
     }
     data.update(overrides)
     return ZendeskAgentComment(**data)
@@ -145,7 +147,8 @@ async def test_public_agent_reply_reaches_whatsapp(env: dict[str, Any]) -> None:
     [
         ({"public": False}, "private_comment"),
         ({"author_id": "777"}, "requester_comment"),
-        ({"author_id": "1"}, "api_user_comment"),
+        ({"author_id": "1", "via_channel": "api"}, "api_user_comment"),
+        ({"author_id": "1", "via_channel": None}, "api_user_comment"),  # sin via: fail-safe
         ({"content": ""}, "empty_content"),
     ],
 )
@@ -156,6 +159,27 @@ async def test_comments_that_never_reach_the_customer(
     assert (await _event(env))["ignored"] == reason
     env["insert_message"].assert_not_awaited()
     env["deliver_to_customer"].assert_not_awaited()
+
+
+async def test_human_reply_from_the_api_user_account_reaches_whatsapp(
+    env: dict[str, Any],
+) -> None:
+    """s81: el OAuth client de Marea se creó con la cuenta de Kenny; su respuesta desde la
+    web de Zendesk (`via=web`) se descartaba como si fuera de Auyan."""
+    env["adapter"].fetch_handoff_comment.return_value = _comment(author_id="1", via_channel="web")
+    assert (await _event(env))["processed"] is True
+    env["deliver_to_customer"].assert_awaited_once()
+
+
+async def test_ignored_reply_is_logged_with_reason(
+    env: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    env["adapter"].fetch_handoff_comment.return_value = _comment(content="")
+    caplog.set_level(logging.INFO)
+    await _event(env)
+    record = next(r for r in caplog.records if r.message == "handoff_reply_ignored")
+    assert record.levelname == "WARNING"
+    assert record.reason == "empty_content" and record.ticket_id == "555"
 
 
 async def test_zendesk_retry_is_not_duplicated(env: dict[str, Any]) -> None:

@@ -191,6 +191,26 @@ class TestAdapterMethods:
         inst.add_comment.assert_awaited_once_with("10", "respuesta", public=True)
 
     @pytest.mark.asyncio
+    async def test_fetch_handoff_comment_reads_via_channel(self) -> None:
+        adapter = ZendeskAdapter()
+        comment = {
+            "id": 9,
+            "author_id": 5,
+            "public": True,
+            "plain_body": "Hola",
+            "via": {"channel": "web", "source": {}},
+        }
+        with patch("apps.api.integrations.zendesk.ZendeskClient") as MockClient:
+            inst = MockClient.return_value
+            inst.get_ticket_with_users = AsyncMock(return_value={"ticket": {"requester_id": 7}})
+            inst.list_comments_with_users = AsyncMock(
+                return_value={"comments": [comment], "users": [{"id": 5, "name": "Laura"}]}
+            )
+            result = await adapter.fetch_handoff_comment(_CTX, "10", "9")
+        assert result is not None
+        assert result.via_channel == "web" and result.author_name == "Laura"
+
+    @pytest.mark.asyncio
     async def test_add_internal_note(self) -> None:
         adapter = ZendeskAdapter()
         with patch("apps.api.integrations.zendesk.ZendeskClient") as MockClient:

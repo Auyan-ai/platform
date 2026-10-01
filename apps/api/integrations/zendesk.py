@@ -419,6 +419,9 @@ class ZendeskAgentComment:
     public: bool
     content: str
     requester_id: str
+    # Por dónde se creó (`via.channel` de Zendesk): `api` (Auyan) o `web`/`mobile`/`email`
+    # (una persona). Distingue a Auyan de un humano que use la misma cuenta.
+    via_channel: str | None = None
 
 
 # ─── Adapter stateless — implementa HelpdeskProvider ──────────────────────────
@@ -586,9 +589,7 @@ class ZendeskAdapter:
         if comment is None:
             return None
         author_id = str(comment.get("author_id", ""))
-        author = next(
-            (u for u in data.get("users") or [] if str(u.get("id")) == author_id), {}
-        )
+        author = next((u for u in data.get("users") or [] if str(u.get("id")) == author_id), {})
         return ZendeskAgentComment(
             ticket_id=ticket_id,
             comment_id=str(comment.get("id", "")),
@@ -598,6 +599,7 @@ class ZendeskAdapter:
             public=bool(comment.get("public")),
             content=str(comment.get("plain_body") or comment.get("body") or "").strip(),
             requester_id=str(ticket.get("requester_id", "")),
+            via_channel=(comment.get("via") or {}).get("channel"),
         )
 
     async def current_user_id(self, ctx: IntegrationContext) -> str:
