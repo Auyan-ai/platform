@@ -12,6 +12,7 @@ from apps.api.scripts.onboard_whatsapp import (
     connect_url_params,
     pick_whatsapp_account,
     reengagement_template_request,
+    sandbox_account_id,
     webhook_request,
     webhook_url,
 )
@@ -32,10 +33,17 @@ def test_webhook_request_filters_by_profile_and_subscribes_events() -> None:
     assert {"message.received", "message.sent", "message.failed"} <= set(body["events"])
 
 
-def test_sandbox_webhook_filters_by_account() -> None:
-    body = webhook_request("marea", "https://x/webhooks/zernio", "s", account_id="acc-sb")
-    assert body["accountIds"] == ["acc-sb"]
+def test_sandbox_webhook_has_no_account_filter() -> None:
+    # El número del sandbox no es del equipo: filtrar por su cuenta da 404 en Zernio.
+    body = webhook_request("marea", "https://x/webhooks/zernio", "s")
+    assert "accountIds" not in body
     assert "profileIds" not in body
+
+
+def test_sandbox_account_id_from_phone_numbers() -> None:
+    payload = {"numbers": [], "sandbox": {"phoneNumber": "+1202", "accountId": "acc-sb"}}
+    assert sandbox_account_id(payload) == "acc-sb"
+    assert sandbox_account_id({"numbers": []}) is None
 
 
 def test_connect_url_is_hosted_signup_in_spanish() -> None:
@@ -57,7 +65,11 @@ def test_reengagement_template_is_utility_es_with_one_variable() -> None:
 def test_pick_whatsapp_account_and_fields() -> None:
     accounts = [
         {"_id": "ig-1", "platform": "instagram"},
-        {"_id": "wa-1", "platform": "whatsapp", "metadata": {"displayPhoneNumber": "+34 600 11 12 22"}},
+        {
+            "_id": "wa-1",
+            "platform": "whatsapp",
+            "metadata": {"displayPhoneNumber": "+34 600 11 12 22"},
+        },
     ]
     account = pick_whatsapp_account(accounts)
     assert account is not None

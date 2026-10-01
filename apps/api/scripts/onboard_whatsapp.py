@@ -19,7 +19,7 @@ AUYAN_API_BASE_URL— y `.env.zernio` aparte con ZERNIO_API_KEY; nunca en `.env.
 
     # Staging: sandbox compartido de Zernio (sin profile; routing por accountId).
     python -m scripts.onboard_whatsapp sandbox --tenant marea-studio --staging \\
-        --phone "+34600111222" [--account-id <account.id del primer webhook>]
+        --phone "+34600111222" [--account-id <id>]  # por defecto: GET /phone-numbers → sandbox
 
     # Baja: borra webhook y key en Zernio y hace soft delete de la integración.
     python -m scripts.onboard_whatsapp offboard --tenant marea-studio
@@ -127,7 +127,6 @@ def webhook_request(
     secret: str,
     *,
     profile_id: str | None = None,
-    account_id: str | None = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
         "name": f"auyan-{slug}"[:50],
@@ -137,8 +136,6 @@ def webhook_request(
     }
     if profile_id:
         body["profileIds"] = [profile_id]
-    if account_id:
-        body["accountIds"] = [account_id]
     return body
 
 
@@ -176,6 +173,13 @@ def pick_whatsapp_account(accounts: list[dict[str, Any]]) -> dict[str, Any] | No
         if str(account.get("platform") or "").lower() == "whatsapp":
             return account
     return None
+
+
+def sandbox_account_id(phone_numbers: dict[str, Any]) -> str | None:
+    """`accountId` del número compartido del sandbox (`GET /v1/phone-numbers` → `sandbox`)."""
+    sandbox = phone_numbers.get("sandbox")
+    value = sandbox.get("accountId") if isinstance(sandbox, dict) else None
+    return str(value) if value else None
 
 
 def account_id_of(account: dict[str, Any]) -> str | None:
@@ -378,12 +382,9 @@ async def cmd_sandbox(args: argparse.Namespace, conn: Any, admin: ZernioAdmin, k
     else:
         await admin.request("POST", "/whatsapp/sandbox/sessions", json={"phone": phone})
         print(f"Activación enviada a {phone}: responde al WhatsApp del sandbox para activarla.")
-    if not args.account_id:
-        print(
-            "Falta --account-id: escribe al número del sandbox y copia `account.id` del log del "
-            "webhook (GET /v1/webhooks/logs); luego repite con --account-id."
-        )
-        return
+    account_id = args.account_id or sandbox_account_id(await admin.request("GET", "/phone-numbers"))
+    if not account_id:
+        raise SystemExit("Zernio no devuelve el número del sandbox (GET /phone-numbers).")
     if not state.credentials.get("api_key"):
         # El sandbox compartido no tiene profile: la key limitada por profile no lo ve.
         # Excepción SOLO de staging: key de alcance completo, caduca en 30 días.
@@ -395,14 +396,13 @@ async def cmd_sandbox(args: argparse.Namespace, conn: Any, admin: ZernioAdmin, k
             api_key = created.get("apiKey") or created.get("api_key") or {}
             state.credentials["api_key"] = api_key["key"]
             state.config["api_key_id"] = api_key.get("id") or api_key.get("_id")
+            # Se guarda ya (inactiva): si falla el webhook, la key no queda huérfana en Zernio.
+            await _save_state(conn, tenant_id, key, state)
     if not state.config.get("webhook_id"):
         secret = secrets.token_hex(32)
-        body = webhook_request(
-            args.tenant,
-            webhook_url(_require_env("AUYAN_API_BASE_URL")),
-            secret,
-            account_id=args.account_id,
-        )
+        # Sin filtro `accountIds`: el número del sandbox es de Zernio, no del equipo (filtrar
+        # por él → 404 account_not_found). El routing a tenant lo hace /webhooks/zernio.
+        body = webhook_request(args.tenant, webhook_url(_require_env("AUYAN_API_BASE_URL")), secret)
         if args.dry_run:
             print("POST /webhooks/settings", json.dumps({**body, "secret": "***"}))
         else:
@@ -410,13 +410,13 @@ async def cmd_sandbox(args: argparse.Namespace, conn: Any, admin: ZernioAdmin, k
             webhook = created.get("webhook") or {}
             state.config["webhook_id"] = webhook.get("_id") or webhook.get("id")
             state.credentials["webhook_secret"] = secret
-    state.config.update({"account_id": args.account_id, "sandbox": True})
+    state.config.update({"account_id": account_id, "sandbox": True})
     state.is_active = True
     if args.dry_run:
         print("Plan:", json.dumps(state.redacted(), indent=2))
         return
     await _save_state(conn, tenant_id, key, state)
-    print(f"OK: sandbox registrado para {args.tenant} (account_id={args.account_id}).")
+    print(f"OK: sandbox registrado para {args.tenant} (account_id={account_id}).")
 
 
 async def cmd_offboard(args: argparse.Namespace, conn: Any, admin: ZernioAdmin, key: bytes) -> None:
