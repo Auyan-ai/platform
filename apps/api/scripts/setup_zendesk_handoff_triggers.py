@@ -94,7 +94,8 @@ def solved_trigger(webhook_id: str, subdomain: str) -> dict[str, Any]:
         "title": SOLVED_TITLE,
         "conditions": {
             "all": [
-                {"field": "status", "operator": "changed_to", "value": "solved"},
+                # En la API de Zendesk "cambió a" es `value` (`changed_to` → 422).
+                {"field": "status", "operator": "value", "value": "solved"},
                 {"field": "current_tags", "operator": "includes", "value": HANDOFF_TAG},
             ],
             "any": [],
