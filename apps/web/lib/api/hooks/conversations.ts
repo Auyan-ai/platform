@@ -53,6 +53,36 @@ export function useConversation(tenantId: string, conversationId: string) {
   })
 }
 
+// Vista previa de un adjunto: URL firmada de vida corta (el bucket es privado). Sin
+// refetch periódico: cambiar la URL a mitad de un audio cortaría la reproducción; se
+// renueva al volver a la pestaña cuando ya está vieja (caduca a los 5 min).
+export function useAttachmentUrl(
+  tenantId: string,
+  conversationId: string,
+  messageId: string,
+  index: number,
+) {
+  return useQuery({
+    queryKey: queryKeys.conversations.attachment(tenantId, messageId, index),
+    queryFn: async () => {
+      const token = await getToken()
+      const { data, error } = await apiClient(token, tenantId).GET(
+        '/conversations/{conversation_id}/messages/{message_id}/attachments/{index}',
+        {
+          params: {
+            path: { conversation_id: conversationId, message_id: messageId, index },
+          },
+        },
+      )
+      if (error) throw error
+      return data
+    },
+    staleTime: 4 * 60_000,
+    refetchOnWindowFocus: true,
+    retry: 1,
+  })
+}
+
 export function useReplyMutation(tenantId: string, conversationId: string) {
   const queryClient = useQueryClient()
   return useMutation({

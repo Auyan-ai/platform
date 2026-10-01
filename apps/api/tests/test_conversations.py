@@ -248,6 +248,69 @@ class TestGetConversation:
         assert resp.json()["error"] == "conversation_not_found"
 
 
+class TestAttachmentUrl:
+    """Vista previa de adjuntos: URL firmada de vida corta, nunca de otro tenant."""
+
+    PATH = f"{TENANT_ID}/{CONVERSATION_ID}/m/0.jpg"
+
+    def _get(
+        self, monkeypatch: pytest.MonkeyPatch, message: Any, index: int = 0
+    ) -> tuple[Any, AsyncMock]:
+        monkeypatch.setattr(
+            "apps.api.routers.conversations.get_conversation_message",
+            AsyncMock(return_value=message),
+        )
+        signer = AsyncMock(return_value="https://sb.example/storage/v1/object/sign/x?token=t")
+        monkeypatch.setattr("apps.api.routers.conversations.create_signed_url", signer)
+        app = _make_app(monkeypatch)
+        resp = TestClient(app).get(
+            f"/conversations/{CONVERSATION_ID}/messages/{OUTBOUND_MSG_ID}/attachments/{index}",
+            headers=AUTH_HDR,
+        )
+        return resp, signer
+
+    def _message(self, path: str) -> Any:
+        return make_message(
+            id=OUTBOUND_MSG_ID,
+            attachments=[
+                {"path": path, "filename": "0.jpg", "kind": "image", "mime_type": "image/jpeg"}
+            ],
+        )
+
+    def test_returns_short_lived_signed_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        resp, signer = self._get(monkeypatch, self._message(self.PATH))
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["url"].endswith("?token=t")
+        assert body["kind"] == "image" and body["mime_type"] == "image/jpeg"
+        assert body["expires_in"] == 300
+        signer.assert_awaited_once_with(self.PATH)
+
+    def test_index_out_of_range_is_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        resp, signer = self._get(monkeypatch, self._message(self.PATH), index=1)
+        assert resp.status_code == 404
+        signer.assert_not_awaited()
+
+    def test_message_from_another_conversation_is_404(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        resp, signer = self._get(monkeypatch, None)
+        assert resp.status_code == 404
+        signer.assert_not_awaited()
+
+    def test_never_signs_a_path_outside_the_tenant(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Defensa en profundidad: aunque el mensaje apuntara a otro tenant, no se firma."""
+        other = f"99999999-9999-9999-9999-999999999999/{CONVERSATION_ID}/m/0.jpg"
+        resp, signer = self._get(monkeypatch, self._message(other))
+        assert resp.status_code == 404
+        signer.assert_not_awaited()
+
+    def test_negative_index_is_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        resp, signer = self._get(monkeypatch, self._message(self.PATH), index=-1)
+        assert resp.status_code == 422
+        signer.assert_not_awaited()
+
+
 class TestReply:
     def test_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         msg = make_message(id=OUTBOUND_MSG_ID, role="agent_human", direction="outbound", content="hola agente")

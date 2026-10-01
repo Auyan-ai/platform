@@ -32,6 +32,8 @@ export const queryKeys = {
       ['conversations', tenantId, filters] as const,
     detail: (tenantId: string, conversationId: string) =>
       ['conversations', tenantId, conversationId] as const,
+    attachment: (tenantId: string, messageId: string, index: number) =>
+      ['conversations', tenantId, 'attachment', messageId, index] as const,
   },
   escalations: {
     list: (tenantId: string, filters?: Record<string, unknown>) =>

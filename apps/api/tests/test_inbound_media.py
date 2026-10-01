@@ -333,6 +333,49 @@ async def test_store_and_download_use_private_bucket(monkeypatch: pytest.MonkeyP
     assert calls[1][1].startswith("/storage/v1/object/authenticated/conversation-media/")
 
 
+def _storage_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = MagicMock()
+    settings.supabase_url = "https://proj.supabase.co"
+    settings.supabase_service_role_key.get_secret_value.return_value = "srk"
+    monkeypatch.setattr(media_storage, "get_settings", lambda: settings)
+
+
+async def test_signed_url_matches_supabase_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Forma real de la respuesta de Supabase, verificada contra staging en s81:
+    `{"signedURL": "/object/sign/<bucket>/<path>?token=…"}`, relativa a `/storage/v1`."""
+    path = f"{TENANT_ID}/{CONVERSATION_ID}/{INBOUND_MSG_ID}/0.jpg"
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content)
+        seen["auth"] = request.headers["Authorization"]
+        return httpx.Response(
+            200, json={"signedURL": f"/object/sign/conversation-media/{path}?token=tok"}
+        )
+
+    _storage_settings(monkeypatch)
+    monkeypatch.setattr(media_storage, "_transport", httpx.MockTransport(handler))
+    url = await media_storage.create_signed_url(path)
+    assert seen["path"] == f"/storage/v1/object/sign/conversation-media/{path}"
+    assert seen["body"] == {"expiresIn": media_storage.SIGNED_URL_SECONDS}
+    assert seen["auth"] == "Bearer srk"
+    assert url == (
+        f"https://proj.supabase.co/storage/v1/object/sign/conversation-media/{path}?token=tok"
+    )
+
+
+async def test_signed_url_failure_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    _storage_settings(monkeypatch)
+    monkeypatch.setattr(
+        media_storage,
+        "_transport",
+        httpx.MockTransport(lambda r: httpx.Response(400, json={"error": "not_found"})),
+    )
+    with pytest.raises(ExternalIntegrationError):
+        await media_storage.create_signed_url("t/c/m/0.jpg")
+
+
 async def test_store_rejects_oversized(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(media_storage, "MAX_ATTACHMENT_BYTES", 3)
     with pytest.raises(ExternalIntegrationError):

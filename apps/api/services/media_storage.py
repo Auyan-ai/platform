@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 MEDIA_BUCKET = "conversation-media"
 MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
+# Vida de las URLs firmadas para ver un adjunto en el dashboard: el bucket sigue privado.
+SIGNED_URL_SECONDS = 300
 _EXTENSIONS = {
     "audio/ogg": "ogg",
     "audio/opus": "opus",
@@ -125,3 +127,31 @@ async def download_attachment(path: str) -> bytes:
             code="storage_download_failed",
         )
     return response.content
+
+
+async def create_signed_url(path: str, expires_in: int = SIGNED_URL_SECONDS) -> str:
+    """URL firmada de vida corta para ver un adjunto del bucket privado.
+
+    Contrato verificado contra Supabase (s81): `POST /storage/v1/object/sign/{bucket}/{path}`
+    con `{"expiresIn"}` → `{"signedURL": "/object/sign/…?token=…"}`, relativa a `/storage/v1`.
+    """
+    base, headers = _storage_base()
+    try:
+        async with httpx.AsyncClient(transport=_transport) as client:
+            response = await client.post(
+                f"{base}/sign/{MEDIA_BUCKET}/{quote(path)}",
+                json={"expiresIn": expires_in},
+                headers=headers,
+                timeout=15,
+            )
+    except httpx.HTTPError as exc:
+        raise ExternalIntegrationError(
+            f"storage sign transport error: {type(exc).__name__}", code="storage_transport"
+        ) from exc
+    signed = response.json().get("signedURL") if response.is_success else None
+    if not signed:
+        logger.error("media_storage_sign_failed", extra={"status": response.status_code})
+        raise ExternalIntegrationError(
+            f"storage sign failed: HTTP {response.status_code}", code="storage_sign_failed"
+        )
+    return f"{base.removesuffix('/object')}{signed}"
