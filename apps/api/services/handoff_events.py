@@ -62,6 +62,15 @@ def _ignored(reason: str) -> dict[str, Any]:
     return {"received": True, "processed": False, "ignored": reason}
 
 
+def _ignored_reply(
+    reason: str, extra: dict[str, Any], *, level: int = logging.INFO
+) -> dict[str, Any]:
+    """Descarte de un comentario del helpdesk: nunca en silencio (s81: una respuesta
+    humana se perdía sin rastro)."""
+    logger.log(level, "handoff_reply_ignored", extra={**extra, "reason": reason})
+    return _ignored(reason)
+
+
 async def _latest_session(
     conn: asyncpg.Connection, tenant_id: UUID, handoff: ConversationHandoff
 ) -> Any:
@@ -111,18 +120,28 @@ async def _on_helpdesk_reply(
     comment_id: str | None,
 ) -> dict[str, Any]:
     ticket_id = str(handoff.external_ticket_id)
+    extra: dict[str, Any] = {"tenant_id": str(tenant_id), "ticket_id": ticket_id}
     comment = await adapter.fetch_handoff_comment(ctx, ticket_id, comment_id)
     if comment is None:
-        return _ignored("comment_not_found")
+        return _ignored_reply("comment_not_found", extra, level=logging.WARNING)
+    extra |= {
+        "comment_id": comment.comment_id,
+        "author_id": comment.author_id,
+        "via": comment.via_channel,
+    }
     api_user_id = str(ctx.config.get("api_user_id") or "")
     if not comment.public:
-        return _ignored("private_comment")
+        return _ignored_reply("private_comment", extra)
     if comment.author_id == comment.requester_id:
-        return _ignored("requester_comment")
-    if api_user_id and comment.author_id == api_user_id:
-        return _ignored("api_user_comment")
+        return _ignored_reply("requester_comment", extra)
+    # Anti-loop: solo lo que Auyan publica POR LA API. Si el OAuth client se creó con la
+    # cuenta de una persona, sus respuestas desde la web de Zendesk (`via=web`) sí llegan
+    # al cliente. Sin `via` se asume la API (fail-safe contra el bucle).
+    if api_user_id and comment.author_id == api_user_id and (comment.via_channel or "api") == "api":
+        return _ignored_reply("api_user_comment", extra)
     if not comment.content:
-        return _ignored("empty_content")
+        # Un comentario público solo con adjunto tampoco llega: que se vea.
+        return _ignored_reply("empty_content", extra, level=logging.WARNING)
 
     async with tenant_scope(tenant_id) as conn:
         claimed = await claim_webhook_idempotency_key(
