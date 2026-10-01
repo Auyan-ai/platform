@@ -48,7 +48,7 @@ from apps.api.db.queries import (
 from apps.api.services.agent_resolution import finalize_agent_resolution, send_agent_reply
 from apps.api.services.channel_delivery import deliver_to_customer, flush_pending_messages
 from apps.api.services.channel_routing import is_messaging_channel, load_delivery_client
-from apps.api.services.handoff import close_handoff, forward_customer_message
+from apps.api.services.handoff import close_handoff, forward_customer_message, is_approval_gate
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
 from apps.api.services.inbound_media import fallback_message, process_inbound_media
 from apps.api.services.message_cap import enforce_message_cap
@@ -217,15 +217,18 @@ async def _messaging_pre_graph(
         # Si falla queda visible en la cola: el mensaje no llegó al ticket (logger.error).
         return ("handoff_forwarded" if forwarded else "handoff_forward_failed"), contents
     if media.fallback_kind is not None:
-        await _send_media_fallback(job, conversation, media.fallback_kind)
+        await _send_fixed_message(job, conversation, media.fallback_kind)
         return "media_fallback", contents
     return None, contents
 
 
-async def _send_media_fallback(
+async def _send_fixed_message(
     job: ClaimedInboundJob, conversation: Conversation, kind: str
 ) -> None:
-    """Mensaje FIJO del tenant cuando no hay nada que razonar (sin grafo). Nunca lanza."""
+    """Mensaje FIJO del tenant por el canal de mensajería (sin LLM). Nunca lanza.
+
+    Cuando no hay nada que razonar (adjunto sin texto, audio ilegible) y como acuse de un
+    escalado que no llevó respuesta al cliente."""
     extra = {"tenant_id": str(job.tenant_id), "job_id": str(job.id), "kind": kind}
     try:
         async with tenant_scope(job.tenant_id) as conn:
@@ -252,12 +255,12 @@ async def _send_media_fallback(
                 message_id=message.id,
             )
     except Exception:
-        logger.error("media_fallback_failed", extra=extra, exc_info=True)
+        logger.error("fixed_message_failed", extra=extra, exc_info=True)
         return
     if result != "delivered":
-        logger.error("media_fallback_not_delivered", extra={**extra, "result": result})
+        logger.error("fixed_message_not_delivered", extra={**extra, "result": result})
     else:
-        logger.info("media_fallback_sent", extra=extra)
+        logger.info("fixed_message_sent", extra=extra)
 
 
 async def _deliver_outcome(
@@ -324,11 +327,19 @@ async def _deliver_outcome(
 
     # Escalado: nota interna + asignación al equipo CX, solo al crear la escalación.
     if outcome.escalation_created:
+        reason = outcome.escalation_reason or "unspecified_escalation"
         await push_escalation_to_helpdesk_safe(
-            tenant_id=job.tenant_id,
-            conversation=conversation,
-            reason=outcome.escalation_reason or "unspecified_escalation",
+            tenant_id=job.tenant_id, conversation=conversation, reason=reason
         )
+        # En un chat nadie ve un ticket `pending`: si el turno escaló sin llegarle nada al
+        # cliente, acuse fijo (haya o no handoff; si no lo hay, ya salió `handoff_unavailable`
+        # como ERROR). La puerta L3 no: la IA sigue atendiendo y ya respondió.
+        if (
+            is_messaging_channel(conversation.channel)
+            and not delivered
+            and not is_approval_gate(reason)
+        ):
+            await _send_fixed_message(job, conversation, "escalation_ack")
 
     _usage_recorder.record(
         tenant_id=job.tenant_id,

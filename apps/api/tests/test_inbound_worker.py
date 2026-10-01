@@ -11,6 +11,7 @@ from uuid import UUID
 import pytest
 from apps.api.agents.service import AgentOutcome
 from apps.api.db.inbound_jobs import ClaimedInboundJob
+from apps.api.services.handoff import APPROVAL_GATE_PREFIX
 from apps.api.services.inbound_media import MediaOutcome
 from apps.api.services.inbound_worker import (
     InboundJobError,
@@ -225,6 +226,90 @@ async def test_escalation_pushes_note_to_helpdesk(turn_mocks: dict[str, Any]) ->
     await run_inbound_turn(_job(), agent_service=_agent(outcome), settings=FakeSettings())
     kwargs = turn_mocks["push_escalation_to_helpdesk_safe"].await_args.kwargs
     assert kwargs["reason"] == "Pide reembolso fuera de política"
+
+
+def _whatsapp_escalation(
+    turn_mocks: dict[str, Any], monkeypatch: pytest.MonkeyPatch, *, delivered: str
+) -> AsyncMock:
+    turn_mocks["get_conversation"].return_value = make_conversation(
+        channel="whatsapp", external_id="chat-1"
+    )
+    monkeypatch.setattr(
+        f"{MODULE}._messaging_pre_graph", AsyncMock(return_value=(None, ["¿cuánto tarda?"]))
+    )
+    monkeypatch.setattr(f"{MODULE}.deliver_to_customer", AsyncMock(return_value=delivered))
+    send_fixed = AsyncMock()
+    monkeypatch.setattr(f"{MODULE}._send_fixed_message", send_fixed)
+    return send_fixed
+
+
+async def test_whatsapp_escalation_without_reply_sends_fixed_ack(
+    turn_mocks: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """En un chat nadie ve un ticket `pending`: el cliente recibe un acuse fijo."""
+    send_fixed = _whatsapp_escalation(turn_mocks, monkeypatch, delivered="delivered")
+    outcome = _outcome(
+        decision="escalate",
+        response_text=None,
+        resolves_on_delivery=False,
+        escalation_created=True,
+        escalation_reason="low_confidence: 0.50 < threshold 0.65",
+    )
+    await run_inbound_turn(
+        _job(channel="whatsapp"), agent_service=_agent(outcome), settings=FakeSettings()
+    )
+    turn_mocks["push_escalation_to_helpdesk_safe"].assert_awaited_once()
+    assert send_fixed.await_args.args[2] == "escalation_ack"
+
+
+async def test_whatsapp_escalation_with_delivered_reply_sends_no_ack(
+    turn_mocks: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    send_fixed = _whatsapp_escalation(turn_mocks, monkeypatch, delivered="delivered")
+    outcome = _outcome(
+        decision="escalate",
+        response_text="Te paso con el equipo.",
+        resolves_on_delivery=False,
+        escalation_created=True,
+        escalation_reason="Pide hablar con una persona",
+    )
+    await run_inbound_turn(
+        _job(channel="whatsapp"), agent_service=_agent(outcome), settings=FakeSettings()
+    )
+    send_fixed.assert_not_awaited()
+
+
+async def test_whatsapp_approval_gate_sends_no_ack(
+    turn_mocks: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    send_fixed = _whatsapp_escalation(turn_mocks, monkeypatch, delivered="delivered")
+    outcome = _outcome(
+        decision="escalate",
+        response_text=None,
+        resolves_on_delivery=False,
+        escalation_created=True,
+        escalation_reason=f"{APPROVAL_GATE_PREFIX}cancel_order",
+    )
+    await run_inbound_turn(
+        _job(channel="whatsapp"), agent_service=_agent(outcome), settings=FakeSettings()
+    )
+    send_fixed.assert_not_awaited()
+
+
+async def test_helpdesk_escalation_sends_no_fixed_ack(
+    turn_mocks: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    send_fixed = AsyncMock()
+    monkeypatch.setattr(f"{MODULE}._send_fixed_message", send_fixed)
+    outcome = _outcome(
+        decision="escalate",
+        response_text=None,
+        resolves_on_delivery=False,
+        escalation_created=True,
+        escalation_reason="Pide reembolso fuera de política",
+    )
+    await run_inbound_turn(_job(), agent_service=_agent(outcome), settings=FakeSettings())
+    send_fixed.assert_not_awaited()
 
 
 async def test_missing_conversation_raises_for_retry(turn_mocks: dict[str, Any]) -> None:
