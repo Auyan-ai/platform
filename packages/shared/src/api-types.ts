@@ -662,6 +662,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/conversations/{conversation_id}/messages/{message_id}/attachments/{index}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** URL firmada (vida corta) para ver un adjunto del comprador */
+        get: operations["get_attachment_url_conversations__conversation_id__messages__message_id__attachments__index__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/conversations/{conversation_id}/reply": {
         parameters: {
             query?: never;
@@ -1679,6 +1696,18 @@ export interface components {
             error?: string | null;
         };
         MessageAttachmentOut: {
+            /** Filename */
+            filename: string;
+            /** Kind */
+            kind: string;
+            /** Mime Type */
+            mime_type?: string | null;
+        };
+        AttachmentUrlOut: {
+            /** Url */
+            url: string;
+            /** Expires In */
+            expires_in: number;
             /** Filename */
             filename: string;
             /** Kind */
@@ -3997,6 +4026,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConversationDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_attachment_url_conversations__conversation_id__messages__message_id__attachments__index__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path: {
+                conversation_id: string;
+                message_id: string;
+                index: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentUrlOut"];
                 };
             };
             /** @description Validation Error */

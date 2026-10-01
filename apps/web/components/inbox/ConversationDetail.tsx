@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
+  useAttachmentUrl,
   useConversation,
   useReplyMutation,
   useEscalateMutation,
@@ -19,6 +20,7 @@ import type { components } from '@auyan/shared/api-types'
 
 type ConversationOut = components['schemas']['ConversationOut']
 type MessageOut = components['schemas']['MessageOut']
+type MessageAttachmentOut = components['schemas']['MessageAttachmentOut']
 type HandoffOut = components['schemas']['HandoffOut']
 
 // ----------------------------------------------------------------
@@ -112,7 +114,70 @@ function formatTime(dateStr: string): string {
 // Message bubble
 // ----------------------------------------------------------------
 
-function MessageBubble({ msg }: { msg: MessageOut }) {
+// Foto, audio o vídeo del comprador, desde el bucket privado con una URL firmada.
+function AttachmentPreview({
+  tenantId,
+  msg,
+  att,
+  index,
+}: {
+  tenantId: string
+  msg: MessageOut
+  att: MessageAttachmentOut
+  index: number
+}) {
+  const { data, isError } = useAttachmentUrl(tenantId, msg.conversation_id, msg.id, index)
+  const label = `📎 ${ATTACHMENT_KIND_LABELS[att.kind] ?? att.kind} · ${att.filename}`
+  if (!data) {
+    return <li className="opacity-80">{isError ? `${label} (no disponible)` : label}</li>
+  }
+  if (att.kind === 'image' || att.kind === 'sticker') {
+    return (
+      <li>
+        <a href={data.url} target="_blank" rel="noreferrer" title="Abrir en grande">
+          {/* URL firmada y efímera de Supabase: next/image no aplica aquí. */}
+          <img src={data.url} alt={label} className="max-h-48 max-w-full rounded-md" />
+        </a>
+      </li>
+    )
+  }
+  if (att.kind === 'audio') {
+    return (
+      <li className="space-y-1">
+        <span className="opacity-80">{label}</span>
+        {/* biome-ignore lint/a11y/useMediaCaption: nota de voz del comprador, sin subtítulos; la transcripción (ADR 0011) irá como texto del mensaje */}
+        <audio controls preload="none" src={data.url} className="w-64 max-w-full" />
+      </li>
+    )
+  }
+  if (att.kind === 'video') {
+    return (
+      <li>
+        {/* biome-ignore lint/a11y/useMediaCaption: vídeo del comprador, sin subtítulos */}
+        <video
+          controls
+          preload="metadata"
+          src={data.url}
+          className="max-h-64 max-w-full rounded-md"
+        />
+      </li>
+    )
+  }
+  return (
+    <li>
+      <a
+        href={data.url}
+        target="_blank"
+        rel="noreferrer"
+        className="opacity-80 underline underline-offset-2"
+      >
+        {label}
+      </a>
+    </li>
+  )
+}
+
+function MessageBubble({ msg, tenantId }: { msg: MessageOut; tenantId: string }) {
   const isSystem = msg.role === 'system'
   return (
     <div className={cn('flex flex-col max-w-[75%]', BUBBLE_STYLES[msg.role])}>
@@ -127,11 +192,15 @@ function MessageBubble({ msg }: { msg: MessageOut }) {
       >
         {msg.content}
         {msg.attachments && msg.attachments.length > 0 && (
-          <ul className="mt-2 space-y-0.5 text-xs opacity-80">
-            {msg.attachments.map((att) => (
-              <li key={att.filename}>
-                📎 {ATTACHMENT_KIND_LABELS[att.kind] ?? att.kind} · {att.filename}
-              </li>
+          <ul className="mt-2 space-y-2 text-xs">
+            {msg.attachments.map((att, index) => (
+              <AttachmentPreview
+                key={`${att.filename}-${index}`}
+                tenantId={tenantId}
+                msg={msg}
+                att={att}
+                index={index}
+              />
             ))}
           </ul>
         )}
@@ -402,7 +471,7 @@ export function ConversationDetail({
         {messages.length === 0 ? (
           <p className="text-center text-sm text-foreground-muted py-8">Sin mensajes aún.</p>
         ) : (
-          messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)
+          messages.map((msg) => <MessageBubble key={msg.id} msg={msg} tenantId={tenantId} />)
         )}
         <div ref={bottomRef} />
       </div>

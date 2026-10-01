@@ -7,10 +7,11 @@ from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from apps.api.core.config import Settings, get_settings
+from apps.api.core.errors import NotFoundError
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
 from apps.api.db.client import tenant_scope
 from apps.api.db.models import ChannelType, ConversationStatus, EscalationStatus, MessageRole
-from apps.api.db.queries import get_active_handoff_for_chat
+from apps.api.db.queries import get_active_handoff_for_chat, get_conversation_message
 from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.conversations import (
     close_conversation,
@@ -21,7 +22,8 @@ from apps.api.services.conversations import (
     reply_to_conversation,
 )
 from apps.api.services.helpdesk_closure import close_external_helpdesk_ticket
-from fastapi import APIRouter, Depends, Query, status
+from apps.api.services.media_storage import SIGNED_URL_SECONDS, create_signed_url
+from fastapi import APIRouter, Depends, Path, Query, status
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -58,6 +60,22 @@ class MessageAttachmentOut(BaseModel):
     filename: str
     kind: str
     mime_type: str | None = None
+
+
+class AttachmentUrlOut(BaseModel):
+    """URL firmada de vida corta para ver un adjunto del bucket privado."""
+
+    url: str
+    expires_in: int
+    filename: str
+    kind: str
+    mime_type: str | None = None
+
+
+def _listed_attachments(raw: Any) -> list[dict[str, Any]]:
+    """Adjuntos que muestra el inbox, en orden. Mismo listado para `MessageOut` y para la
+    vista previa: el índice que manda la web apunta al mismo adjunto."""
+    return [a for a in (raw or []) if isinstance(a, dict) and (a.get("path") or a.get("filename"))]
 
 
 class MessageOut(BaseModel):
@@ -103,8 +121,7 @@ class MessageOut(BaseModel):
                     "kind": a.get("kind") or "file",
                     "mime_type": a.get("mime_type"),
                 }
-                for a in raw_attachments
-                if isinstance(a, dict) and (a.get("path") or a.get("filename"))
+                for a in _listed_attachments(raw_attachments)
             ],
             "delivery": metadata.get("delivery"),
         }
@@ -213,6 +230,36 @@ async def get_conversation(
     )
 
 
+@router.get(
+    "/{conversation_id}/messages/{message_id}/attachments/{index}",
+    response_model=AttachmentUrlOut,
+    summary="URL firmada (vida corta) para ver un adjunto del comprador",
+)
+async def get_attachment_url(
+    conversation_id: UUID,
+    message_id: UUID,
+    tenant_id: TenantIdDep,
+    index: Annotated[int, Path(ge=0)],
+) -> AttachmentUrlOut:
+    async with tenant_scope(tenant_id) as conn:
+        message = await get_conversation_message(conn, tenant_id, conversation_id, message_id)
+    attachments = _listed_attachments(message.attachments if message else None)
+    item = attachments[index] if index < len(attachments) else None
+    path = str(item.get("path") or "") if item else ""
+    # La ruta del adjunto empieza siempre por el tenant y la conversación (media_storage):
+    # defensa en profundidad para no firmar nunca un objeto de otro tenant.
+    if not path.startswith(f"{tenant_id}/{conversation_id}/"):
+        raise NotFoundError("attachment not found", code="attachment_not_found")
+    url = await create_signed_url(path)
+    return AttachmentUrlOut(
+        url=url,
+        expires_in=SIGNED_URL_SECONDS,
+        filename=str(item.get("filename") or path.rsplit("/", 1)[-1]),
+        kind=str(item.get("kind") or "file"),
+        mime_type=item.get("mime_type"),
+    )
+
+
 @router.post(
     "/{conversation_id}/reply",
     response_model=MessageOut,
@@ -244,9 +291,7 @@ async def escalate(
     tenant_id: TenantIdDep,
 ) -> EscalationOut:
     async with tenant_scope(tenant_id) as conn:
-        escalation = await escalate_conversation(
-            conn, tenant_id, conversation_id, body.reason
-        )
+        escalation = await escalate_conversation(conn, tenant_id, conversation_id, body.reason)
     return EscalationOut.model_validate(escalation)
 
 

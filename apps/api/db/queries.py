@@ -575,6 +575,27 @@ async def get_messages_for_conversation(
     return [Message(**dict(r)) for r in rows]
 
 
+async def get_conversation_message(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    message_id: UUID,
+) -> Message | None:
+    """Un mensaje de una conversación del tenant; None si no existe o es de otra."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, conversation_id, role, direction,
+               author_user_id, content, attachments, metadata, created_at
+          FROM messages
+         WHERE tenant_id = $1 AND conversation_id = $2 AND id = $3 AND deleted_at IS NULL
+        """,
+        tenant_id,
+        conversation_id,
+        message_id,
+    )
+    return Message(**dict(row)) if row else None
+
+
 async def get_recent_messages(
     conn: asyncpg.Connection,
     tenant_id: UUID,
@@ -756,6 +777,7 @@ async def find_outbound_message_by_platform_id(
 # ============================================================
 # Handoffs (Sprint 2, ADR 0010)
 # ============================================================
+
 
 async def get_active_handoff(
     conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
