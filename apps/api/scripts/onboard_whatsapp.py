@@ -303,6 +303,16 @@ def handoff_target_warning(primary_helpdesk: str | None) -> str | None:
     return None
 
 
+def ensure_not_sandbox(state: ZernioIntegrationState) -> None:
+    """`prepare` sobre el sandbox reutilizaría su key de alcance completo (caduca a los 30
+    días) y su webhook sin filtro, en vez de la key limitada y el webhook del profile (s81)."""
+    if state.config.get("sandbox"):
+        raise SystemExit(
+            "El tenant tiene registrado el sandbox de Zernio: primero `offboard` (borra su key "
+            "y su webhook) y después `prepare` con el número real."
+        )
+
+
 async def _warn_handoff_target(conn: Any, tenant_id: UUID) -> None:
     primary = await get_primary_integration_for_kind(conn, tenant_id=tenant_id, kind="helpdesk")
     warning = handoff_target_warning(primary.provider if primary else None)
@@ -314,6 +324,7 @@ async def cmd_prepare(args: argparse.Namespace, conn: Any, admin: ZernioAdmin, k
     tenant_id = await _resolve_tenant_id(conn, args.tenant)
     await _warn_handoff_target(conn, tenant_id)
     _, state = await _load_state(conn, tenant_id, key)
+    ensure_not_sandbox(state)
     api_base = _require_env("AUYAN_API_BASE_URL")
 
     profile_id = state.config.get("profile_id")

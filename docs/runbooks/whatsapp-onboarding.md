@@ -94,6 +94,10 @@ El `accountId` del número compartido se lee de `GET /v1/phone-numbers` → `san
 `--account-id`). El webhook va **sin** filtro `accountIds`: el número es de Zernio, no del
 equipo, y Zernio responde `404 account_not_found`. El comando es idempotente.
 
+**Del sandbox al número real:** primero `offboard` (borra la key y el webhook del sandbox) y
+después `prepare`. `prepare` se niega si el tenant tiene el sandbox registrado: reutilizaría su
+key de alcance completo y su webhook sin filtro.
+
 El sandbox no tiene profile: el routing va por `account_id` y el índice único garantiza que
 solo un tenant de staging lo tenga. **Excepción solo de staging:** la key del sandbox es de
 alcance completo y caduca a los 30 días (una key limitada por profile no ve el sandbox).
