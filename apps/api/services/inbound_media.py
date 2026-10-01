@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 FallbackKind = str  # audio_too_long | audio_unavailable | download_failed | media_without_text
-#                     | unsupported
+#                     | unsupported | escalation_ack (este último lo usa el worker al escalar)
 FALLBACK_PRIORITY = (
     "audio_too_long",
     "audio_unavailable",
@@ -67,6 +67,9 @@ DEFAULT_FALLBACK_MESSAGES: dict[str, str] = {
         "No hemos podido abrir lo que nos enviaste. ¿Puedes escribirnos tu consulta, por favor?"
     ),
     "unsupported": "¿En qué te podemos ayudar? Escríbenos tu consulta, por favor.",
+    "escalation_ack": (
+        "Le hemos pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
+    ),
 }
 _DOWNLOADABLE = frozenset({"image", "audio", "video", "file"})
 
