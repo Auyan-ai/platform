@@ -87,9 +87,12 @@ condición `tags no incluye auyan_handoff`. Guarda `api_user_id` en la config de
 
 ```bash
 python -m scripts.onboard_whatsapp sandbox --tenant <slug> --staging --phone "+34…"
-# escribir al número del sandbox; copiar account.id del log del webhook (GET /v1/webhooks/logs)
-python -m scripts.onboard_whatsapp sandbox --tenant <slug> --staging --phone "+34…" --account-id <id>
+# después, responder en el móvil al WhatsApp del sandbox para activar la sesión (7 días)
 ```
+
+El `accountId` del número compartido se lee de `GET /v1/phone-numbers` → `sandbox` (o
+`--account-id`). El webhook va **sin** filtro `accountIds`: el número es de Zernio, no del
+equipo, y Zernio responde `404 account_not_found`. El comando es idempotente.
 
 El sandbox no tiene profile: el routing va por `account_id` y el índice único garantiza que
 solo un tenant de staging lo tenga. **Excepción solo de staging:** la key del sandbox es de
