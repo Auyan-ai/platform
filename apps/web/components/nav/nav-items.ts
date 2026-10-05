@@ -10,6 +10,7 @@ import {
   MessagesSquare,
   ScrollText,
   Sparkles,
+  Stethoscope,
 } from 'lucide-react'
 
 export type TenantSection =
@@ -23,6 +24,7 @@ export type TenantSection =
   | 'aops'
   | 'proposals'
   | 'simulator'
+  | 'doctor'
 
 export interface TenantNavItem {
   label: string
@@ -111,6 +113,17 @@ export const TENANT_NAV_GROUPS: TenantNavGroup[] = [
         icon: FlaskConical,
         section: 'simulator',
         keywords: ['simulator', 'pruebas', 'tests'],
+      },
+    ],
+  },
+  {
+    label: 'Operación',
+    items: [
+      {
+        label: 'Diagnóstico',
+        icon: Stethoscope,
+        section: 'doctor',
+        keywords: ['doctor', 'salud', 'integraciones', 'webhooks', 'triggers', 'migraciones'],
       },
     ],
   },

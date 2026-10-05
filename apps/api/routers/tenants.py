@@ -56,6 +56,7 @@ from apps.api.integrations.shopify import (
     ShopifyClient,
     exchange_client_credentials,
 )
+from apps.api.services.doctor import DoctorReport, TenantNotFoundError, run_tenant_doctor
 from apps.api.services.integrations_crypto import (
     encrypt_credentials,
     get_integration_crypto_key,
@@ -1311,6 +1312,24 @@ async def get_my_integrations(tenant_id: TenantIdDep) -> IntegrationsOverviewRes
         integrations=[IntegrationStatusResponse.model_validate(r) for r in rows],
         checklist=_checklist_response(checklist, tenant.agent_lifecycle_state),
     )
+
+
+@router.get(
+    "/me/doctor",
+    response_model=DoctorReport,
+    summary="Doctor del tenant: migraciones, helpdesk, triggers, webhooks y WhatsApp en vivo",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def get_my_tenant_doctor(tenant_id: TenantIdDep, settings: SettingsDep) -> DoctorReport:
+    """Solo lecturas (catálogo de Postgres + APIs de terceros). Tarda unos segundos."""
+    try:
+        return await run_tenant_doctor(
+            tenant_id,
+            crypto_key=_crypto_key(settings),
+            api_base_url=getattr(settings, "api_base_url", None),
+        )
+    except TenantNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado") from exc
 
 
 @router.post(

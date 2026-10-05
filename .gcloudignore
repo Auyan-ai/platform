@@ -8,7 +8,9 @@ apps/web
 apps/landing
 packages
 docs
-supabase
+# supabase/migrations sí sube: el doctor del tenant compara las migraciones con el esquema real.
+supabase/*
+!supabase/migrations
 **/tests
 **/.venv
 **/node_modules

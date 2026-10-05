@@ -74,6 +74,19 @@ condición `tags no incluye auyan_handoff`. Guarda `api_user_id` en la config de
 
 ## 6. Verificación
 
+Primero el **doctor**, que comprueba en vivo todo lo que se puede comprobar sin un mensaje
+real: migraciones aplicadas, helpdesk primario con handoff, firma, webhook y triggers de
+Zendesk contra su definición canónica, credenciales y salud de la cuenta en Meta
+(`GET /v1/accounts/{id}/health`), plantilla de re-enganche y cola de turnos. Sale con código 1
+si algo falla; cada fallo trae el comando que lo arregla. También está en el dashboard
+(super_admin → tenant → **Diagnóstico**).
+
+```bash
+python -m scripts.doctor --tenant <slug>
+```
+
+Con el doctor en verde, lo que solo se ve con tráfico real:
+
 - [ ] `POST /v1/webhooks/test` desde Zernio → 200 en los logs de Cloud Run.
 - [ ] Mensaje de prueba desde un móvil → fila en `inbound_jobs` → respuesta en WhatsApp.
 - [ ] Trace en LangSmith con `channel=whatsapp` y el teléfono enmascarado.
