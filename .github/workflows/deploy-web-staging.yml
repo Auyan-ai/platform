@@ -1,0 +1,48 @@
+name: Deploy web — staging
+
+# Despliega apps/web en Vercel (auyan-web-staging) con cada push a develop que
+# toque la web. Vercel Hobby no conecta repos privados de una organización de
+# GitHub, así que se hace con el CLI (el mismo `vercel deploy --prod` manual).
+# El build corre en Vercel: si `next build` falla, no se promueve nada.
+#
+# Secretos del repo: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID.
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - apps/web/**
+      - packages/shared/**
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - .vercelignore
+      - .github/workflows/deploy-web-staging.yml
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web-staging
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Vercel — producción de staging
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@62.2.0
+
+      - name: Deploy
+        run: |
+          url="$(vercel deploy --prod --yes --token="${{ secrets.VERCEL_TOKEN }}")"
+          echo "Desplegado: $url" >> "$GITHUB_STEP_SUMMARY"
