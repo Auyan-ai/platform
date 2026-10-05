@@ -21,23 +21,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/webhooks/zendesk": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Webhook inbound de Zendesk — dispara el agente para mensajes del cliente */
-        post: operations["zendesk_webhook_webhooks_zendesk_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/webhooks/postmark": {
         parameters: {
             query?: never;
@@ -72,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/webhooks/zendesk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Webhook inbound de Zendesk — dispara el agente para mensajes del cliente */
+        post: operations["zendesk_webhook_webhooks_zendesk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhooks/gorgias": {
         parameters: {
             query?: never;
@@ -83,6 +83,23 @@ export interface paths {
         put?: never;
         /** Webhook inbound de Gorgias — dispara el agente para mensajes del cliente */
         post: operations["gorgias_webhook_webhooks_gorgias_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhooks/zernio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Webhook de Zernio (WhatsApp) — mensajes entrantes y estado de envíos */
+        post: operations["zernio_webhook_webhooks_zernio_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -207,6 +224,23 @@ export interface paths {
         get: operations["list_tenants_admin_tenants_admin_list_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Crear nuevo tenant + tenant_admin con invite — sólo super_admin */
+        post: operations["create_tenant_tenants_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -542,6 +576,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tenants/me/onboarding/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Estado del checklist que gatea discovery → building */
+        get: operations["get_my_onboarding_checklist_tenants_me_onboarding_checklist_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/me/onboarding/submit": {
         parameters: {
             query?: never;
@@ -551,8 +602,87 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Confirma onboarding inicial y mueve el agente a Building */
+        /** Confirma onboarding inicial; pasa a Building si el checklist está completo */
         post: operations["submit_my_tenant_onboarding_tenants_me_onboarding_submit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/integrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Estado de las integraciones del tenant + checklist de onboarding */
+        get: operations["get_my_integrations_tenants_me_integrations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/doctor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Doctor del tenant: migraciones, helpdesk, triggers, webhooks y WhatsApp en vivo
+         * @description Solo lecturas (catálogo de Postgres + APIs de terceros). Tarda unos segundos.
+         */
+        get: operations["get_my_tenant_doctor_tenants_me_doctor_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/integrations/shopify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Conecta la tienda Shopify del tenant (valida, cifra y guarda)
+         * @description Valida client_id + client_secret vía OAuth Client Credentials Grant, persiste.
+         *
+         *     Shopify 2026: el merchant crea una app en Dev Dashboard, la instala, copia
+         *     Client ID + Client Secret. Aquí los intercambiamos por un access_token de 24h.
+         *     Guardamos client_id + client_secret cifrados (long-lived), y el access_token
+         *     en config (short-lived, refrescado on-demand por `ensure_shopify_access_token`).
+         */
+        post: operations["connect_shopify_tenants_me_integrations_shopify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/me/integrations/chatwoot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Conecta el helpdesk Chatwoot del tenant (valida, registra webhook, cifra y guarda) */
+        post: operations["connect_chatwoot_tenants_me_integrations_chatwoot_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1241,6 +1371,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/billing/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Uso del periodo actual */
+        get: operations["get_usage_billing_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/billing/subscription": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Crear o editar el plan del tenant (super_admin) */
+        put: operations["upsert_subscription_billing_subscription_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -1402,6 +1566,10 @@ export interface components {
             inputs_redacted: {
                 [key: string]: unknown;
             };
+            /** Inputs Raw */
+            inputs_raw: {
+                [key: string]: unknown;
+            };
             /** Aop Slug */
             aop_slug: string;
             /** Aop Version */
@@ -1441,6 +1609,22 @@ export interface components {
             /** Comment */
             comment?: string | null;
         };
+        /**
+         * AttachmentUrlOut
+         * @description URL firmada de vida corta para ver un adjunto del bucket privado.
+         */
+        AttachmentUrlOut: {
+            /** Url */
+            url: string;
+            /** Expires In */
+            expires_in: number;
+            /** Filename */
+            filename: string;
+            /** Kind */
+            kind: string;
+            /** Mime Type */
+            mime_type?: string | null;
+        };
         /** BatchCreatedOut */
         BatchCreatedOut: {
             /**
@@ -1455,6 +1639,138 @@ export interface components {
         BatchRequest: {
             /** Scenario Ids */
             scenario_ids: string[];
+            /**
+             * Judge Model
+             * @default sonnet
+             * @enum {string}
+             */
+            judge_model: "sonnet" | "opus";
+        };
+        /**
+         * BillingSubscription
+         * @description Plan del tenant. floor/included/overage son un SNAPSHOT: cambiar el catálogo de
+         *     tiers (services/billing.py) no altera contratos vigentes.
+         */
+        BillingSubscription: {
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Tier
+             * @enum {string}
+             */
+            tier: "starter" | "growth" | "scale" | "founding";
+            /** Floor Cents */
+            floor_cents: number;
+            /** Included Resolutions */
+            included_resolutions: number;
+            /** Overage Cents */
+            overage_cents: number;
+            /**
+             * Currency
+             * @default EUR
+             */
+            currency: string;
+            /**
+             * Reopen Window Days
+             * @default 7
+             */
+            reopen_window_days: number;
+            /**
+             * Period Anchor Day
+             * @default 1
+             */
+            period_anchor_day: number;
+            /**
+             * Status
+             * @default active
+             */
+            status: string;
+            /** Stripe Customer Id */
+            stripe_customer_id?: string | null;
+            /** Stripe Subscription Id */
+            stripe_subscription_id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * BillingUsage
+         * @description Uso del periodo actual, calculado (no es fila de DB): resoluciones cobrables vs
+         *     incluidas, overage y total estimado en céntimos. Lo consume el dashboard del cliente.
+         */
+        BillingUsage: {
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /**
+             * Tier
+             * @enum {string}
+             */
+            tier: "starter" | "growth" | "scale" | "founding";
+            /**
+             * Period Start
+             * Format: date-time
+             */
+            period_start: string;
+            /**
+             * Period End
+             * Format: date-time
+             */
+            period_end: string;
+            /** Billable Resolutions */
+            billable_resolutions: number;
+            /** Included Resolutions */
+            included_resolutions: number;
+            /** Overage Resolutions */
+            overage_resolutions: number;
+            /** Floor Cents */
+            floor_cents: number;
+            /** Overage Cents Total */
+            overage_cents_total: number;
+            /** Total Cents */
+            total_cents: number;
+            /** Currency */
+            currency: string;
+        };
+        /** ConnectChatwootRequest */
+        ConnectChatwootRequest: {
+            /** Base Url */
+            base_url: string;
+            /** Account Id */
+            account_id: string;
+            /** Api Access Token */
+            api_access_token: string;
+            /** Escalation Team Id */
+            escalation_team_id?: string | null;
+        };
+        /** ConnectIntegrationResponse */
+        ConnectIntegrationResponse: {
+            integration: components["schemas"]["IntegrationStatusResponse"];
+            checklist: components["schemas"]["OnboardingChecklistResponse"];
+            /** Webhook Registered */
+            webhook_registered?: boolean | null;
+        };
+        /**
+         * ConnectShopifyRequest
+         * @description Credentials del Custom App creado en Shopify Dev Dashboard.
+         *
+         *     Shopify deprecó los Custom Apps legacy con `shpat_` permanente el 1-ene-2026.
+         *     El flow nuevo: merchant crea app en Dev Dashboard, instala en su tienda, y
+         *     copia Client ID + Client Secret. Auyan los intercambia por access_token de 24h.
+         */
+        ConnectShopifyRequest: {
+            /** Domain */
+            domain: string;
+            /** Client Id */
+            client_id: string;
+            /** Client Secret */
+            client_secret: string;
         };
         /** ConversationDetailResponse */
         ConversationDetailResponse: {
@@ -1593,6 +1909,34 @@ export interface components {
              */
             max_turns: number;
         };
+        /** CreateTenantRequest */
+        CreateTenantRequest: {
+            /** Company Name */
+            company_name: string;
+            /** Slug */
+            slug: string;
+            /**
+             * Plan Tier
+             * @default founding
+             * @enum {string}
+             */
+            plan_tier: "founding" | "standard" | "trial";
+            /** Tenant Admin Email */
+            tenant_admin_email: string;
+            /** Tenant Admin Name */
+            tenant_admin_name: string;
+        };
+        /** CreateTenantResponse */
+        CreateTenantResponse: {
+            tenant: components["schemas"]["TenantResponse"];
+            /**
+             * Tenant Admin User Id
+             * Format: uuid
+             */
+            tenant_admin_user_id: string;
+            /** Invite Sent */
+            invite_sent: boolean;
+        };
         /** CurrentUserResponse */
         CurrentUserResponse: {
             /**
@@ -1619,6 +1963,55 @@ export interface components {
             cost_usd: number;
             /** Request Count */
             request_count: number;
+        };
+        /** DoctorCheck */
+        DoctorCheck: {
+            /** Id */
+            id: string;
+            /**
+             * Group
+             * @enum {string}
+             */
+            group: "platform" | "helpdesk" | "whatsapp" | "commerce" | "operations";
+            /** Title */
+            title: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "warn" | "fail" | "skip";
+            /** Detail */
+            detail: string;
+            /** Hint */
+            hint?: string | null;
+        };
+        /** DoctorReport */
+        DoctorReport: {
+            /**
+             * Tenant Id
+             * Format: uuid
+             */
+            tenant_id: string;
+            /** Tenant Slug */
+            tenant_slug: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Duration Ms */
+            duration_ms: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "warn" | "fail" | "skip";
+            /** Counts */
+            counts: {
+                [key: string]: number;
+            };
+            /** Checks */
+            checks: components["schemas"]["DoctorCheck"][];
         };
         /** EscalateBody */
         EscalateBody: {
@@ -1654,6 +2047,10 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * HandoffOut
+         * @description Handoff activo: un humano de la marca lleva la conversación y la IA calla.
+         */
         HandoffOut: {
             /**
              * Target
@@ -1695,19 +2092,34 @@ export interface components {
             /** Error */
             error?: string | null;
         };
-        MessageAttachmentOut: {
-            /** Filename */
-            filename: string;
+        /** IntegrationStatusResponse */
+        IntegrationStatusResponse: {
             /** Kind */
             kind: string;
-            /** Mime Type */
-            mime_type?: string | null;
+            /** Provider */
+            provider: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Is Primary For Kind */
+            is_primary_for_kind: boolean;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            };
+            /** Enabled At */
+            enabled_at?: string | null;
         };
-        AttachmentUrlOut: {
-            /** Url */
-            url: string;
-            /** Expires In */
-            expires_in: number;
+        /** IntegrationsOverviewResponse */
+        IntegrationsOverviewResponse: {
+            /** Integrations */
+            integrations: components["schemas"]["IntegrationStatusResponse"][];
+            checklist: components["schemas"]["OnboardingChecklistResponse"];
+        };
+        /**
+         * MessageAttachmentOut
+         * @description Solo nombre y tipo: la vista previa (URL firmada) va aparte.
+         */
+        MessageAttachmentOut: {
             /** Filename */
             filename: string;
             /** Kind */
@@ -1751,6 +2163,21 @@ export interface components {
             attachments?: components["schemas"]["MessageAttachmentOut"][];
             /** Delivery */
             delivery?: string | null;
+        };
+        /** OnboardingChecklistResponse */
+        OnboardingChecklistResponse: {
+            /** Onboarding Submitted */
+            onboarding_submitted: boolean;
+            /** Has Commerce Integration */
+            has_commerce_integration: boolean;
+            /** Has Helpdesk Integration */
+            has_helpdesk_integration: boolean;
+            /** Has Knowledge */
+            has_knowledge: boolean;
+            /** Complete */
+            complete: boolean;
+            /** Agent Lifecycle State */
+            agent_lifecycle_state: string;
         };
         /** OutboundEmailJobCreateRequest */
         OutboundEmailJobCreateRequest: {
@@ -2105,6 +2532,12 @@ export interface components {
              * Format: uuid
              */
             scenario_id: string;
+            /**
+             * Judge Model
+             * @default sonnet
+             * @enum {string}
+             */
+            judge_model: "sonnet" | "opus";
         };
         /** ScenarioOut */
         ScenarioOut: {
@@ -2143,6 +2576,40 @@ export interface components {
             max_turns: number;
             /** Is Active */
             is_active: boolean;
+        };
+        /**
+         * SubscriptionUpsertRequest
+         * @description Plan a aplicar. Para starter/growth/scale, floor/included/overage se toman del
+         *     catálogo (BILLING_TIERS) salvo override explícito. `founding` no tiene defaults →
+         *     los tres valores son obligatorios en el body.
+         */
+        SubscriptionUpsertRequest: {
+            /**
+             * Tier
+             * @enum {string}
+             */
+            tier: "starter" | "growth" | "scale" | "founding";
+            /** Floor Cents */
+            floor_cents?: number | null;
+            /** Included Resolutions */
+            included_resolutions?: number | null;
+            /** Overage Cents */
+            overage_cents?: number | null;
+            /**
+             * Currency
+             * @default EUR
+             */
+            currency: string;
+            /**
+             * Reopen Window Days
+             * @default 7
+             */
+            reopen_window_days: number;
+            /**
+             * Period Anchor Day
+             * @default 1
+             */
+            period_anchor_day: number;
         };
         /** TenantConfigResponse */
         TenantConfigResponse: {
@@ -2323,42 +2790,6 @@ export interface components {
             /** Resolution Windows */
             resolution_windows: components["schemas"]["TenantResolutionWindow"][];
         };
-        /** TenantResolutionSeriesPoint */
-        TenantResolutionSeriesPoint: {
-            /** Bucket */
-            bucket: string;
-            /** Conversations */
-            conversations: number;
-            /** Resolved */
-            resolved: number;
-            /** Escalated */
-            escalated: number;
-            /** Resolution Rate */
-            resolution_rate: number;
-            /** Escalation Rate */
-            escalation_rate: number;
-        };
-        /** TenantResolutionWindow */
-        TenantResolutionWindow: {
-            /** Key */
-            key: "30d" | "7d" | "24h";
-            /** Label */
-            label: string;
-            /** Granularity */
-            granularity: "day" | "hour";
-            /** Total */
-            total: number;
-            /** Resolved */
-            resolved: number;
-            /** Escalated */
-            escalated: number;
-            /** Resolution Rate */
-            resolution_rate: number;
-            /** Escalation Rate */
-            escalation_rate: number;
-            /** Points */
-            points: components["schemas"]["TenantResolutionSeriesPoint"][];
-        };
         /** TenantOnboardingResponse */
         TenantOnboardingResponse: {
             /**
@@ -2470,6 +2901,48 @@ export interface components {
              */
             agent_instructions: string;
         };
+        /** TenantResolutionSeriesPoint */
+        TenantResolutionSeriesPoint: {
+            /** Bucket */
+            bucket: string;
+            /** Conversations */
+            conversations: number;
+            /** Resolved */
+            resolved: number;
+            /** Escalated */
+            escalated: number;
+            /** Resolution Rate */
+            resolution_rate: number;
+            /** Escalation Rate */
+            escalation_rate: number;
+        };
+        /** TenantResolutionWindow */
+        TenantResolutionWindow: {
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "30d" | "7d" | "24h";
+            /** Label */
+            label: string;
+            /**
+             * Granularity
+             * @enum {string}
+             */
+            granularity: "day" | "hour";
+            /** Total */
+            total: number;
+            /** Resolved */
+            resolved: number;
+            /** Escalated */
+            escalated: number;
+            /** Resolution Rate */
+            resolution_rate: number;
+            /** Escalation Rate */
+            escalation_rate: number;
+            /** Points */
+            points: components["schemas"]["TenantResolutionSeriesPoint"][];
+        };
         /** TenantResponse */
         TenantResponse: {
             /**
@@ -2488,6 +2961,12 @@ export interface components {
              * @default initial
              */
             agent_lifecycle_state: string;
+            /**
+             * Plan Tier
+             * @default founding
+             * @enum {string}
+             */
+            plan_tier: "founding" | "standard" | "trial";
         };
         /** TenantUsageResponse */
         TenantUsageResponse: {
@@ -2538,6 +3017,11 @@ export interface components {
             human_approval_required: boolean;
             /** Threshold Override */
             threshold_override?: number | null;
+            /**
+             * Acknowledge L3 Autonomy
+             * @default false
+             */
+            acknowledge_l3_autonomy: boolean;
         };
         /** ValidateAopRequest */
         ValidateAopRequest: {
@@ -2678,28 +3162,6 @@ export interface operations {
             };
         };
     };
-    zendesk_webhook_webhooks_zendesk_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-        };
-    };
     postmark_webhook_webhooks_postmark_post: {
         parameters: {
             query?: never;
@@ -2744,7 +3206,51 @@ export interface operations {
             };
         };
     };
+    zendesk_webhook_webhooks_zendesk_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     gorgias_webhook_webhooks_gorgias_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    zernio_webhook_webhooks_zernio_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -2771,6 +3277,7 @@ export interface operations {
             query: {
                 tenant_id: string;
                 subdomain: string;
+                format?: string;
             };
             header?: never;
             path?: never;
@@ -2779,7 +3286,7 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            302: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2837,6 +3344,7 @@ export interface operations {
             query: {
                 tenant_id: string;
                 domain: string;
+                format?: string;
             };
             header?: never;
             path?: never;
@@ -2845,7 +3353,7 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Successful Response */
-            302: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2934,6 +3442,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TenantResponse"][];
+                };
+            };
+        };
+    };
+    create_tenant_tenants_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTenantRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateTenantResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3761,6 +4302,37 @@ export interface operations {
             };
         };
     };
+    get_my_onboarding_checklist_tenants_me_onboarding_checklist_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnboardingChecklistResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     submit_my_tenant_onboarding_tenants_me_onboarding_submit_post: {
         parameters: {
             query?: never;
@@ -3779,6 +4351,138 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TenantOnboardingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_integrations_tenants_me_integrations_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IntegrationsOverviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_tenant_doctor_tenants_me_doctor_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DoctorReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connect_shopify_tenants_me_integrations_shopify_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectShopifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectIntegrationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connect_chatwoot_tenants_me_integrations_chatwoot_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectChatwootRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectIntegrationResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5268,6 +5972,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_usage_billing_usage_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingUsage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upsert_subscription_billing_subscription_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Tenant-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubscriptionUpsertRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingSubscription"];
                 };
             };
             /** @description Validation Error */

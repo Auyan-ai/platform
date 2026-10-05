@@ -1911,3 +1911,83 @@ class TestEvaluateAndAdvanceLifecycle:
 
         assert tenant.agent_lifecycle_state == "building"
         update_mock.assert_not_awaited()
+
+
+class TestDoctorEndpoint:
+    def _report(self) -> Any:
+        from apps.api.services.doctor import DoctorCheck, DoctorReport
+
+        check = DoctorCheck(
+            id="helpdesk.primary",
+            group="helpdesk",
+            title="Helpdesk primario",
+            status="ok",
+            detail="zendesk",
+        )
+        return DoctorReport(
+            tenant_id=TENANT_ID,
+            tenant_slug="acme",
+            generated_at=datetime.now(UTC),
+            duration_ms=12,
+            status="ok",
+            counts={"ok": 1, "warn": 0, "fail": 0, "skip": 0},
+            checks=[check],
+        )
+
+    def test_tenant_admin_is_forbidden(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        run_mock = AsyncMock(return_value=self._report())
+        monkeypatch.setattr("apps.api.routers.tenants.run_tenant_doctor", run_mock)
+        client = TestClient(_make_app(monkeypatch))
+
+        resp = client.get("/tenants/me/doctor", headers={"Authorization": f"Bearer {_make_jwt()}"})
+
+        assert resp.status_code == 403
+        run_mock.assert_not_awaited()
+
+    def test_super_admin_gets_report_for_target_tenant(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        run_mock = AsyncMock(return_value=self._report())
+        monkeypatch.setattr("apps.api.routers.tenants.run_tenant_doctor", run_mock)
+        app = _make_super_admin_app(monkeypatch)
+        from apps.api.core.config import get_settings
+
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX, api_base_url="https://api.auyan.test"
+        )
+        client = TestClient(app)
+
+        resp = client.get(
+            "/tenants/me/doctor",
+            headers={"Authorization": f"Bearer {_make_jwt()}", "X-Tenant-Id": str(TENANT_ID)},
+        )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "ok"
+        assert body["checks"][0]["id"] == "helpdesk.primary"
+        assert run_mock.await_args.args == (TENANT_ID,)
+        assert run_mock.await_args.kwargs["api_base_url"] == "https://api.auyan.test"
+        assert len(run_mock.await_args.kwargs["crypto_key"]) == 32
+
+    def test_unknown_tenant_is_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from apps.api.services.doctor import TenantNotFoundError
+
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.run_tenant_doctor",
+            AsyncMock(side_effect=TenantNotFoundError("x")),
+        )
+        app = _make_super_admin_app(monkeypatch)
+        from apps.api.core.config import get_settings
+
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX
+        )
+        client = TestClient(app)
+
+        resp = client.get(
+            "/tenants/me/doctor",
+            headers={"Authorization": f"Bearer {_make_jwt()}", "X-Tenant-Id": str(TENANT_ID)},
+        )
+
+        assert resp.status_code == 404

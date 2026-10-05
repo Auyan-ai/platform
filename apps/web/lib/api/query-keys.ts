@@ -18,6 +18,7 @@ export const queryKeys = {
     onboardingChecklist: (tenantId: string) =>
       ['tenants', tenantId, 'onboarding', 'checklist'] as const,
     integrations: (tenantId: string) => ['tenants', tenantId, 'integrations'] as const,
+    doctor: (tenantId: string) => ['tenants', tenantId, 'doctor'] as const,
     kbSubmissions: (tenantId: string, status?: string) =>
       ['tenants', tenantId, 'kb-submissions', status ?? 'all'] as const,
     weeklyReports: (tenantId: string, status?: string) =>

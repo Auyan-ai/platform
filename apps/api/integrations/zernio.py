@@ -348,6 +348,12 @@ class ZernioClient:
             "GET", f"/inbox/conversations/{conversation_id}", op="get_conversation"
         )
 
+    async def get_account_health(self, account_id: str) -> dict[str, Any]:
+        """Salud de la cuenta: token, scopes y, en WhatsApp, una lectura EN VIVO del canal
+        en Meta (`platformConnection`). `GET /accounts` es una caché y puede estar días
+        desfasada; este endpoint no."""
+        return await self._request("GET", f"/accounts/{account_id}/health", op="account_health")
+
     def _is_zernio_url(self, url: str) -> bool:
         base = urlparse(self._base_url)
         target = urlparse(url)
