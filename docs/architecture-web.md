@@ -276,7 +276,8 @@ No usamos `SUPABASE_SERVICE_ROLE_KEY` en el web — todas las operaciones admin 
 - Root Directory: `apps/web`; install `pnpm install --frozen-lockfile`, build `pnpm build`.
 - `.vercelignore` en la raíz: sube solo `apps/web` + `packages/shared` + manifiestos (nunca `.env*`, API, docs ni migraciones; patrones anclados con `/`).
 - Env vars (Production y Preview): `NEXT_PUBLIC_API_URL` (Cloud Run), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (pública por diseño; marcada `--type config`).
-- Deploy: `vercel deploy --prod --yes` desde la raíz (repo enlazado con `vercel link`; `.vercel/` ignorado por git).
+- Deploy automático: `.github/workflows/deploy-web-staging.yml` corre `vercel deploy --prod` con cada push a `develop` que toque `apps/web`, `packages/shared` o los manifiestos del workspace (también a mano con *Run workflow*). Vercel Hobby no conecta repos privados de una organización de GitHub, por eso va por CLI y no por la integración Git. Secretos del repo: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
+- Deploy manual (fallback): `vercel deploy --prod --yes` desde la raíz (repo enlazado con `vercel link`; `.vercel/` ignorado por git).
 - El API debe incluir la URL de Vercel en `ALLOWED_ORIGINS` (CORS) y Supabase Auth debe tenerla como Site URL / Redirect URL (magic links).
 
 ---
