@@ -151,12 +151,8 @@ El repo solo contiene documentación técnica: nada de negocio, ventas ni GTM.
 
 por último, estas no son normas grabadas para siempre, si tienes alguna sugerencia puedes sugerir cambios que yo tendrás que aprobar antes de continuarlos y luego actualizar este archivo
 
-## Agent skills
-
-### Issue tracker
+## Issue tracker
 
 Los issues y PRDs viven como GitHub Issues en `Auyan-ai/platform` (CLI `gh`).
 
-### Triage labels
-
-Labels canónicos: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`.
+Cola de trabajo de agentes: `agent-queue` (concreto, un agente puede tomarlo) y `needs-human` (requiere una decisión humana). `wontfix` para descartados.
