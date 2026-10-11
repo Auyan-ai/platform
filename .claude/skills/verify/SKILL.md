@@ -88,7 +88,7 @@ y espera un build de Chromium más nuevo que el del caché; `_pw.cjs` usa el Chr
 Rutas super_admin: `/tenants/<id>/{conversations,escalations,approvals,playbook,knowledge,reports,emails,aops,proposals,simulator}`;
 rutas del cliente: `/clients/<id>/{overview,conversations,escalations,approvals,facts,knowledge,insights,reports,settings,onboarding}`.
 IDs: `marea-studio` = `683246c2-10ce-4f6c-a299-5053f32f8c01`, `lunaria` = `11111111-1111-1111-1111-111111111111`.
-Sin sesión, cualquier ruta redirige a `/login` (middleware). La sesión guardada es la de `super-admin@auyan.ai`: abre `/tenants/...`; las rutas `/clients/...` exigen rol `tenant_admin` y a un super_admin lo mandan a `/`.
+Sin sesión, cualquier ruta redirige a `/login` (middleware). La sesión guardada es la de `kenny+admin@auyan.es`: abre `/tenants/...`; las rutas `/clients/...` exigen rol `tenant_admin` y a un super_admin lo mandan a `/`.
 `web-shot.cjs` no cuenta el 404 de `/favicon.ico` (apps/web no tiene favicon); cualquier otro 4xx/5xx o error de consola sí se lista.
 
 ## Evidence

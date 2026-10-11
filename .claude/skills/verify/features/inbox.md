@@ -30,6 +30,6 @@ Preconditions:
 - Sin sesión, todo redirige a `/login`: `web-shot.cjs` sale con código 3. No intentes escribir credenciales; pídele a Kenny que corra `web-login.sh`.
 - El detalle usa TanStack Query: espera a que desaparezcan los esqueletos de carga antes de la captura (pasa un selector a `web-shot.cjs`).
 - Los adjuntos (foto/audio) usan URL firmada de 5 min; no los cachees en la evidencia.
-- Probado el 2026-10-11 con `super-admin@auyan.ai` (rutas `/tenants/...`): lista (`Conversaciones`, con filtros Todas/Abiertas/Escaladas/…), detalle (mensajes cliente/Agente IA + panel `Agent reasoning`, 8 events) y `Escalaciones` (Pendiente / Tomar / Ver conversación). Las rutas `/clients/...` **no** se abren con super_admin (ver `knowledge-facts.md`).
+- Probado el 2026-10-11 con `kenny+admin@auyan.es` (rutas `/tenants/...`): lista (`Conversaciones`, con filtros Todas/Abiertas/Escaladas/…), detalle (mensajes cliente/Agente IA + panel `Agent reasoning`, 8 events) y `Escalaciones` (Pendiente / Tomar / Ver conversación). Las rutas `/clients/...` **no** se abren con super_admin (ver `knowledge-facts.md`).
 - El panel `Agent reasoning` viene colapsado: para ver los eventos hay que expandirlo (no verificado con captura).
 - Una conversación `Resuelta` es de solo lectura (`Conversación resuelta — sólo lectura`): no se puede responder desde ahí.

@@ -2,12 +2,16 @@ import { describe, expect, it, vi } from 'vitest'
 import { decideMagicAccess, landingPathFor } from './access'
 import { type CallbackDeps, resolveCallback } from './callback'
 import {
+  EMAIL_RATE_LIMIT_MESSAGE,
+  RATE_LIMIT_MESSAGE,
+  isRateLimit,
   linkErrorCode,
   loginErrorMessage,
   passwordErrorMessage,
   signInErrorMessage,
 } from './messages'
 import { validateNewPassword } from './password'
+import { RESEND_COOLDOWN_SECONDS, cooldownRemaining } from './resend'
 
 const TENANT = '11111111-1111-1111-1111-111111111111'
 const tenantAdmin = { user_id: 'u', tenant_id: TENANT, role: 'tenant_admin', email: 'a@b.c' }
@@ -125,5 +129,37 @@ describe('mensajes y validación', () => {
     expect(validateNewPassword('corta', 'corta')).toMatch(/al menos 8/)
     expect(validateNewPassword('suficiente1', 'otra-cosa1')).toBe('Las contraseñas no coinciden.')
     expect(validateNewPassword('suficiente1', 'suficiente1')).toBeNull()
+  })
+})
+
+describe('rate limit', () => {
+  it('detecta los códigos de rate limit de Supabase', () => {
+    expect(isRateLimit({ status: 429 })).toBe(true)
+    expect(isRateLimit({ code: 'over_email_send_rate_limit' })).toBe(true)
+    expect(isRateLimit({ code: 'invalid_credentials' })).toBe(false)
+    expect(isRateLimit(null)).toBe(false)
+  })
+  it('el mensaje de correos es veraz: límite por hora y salida por contraseña', () => {
+    expect(EMAIL_RATE_LIMIT_MESSAGE).toBe(
+      'Hemos enviado muchos correos en la última hora. Prueba más tarde o entra con tu contraseña.',
+    )
+    expect(EMAIL_RATE_LIMIT_MESSAGE).not.toBe(RATE_LIMIT_MESSAGE)
+  })
+})
+
+describe('cooldownRemaining (reenviar)', () => {
+  const t0 = 1_000_000
+  it('arranca en el intervalo mínimo de Supabase (60 s)', () => {
+    expect(RESEND_COOLDOWN_SECONDS).toBe(60)
+    expect(cooldownRemaining(t0, t0)).toBe(60)
+  })
+  it('redondea hacia arriba mientras queda tiempo', () => {
+    expect(cooldownRemaining(t0, t0 + 1)).toBe(60)
+    expect(cooldownRemaining(t0, t0 + 1_000)).toBe(59)
+    expect(cooldownRemaining(t0, t0 + 59_001)).toBe(1)
+  })
+  it('llega a 0 y no baja de ahí', () => {
+    expect(cooldownRemaining(t0, t0 + 60_000)).toBe(0)
+    expect(cooldownRemaining(t0, t0 + 120_000)).toBe(0)
   })
 })

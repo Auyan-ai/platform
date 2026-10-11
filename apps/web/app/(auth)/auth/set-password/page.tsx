@@ -7,8 +7,9 @@ import { fetchCurrentUser } from '@/lib/api/users'
 import { landingPathFor } from '@/lib/auth/access'
 import { passwordErrorMessage } from '@/lib/auth/messages'
 import { clearPasswordRequiredCookie, validateNewPassword } from '@/lib/auth/password'
+import { Loader2 } from 'lucide-react'
+import { AuthCard, AuthError } from '@/components/auth/AuthCard'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
@@ -39,9 +40,12 @@ function SetPasswordForm() {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  // saving: guardando la contraseña; entering: esperando a la API para decidir a dónde ir.
+  const [phase, setPhase] = useState<'idle' | 'saving' | 'entering'>('idle')
+  const loading = phase !== 'idle'
 
   async function goToLanding() {
+    setPhase('entering')
     const supabase = createClient()
     const {
       data: { session },
@@ -61,7 +65,7 @@ function SetPasswordForm() {
       return
     }
 
-    setLoading(true)
+    setPhase('saving')
     const supabase = createClient()
     const { error: updateError } = await supabase.auth.updateUser({
       password,
@@ -69,7 +73,7 @@ function SetPasswordForm() {
     })
     if (updateError) {
       setError(passwordErrorMessage(updateError))
-      setLoading(false)
+      setPhase('idle')
       return
     }
 
@@ -78,7 +82,7 @@ function SetPasswordForm() {
   }
 
   async function handleSkip() {
-    setLoading(true)
+    setPhase('entering')
     const supabase = createClient()
     // Recordamos la decisión para no volver a ofrecerlo en cada enlace de acceso.
     await supabase.auth.updateUser({ data: { password_prompt_dismissed: true } })
@@ -86,12 +90,7 @@ function SetPasswordForm() {
   }
 
   return (
-    <Card className="w-full max-w-sm p-8">
-      <div className="mb-6">
-        <h1 className="text-lg font-semibold text-foreground">{COPY[mode].title}</h1>
-        <p className="mt-1 text-sm text-foreground-muted">{COPY[mode].subtitle}</p>
-      </div>
-
+    <AuthCard title={COPY[mode].title} description={COPY[mode].subtitle}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-1.5">
           <Label htmlFor="new-password">Contraseña nueva</Label>
@@ -102,6 +101,7 @@ function SetPasswordForm() {
             onChange={(e) => setPassword(e.target.value)}
             required
             autoComplete="new-password"
+            disabled={loading}
           />
         </div>
 
@@ -114,20 +114,19 @@ function SetPasswordForm() {
             onChange={(e) => setConfirm(e.target.value)}
             required
             autoComplete="new-password"
+            disabled={loading}
           />
         </div>
 
-        {error && (
-          <div
-            role="alert"
-            className="rounded-sm bg-danger-subtle px-3 py-2 text-sm text-danger-foreground"
-          >
-            {error}
-          </div>
-        )}
+        {error && <AuthError>{error}</AuthError>}
 
         <Button type="submit" disabled={loading} className="w-full">
-          {loading ? 'Guardando…' : 'Guardar contraseña'}
+          {loading && <Loader2 className="animate-spin" aria-hidden />}
+          {phase === 'saving'
+            ? 'Guardando…'
+            : phase === 'entering'
+              ? 'Entrando…'
+              : 'Guardar contraseña'}
         </Button>
 
         {skippable && (
@@ -142,7 +141,7 @@ function SetPasswordForm() {
           </Button>
         )}
       </form>
-    </Card>
+    </AuthCard>
   )
 }
 
