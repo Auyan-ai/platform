@@ -4,30 +4,33 @@ Las acciones destructivas de Shopify (reembolso, cancelación, cambio de direcci
 
 ## Sub-features
 
-- `approval-pending` una petición L3 válida crea una aprobación pendiente (el gate exige que el email/teléfono del comprador sea el del pedido).
-- `approval-reject` rechazar cierra la aprobación **sin ejecutar** nada en Shopify.
-- `approval-approve` aprobar ejecuta la skill L3 en Shopify.
+- `approval-pending` una petición L3 válida crea una aprobación pendiente y el agente avisa que pasa al equipo (el gate exige que el email del comprador sea el del pedido).
+- `approval-reject` rechazar desde el dashboard cierra la aprobación **sin ejecutar** nada en Shopify.
+- `approval-approve` aprobar ejecuta la skill L3 en Shopify. **No se automatiza** (ver Gotchas).
 
 ## How to get to it (user POV)
 
-- Super_admin: `/tenants/<tenantId>/approvals`. Cliente: `/clients/<tenantId>/approvals`. h1 `Aprobaciones`; el rechazo pide un motivo (`Motivo del rechazo…`).
+- Super_admin: `/tenants/<tenantId>/approvals`. Cliente: `/clients/<tenantId>/approvals`. h1 `Aprobaciones`, pestañas `Pendientes / Aprobadas / Rechazadas / Todas`. Cada tarjeta muestra la acción (p. ej. `Iniciar devolución`), el motivo, el pedido y el procedimiento, con los botones `Aprobar` y `Rechazar`; `Rechazar` abre el diálogo `Rechazar acción` con el campo `Motivo del rechazo…`.
 
 ## Driving it with scripts/ + Playwright
 
 Preconditions:
 
-- Un pedido de la tienda demo de Marea cuyo email conoces (pídeselo a Kenny o léelo con `db.sh`/Shopify; no lo inventes).
-- Sesión de dashboard guardada (ver `inbox.md`).
+- `doctor.sh` sin `FAIL`, API y web locales arriba, sesión super_admin guardada.
+- La cola de `marea-studio` **sin otras aprobaciones pendientes**: el driver se niega a actuar si ve más de una.
+- Pedido de la demo de Marea: `#1431` (Blusa Satinada + Bolso Bandolera, pagado y enviado el 2026-09-30) del email `carmenrosavegas@hotmail.com`. Estado de los otros: `#1430` reembolso parcial, `#1432` y `#1433` reembolsados. Si Shopify cambió, léelo con el paso 1.
 
-- **Crear la aprobación.** `VERIFY_EMAIL=<email del pedido> .claude/skills/verify/scripts/inbound.sh marea-studio "Quiero un reembolso parcial del pedido #<n>"`. Esperado: la respuesta anuncia que queda pendiente de aprobación (no que ya se hizo); `dump.sh` no muestra ejecución.
-- **Verla en la cola.** `node .claude/skills/verify/scripts/web-shot.cjs /tenants/683246c2-10ce-4f6c-a299-5053f32f8c01/approvals approvals-pending`. El `.txt` lista la aprobación.
-- **Rechazar (camino seguro).** Rechazar desde el dashboard con un motivo; en Supabase la aprobación pasa a rechazada y Shopify no cambia. 
-- **Aprobar.** Solo con OK explícito de Kenny: ejecuta una acción real sobre la tienda demo; verifícala después en Shopify.
+- **1. Identificar al comprador.** El email del payload **no** se usa para buscar pedidos; hay que decirlo en el mensaje. `VERIFY_EMAIL=carmenrosavegas@hotmail.com .claude/skills/verify/scripts/inbound.sh marea-studio "Hola, mi email es carmenrosavegas@hotmail.com. Quiero devolver el pedido #1431, me queda pequeño."`. `decision: respond`; el agente confirma que está dentro del plazo y pregunta qué artículo. Guarda el `conversation_id`.
+- **2. Concretar y disparar el L3.** `VERIFY_EMAIL=carmenrosavegas@hotmail.com .claude/skills/verify/scripts/inbound.sh marea-studio "Solo la Blusa Satinada, por favor. El motivo es que la talla me queda pequeña." <conversation_id>`. `decision: escalate` con `escalation_reason: awaiting_human_approval:<approval_id>` y una respuesta que dice que lo pasa al equipo.
+- **3. Confirmar la aprobación pendiente.** `.claude/skills/verify/scripts/db.sh "select id, aop_slug, skill_slug, skill_tier, status from pending_approvals where conversation_id='<conversation_id>' and deleted_at is null"`. Una fila: `returns | shopify.start_return | L3 | pending`.
+- **4. Verla en el dashboard y rechazarla.** `node .claude/skills/verify/scripts/web-reject-approval.cjs 683246c2-10ce-4f6c-a299-5053f32f8c01 "Verificación automática: rechazo de prueba, no ejecutar."`. Guarda tres capturas (`approval-reject-1-pending/2-dialog/3-after`); la primera muestra la tarjeta `Iniciar devolución` con `Motivo: size_too_small`.
+- **5. Confirmar el rechazo.** Repite el `select` del paso 3: `status = rejected` y el `review_comment` enviado. Comprueba que Shopify no se tocó: `db.sh "select skill_slug, status from skill_audit_log where conversation_id='<conversation_id>' order by created_at"` muestra `shopify.start_return | rejected_by_permissions` y ninguna ejecución exitosa.
 
 ## Gotchas
 
-- Aprobar es irreversible en Shopify (reembolsos/cancelaciones). Por defecto, verifica `approval-pending` y `approval-reject`.
-- Sin el email/teléfono correcto el gate bloquea (`phone_mismatch`/ownership) y no crea aprobación: eso es correcto, no un fallo.
-- Un reembolso exige la transacción de cobro del pedido; en pedidos de prueba sin pago la skill falla.
-- Probado el 2026-10-11: la cola `/tenants/<id>/approvals` carga con pestañas `Pendientes / Aprobadas / Rechazadas / Todas` y, sin pendientes, dice `No hay aprobaciones con estado "Pendientes".`.
-- **Sin probar aún**: crear una aprobación (necesita el email de un pedido real de la demo) y rechazarla.
+- **Aprobar es irreversible en Shopify.** `web-reject-approval.cjs` nunca pulsa `Aprobar` y se niega a actuar si no hay exactamente 1 pendiente. Aprobar solo con OK explícito de Kenny, a mano.
+- Si describes un defecto ("llegó con un hilo suelto"), el AOP es `complaint` y **escala sin crear aprobación** (probado). Para una aprobación L3 usa un motivo de devolución (`talla`) o un cambio de dirección/cancelación.
+- El agente hace dos turnos (identificar y concretar artículo) antes del L3; un solo mensaje no basta.
+- Sin el email/teléfono correcto el gate bloquea (`phone_mismatch`/ownership) y no crea aprobación: es el comportamiento correcto.
+- La conversación de prueba queda en staging con una escalación abierta (`awaiting_human_approval:…`); no la resuelvas sin avisar a Kenny.
+- Probado el 2026-10-11 (pasos 1-5, `marea-studio`).

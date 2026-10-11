@@ -33,11 +33,16 @@ fi
 if [ -f "$RUN_DIR/web.pid" ] && kill -0 "$(cat "$RUN_DIR/web.pid")" 2>/dev/null; then
   code="$(curl -s -o /dev/null -m 20 -w '%{http_code}' "$WEB_LOCAL/login")"
   [ "$code" = "200" ] && ok "web local /login 200" || fail "web local /login devolvió $code"
+  # The dashboard asks the local API who the user is (/users/me); without it every page loops / <-> /login.
+  { [ -f "$RUN_DIR/api.pid" ] && kill -0 "$(cat "$RUN_DIR/api.pid")" 2>/dev/null; } || fail "web local arriba pero la API local NO: las páginas dan ERR_TOO_MANY_REDIRECTS (up.sh api)"
 else
   warn "web local no está corriendo (up.sh web)"
 fi
 
-# Browser session of the dashboard (user logs in once; see SKILL.md)
-if [ -f "$VERIFY_DIR/profile/.logged-in" ]; then ok "perfil de navegador con login previo (profile/.logged-in)"; else warn "sin sesión de dashboard guardada: el usuario debe correr web-login.sh una vez"; fi
+# Browser sessions of the dashboard (a human logs in once per profile; see SKILL.md)
+for prof in profile profile-tenant; do
+  who="super_admin"; [ "$prof" = "profile-tenant" ] && who="tenant_admin (VERIFY_PROFILE=tenant)"
+  if [ -f "$VERIFY_DIR/$prof/.logged-in" ]; then ok "sesión de dashboard $who guardada ($prof/)"; else warn "sin sesión de dashboard $who: la persona debe correr web-login.sh${prof/profile-tenant/ con VERIFY_PROFILE=tenant}"; fi
+done
 
 exit $bad

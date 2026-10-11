@@ -37,6 +37,8 @@ bloquean; las `FAIL` sí.
   de Zendesk/Gorgias/Chatwoot de staging y los respondería con código sin desplegar**. No lo quites.
 - La web recibe `NEXT_PUBLIC_SUPABASE_URL/ANON_KEY` de staging y `NEXT_PUBLIC_API_URL=http://localhost:8000` por
   entorno del proceso (gana a `apps/web/.env.local`).
+- **La web necesita la API local.** El dashboard le pregunta a `localhost:8000/users/me` quién es el usuario; sin API, toda página
+  entra en un bucle `/` ↔ `/login` (`ERR_TOO_MANY_REDIRECTS`) y parece "sesión expirada". Levanta siempre `up.sh all`.
 - Logs: `.claude/skills/verify/run/api.log` y `web.log`. Pidfiles en `run/`.
 
 ## Drive
@@ -65,6 +67,15 @@ El login es email+contraseña de Supabase y **el agente no escribe contraseñas*
 ```bash
 .claude/skills/verify/scripts/web-login.sh      # abre Chromium visible; Kenny inicia sesión; se guarda en profile/
 ```
+Hay dos perfiles de navegador, uno por rol. Sin variable es el **super_admin** (`profile/`, rutas `/tenants/...`). Con
+`VERIFY_PROFILE=tenant` es un **tenant_admin** de Marea (`profile-tenant/`, rutas `/clients/...`):
+```bash
+VERIFY_PROFILE=tenant .claude/skills/verify/scripts/web-login.sh   # Kenny, una vez, con el usuario tenant_admin de Marea
+VERIFY_PROFILE=tenant node .claude/skills/verify/scripts/web-shot.cjs /clients/<id>/facts facts
+```
+El login guarda las cookies en el perfil y en `state.json`, que cada corrida restaura (Chromium se lanza con `--password-store=basic`;
+con el llavero del escritorio, la clave de cifrado de las cookies podía variar entre la ventana de login y una corrida headless).
+Si una página da "sesión expirada" o un bucle de redirecciones, **mira primero que la API local esté arriba** antes de pedir otro login.
 Después, el agente conduce con la sesión guardada:
 ```bash
 node .claude/skills/verify/scripts/web-shot.cjs /tenants/683246c2-10ce-4f6c-a299-5053f32f8c01/conversations conversaciones
@@ -108,4 +119,6 @@ Nunca mates por nombre de proceso (`pkill uvicorn`/`next`): puede haber instanci
 ## Mapa de features
 
 `features/README.md` indexa lo verificable (agente → respuesta, escalado, inbox, aprobaciones L3, conocimiento/hechos).
+`isolation.cjs <conv propia> <conv ajena>` prueba el aislamiento de tenant en la API con el token del tenant_admin.
+`web-reject-approval.cjs <tenantId> "<motivo>"` rechaza la única aprobación L3 pendiente (nunca aprueba; ver `features/approvals-l3.md`).
 Una prueba que solo conduce un punto de entrada cuando el mapa lista varios está incompleta: cúbrelos o di cuáles no.
