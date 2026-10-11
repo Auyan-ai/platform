@@ -415,7 +415,17 @@ async def run_live_checks(
         if integration.credentials is None:
             continue  # ya reportado por los checks de configuración
         key = (integration.kind, integration.provider)
-        if key == ("helpdesk", "zendesk") and integration.config.get("subdomain"):
+        if not integration.is_active:
+            skipped.append(
+                DoctorCheck(
+                    id=f"{integration.kind}.{integration.provider}.live",
+                    group=_GROUP_BY_KIND.get(integration.kind, "platform"),
+                    title=f"Acceso a {integration.provider}",
+                    status="skip",
+                    detail="Inactiva: sin check en vivo.",
+                )
+            )
+        elif key == ("helpdesk", "zendesk") and integration.config.get("subdomain"):
             tasks.append(
                 _guarded(
                     snapshot,
@@ -453,12 +463,21 @@ async def run_live_checks(
                 )
             )
         elif key == ("channel", "zernio"):
-            ready = (
-                integration.is_active
-                and integration.config.get("account_id")
-                and integration.credentials.get("api_key")
-            )
-            if ready:
+            ready = integration.config.get("account_id") and integration.credentials.get("api_key")
+            if ready and integration.config.get("sandbox"):
+                skipped.append(
+                    DoctorCheck(
+                        id="whatsapp.account_health",
+                        group="whatsapp",
+                        title="Salud de la cuenta de WhatsApp",
+                        status="skip",
+                        detail=(
+                            "Sandbox compartido de Zernio: sin check de salud (su endpoint no "
+                            "conoce la cuenta). Ver el aviso de configuración del SANDBOX."
+                        ),
+                    )
+                )
+            elif ready:
                 tasks.append(
                     _guarded(
                         snapshot,

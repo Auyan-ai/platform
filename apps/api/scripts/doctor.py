@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 import time
@@ -45,6 +46,24 @@ GROUP_LABELS = {
 }
 
 
+class _NoTracebackFormatter(logging.Formatter):
+    def formatException(self, ei: object) -> str:
+        return ""
+
+
+def quiet_live_tracebacks() -> None:
+    """Deja el aviso de cada check en vivo fallido en una línea, sin traceback, en la salida.
+
+    Solo afecta al CLI: el record conserva `exc_info`, así que en la API (Cloud Run) el
+    logger sigue registrando la excepción completa.
+    """
+    handler = logging.StreamHandler()
+    handler.setFormatter(_NoTracebackFormatter("%(levelname)s %(name)s: %(message)s"))
+    logger = logging.getLogger("apps.api.services.doctor.live")
+    logger.handlers[:] = [handler]
+    logger.propagate = False
+
+
 def render(report: DoctorReport) -> str:
     lines = [f"Doctor · {report.tenant_slug} · {ICONS[report.status]} {report.status.upper()}"]
     group = None
@@ -65,6 +84,7 @@ def render(report: DoctorReport) -> str:
 
 
 async def run(args: argparse.Namespace) -> int:
+    quiet_live_tracebacks()
     key = _integration_key_from_env()
     started = time.monotonic()
     conn = await _connect_database(_require_env("DATABASE_URL"))

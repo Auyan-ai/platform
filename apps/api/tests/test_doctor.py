@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -17,7 +18,7 @@ from apps.api.integrations.zendesk_triggers import (
     reply_trigger,
     solved_trigger,
 )
-from apps.api.scripts.doctor import render
+from apps.api.scripts.doctor import quiet_live_tracebacks, render
 from apps.api.services.doctor import build_report, platform_checks
 from apps.api.services.doctor.checks import (
     helpdesk_checks,
@@ -633,6 +634,116 @@ class TestRunLiveChecks:
         checks = _by_id(await run_live_checks(_snapshot(gorgias_hd, inactive), api_base_url=None))
         assert checks["helpdesk.gorgias.live"].status == "skip"
         assert "whatsapp.account_health" not in checks
+
+    async def test_inactive_integrations_are_skipped_without_live_calls(self) -> None:
+        calls: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            return httpx.Response(403)
+
+        chatwoot_hd = _integration(
+            "helpdesk",
+            "chatwoot",
+            active=False,
+            primary=False,
+            config={"base_url": "https://cw.example.com", "account_id": 1},
+            credentials={"api_access_token": "t"},
+        )
+        shopify = _integration(
+            "commerce", "shopify", active=False, credentials={"domain": "x.myshopify.com"}
+        )
+        zendesk_off = _integration(
+            "helpdesk",
+            "zendesk",
+            active=False,
+            primary=False,
+            config={"subdomain": SUBDOMAIN},
+            credentials={"client_id": "c", "client_secret": "s"},
+        )
+
+        async def must_not_connect(creds: dict[str, Any], subdomain: str) -> Any:
+            raise AssertionError("no debe llamar a Zendesk")
+
+        checks = await run_live_checks(
+            _snapshot(chatwoot_hd, shopify, zendesk_off, _zernio(active=False)),
+            api_base_url=API_BASE,
+            zendesk_client_factory=must_not_connect,
+            zernio_transport=httpx.MockTransport(handler),
+        )
+        assert calls == []
+        assert {c.id for c in checks} == {
+            "helpdesk.chatwoot.live",
+            "commerce.shopify.live",
+            "helpdesk.zendesk.live",
+            "channel.zernio.live",
+        }
+        assert all(c.status == "skip" and "Inactiva" in c.detail for c in checks)
+
+    async def test_active_integration_with_bad_credentials_still_fails(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(401)
+
+        checks = _by_id(
+            await run_live_checks(
+                _snapshot(_zernio()),
+                api_base_url=API_BASE,
+                zernio_transport=httpx.MockTransport(handler),
+            )
+        )
+        assert checks["whatsapp.account_health"].status == "fail"
+
+    async def test_sandbox_skips_account_health(self) -> None:
+        calls: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            return httpx.Response(404, json={"error": "Account not found"})
+
+        checks = _by_id(
+            await run_live_checks(
+                _snapshot(_zernio(sandbox=True)),
+                api_base_url=API_BASE,
+                zernio_transport=httpx.MockTransport(handler),
+            )
+        )
+        assert calls == []
+        health = checks["whatsapp.account_health"]
+        assert health.status == "skip"
+        assert "SANDBOX" in health.detail
+
+
+class TestCliLogging:
+    def test_live_failure_logs_exception_but_cli_output_has_no_traceback(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        logger = logging.getLogger("apps.api.services.doctor.live")
+        handlers, propagate = list(logger.handlers), logger.propagate
+        try:
+            quiet_live_tracebacks()
+            try:
+                raise ValueError("boom")
+            except ValueError:
+                logger.warning("doctor_live_check_failed", exc_info=True)
+        finally:
+            logger.handlers[:] = handlers
+            logger.propagate = propagate
+        err = capsys.readouterr().err
+        assert "doctor_live_check_failed" in err
+        assert "Traceback" not in err
+
+    async def test_live_failure_keeps_the_exception_in_the_log_record(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Cloud Run sigue recibiendo la excepción: el recorte es solo del CLI.
+        with caplog.at_level(logging.WARNING, logger="apps.api.services.doctor.live"):
+            await run_live_checks(
+                _snapshot(_zernio()),
+                api_base_url=API_BASE,
+                zernio_transport=httpx.MockTransport(lambda r: httpx.Response(401)),
+            )
+        record = next(r for r in caplog.records if r.message == "doctor_live_check_failed")
+        assert record.exc_info is not None
 
 
 class TestBuildReport:
