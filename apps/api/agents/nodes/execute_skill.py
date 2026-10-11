@@ -350,6 +350,43 @@ def make_execute_skill_node(
         # Piso L3: exige aprobación humana salvo opt-out explícito y reconocido.
         if _l3_requires_human_approval(skill_cls, perm):
             if state.get("conversation_id") and state.get("tenant_id"):
+                # La skill valida y completa en código lo que va a aprobar el humano
+                # (p. ej. refund_partial: tope reembolsable y moneda del pedido).
+                try:
+                    raw_input = await skill_cls().prepare_approval(
+                        build_skill_context(state), raw_input
+                    )
+                except Exception as exc:
+                    precheck_error = f"approval_precheck_failed: {type(exc).__name__}: {exc!s}"
+                    logger.warning(
+                        "l3_approval_precheck_failed",
+                        extra={
+                            "tenant_id": state.get("tenant_id"),
+                            "conversation_id": state.get("conversation_id"),
+                            "slug": slug,
+                            "error_type": type(exc).__name__,
+                        },
+                    )
+                    auditor.log(
+                        tenant_id=state["tenant_id"],
+                        conversation_id=state["conversation_id"],
+                        aop_slug=state.get("aop_slug") or "unknown",
+                        aop_version=state.get("aop_version") or 0,
+                        skill_slug=slug,
+                        skill_tier=skill_cls.tier,
+                        inputs_raw=raw_input,
+                        status="failed",
+                        error_message=precheck_error,
+                        langfuse_trace_id=state.get("langfuse_trace_id"),
+                    )
+                    return _append_and_finish(
+                        _error_entry(
+                            tool_use_id=tool_use_id,
+                            slug=slug,
+                            raw_input=raw_input,
+                            error=precheck_error,
+                        )
+                    )
                 approval_id = uuid4()
                 tenant_id_uuid = UUID(state["tenant_id"])
                 conv_id_uuid = UUID(state["conversation_id"])

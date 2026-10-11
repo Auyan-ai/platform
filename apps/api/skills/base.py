@@ -70,6 +70,18 @@ class Skill(ABC):
         """Ejecutar la skill. Debe ser idempotente si requires_idempotency=True."""
         ...
 
+    async def prepare_approval(
+        self, ctx: SkillContext, raw_input: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Inputs que se guardan en la aprobación L3 y ve el humano. Por defecto, los
+        del LLM tal cual.
+
+        Una skill la sobrescribe para rechazar antes de pedir aprobación lo que fallaría
+        al ejecutar, o para añadir datos derivados en código (p. ej. la moneda del
+        pedido). Si lanza, el error vuelve al LLM y no se crea la aprobación.
+        """
+        return raw_input
+
     def to_anthropic_tool(self) -> dict[str, Any]:
         """Serializa la skill como tool definition para la API de Anthropic."""
         return {

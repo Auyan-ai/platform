@@ -61,10 +61,13 @@ _ORDER_BROKEN_PRODUCT: dict[str, Any] = {
         "financial_status": "paid",
         "fulfillment_status": "fulfilled",
         "created_at": "2026-05-15T10:00:00Z",
+        "total_price": "49.99",
+        "currency": "EUR",
         "line_items": [
             {"id": 5001, "title": "Lámpara LED", "quantity": 1, "price": "49.99"}
         ],
     },
+    "get_refundable_balance": {"captured": "49.99", "refunded": "0", "currency": "EUR"},
     "refund_partial": {"ok": True, "simulated": True},
 }
 

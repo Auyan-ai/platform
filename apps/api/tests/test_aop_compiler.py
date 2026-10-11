@@ -233,6 +233,14 @@ def test_render_global_rules_includes_natural_writing_rule() -> None:
     assert "markdown" in result
 
 
+def test_render_global_rules_pins_the_currency_returned_by_the_skill() -> None:
+    """Issue #265: el agente dijo "100,95 €" por 100.95 USD al deducir la moneda."""
+    result = _render_global_rules([])
+    assert "trae su código de moneda" in result
+    assert "Nunca deduzcas la moneda" in result
+    assert "nunca conviertas a otra" in result
+
+
 def test_render_global_rules_includes_escalation_triggers() -> None:
     result = _render_global_rules(["El pedido no aparece", "Cliente enojado"])
     assert "El pedido no aparece" in result

@@ -22,7 +22,8 @@ class GetOrderByEmail(Skill):
     slug = "shopify.get_order_by_email"
     description = (
         "Busca pedidos de Shopify por email del cliente. "
-        "Devuelve hasta 10 pedidos más recientes con estado, precio y tracking."
+        "Devuelve hasta 10 pedidos más recientes con estado, total y tracking. "
+        "El total viene en la moneda en que pagó el cliente: úsala tal cual."
     )
     tier: SkillTier = "L1"
     input_schema = GetOrderByEmailInput

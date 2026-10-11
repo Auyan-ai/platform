@@ -22,7 +22,8 @@ class GetProductInfo(Skill):
     slug = "shopify.get_product_info"
     description = (
         "Busca productos activos en Shopify por nombre o keyword. "
-        "Devuelve título, tipo, variantes (precio, disponibilidad) y descripción."
+        "Devuelve título, tipo, variantes (precio, disponibilidad) y descripción. "
+        "Cada precio trae su moneda (la de la tienda): úsala tal cual, sin convertir."
     )
     tier: SkillTier = "L1"
     input_schema = GetProductInfoInput
@@ -35,5 +36,10 @@ class GetProductInfo(Skill):
             raise ValueError("shopify_not_configured")
         adapter = ctx.commerce_mock or ShopifyAdapter()
         raw_products = await adapter.search_products(ctx.integration_ctx, inputs.query)
-        products = [map_product_summary(p) for p in raw_products]
+        if not raw_products:
+            return GetProductInfoOutput(products=[], total_found=0)
+        shop_currency = await adapter.get_shop_currency(ctx.integration_ctx)
+        if not shop_currency:
+            raise ValueError("shop_currency_unavailable")
+        products = [map_product_summary(p, shop_currency) for p in raw_products]
         return GetProductInfoOutput(products=products, total_found=len(products))

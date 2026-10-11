@@ -12,7 +12,7 @@ from uuid import UUID
 import pytest
 from apps.api.integrations.base import IntegrationContext
 from apps.api.skills.base import SkillContext
-from apps.api.skills.shopify._models import OrderSummary
+from apps.api.skills.shopify._models import Money, OrderSummary
 from apps.api.skills.shopify.get_customer_history import (
     GetCustomerHistory,
     GetCustomerHistoryInput,
@@ -78,6 +78,36 @@ _RAW_ORDER = {
     ],
 }
 
+# Tienda en EUR, cliente de UK que paga en GBP (Shopify Markets): `total_price` y
+# `price` planos vienen en la moneda de la tienda; los `_set` traen ambas.
+_RAW_ORDER_EUR_SHOP_PAID_GBP = {
+    "id": 1002,
+    "name": "#1002",
+    "financial_status": "paid",
+    "fulfillment_status": None,
+    "total_price": "52.00",
+    "currency": "EUR",
+    "presentment_currency": "GBP",
+    "total_price_set": {
+        "shop_money": {"amount": "52.00", "currency_code": "EUR"},
+        "presentment_money": {"amount": "45.00", "currency_code": "GBP"},
+    },
+    "created_at": "2026-05-02T10:00:00Z",
+    "fulfillments": [],
+    "line_items": [
+        {
+            "id": 7001,
+            "title": "Bolso Tote Piel",
+            "quantity": 1,
+            "price": "52.00",
+            "price_set": {
+                "shop_money": {"amount": "52.00", "currency_code": "EUR"},
+                "presentment_money": {"amount": "45.00", "currency_code": "GBP"},
+            },
+        }
+    ],
+}
+
 _RAW_PRODUCT = {
     "id": 2001,
     "title": "Camiseta Auyan",
@@ -133,6 +163,13 @@ class TestGetOrderByEmail:
         assert result.orders[0].order_number == "#1001"
         assert result.orders[0].financial_status == "paid"
 
+    async def test_eur_shop_order_paid_in_gbp_exposes_gbp(self) -> None:
+        mock_client = _mock_shopify(get_orders_by_email=[_RAW_ORDER_EUR_SHOP_PAID_GBP])
+        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
+            result = await GetOrderByEmail().execute(CTX, GetOrderByEmailInput(email="a@b.com"))
+        assert result.orders[0].total == Money(amount="45.00", currency="GBP")
+        assert result.orders[0].total_in_shop_currency == Money(amount="52.00", currency="EUR")
+
     async def test_empty_result(self) -> None:
         mock_client = _mock_shopify(get_orders_by_email=[])
         with patch(
@@ -179,6 +216,25 @@ class TestGetOrderStatus:
         assert result.financial_status == "paid"
         assert len(result.fulfillments) == 1
         assert result.fulfillments[0].tracking_number == "TRACK123"
+
+    async def test_order_in_shop_currency_exposes_total_with_its_currency(self) -> None:
+        mock_client = _mock_shopify(get_order_by_name=_RAW_ORDER)
+        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
+            result = await GetOrderStatus().execute(
+                CTX, GetOrderStatusInput(order_identifier="#1001")
+            )
+        assert result.total == Money(amount="29.99", currency="USD")
+        assert result.total_in_shop_currency is None
+
+    async def test_eur_shop_order_paid_in_gbp_exposes_gbp(self) -> None:
+        mock_client = _mock_shopify(get_order_by_name=_RAW_ORDER_EUR_SHOP_PAID_GBP)
+        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
+            result = await GetOrderStatus().execute(
+                CTX, GetOrderStatusInput(order_identifier="#1002")
+            )
+        assert result.total == Money(amount="45.00", currency="GBP")
+        assert result.total_in_shop_currency == Money(amount="52.00", currency="EUR")
+        assert result.line_items[0].price == Money(amount="45.00", currency="GBP")
 
     async def test_returns_not_found_when_order_missing(self) -> None:
         mock_client = _mock_shopify(get_order_by_name=None)
@@ -275,7 +331,7 @@ class TestGetOrderStatus:
 
 class TestGetProductInfo:
     async def test_returns_mapped_products(self) -> None:
-        mock_client = _mock_shopify(search_products=[_RAW_PRODUCT])
+        mock_client = _mock_shopify(search_products=[_RAW_PRODUCT], get_shop_currency="USD")
         with patch(
             "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
@@ -291,6 +347,7 @@ class TestGetProductInfo:
         assert len(p.variants) == 2
         assert p.variants[0].available is True
         assert p.variants[1].available is False
+        assert p.variants[0].price == Money(amount="19.99", currency="USD")
         assert "Descripción" in p.description_snippet
         assert "<p>" not in p.description_snippet  # HTML eliminado
 
@@ -303,6 +360,15 @@ class TestGetProductInfo:
             result = await GetProductInfo().execute(CTX, GetProductInfoInput(query="xyz"))
         assert isinstance(result, GetProductInfoOutput)
         assert result.total_found == 0
+        mock_client.get_shop_currency.assert_not_awaited()
+
+    async def test_fails_rather_than_return_prices_without_currency(self) -> None:
+        mock_client = _mock_shopify(search_products=[_RAW_PRODUCT], get_shop_currency="")
+        with (
+            patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client),
+            pytest.raises(ValueError, match="shop_currency_unavailable"),
+        ):
+            await GetProductInfo().execute(CTX, GetProductInfoInput(query="camiseta"))
 
     async def test_raises_when_shopify_not_configured(self) -> None:
         with pytest.raises(ValueError, match="shopify_not_configured"):
@@ -331,8 +397,22 @@ class TestGetCustomerHistory:
         assert result.customer is not None
         assert result.customer.first_name == "Ana"
         assert result.customer.orders_count == 3
-        assert result.customer.total_spent == "89.97"
+        assert result.customer.total_spent == Money(amount="89.97", currency="USD")
         assert len(result.orders) == 1
+
+    async def test_history_shows_each_order_in_the_currency_the_customer_paid(self) -> None:
+        mock_client = _mock_shopify(
+            get_customer_by_email=_RAW_CUSTOMER,
+            get_orders_by_customer_id=[_RAW_ORDER_EUR_SHOP_PAID_GBP],
+        )
+        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
+            result = await GetCustomerHistory().execute(
+                CTX, GetCustomerHistoryInput(email="cliente@example.com")
+            )
+        assert result.customer is not None
+        assert result.customer.total_spent == Money(amount="89.97", currency="EUR")
+        assert result.orders[0].total == Money(amount="45.00", currency="GBP")
+        assert result.orders[0].total_in_shop_currency == Money(amount="52.00", currency="EUR")
 
     async def test_customer_not_found_returns_empty(self) -> None:
         mock_client = _mock_shopify(get_customer_by_email=None)

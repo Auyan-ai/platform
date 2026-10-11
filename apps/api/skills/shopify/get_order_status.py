@@ -7,7 +7,15 @@ from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.identity import check_order_ownership
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
-from apps.api.skills.shopify._models import FulfillmentInfo, LineItemInfo, ShippingAddressInfo
+from apps.api.skills.shopify._models import (
+    FulfillmentInfo,
+    LineItemInfo,
+    Money,
+    ShippingAddressInfo,
+    customer_money,
+    map_line_item,
+    shop_money_if_different,
+)
 from pydantic import Field
 
 
@@ -21,8 +29,10 @@ class OrderDetail(SkillOutput):
     order_number: str | None
     financial_status: str | None
     fulfillment_status: str | None
-    total_price: str | None
-    currency: str | None
+    # Importes en la moneda en que pagó el cliente (presentment). La de la tienda solo
+    # aparece en `total_in_shop_currency` cuando difiere (Shopify Markets).
+    total: Money | None
+    total_in_shop_currency: Money | None = None
     created_at: str | None
     # Fecha de envío (created_at del primer fulfillment) y de entrega (cuando el
     # carrier reporta shipment_status="delivered"). El plazo de devolución se mide
@@ -74,7 +84,8 @@ class GetOrderStatus(Skill):
     description = (
         "Devuelve el estado detallado de un pedido de Shopify. "
         "Acepta el número de orden (#1234 o 1234). "
-        "Incluye estado de pago, fulfillment y tracking."
+        "Incluye estado de pago, fulfillment, tracking y artículos. "
+        "Los importes vienen en la moneda en que pagó el cliente: úsala tal cual."
     )
     tier: SkillTier = "L1"
     input_schema = GetOrderStatusInput
@@ -95,8 +106,7 @@ class GetOrderStatus(Skill):
                 order_number=None,
                 financial_status=None,
                 fulfillment_status=None,
-                total_price=None,
-                currency=None,
+                total=None,
                 created_at=None,
                 fulfillments=[],
             )
@@ -123,16 +133,7 @@ class GetOrderStatus(Skill):
             ),
             None,
         )
-        line_items = [
-            LineItemInfo(
-                line_item_id=li["id"],
-                title=li.get("title", ""),
-                quantity=li.get("quantity", 1),
-                price=li.get("price"),
-            )
-            for li in raw.get("line_items", [])
-            if "id" in li
-        ]
+        line_items = [map_line_item(li, raw) for li in raw.get("line_items", []) if "id" in li]
         raw_address = raw.get("shipping_address") or None
         # Dueño por email o teléfono (mismo gate determinista que las L3).
         is_owner = check_order_ownership(
@@ -152,8 +153,8 @@ class GetOrderStatus(Skill):
             order_number=raw.get("name") or raw.get("order_number"),
             financial_status=raw.get("financial_status"),
             fulfillment_status=raw.get("fulfillment_status"),
-            total_price=raw.get("total_price"),
-            currency=raw.get("currency"),
+            total=customer_money(raw, "total_price"),
+            total_in_shop_currency=shop_money_if_different(raw, "total_price"),
             created_at=raw.get("created_at"),
             fulfilled_at=fulfilled_at,
             delivered_at=delivered_at,

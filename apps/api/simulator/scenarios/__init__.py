@@ -1,6 +1,6 @@
 """Package de scenarios del simulador.
 
-`seed_scenarios(conn, tenant_id)` inserta o actualiza los 25 scenarios base
+`seed_scenarios(conn, tenant_id)` inserta o actualiza los 27 scenarios base
 para un tenant dado. Es idempotente: si el scenario ya existe (mismo `name`),
 no lo duplica.
 """
