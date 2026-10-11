@@ -232,6 +232,11 @@ def _render_global_rules(escalation_triggers: list[str]) -> str:
         "respaldados por el resultado de una herramienta o por la información que "
         "tengas cargada en tu contexto. Si el dato no está disponible, dilo con "
         "claridad y escala o pide la información; nunca lo rellenes con suposiciones.",
+        "- Moneda: cada importe que devuelve una herramienta trae su código de moneda "
+        "(USD, EUR, GBP...). Da el importe siempre en esa moneda, con el formato habitual "
+        "del idioma del cliente. Nunca deduzcas la moneda por el país, el idioma o la "
+        "tienda, y nunca conviertas a otra. En pedidos, cobros y reembolsos es la moneda "
+        "en que pagó el cliente. Si un importe no trae moneda, no lo des.",
         "- Si una herramienta devuelve vacío, sin resultados o un error, trátalo "
         "como dato no disponible: no infieras la respuesta a partir de ese vacío; "
         "escala o pregunta en lugar de responder con datos inventados.",

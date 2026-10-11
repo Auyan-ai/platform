@@ -21,13 +21,20 @@ para probar que el agente maneja fallos de integración correctamente.
 Defaults cuando no hay fixture para un método:
 - lecturas que devuelven un objeto opcional → None ("no encontrado")
 - lecturas que devuelven listas → []
-- escrituras (cancel/refund/return/update/note/tag) → dict de éxito genérico
+- escrituras (cancel/return/update/note/tag) → dict de éxito genérico
+- `get_shop_currency` → None (la skill de productos falla: la moneda nunca se supone)
+- `get_refundable_balance` → error `order_has_no_refundable_payment`. Un reembolso
+  necesita la fixture `{"captured": "45.00", "refunded": "0", "currency": "GBP"}`;
+  `refund_partial` aplica el mismo tope y la misma moneda que el adapter real.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
+
+from apps.api.integrations.shopify import IssuedRefund, RefundableBalance
 
 
 class MockShopifyError(Exception):
@@ -83,6 +90,9 @@ class MockShopifyAdapter:
     ) -> list[dict[str, Any]]:
         return self._resolve("search_products", [])
 
+    async def get_shop_currency(self, ctx: Any) -> str | None:
+        return self._resolve("get_shop_currency", None)  # type: ignore[no-any-return]
+
     async def get_policies(self, ctx: Any) -> list[dict[str, Any]]:
         return self._resolve("get_policies", [])
 
@@ -122,16 +132,28 @@ class MockShopifyAdapter:
     ) -> dict[str, Any]:
         return self._resolve("update_shipping_address", dict(_WRITE_DEFAULT))
 
+    async def get_refundable_balance(self, ctx: Any, order_id: int) -> RefundableBalance:
+        data = self._resolve("get_refundable_balance", None)
+        if data is None:
+            raise MockShopifyError("order_has_no_refundable_payment")
+        return RefundableBalance(
+            captured=Decimal(str(data["captured"])),
+            refunded=Decimal(str(data.get("refunded", "0"))),
+            currency=data["currency"],
+        )
+
     async def refund_partial(
         self,
         ctx: Any,
         order_id: int,
         *,
-        amount: str,
-        currency: str,
+        amount: Decimal,
         note: str = "",
-    ) -> dict[str, Any]:
-        return self._resolve("refund_partial", dict(_WRITE_DEFAULT))
+    ) -> IssuedRefund:
+        refund = self._resolve("refund_partial", {})
+        balance = await self.get_refundable_balance(ctx, order_id)
+        balance.require(amount)
+        return IssuedRefund(refund_id=refund.get("id"), amount=amount, currency=balance.currency)
 
     async def start_return(
         self,

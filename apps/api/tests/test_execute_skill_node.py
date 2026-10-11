@@ -892,6 +892,71 @@ class TestL3HumanApprovalGate:
         assert result.get("pending_approval_is_repeat") is False
 
 
+class TestRefundApprovalPrecheck:
+    """refund_partial real contra el mock de Shopify: el tope y la moneda del pedido
+    se aplican en código ANTES de crear la aprobación humana."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, monkeypatch: pytest.MonkeyPatch) -> Generator[AsyncMock, None, None]:
+        from apps.api.skills.shopify.refund_partial import RefundPartial
+
+        SkillRegistry._reset()
+        SkillRegistry.register(RefundPartial)
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill._l3_ownership_error",
+            AsyncMock(return_value=None),
+        )
+        self.create = AsyncMock()
+        TestL3HumanApprovalGate()._mock_l3_scope(monkeypatch, self.create, None)
+        yield self.create
+        SkillRegistry._reset()
+
+    def _state(self, amount: str) -> dict[str, Any]:
+        return _base_state(
+            pending_tool_call=_pending(
+                slug="shopify.refund_partial",
+                input={"order_id": 1002, "amount": amount, "currency": "EUR"},
+            ),
+            allowed_skills=["shopify.refund_partial"],
+            tool_permissions={"shopify.refund_partial": _perm(human_approval_required=True)},
+            commerce_integration_ctx={
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "credentials": {"domain": "marea.myshopify.com", "access_token": "t"},
+            },
+            simulation_mode=True,
+            simulation_fixtures={
+                "shopify": {
+                    "get_refundable_balance": {
+                        "captured": "45.00",
+                        "refunded": "0",
+                        "currency": "GBP",
+                    }
+                }
+            },
+        )
+
+    async def test_approval_stores_the_order_currency_not_the_llm_one(
+        self, deps: AgentDependencies
+    ) -> None:
+        result = await make_execute_skill_node(deps)(self._state("12.50"))
+
+        assert result.get("pending_approval_id") is not None
+        stored = self.create.await_args.kwargs["inputs_raw"]
+        assert stored == {"order_id": 1002, "amount": "12.50", "currency": "GBP"}
+
+    async def test_amount_above_refundable_is_rejected_without_approval(
+        self, deps: AgentDependencies
+    ) -> None:
+        result = await make_execute_skill_node(deps)(self._state("45.01"))
+
+        entry = result["tool_results"][-1]
+        assert entry["is_error"] is True
+        assert entry["error"].startswith("approval_precheck_failed: ShopifyActionError: ")
+        assert "solo quedan 45.00 GBP" in entry["error"]
+        assert "pending_approval_id" not in result
+        self.create.assert_not_awaited()
+
+
 # ----------------------------------------------------------------
 # Make node sanity
 # ----------------------------------------------------------------

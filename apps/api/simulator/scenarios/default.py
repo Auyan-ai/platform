@@ -1,4 +1,4 @@
-"""Scenarios DE-* — Default / preguntas generales (6 scenarios)."""
+"""Scenarios DE-* — Default / preguntas generales (8 scenarios)."""
 
 from __future__ import annotations
 
@@ -33,7 +33,52 @@ _PRODUCT_TALLA_M: dict[str, Any] = {
             ],
             "price": "19.99",
         }
-    ]
+    ],
+    "get_shop_currency": "USD",
+}
+
+# Issue #265 (s78): tienda en USD y el agente dijo "100,95 €" deduciendo la moneda.
+_PRODUCT_TIENDA_USD: dict[str, Any] = {
+    "search_products": [
+        {
+            "id": 3101,
+            "title": "Bolso Tote Piel",
+            "status": "active",
+            "variants": [{"title": "Default Title", "price": "100.95", "inventory_quantity": 4}],
+        }
+    ],
+    "get_shop_currency": "USD",
+}
+
+# Tienda en EUR, cliente de UK que pagó en GBP (Shopify Markets).
+_ORDER_TIENDA_EUR_PAGADO_GBP: dict[str, Any] = {
+    "get_order_by_name": {
+        "id": 4002,
+        "name": "#1502",
+        "financial_status": "paid",
+        "fulfillment_status": "fulfilled",
+        "total_price": "52.00",
+        "currency": "EUR",
+        "presentment_currency": "GBP",
+        "total_price_set": {
+            "shop_money": {"amount": "52.00", "currency_code": "EUR"},
+            "presentment_money": {"amount": "45.00", "currency_code": "GBP"},
+        },
+        "line_items": [
+            {
+                "id": 6002,
+                "title": "Bolso Tote Piel",
+                "quantity": 1,
+                "price": "52.00",
+                "price_set": {
+                    "shop_money": {"amount": "52.00", "currency_code": "EUR"},
+                    "presentment_money": {"amount": "45.00", "currency_code": "GBP"},
+                },
+            }
+        ],
+        "created_at": "2026-05-24T10:00:00Z",
+        "email": "cliente@ejemplo.com",
+    }
 }
 
 _ORDER_PRE_ENVIO: dict[str, Any] = {
@@ -167,5 +212,45 @@ SCENARIOS: list[dict[str, Any]] = [
             ],
         },
         "max_turns": 4,
+    },
+    {
+        "id": "DE-07",
+        "name": "DE-07: Precio de producto en la moneda de la tienda (USD)",
+        "description": (
+            "Issue #265: la tienda cobra en USD. El agente da el precio en dólares y no "
+            "deduce euros por el idioma o el país del cliente."
+        ),
+        "aop_slug": "default",
+        "profile": "cooperativo",
+        "goal": "Saber cuánto cuesta el Bolso Tote Piel",
+        "initial_message": "Hola, ¿cuánto cuesta el Bolso Tote Piel?",
+        "expected_outcome": "El agente da el precio 100.95 en dólares (USD), nunca en euros.",
+        "mock_fixtures": {"shopify": _PRODUCT_TIENDA_USD},
+        "assertions": {
+            "skills_called": ["shopify.get_product_info"],
+            "response_contains": ["100"],
+            "response_not_contains": ["€", "euro"],
+        },
+        "max_turns": 3,
+    },
+    {
+        "id": "DE-08",
+        "name": "DE-08: Importe del pedido en la moneda en que pagó el cliente (GBP)",
+        "description": (
+            "Issue #265: tienda en EUR, el cliente pagó en GBP. El agente dice lo que pagó "
+            "en libras (45.00 GBP), no el importe de la tienda en euros."
+        ),
+        "aop_slug": "default",
+        "profile": "cooperativo",
+        "goal": "Saber cuánto pagué por mi pedido #1502",
+        "initial_message": "Hola, ¿cuánto pagué en total por mi pedido #1502?",
+        "expected_outcome": "El agente dice que pagó 45.00 GBP (libras), sin dar el importe en euros.",
+        "mock_fixtures": {"shopify": _ORDER_TIENDA_EUR_PAGADO_GBP},
+        "assertions": {
+            "skills_called": ["shopify.get_order_status"],
+            "response_contains": ["45"],
+            "response_not_contains": ["€", "euro", "52"],
+        },
+        "max_turns": 3,
     },
 ]

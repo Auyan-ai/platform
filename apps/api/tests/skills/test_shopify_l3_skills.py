@@ -6,12 +6,15 @@ ShopifyClient mockeado con AsyncMock — sin llamadas HTTP reales.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
 from apps.api.integrations.base import IntegrationContext
+from apps.api.integrations.shopify import IssuedRefund, RefundableBalance, ShopifyActionError
 from apps.api.skills.base import SkillContext
+from apps.api.skills.shopify._models import Money
 from apps.api.skills.shopify.cancel_order import (
     CancelOrder,
     CancelOrderInput,
@@ -71,11 +74,9 @@ _UPDATED_ORDER = {
     },
 }
 
-_REFUND_RESPONSE = {
-    "id": 9001,
-    "order_id": 1001,
-    "transactions": [{"amount": "12.50", "currency": "EUR"}],
-}
+_GBP_BALANCE = RefundableBalance(
+    captured=Decimal("45.00"), refunded=Decimal("0"), currency="GBP"
+)
 
 _RETURN_RESPONSE = {
     "id": 5001,
@@ -268,14 +269,16 @@ class TestRefundPartial:
         assert RefundPartial.requires_idempotency is True
 
     @pytest.mark.asyncio
-    async def test_creates_refund_successfully(self) -> None:
+    async def test_refund_reports_the_currency_derived_from_the_order(self) -> None:
         skill = RefundPartial()
-        inputs = RefundPartialInput(order_id=1001, amount="12.50", currency="EUR")
+        inputs = RefundPartialInput(order_id=1001, amount="12.50")
 
         with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.get_order_by_name = AsyncMock(return_value=None)
-            instance.refund_partial = AsyncMock(return_value=_REFUND_RESPONSE)
+            instance.refund_partial = AsyncMock(
+                return_value=IssuedRefund(refund_id=9001, amount=Decimal("12.50"), currency="GBP")
+            )
 
             result = await skill.execute(CTX, inputs)
 
@@ -283,35 +286,51 @@ class TestRefundPartial:
         assert result.success is True
         assert result.order_id == 1001
         assert result.refund_id == 9001
-        assert result.amount == "12.50"
-        assert result.currency == "EUR"
-        instance.refund_partial.assert_awaited_once_with(1001, amount="12.50", currency="EUR", note="")
+        assert result.amount == Money(amount="12.50", currency="GBP")
+        instance.refund_partial.assert_awaited_once_with(1001, amount=Decimal("12.50"), note="")
 
-    @pytest.mark.asyncio
-    async def test_refund_id_none_if_api_omits_it(self) -> None:
-        skill = RefundPartial()
-        inputs = RefundPartialInput(order_id=1001, amount="5.00", currency="EUR")
-
-        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
-            instance = MockClient.return_value
-            instance.get_order_by_name = AsyncMock(return_value=None)
-            instance.refund_partial = AsyncMock(return_value={})
-
-            result = await skill.execute(CTX, inputs)
-
-        assert result.refund_id is None
+    def test_llm_supplied_currency_is_ignored(self) -> None:
+        inputs = RefundPartialInput.model_validate(
+            {"order_id": 1001, "amount": "12.50", "currency": "EUR"}
+        )
+        assert "currency" not in inputs.model_dump()
 
     @pytest.mark.asyncio
     async def test_raises_if_shopify_not_configured(self) -> None:
         skill = RefundPartial()
         with pytest.raises(ValueError, match="shopify_not_configured"):
-            await skill.execute(CTX_NO_SHOPIFY, RefundPartialInput(order_id=1, amount="1.00", currency="EUR"))
+            await skill.execute(CTX_NO_SHOPIFY, RefundPartialInput(order_id=1, amount="1.00"))
+
+    @pytest.mark.asyncio
+    async def test_prepare_approval_pins_the_order_currency(self) -> None:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
+            instance = MockClient.return_value
+            instance.get_order_by_name = AsyncMock(return_value=None)
+            instance.get_refundable_balance = AsyncMock(return_value=_GBP_BALANCE)
+
+            approved = await RefundPartial().prepare_approval(
+                CTX, {"order_id": 1001, "amount": "12.50", "currency": "EUR"}
+            )
+
+        assert approved == {"order_id": 1001, "amount": "12.50", "currency": "GBP"}
+
+    @pytest.mark.asyncio
+    async def test_prepare_approval_rejects_amount_above_refundable(self) -> None:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
+            instance = MockClient.return_value
+            instance.get_order_by_name = AsyncMock(return_value=None)
+            instance.get_refundable_balance = AsyncMock(return_value=_GBP_BALANCE)
+
+            with pytest.raises(ShopifyActionError, match="refund_amount_exceeds_refundable"):
+                await RefundPartial().prepare_approval(
+                    CTX, {"order_id": 1001, "amount": "45.01"}
+                )
 
     def test_anthropic_tool_shape(self) -> None:
         tool = RefundPartial().to_anthropic_tool()
         assert tool["name"] == "shopify_refund_partial"
         assert "amount" in tool["input_schema"]["properties"]
-        assert "currency" in tool["input_schema"]["properties"]
+        assert "currency" not in tool["input_schema"]["properties"]
 
 
 # ----------------------------------------------------------------

@@ -17,6 +17,8 @@ import asyncio
 import datetime as _dt
 import logging
 from collections import OrderedDict
+from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -209,6 +211,18 @@ class ShopifyClient:
             )
             response.raise_for_status()
             return response.json()["shop"]  # type: ignore[no-any-return]
+
+    async def get_shop_currency(self) -> str:
+        """Moneda de la tienda (ISO 4217): en la que Shopify da los precios de producto."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self._base_url}/shop.json",
+                headers=self._headers(),
+                params={"fields": "currency"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            return str(response.json()["shop"]["currency"])
 
     # ----------------------------------------------------------------
     # Orders
@@ -464,41 +478,45 @@ class ShopifyClient:
             response.raise_for_status()
             return response.json()["order"]  # type: ignore[no-any-return]
 
+    async def _get_transactions(
+        self, client: httpx.AsyncClient, order_id: int
+    ) -> list[dict[str, Any]]:
+        response = await client.get(
+            f"{self._base_url}/orders/{order_id}/transactions.json",
+            headers=self._headers(),
+            timeout=15,
+        )
+        response.raise_for_status()
+        return response.json()["transactions"]  # type: ignore[no-any-return]
+
+    async def get_refundable_balance(self, order_id: int) -> RefundableBalance:
+        """Lo que queda por reembolsar del pedido, en la moneda en que pagó el cliente."""
+        async with httpx.AsyncClient() as client:
+            return refundable_balance(await self._get_transactions(client, order_id))
+
     async def refund_partial(
         self,
         order_id: int,
         *,
-        amount: str,
-        currency: str,
+        amount: Decimal,
         note: str = "",
-    ) -> dict[str, Any]:
+    ) -> IssuedRefund:
         """Crea un reembolso parcial en un pedido. Acción L3.
 
-        Shopify exige que la transacción de reembolso cuelgue (`parent_id`) de la
-        transacción de cobro (`sale`/`capture`) y use su mismo gateway: con
-        `parent_id` nulo el reembolso de un pedido cobrado se rechaza.
+        Moneda y tope salen de las transacciones del pedido, no de quien llama: un
+        importe por encima de lo que queda por reembolsar se rechaza sin llamar a
+        Shopify. La transacción de reembolso cuelga (`parent_id`) de la de cobro
+        (`sale`/`capture`) y usa su mismo gateway: con `parent_id` nulo el reembolso
+        de un pedido cobrado se rechaza.
         """
         async with httpx.AsyncClient() as client:
-            tx_resp = await client.get(
-                f"{self._base_url}/orders/{order_id}/transactions.json",
-                headers=self._headers(),
-                timeout=15,
-            )
-            tx_resp.raise_for_status()
-            transactions: list[dict[str, Any]] = tx_resp.json()["transactions"]
-            parent = next(
-                (
-                    t
-                    for t in reversed(transactions)
-                    if t.get("kind") in ("sale", "capture") and t.get("status") == "success"
-                ),
-                None,
-            )
-            if parent is None:
-                raise ShopifyActionError("order_has_no_refundable_payment")
+            transactions = await self._get_transactions(client, order_id)
+            balance = refundable_balance(transactions)
+            balance.require(amount)
+            parent = _successful(transactions, _PAYMENT_KINDS)[-1]
             refund_tx: dict[str, Any] = {
                 "parent_id": parent["id"],
-                "amount": amount,
+                "amount": str(amount),
                 "kind": "refund",
             }
             # Pedidos creados por API (sin checkout) traen gateway vacío: no se envía.
@@ -509,7 +527,7 @@ class ShopifyClient:
                 headers=self._headers(),
                 json={
                     "refund": {
-                        "currency": currency,
+                        "currency": balance.currency,
                         "note": note,
                         "transactions": [refund_tx],
                     }
@@ -517,7 +535,10 @@ class ShopifyClient:
                 timeout=15,
             )
             response.raise_for_status()
-            return response.json()["refund"]  # type: ignore[no-any-return]
+            refund: dict[str, Any] = response.json()["refund"]
+            return IssuedRefund(
+                refund_id=refund.get("id"), amount=amount, currency=balance.currency
+            )
 
     async def _graphql(
         self, client: httpx.AsyncClient, query: str, variables: dict[str, Any]
@@ -609,6 +630,63 @@ class ShopifyClient:
 
 class ShopifyActionError(RuntimeError):
     """Shopify no permite la acción con el estado actual del pedido."""
+
+
+_PAYMENT_KINDS = ("sale", "capture")
+
+
+def _successful(transactions: list[dict[str, Any]], kinds: tuple[str, ...]) -> list[dict[str, Any]]:
+    return [t for t in transactions if t.get("kind") in kinds and t.get("status") == "success"]
+
+
+@dataclass(frozen=True)
+class RefundableBalance:
+    """Lo que queda por reembolsar de un pedido, en la moneda en que pagó el cliente.
+
+    Las transacciones de Shopify van en la moneda de presentación (la del cliente con
+    Shopify Markets), así que moneda y tope salen de ellas, nunca del input del LLM.
+    """
+
+    captured: Decimal
+    refunded: Decimal
+    currency: str
+
+    @property
+    def remaining(self) -> Decimal:
+        return self.captured - self.refunded
+
+    def require(self, amount: Decimal) -> None:
+        if amount <= 0:
+            raise ShopifyActionError(f"refund_amount_not_positive: {amount}")
+        if amount > self.remaining:
+            raise ShopifyActionError(
+                f"refund_amount_exceeds_refundable: se pidió reembolsar {amount} "
+                f"{self.currency} y solo quedan {self.remaining} {self.currency} "
+                f"(cobrado {self.captured}, ya reembolsado {self.refunded})"
+            )
+
+
+@dataclass(frozen=True)
+class IssuedRefund:
+    refund_id: int | None
+    amount: Decimal
+    currency: str
+
+
+def refundable_balance(transactions: list[dict[str, Any]]) -> RefundableBalance:
+    """Cobrado menos reembolsado, a partir de las transacciones exitosas del pedido."""
+    payments = _successful(transactions, _PAYMENT_KINDS)
+    if not payments:
+        raise ShopifyActionError("order_has_no_refundable_payment")
+    refunds = _successful(transactions, ("refund",))
+    currencies = {t.get("currency") for t in payments + refunds}
+    if len(currencies) != 1 or None in currencies:
+        raise ShopifyActionError(f"order_transactions_currency_ambiguous: {currencies}")
+    return RefundableBalance(
+        captured=sum((Decimal(str(t["amount"])) for t in payments), Decimal(0)),
+        refunded=sum((Decimal(str(t["amount"])) for t in refunds), Decimal(0)),
+        currency=str(currencies.pop()),
+    )
 
 
 # Motivo libre del agente → handle de la librería de motivos de Shopify.
@@ -762,6 +840,9 @@ class ShopifyAdapter:
     ) -> list[dict[str, Any]]:
         return await self._client(ctx).search_products(query, limit=limit)
 
+    async def get_shop_currency(self, ctx: IntegrationContext) -> str:
+        return await self._client(ctx).get_shop_currency()
+
     async def get_policies(self, ctx: IntegrationContext) -> list[dict[str, Any]]:
         return await self._client(ctx).get_policies()
 
@@ -843,19 +924,22 @@ class ShopifyAdapter:
             last_name=last_name,
         )
 
+    async def get_refundable_balance(
+        self, ctx: IntegrationContext, order_id: int
+    ) -> RefundableBalance:
+        order_id = await self._resolve_order_id(ctx, order_id)
+        return await self._client(ctx).get_refundable_balance(order_id)
+
     async def refund_partial(
         self,
         ctx: IntegrationContext,
         order_id: int,
         *,
-        amount: str,
-        currency: str,
+        amount: Decimal,
         note: str = "",
-    ) -> dict[str, Any]:
+    ) -> IssuedRefund:
         order_id = await self._resolve_order_id(ctx, order_id)
-        return await self._client(ctx).refund_partial(
-            order_id, amount=amount, currency=currency, note=note
-        )
+        return await self._client(ctx).refund_partial(order_id, amount=amount, note=note)
 
     async def start_return(
         self,

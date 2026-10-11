@@ -1,0 +1,8 @@
+name: "Prompt fija la moneda que devuelve la skill"
+description: "Issue #265: el importe va en la moneda de la skill (la que pagó el cliente), sin deducirla ni convertirla"
+assertions:
+  - kind: prompt_contains
+    expected:
+      - trae su código de moneda
+      - nunca conviertas a otra
+      - la moneda en que pagó el cliente

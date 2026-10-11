@@ -8,18 +8,37 @@ un recurso REST `orders/{id}/returns.json` que no existe.
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 import respx
-from apps.api.integrations.shopify import ShopifyActionError, ShopifyClient
+from apps.api.integrations.shopify import (
+    IssuedRefund,
+    RefundableBalance,
+    ShopifyActionError,
+    ShopifyClient,
+    refundable_balance,
+)
 
 BASE = "https://marea.myshopify.com/admin/api/2026-04"
 
 
 def _client() -> ShopifyClient:
     return ShopifyClient("marea.myshopify.com", "tok")
+
+
+def _sale(tx_id: int, amount: str, currency: str = "GBP", **extra: str) -> dict:
+    return {
+        "id": tx_id,
+        "kind": "sale",
+        "status": "success",
+        "amount": amount,
+        "currency": currency,
+        "gateway": "bogus",
+        **extra,
+    }
 
 
 @respx.mock
@@ -30,7 +49,7 @@ async def test_refund_hangs_from_the_successful_sale_transaction() -> None:
             "transactions": [
                 {"id": 1, "kind": "authorization", "status": "success", "gateway": "bogus"},
                 {"id": 2, "kind": "sale", "status": "failure", "gateway": "bogus"},
-                {"id": 3, "kind": "sale", "status": "success", "gateway": "bogus"},
+                _sale(3, "45.00"),
             ]
         },
     )
@@ -38,23 +57,23 @@ async def test_refund_hangs_from_the_successful_sale_transaction() -> None:
         201, json={"refund": {"id": 77}}
     )
 
-    out = await _client().refund_partial(1001, amount="12.50", currency="EUR", note="n")
+    out = await _client().refund_partial(1001, amount=Decimal("12.50"), note="n")
 
-    assert out == {"id": 77}
+    assert out == IssuedRefund(refund_id=77, amount=Decimal("12.50"), currency="GBP")
     body = json.loads(refund.calls.last.request.content)["refund"]
     assert body["transactions"] == [
         {"parent_id": 3, "amount": "12.50", "kind": "refund", "gateway": "bogus"}
     ]
-    assert body["currency"] == "EUR"
+    assert body["currency"] == "GBP"
 
 
 @respx.mock
 async def test_refund_omits_empty_gateway() -> None:
     respx.get(f"{BASE}/orders/1001/transactions.json").respond(
-        200, json={"transactions": [{"id": 9, "kind": "sale", "status": "success", "gateway": ""}]}
+        200, json={"transactions": [_sale(9, "5.00", "USD", gateway="")]}
     )
     refund = respx.post(f"{BASE}/orders/1001/refunds.json").respond(201, json={"refund": {"id": 1}})
-    await _client().refund_partial(1001, amount="5.00", currency="USD")
+    await _client().refund_partial(1001, amount=Decimal("5.00"))
     tx = json.loads(refund.calls.last.request.content)["refund"]["transactions"][0]
     assert tx == {"parent_id": 9, "amount": "5.00", "kind": "refund"}
 
@@ -65,8 +84,60 @@ async def test_refund_without_payment_raises_and_does_not_post() -> None:
     refund = respx.post(f"{BASE}/orders/1001/refunds.json")
 
     with pytest.raises(ShopifyActionError, match="order_has_no_refundable_payment"):
-        await _client().refund_partial(1001, amount="1.00", currency="EUR")
+        await _client().refund_partial(1001, amount=Decimal("1.00"))
     assert not refund.called
+
+
+@respx.mock
+async def test_refund_above_what_is_left_is_rejected_and_not_posted() -> None:
+    respx.get(f"{BASE}/orders/1001/transactions.json").respond(
+        200,
+        json={
+            "transactions": [
+                _sale(3, "45.00"),
+                {"id": 4, "kind": "refund", "status": "success", "amount": "30.00",
+                 "currency": "GBP", "parent_id": 3},
+            ]
+        },
+    )
+    refund = respx.post(f"{BASE}/orders/1001/refunds.json")
+
+    with pytest.raises(
+        ShopifyActionError,
+        match="refund_amount_exceeds_refundable: .*20.00 GBP .*solo quedan 15.00 GBP",
+    ):
+        await _client().refund_partial(1001, amount=Decimal("20.00"))
+    assert not refund.called
+
+
+def test_refundable_balance_is_captured_minus_refunded_in_presentment_currency() -> None:
+    balance = refundable_balance(
+        [
+            {"id": 1, "kind": "authorization", "status": "success", "amount": "99.00",
+             "currency": "GBP"},
+            {"id": 2, "kind": "capture", "status": "success", "amount": "45.00",
+             "currency": "GBP"},
+            {"id": 3, "kind": "refund", "status": "failure", "amount": "45.00",
+             "currency": "GBP"},
+            {"id": 4, "kind": "refund", "status": "success", "amount": "10.00",
+             "currency": "GBP"},
+        ]
+    )
+    assert balance == RefundableBalance(
+        captured=Decimal("45.00"), refunded=Decimal("10.00"), currency="GBP"
+    )
+    assert balance.remaining == Decimal("35.00")
+
+
+def test_refundable_balance_rejects_mixed_currencies() -> None:
+    with pytest.raises(ShopifyActionError, match="order_transactions_currency_ambiguous"):
+        refundable_balance([_sale(1, "10.00", "GBP"), _sale(2, "10.00", "EUR")])
+
+
+def test_refund_amount_must_be_positive() -> None:
+    balance = RefundableBalance(captured=Decimal("10"), refunded=Decimal("0"), currency="GBP")
+    with pytest.raises(ShopifyActionError, match="refund_amount_not_positive"):
+        balance.require(Decimal("0"))
 
 
 def _reasons(*handles: str) -> dict:

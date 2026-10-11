@@ -145,7 +145,7 @@ AOPS: list[dict] = [
             "5. Si el producto llegó roto o defectuoso:\n"
             "   - Llama `shopify.refund_partial` INMEDIATAMENTE. No pidas confirmación extra.\n"
             "   - Mapea: `order_id` = campo `id` del pedido, `amount` = precio del artículo "
-            "afectado (campo `price` en `line_items`), `currency` = 'EUR'. "
+            "afectado (`price.amount` en `line_items`). La moneda la pone el sistema. "
             "Si hay duda del artículo, usa el primer `line_item`.\n"
             "   - El reembolso quedará pendiente de aprobación interna — informa al cliente "
             "que está en proceso.\n"

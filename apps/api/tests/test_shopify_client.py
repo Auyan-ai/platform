@@ -246,6 +246,15 @@ class TestAuth:
 # ----------------------------------------------------------------
 
 
+class TestGetShopCurrency:
+    async def test_returns_shop_currency(self) -> None:
+        mock_cm, mock_client = _mock_httpx({"shop": {"currency": "USD"}})
+        with patch("apps.api.integrations.shopify.httpx.AsyncClient", return_value=mock_cm):
+            currency = await ShopifyClient(DOMAIN, TOKEN).get_shop_currency()
+        assert currency == "USD"
+        assert mock_client.get.call_args.kwargs["params"] == {"fields": "currency"}
+
+
 class TestValidate:
     async def test_returns_shop_on_success(self) -> None:
         mock_cm, mock_client = _mock_httpx({"shop": {"name": "Marea", "email": "ops@marea.io"}})
