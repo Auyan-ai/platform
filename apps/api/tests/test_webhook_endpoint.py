@@ -16,6 +16,8 @@ from unittest.mock import AsyncMock
 from apps.api.agents.service import AgentOutcome
 from apps.api.core.config import get_settings
 from apps.api.routers.webhooks import router as webhooks_router
+from apps.api.services.handoff import APPROVAL_GATE_PREFIX
+from apps.api.services.inbound_media import fallback_message
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -257,7 +259,71 @@ class TestInboundEndpoint:
         assert body_out["decision"] == "escalate"
         assert body_out["escalation_reason"] == "out_of_scope"
         assert body_out["escalation_id"] == str(ESCALATION_ID)
-        assert body_out["response_text"] is None
+        assert body_out["response_text"] == fallback_message("escalation_ack", None)
+
+    def _post_chat(self, monkeypatch, outcome: AgentOutcome, channel: str = "chat"):
+        service = AsyncMock()
+        service.process_inbound = AsyncMock(return_value=outcome)
+        _patch_db(monkeypatch)
+        insert = AsyncMock(return_value=make_message(id=OUTBOUND_MSG_ID, role="agent_ai"))
+        monkeypatch.setattr(f"{ROUTER_MODULE}.insert_message", insert)
+        payload = {**_valid_payload(), "channel": channel}
+        body = json.dumps(payload).encode()
+        with TestClient(_make_app(agent_service=service)) as client:
+            r = client.post(
+                "/webhooks/inbound",
+                content=body,
+                headers={"X-Auyan-Signature": _sign(body)},
+            )
+        return r, insert
+
+    def test_chat_low_confidence_escalation_gets_ack_and_outbound_message(
+        self, monkeypatch
+    ) -> None:
+        outcome = dataclasses.replace(
+            _outcome_escalate(),
+            escalation_reason="low_confidence: 0.50 < threshold 0.60",
+            confidence=0.5,
+        )
+        r, insert = self._post_chat(monkeypatch, outcome)
+
+        assert r.status_code == 200
+        body = r.json()
+        ack = fallback_message("escalation_ack", None)
+        assert body["decision"] == "escalate"
+        assert body["response_text"] == ack
+        assert body["output_message_id"] == str(OUTBOUND_MSG_ID)
+        outbound = [
+            c.kwargs for c in insert.await_args_list if c.kwargs.get("direction") == "outbound"
+        ]
+        assert len(outbound) == 1
+        assert outbound[0]["content"] == ack
+        assert outbound[0]["role"] == "agent_ai"
+        assert outbound[0]["metadata"] == {"fixed_message": "escalation_ack"}
+
+    def test_chat_approval_gate_escalation_gets_no_ack(self, monkeypatch) -> None:
+        outcome = dataclasses.replace(
+            _outcome_escalate(), escalation_reason=f"{APPROVAL_GATE_PREFIX}refund"
+        )
+        r, insert = self._post_chat(monkeypatch, outcome)
+
+        assert r.json()["response_text"] is None
+        assert [c for c in insert.await_args_list if c.kwargs.get("direction") == "outbound"] == []
+
+    def test_chat_escalation_with_llm_text_gets_no_extra_ack(self, monkeypatch) -> None:
+        outcome = dataclasses.replace(
+            _outcome_escalate(), response_text="No tengo ese dato, te paso con el equipo."
+        )
+        r, insert = self._post_chat(monkeypatch, outcome)
+
+        assert r.json()["response_text"] == "No tengo ese dato, te paso con el equipo."
+        assert [c for c in insert.await_args_list if c.kwargs.get("direction") == "outbound"] == []
+
+    def test_non_chat_escalation_gets_no_ack(self, monkeypatch) -> None:
+        r, insert = self._post_chat(monkeypatch, _outcome_escalate(), channel="zendesk")
+
+        assert r.json()["response_text"] is None
+        assert [c for c in insert.await_args_list if c.kwargs.get("direction") == "outbound"] == []
 
     def test_invalid_signature_returns_401(self, monkeypatch) -> None:
         service = AsyncMock()
