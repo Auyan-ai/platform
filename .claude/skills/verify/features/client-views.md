@@ -31,6 +31,5 @@ Preconditions:
 ## Gotchas
 
 - Sin la API local la página da `ERR_TOO_MANY_REDIRECTS`.
-- Hallazgo abierto: la tarjeta de integraciones de `client-settings` dice `Sin canales activos` aunque Marea tiene canal e integraciones activas (`tenant_configurations.active_channels` vacío): issue #288. No lo tomes como regresión de tu cambio.
 - `/clients/<id>/facts` redirige a `/knowledge`.
 - Probado el 2026-10-11: las 8 páginas cargan y el aislamiento (UI y API) se comporta como se espera. Aprobaciones ajenas no se probaron (Lunaria no tiene ninguna viva).

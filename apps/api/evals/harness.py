@@ -229,7 +229,6 @@ def _default_tenant_config(tenant_id: Any = None) -> TenantConfiguration:
         tenant_id=tid,
         agent_model="claude-sonnet-4-6",
         escalation_threshold=0.6,
-        active_channels=["chat"],
         branding={},
         extra={},
     )

@@ -12,7 +12,7 @@ import httpx
 from apps.api.core.config import get_settings
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id, require_role
 from apps.api.db.client import bootstrap_connection, tenant_scope
-from apps.api.db.models import ChannelType, OnboardingChecklist
+from apps.api.db.models import IntegrationGroup, OnboardingChecklist
 from apps.api.db.queries import (
     approve_tenant_knowledge_submission_with_document,
     approve_weekly_report,
@@ -74,6 +74,7 @@ from apps.api.services.tenants import (
     get_tenant_config,
     get_tenant_insights,
     get_tenant_metrics,
+    list_tenant_integration_groups,
 )
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -135,7 +136,7 @@ class TenantConfigResponse(BaseModel):
     tenant_id: UUID
     agent_model: str
     escalation_threshold: float
-    active_channels: list[ChannelType]
+    integrations: list[IntegrationGroup]
     branding: dict
     extra: dict
 
@@ -608,7 +609,15 @@ async def get_my_tenant(tenant_id: TenantIdDep) -> TenantResponse:
 async def get_my_tenant_config(tenant_id: TenantIdDep) -> TenantConfigResponse:
     async with tenant_scope(tenant_id) as conn:
         config = await get_tenant_config(conn, tenant_id)
-    return TenantConfigResponse.model_validate(config)
+        integrations = await list_tenant_integration_groups(conn, tenant_id)
+    return TenantConfigResponse(
+        tenant_id=config.tenant_id,
+        agent_model=config.agent_model,
+        escalation_threshold=config.escalation_threshold,
+        integrations=integrations,
+        branding=config.branding,
+        extra=config.extra,
+    )
 
 
 @router.get(

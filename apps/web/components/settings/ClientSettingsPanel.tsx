@@ -4,19 +4,33 @@ import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useMyTenant, useMyTenantConfig } from '@/lib/api/hooks/tenants'
-import type { ChannelType } from '@auyan/shared'
+import type { components } from '@auyan/shared/api-types'
 import { Bot, Palette, PlugZap, UserRoundCheck } from 'lucide-react'
 
-const CHANNEL_LABELS: Record<ChannelType, string> = {
-  email: 'Email',
+type IntegrationGroup = components['schemas']['IntegrationGroup']
+
+const KIND_LABELS: Record<IntegrationGroup['kind'], string> = {
+  channel: 'Canales',
+  helpdesk: 'Helpdesk',
+  commerce: 'Tienda',
+  llm: 'Modelo',
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  whatsapp: 'WhatsApp',
   chat: 'Chat',
   widget: 'Widget',
-  whatsapp: 'WhatsApp',
+  email: 'Email',
   instagram: 'Instagram',
   zendesk: 'Zendesk',
   gorgias: 'Gorgias',
   intercom: 'Intercom',
   chatwoot: 'Chatwoot',
+  shopify: 'Shopify',
+}
+
+function providerLabel(provider: string) {
+  return PROVIDER_LABELS[provider] ?? provider.charAt(0).toUpperCase() + provider.slice(1)
 }
 
 function textFromExtra(extra: Record<string, unknown>, keys: string[], fallback: string) {
@@ -88,17 +102,26 @@ export function ClientSettingsPanel() {
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {config.data.active_channels.length > 0 ? (
-            config.data.active_channels.map((channel) => (
-              <Badge key={channel} variant="success">
-                {CHANNEL_LABELS[channel]}
-              </Badge>
-            ))
-          ) : (
-            <Badge variant="muted">Sin canales activos</Badge>
-          )}
-        </div>
+        {config.data.integrations.length > 0 ? (
+          <div className="mt-4 space-y-3">
+            {config.data.integrations.map((group) => (
+              <div key={group.kind} className="flex flex-wrap items-center gap-2">
+                <p className="w-20 text-xs font-medium uppercase tracking-wider text-foreground-muted">
+                  {KIND_LABELS[group.kind]}
+                </p>
+                {group.integrations.map((integration) => (
+                  <Badge key={integration.provider} variant="success">
+                    {providerLabel(integration.provider)}
+                  </Badge>
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-4">
+            <Badge variant="muted">Sin integraciones activas</Badge>
+          </div>
+        )}
       </Card>
 
       <Card className="p-(--density-card-p)">

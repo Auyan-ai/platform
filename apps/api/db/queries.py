@@ -36,6 +36,7 @@ from apps.api.db.models import (
     IdempotencyRecord,
     ImprovementProposal,
     IntegrationKind,
+    IntegrationSummary,
     IntentClassifierRun,
     InternalRole,
     InternalUser,
@@ -146,7 +147,7 @@ async def get_tenant_configuration(
     row = await conn.fetchrow(
         """
         SELECT tenant_id, agent_model, escalation_threshold,
-               active_channels, branding, extra
+               branding, extra
           FROM tenant_configurations
          WHERE tenant_id = $1
         """,
@@ -3349,6 +3350,34 @@ async def list_integrations_for_tenant(
             tenant_id,
         )
     return [_row_to_integration(r) for r in rows]
+
+
+async def list_active_integration_summaries(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+) -> list[IntegrationSummary]:
+    """Integraciones activas del tenant, solo kind/provider/primaria (lista blanca).
+
+    Nunca selecciona `credentials_encrypted` ni `config`: es lo que ve el cliente.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT kind, provider, is_primary_for_kind
+          FROM tenant_integrations
+         WHERE tenant_id  = $1
+           AND deleted_at IS NULL
+           AND is_active = TRUE
+         ORDER BY kind, is_primary_for_kind DESC, provider
+        """,
+        tenant_id,
+    )
+    return [
+        IntegrationSummary(
+            kind=r["kind"], provider=r["provider"], is_primary=r["is_primary_for_kind"]
+        )
+        for r in rows
+    ]
 
 
 async def upsert_integration(

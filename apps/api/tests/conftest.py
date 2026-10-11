@@ -237,7 +237,6 @@ def make_tenant_configuration(**overrides: Any) -> TenantConfiguration:
         "tenant_id": TENANT_ID,
         "agent_model": "claude-sonnet-4-6",
         "escalation_threshold": 0.70,
-        "active_channels": ["chat"],
         "branding": {},
         "extra": {},
     }
