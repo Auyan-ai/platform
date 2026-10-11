@@ -18,7 +18,14 @@ export function loginErrorMessage(code: string | null | undefined): string | nul
 /** Respuesta única al pedir enlace de acceso o recuperación: no revela si el email existe. */
 export const LINK_SENT_MESSAGE = 'Si el email existe, te llegará un enlace.'
 
+/** Rate limit al pedir enlaces: el límite de correos es por proyecto y por hora, no por usuario. */
+export const EMAIL_RATE_LIMIT_MESSAGE =
+  'Hemos enviado muchos correos en la última hora. Prueba más tarde o entra con tu contraseña.'
+
+/** Rate limit al entrar o al guardar la contraseña (no depende del correo). */
 export const RATE_LIMIT_MESSAGE = 'Demasiados intentos. Espera unos minutos y vuelve a probar.'
+
+export const EMAIL_REQUIRED_MESSAGE = 'Escribe tu email primero.'
 
 export interface AuthErrorLike {
   code?: string
@@ -57,10 +64,10 @@ export function signInErrorMessage(error: AuthErrorLike): string {
     return 'Email o contraseña incorrectos.'
   }
   if (error.code === 'email_not_confirmed') {
-    return 'Tu email aún no está confirmado. Usa el enlace de la invitación.'
+    return 'Tu email aún no está confirmado. Abre el enlace de la invitación que te enviamos.'
   }
   if (isRateLimit(error)) return RATE_LIMIT_MESSAGE
-  return 'No pudimos iniciar sesión. Inténtalo de nuevo.'
+  return 'No hemos podido iniciar sesión. Inténtalo de nuevo.'
 }
 
 /** Traduce errores de updateUser({ password }). */
@@ -79,8 +86,8 @@ export function passwordErrorMessage(error: AuthErrorLike): string {
     error.code === 'session_not_found' ||
     error.code === 'not_authenticated'
   ) {
-    return 'Tu sesión caducó. Solicita un enlace nuevo.'
+    return 'Tu sesión ha caducado. Vuelve a entrar para continuar.'
   }
   if (isRateLimit(error)) return RATE_LIMIT_MESSAGE
-  return 'No pudimos guardar la contraseña. Inténtalo de nuevo.'
+  return 'No hemos podido guardar la contraseña. Inténtalo de nuevo.'
 }
