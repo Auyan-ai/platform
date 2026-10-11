@@ -116,12 +116,11 @@ insert into users (id, tenant_id, email, full_name, role) values
 -- ============================================================
 insert into tenant_configurations (
   tenant_id, agent_model, escalation_threshold,
-  active_channels, branding, extra
+  branding, extra
 ) values (
   '11111111-1111-1111-1111-111111111111',
   'claude-sonnet-4-6',
   0.70,
-  array['email', 'chat', 'whatsapp']::channel_type[],
   jsonb_build_object(
     'brand_name', 'Lunaria',
     'tone', 'cercano, elegante, breve',
