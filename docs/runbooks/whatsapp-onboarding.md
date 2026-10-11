@@ -40,6 +40,35 @@ Crea (o reusa) el profile `auyan-<slug>`, una API key **limitada a ese profile**
 webhook firmado hacia `…/webhooks/zernio`. Guarda la integración **inactiva** e imprime el
 enlace del **signup hospedado** (co-branded, en español). Mándaselo al cliente.
 
+`--onboarding {business_app,api}` (solo `prepare`): `business_app` (por defecto) ofrece
+coexistence con la app WhatsApp Business; `api` es solo Cloud API (número nuevo o ya en Cloud
+API, grupos o llamadas). Se pasa tal cual a `GET /v1/connect/whatsapp`.
+
+### Idempotencia y dry-run (todos los subcomandos)
+
+Cada paso lee primero el estado actual (Zernio y Supabase) y solo crea lo que falta. Se puede
+repetir cualquier subcomando tras un fallo a medias; repetir uno que ya terminó no crea nada.
+Al final imprime un resumen por paso: `created`, `reused`, `skipped` o `deleted`.
+
+| Paso | Cómo detecta que ya existe |
+|---|---|
+| profile | `config.profile_id` guardado; si falta, busca `auyan-<slug>` en `GET /profiles` |
+| api_key | `api_key` + `config.api_key_id` guardados y presentes en `GET /api-keys` (por nombre `auyan-<slug>-runtime`/`-sandbox`) |
+| webhook | `config.webhook_id` + `webhook_secret` guardados y presentes en `GET /webhooks/settings` (nombre `auyan-<slug>`) |
+| signup_link | si `GET /accounts` ya trae WhatsApp, se omite (corre `finalize`) |
+| integration / template (`finalize`) | estado guardado igual a la cuenta leída; plantilla en `GET /whatsapp/templates` |
+
+- **Sin huérfanos.** Cada recurso remoto se guarda en Supabase nada más crearse (ya no hay una
+  transacción envolvente que lo revierta). Si el guardado falla, el script borra el recurso
+  que acaba de crear y lo dice. Una key o webhook con nuestro nombre y sin valor guardado es
+  huérfano (Zernio no devuelve el valor): se borra y se recrea. `--rotate-key` crea la nueva,
+  la guarda y solo entonces borra la anterior.
+- **`--dry-run`** hace solo lecturas y muestra, paso a paso, qué se crearía, reutilizaría o
+  borraría. Cualquier escritura en dry-run se bloquea en el cliente.
+- **Secretos.** `GET /v1/api-keys` devuelve la key maestra en claro (`firstApiKey`): el script
+  solo conserva id, nombre, scope y profileIds, y nunca imprime cuerpos de esos endpoints.
+- Si el listado de Zernio llega con una forma inesperada, el script se detiene sin tocar nada.
+
 ## 3. El cliente completa el Embedded Signup
 
 Con el enlace: login de Facebook → portfolio → número (coexistence o nuevo) → verificación
@@ -105,7 +134,8 @@ python -m scripts.onboard_whatsapp sandbox --tenant <slug> --staging --phone "+3
 
 El `accountId` del número compartido se lee de `GET /v1/phone-numbers` → `sandbox` (o
 `--account-id`). El webhook va **sin** filtro `accountIds`: el número es de Zernio, no del
-equipo, y Zernio responde `404 account_not_found`. El comando es idempotente.
+equipo, y Zernio responde `404 account_not_found`. El comando es idempotente (guarda
+`sandbox_phone` para no reenviar la activación) y se niega si el tenant ya tiene un profile real.
 
 **Del sandbox al número real:** primero `offboard` (borra la key y el webhook del sandbox) y
 después `prepare`. `prepare` se niega si el tenant tiene el sandbox registrado: reutilizaría su
@@ -122,4 +152,5 @@ python -m scripts.onboard_whatsapp offboard --tenant <slug>
 ```
 
 Borra el webhook y la key en Zernio y hace soft delete de la integración. El profile se
-conserva (historial).
+conserva (historial). Es repetible: borra primero en Zernio (también key/webhook huérfanos
+por nombre) y al final hace el soft delete; lo que ya no existe sale como `skipped`.
