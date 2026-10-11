@@ -1,18 +1,19 @@
 """Provisioning de tenants: crea tenant + tenant_admin + invite end-to-end.
 
 Productiza los pasos 1 y 2 del onboarding (ver docs/onboarding-system-plan.md §3-6).
-Usa el service_role key de Supabase para crear el auth user y mandar magic link.
+Usa el service_role key de Supabase para crear el auth user y mandarle el correo de acceso.
 
 Flujo:
     1. Valida slug único.
-    2. Crea o recupera el auth.users vía Supabase Auth Admin API.
+    2. Crea o recupera el auth.users vía Supabase Auth y le manda el correo de acceso.
+       Si el correo no sale, SupabaseAdminError antes de tocar la DB.
     3. Transacción DB: tenants + public.users + tenant_onboarding + tenant_assignment.
        Tenant nace con lifecycle 'discovery' porque el invite ya se mandó.
     4. Devuelve resultado con tenant + auth_user_id + invite_sent.
 
-Idempotencia: si el email ya tiene auth user, lo recupera y le re-manda magic link
-(no falla). El INSERT en public.users hace ON CONFLICT (id) DO UPDATE para tolerar
-re-provisioning del mismo email a un tenant nuevo.
+Idempotencia: si el email ya tiene auth user, lo recupera y le manda un magic link
+por correo (no falla). El INSERT en public.users hace ON CONFLICT (id) DO UPDATE para
+tolerar re-provisioning del mismo email a un tenant nuevo.
 """
 
 from __future__ import annotations
@@ -74,6 +75,8 @@ class ProvisionRequest:
 class ProvisionResult:
     tenant: Tenant
     tenant_admin_user_id: UUID
+    # Siempre True: si el correo no sale, provision_tenant lanza SupabaseAdminError
+    # y no hay resultado. Se mantiene en el contrato de POST /tenants.
     invite_sent: bool
 
 
@@ -138,7 +141,7 @@ async def provision_tenant(
     supabase_url = str(settings.supabase_url).rstrip("/")
     service_role = settings.supabase_service_role_key.get_secret_value()
 
-    auth_user_id, invite_sent = await _invite_or_get_user(
+    auth_user_id = await _invite_or_get_user(
         http=http,
         supabase_url=supabase_url,
         service_role=service_role,
@@ -196,9 +199,7 @@ async def provision_tenant(
         # tenant_configurations (1:1) + prompt 'system' activo. Sin ambos,
         # load_tenant_context hard-failea (tenant_config_missing /
         # no_active_system_prompt) en el primer mensaje.
-        await ensure_tenant_config_and_prompt(
-            conn, tenant_id, company_name=request.company_name
-        )
+        await ensure_tenant_config_and_prompt(conn, tenant_id, company_name=request.company_name)
 
         # Copy-on-create: cada tenant nace con su propia copia de los 8 AOPs canónicos
         # + permisos default (L1/L2 auto, L3 approval). Dentro de la misma transacción
@@ -210,7 +211,7 @@ async def provision_tenant(
     return ProvisionResult(
         tenant=tenant,
         tenant_admin_user_id=auth_user_id,
-        invite_sent=invite_sent,
+        invite_sent=True,
     )
 
 
@@ -231,11 +232,15 @@ async def _invite_or_get_user(
     supabase_url: str,
     service_role: str,
     email: str,
-) -> tuple[UUID, bool]:
-    """POST /auth/v1/invite. Si el user ya existe, lo busca y re-manda magic link.
+) -> UUID:
+    """Manda el correo de acceso al tenant_admin y devuelve su auth user id.
 
-    Returns:
-        (auth_user_id, invite_sent)
+    Usuario nuevo (o invitado sin confirmar): POST /auth/v1/invite crea el user y
+    envía el correo de invitación. Usuario ya confirmado: /invite responde 422
+    email_exists, se busca su id y se le manda un magic link con POST /auth/v1/otp.
+
+    Raises:
+        SupabaseAdminError: si Supabase no confirma el envío del correo.
     """
     headers = _admin_headers(service_role)
     invite_resp = await http.post(
@@ -247,7 +252,7 @@ async def _invite_or_get_user(
 
     if invite_resp.status_code in (200, 201):
         data = invite_resp.json()
-        return UUID(data["id"]), True
+        return UUID(data["id"])
 
     if invite_resp.status_code in (400, 409, 422) and _looks_like_email_exists(invite_resp):
         user_id = await _find_user_by_email(
@@ -257,17 +262,44 @@ async def _invite_or_get_user(
             raise SupabaseAdminError(
                 f"Supabase reportó email existente pero no se encontró usuario para {email}"
             )
-        magic_resp = await http.post(
-            f"{supabase_url}/auth/v1/admin/generate_link",
-            headers=headers,
-            json={"type": "magiclink", "email": email},
-            timeout=15,
+        await _send_magic_link(
+            http=http, supabase_url=supabase_url, service_role=service_role, email=email
         )
-        return user_id, magic_resp.status_code in (200, 201)
+        return user_id
 
     raise SupabaseAdminError(
         f"Supabase invite falló: {invite_resp.status_code} {invite_resp.text[:200]}"
     )
+
+
+async def _send_magic_link(
+    *,
+    http: httpx.AsyncClient,
+    supabase_url: str,
+    service_role: str,
+    email: str,
+) -> None:
+    """POST /auth/v1/otp con create_user=false: envía el correo de magic link.
+
+    No se usa /admin/generate_link porque solo devuelve el enlace sin mandar correo.
+    create_user=false impide que esta vía cree usuarios (si no existe, 422 otp_disabled).
+    Supabase responde 200 con cuerpo vacío cuando el correo sale.
+
+    Raises:
+        SupabaseAdminError: cualquier respuesta distinta de 200 (p. ej. 429
+            over_email_send_rate_limit, 422 otp_disabled, 5xx).
+    """
+    resp = await http.post(
+        f"{supabase_url}/auth/v1/otp",
+        headers=_admin_headers(service_role),
+        json={"email": email, "create_user": False},
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        raise SupabaseAdminError(
+            f"No se pudo enviar el magic link a {email} (usuario ya existente en Supabase "
+            f"Auth): {resp.status_code} {resp.text[:200]}. No se creó el tenant."
+        )
 
 
 def _looks_like_email_exists(resp: httpx.Response) -> bool:
