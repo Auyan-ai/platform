@@ -63,8 +63,8 @@ const STANDARD_FIELDS = [
   {
     key: 'email_signature',
     label: 'Firma de correo',
-    placeholder: 'El equipo de Marea Studio',
-    type: 'text',
+    placeholder: 'El equipo de Marea Studio\nhola@mareastudio.com',
+    type: 'textarea',
     suffix: '',
   },
 ] as const
@@ -208,18 +208,33 @@ export function TenantFactsForm({ tenantId }: { tenantId: string }) {
             >
               <Label htmlFor={field.key}>{field.label}</Label>
               <div className="mt-1.5 flex items-center gap-2">
-                <Input
-                  id={field.key}
-                  type={field.type ?? 'text'}
-                  value={form[field.key]}
-                  placeholder={field.placeholder}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      [field.key]: event.target.value,
-                    }))
-                  }
-                />
+                {field.type === 'textarea' ? (
+                  <Textarea
+                    id={field.key}
+                    value={form[field.key]}
+                    placeholder={field.placeholder}
+                    rows={3}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        [field.key]: event.target.value,
+                      }))
+                    }
+                  />
+                ) : (
+                  <Input
+                    id={field.key}
+                    type={field.type ?? 'text'}
+                    value={form[field.key]}
+                    placeholder={field.placeholder}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        [field.key]: event.target.value,
+                      }))
+                    }
+                  />
+                )}
                 {field.suffix && (
                   <span className="shrink-0 text-sm text-foreground-muted">{field.suffix}</span>
                 )}

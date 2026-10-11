@@ -96,7 +96,7 @@ class TestGenerateCustomerReply:
         client.messages.create = AsyncMock(return_value=resp)
 
         msg = await generate_customer_reply(client, "shopify.cancel_order", success=True)
-        assert msg == "¡Listo! Cancelamos tu pedido, cualquier cosa aquí estamos. 😊"
+        assert msg == "¡Listo! Cancelamos tu pedido, cualquier cosa aquí estamos."
 
     async def test_falls_back_when_llm_raises(self) -> None:
         client = MagicMock()
@@ -143,3 +143,32 @@ def test_confirmation_without_output_keeps_generic_template() -> None:
     assert fallback_message("shopify.update_shipping_address", success=True) == (
         "Hemos actualizado la dirección de envío de tu pedido."
     )
+
+
+class TestNoEmojiOrMarkdownToCustomer:
+    def test_fixed_texts_have_no_emoji(self) -> None:
+        from apps.api.services import approval_reply as ar
+        from apps.api.services.reply_format import has_emoji
+
+        texts = [
+            *ar._SKILL_DONE.values(), *ar._SKILL_GATE.values(), *ar._SKILL_WAITING.values(),
+            *ar._SKILL_DONE_FOLLOWUP.values(),
+            ar._DEFAULT_DONE, ar._DEFAULT_GATE, ar._DEFAULT_WAITING, ar._DEFAULT_DONE_FOLLOWUP,
+        ]
+        assert texts and not [t for t in texts if has_emoji(t)]
+
+    async def test_llm_reply_is_stripped_but_details_kept_literal(self) -> None:
+        block = MagicMock()
+        block.type = "text"
+        block.text = "**Listo**, ya está 😊"
+        client = MagicMock()
+        client.messages.create = AsyncMock(return_value=MagicMock(content=[block]))
+
+        msg = await generate_customer_reply(
+            client,
+            "shopify.update_shipping_address",
+            success=True,
+            output={"address": {"address1": "Calle *Mayor* 1"}},
+        )
+        assert msg.startswith("Listo, ya está")
+        assert "😊" not in msg
