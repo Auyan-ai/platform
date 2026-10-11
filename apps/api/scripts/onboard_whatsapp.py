@@ -82,6 +82,7 @@ WEBHOOK_EVENTS = [
     "conversation.control_changed",
     "account.disconnected",
 ]
+ONBOARDING_MODES = ("business_app", "api")
 REENGAGEMENT_TEMPLATE_NAME = "auyan_reengagement"
 REENGAGEMENT_TEMPLATE_LANGUAGE = "es"
 REENGAGEMENT_TEMPLATE_BODY = (
@@ -111,6 +112,10 @@ def profile_name(slug: str) -> str:
     return f"auyan-{slug}"
 
 
+def webhook_name(slug: str) -> str:
+    return f"auyan-{slug}"[:50]
+
+
 def webhook_url(api_base_url: str) -> str:
     return f"{api_base_url.rstrip('/')}/webhooks/zernio"
 
@@ -132,7 +137,7 @@ def webhook_request(
     profile_id: str | None = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
-        "name": f"auyan-{slug}"[:50],
+        "name": webhook_name(slug),
         "url": url,
         "secret": secret,
         "events": WEBHOOK_EVENTS,
@@ -158,7 +163,9 @@ def reengagement_template_request(account_id: str) -> dict[str, Any]:
     }
 
 
-def connect_url_params(profile_id: str, brand: str, redirect_url: str | None) -> dict[str, str]:
+def connect_url_params(
+    profile_id: str, brand: str, redirect_url: str | None, onboarding: str = "business_app"
+) -> dict[str, str]:
     params = {
         "profileId": profile_id,
         "signup": "hosted",
@@ -167,6 +174,8 @@ def connect_url_params(profile_id: str, brand: str, redirect_url: str | None) ->
     }
     if redirect_url:
         params["redirect_url"] = redirect_url
+    if onboarding != "business_app":
+        params["onboarding"] = onboarding
     return params
 
 
@@ -206,40 +215,150 @@ def account_phone_of(account: dict[str, Any]) -> str | None:
 
 # ─── Cliente de administración (key maestra) ──────────────────────────────────
 
+_READ_METHODS = frozenset({"GET"})
+
+
+@dataclass(frozen=True)
+class RemoteKey:
+    """Campos en lista blanca de una API key de Zernio. Nunca el valor de la key."""
+
+    id: str
+    name: str
+    scope: str | None
+    profile_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RemoteWebhook:
+    id: str
+    name: str
+    url: str | None
+
+
+def _items(data: dict[str, Any], *keys: str, what: str) -> list[dict[str, Any]]:
+    """Lista de objetos bajo la primera clave presente. Falla cerrado si la forma no es la
+    esperada: asumir "no hay nada" crearía duplicados."""
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    raise SystemExit(f"Zernio: forma inesperada en el listado de {what}; no se toca nada.")
+
+
+def _id_of(item: dict[str, Any]) -> str | None:
+    value = item.get("_id") or item.get("id")
+    return str(value) if value else None
+
+
+def parse_remote_keys(data: dict[str, Any]) -> list[RemoteKey]:
+    """Solo id, nombre, scope y profileIds: `GET /api-keys` devuelve la key MAESTRA en claro
+    en `firstApiKey` y nada de eso se retiene."""
+    keys: list[RemoteKey] = []
+    for item in _items(data, "apiKeys", "keys", "data", what="API keys"):
+        key_id = _id_of(item)
+        if key_id is None:
+            continue
+        raw_profiles = item.get("profileIds")
+        profiles = tuple(str(p) for p in raw_profiles) if isinstance(raw_profiles, list) else ()
+        scope = item.get("scope")
+        keys.append(
+            RemoteKey(
+                id=key_id,
+                name=str(item.get("name") or ""),
+                scope=str(scope) if scope else None,
+                profile_ids=profiles,
+            )
+        )
+    return keys
+
+
+def parse_remote_webhooks(data: dict[str, Any]) -> list[RemoteWebhook]:
+    hooks: list[RemoteWebhook] = []
+    for item in _items(data, "webhooks", "data", what="webhooks"):
+        hook_id = _id_of(item)
+        if hook_id is None:
+            continue
+        url = item.get("url")
+        hooks.append(
+            RemoteWebhook(
+                id=hook_id, name=str(item.get("name") or ""), url=str(url) if url else None
+            )
+        )
+    return hooks
+
 
 class ZernioAdmin:
-    def __init__(self, api_key: str, base_url: str = ZERNIO_API_BASE_URL) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = ZERNIO_API_BASE_URL,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self.dry_run = False
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=20,
+            transport=transport,
         )
 
     async def close(self) -> None:
         await self._client.aclose()
 
+    @staticmethod
+    def _failure(method: str, path: str, response: httpx.Response) -> SystemExit:
+        # Los endpoints de keys pueden devolver key material: ni una línea del cuerpo.
+        detail = "" if path.startswith("/api-keys") else f": {response.text[:500]}"
+        return SystemExit(
+            f"Zernio {method} {path} → HTTP {response.status_code} "
+            f"(request_id={response.headers.get('X-Request-Id')}){detail}"
+        )
+
     async def request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        method = method.upper()
+        if self.dry_run and method not in _READ_METHODS:
+            raise RuntimeError(f"dry-run: escritura bloqueada ({method} {path})")
         response = await self._client.request(method, path, **kwargs)
-        request_id = response.headers.get("X-Request-Id")
         if response.status_code >= 400:
-            raise SystemExit(
-                f"Zernio {method} {path} → HTTP {response.status_code} "
-                f"(request_id={request_id}): {response.text[:500]}"
-            )
+            raise self._failure(method, path, response)
         try:
             data = response.json()
         except ValueError:
             return {}
         return data if isinstance(data, dict) else {"data": data}
 
-    async def find_or_create_profile(self, name: str) -> str:
+    async def delete(self, path: str, **kwargs: Any) -> bool:
+        """DELETE tolerante: False si el recurso ya no existe (404)."""
+        if self.dry_run:
+            raise RuntimeError(f"dry-run: escritura bloqueada (DELETE {path})")
+        response = await self._client.request("DELETE", path, **kwargs)
+        if response.status_code == 404:
+            return False
+        if response.status_code >= 400:
+            raise self._failure("DELETE", path, response)
+        return True
+
+    async def find_profile(self, name: str) -> str | None:
         data = await self.request("GET", "/profiles")
-        for profile in data.get("profiles") or data.get("data") or []:
-            if isinstance(profile, dict) and profile.get("name") == name:
-                return str(profile.get("_id") or profile.get("id"))
+        for profile in _items(data, "profiles", "data", what="profiles"):
+            if profile.get("name") == name:
+                return _id_of(profile)
+        return None
+
+    async def create_profile(self, name: str) -> str:
         created = await self.request("POST", "/profiles", json={"name": name})
         profile = created.get("profile") or created.get("data") or created
-        return str(profile.get("_id") or profile.get("id"))
+        profile_id = _id_of(profile) if isinstance(profile, dict) else None
+        if profile_id is None:
+            raise SystemExit("Zernio creó el profile pero no devolvió su id.")
+        return profile_id
+
+    async def list_api_keys(self) -> list[RemoteKey]:
+        return parse_remote_keys(await self.request("GET", "/api-keys"))
+
+    async def list_webhooks(self) -> list[RemoteWebhook]:
+        return parse_remote_webhooks(await self.request("GET", "/webhooks/settings"))
 
 
 # ─── DB ───────────────────────────────────────────────────────────────────────
@@ -284,6 +403,225 @@ async def _save_state(
     )
 
 
+# ─── Informe por pasos ────────────────────────────────────────────────────────
+
+ACTIONS = ("created", "reused", "skipped", "deleted")
+
+
+@dataclass
+class Report:
+    """Cada decisión de un paso queda impresa y resumida. Sin secretos: solo ids y nombres."""
+
+    dry_run: bool
+    rows: list[tuple[str, str, str]] = field(default_factory=list)
+
+    def record(self, step: str, action: str, detail: str = "") -> None:
+        if action not in ACTIONS:
+            raise ValueError(f"acción desconocida: {action}")
+        self.rows.append((step, action, detail))
+        prefix = "[dry-run] " if self.dry_run else ""
+        print(f"{prefix}{step}: {action}" + (f" — {detail}" if detail else ""))
+
+    def summary(self) -> None:
+        title = "Resumen (dry-run: no se escribió nada)" if self.dry_run else "Resumen"
+        print(f"\n{title}")
+        for action in ACTIONS:
+            steps = [step for step, a, _ in self.rows if a == action]
+            if steps:
+                print(f"  {action}: {', '.join(steps)}")
+
+
+@dataclass
+class Ctx:
+    args: argparse.Namespace
+    conn: Any
+    admin: ZernioAdmin
+    key: bytes
+    tenant_id: UUID
+    state: ZernioIntegrationState
+    report: Report
+
+    @property
+    def dry_run(self) -> bool:
+        return bool(self.args.dry_run)
+
+    @property
+    def slug(self) -> str:
+        return str(self.args.tenant)
+
+    async def persist(self) -> None:
+        if not self.dry_run:
+            await _save_state(self.conn, self.tenant_id, self.key, self.state)
+
+
+async def _open_ctx(
+    args: argparse.Namespace, conn: Any, admin: ZernioAdmin, key: bytes
+) -> tuple[Ctx, Any]:
+    admin.dry_run = bool(args.dry_run)
+    tenant_id = await _resolve_tenant_id(conn, args.tenant)
+    current, state = await _load_state(conn, tenant_id, key)
+    return Ctx(args, conn, admin, key, tenant_id, state, Report(bool(args.dry_run))), current
+
+
+async def _persist_or_rollback(ctx: Ctx, step: str, undo: Any, undo_detail: str) -> None:
+    """Guarda justo después de crear un recurso remoto. Si el guardado falla, lo borra (y lo
+    dice) para no dejarlo huérfano; el error original se relanza."""
+    try:
+        await ctx.persist()
+    except Exception:
+        print(f"{step}: el guardado en Supabase falló; revirtiendo {undo_detail} en Zernio.")
+        try:
+            await undo()
+            ctx.report.record(step, "deleted", f"rollback de {undo_detail}")
+        except Exception as rollback_error:
+            print(
+                f"{step}: AVISO el rollback también falló ({type(rollback_error).__name__}); "
+                f"borra a mano {undo_detail}."
+            )
+        raise
+
+
+# ─── Pasos idempotentes (compartidos por prepare y sandbox) ───────────────────
+
+
+async def ensure_profile(ctx: Ctx) -> str:
+    name = profile_name(ctx.slug)
+    stored = ctx.state.config.get("profile_id")
+    remote = await ctx.admin.find_profile(name)
+    if stored:
+        note = "" if remote in (None, stored) else f" (en Zernio '{name}' es {remote})"
+        ctx.report.record("profile", "reused", f"{name} id={stored}{note}")
+        return str(stored)
+    if remote:
+        ctx.state.config["profile_id"] = remote
+        await ctx.persist()
+        ctx.report.record("profile", "reused", f"{name} id={remote} (adoptado por nombre)")
+        return remote
+    if ctx.dry_run:
+        ctx.report.record("profile", "created", f"POST /profiles {json.dumps({'name': name})}")
+        return "<profile_id>"
+    profile_id = await ctx.admin.create_profile(name)
+    ctx.state.config["profile_id"] = profile_id
+    await ctx.persist()
+    ctx.report.record("profile", "created", f"{name} id={profile_id}")
+    return profile_id
+
+
+async def _delete_key(ctx: Ctx, remote: RemoteKey, why: str) -> None:
+    detail = f"{remote.name} id={remote.id} ({why})"
+    if ctx.dry_run:
+        ctx.report.record("api_key", "deleted", f"DELETE /api-keys/{remote.id} — {detail}")
+    elif await ctx.admin.delete(f"/api-keys/{remote.id}"):
+        ctx.report.record("api_key", "deleted", detail)
+    else:
+        ctx.report.record("api_key", "skipped", f"{detail}: ya no existía")
+
+
+async def ensure_api_key(
+    ctx: Ctx, *, name: str, body: dict[str, Any], rotate: bool = False
+) -> None:
+    """Una key por tenant, localizada por nombre. El valor solo se obtiene al crearla, así que
+    una key remota que no tenemos guardada (huérfana) no es recuperable: se borra y se recrea."""
+    remote = [k for k in await ctx.admin.list_api_keys() if k.name == name]
+    stored = ctx.state.credentials.get("api_key")
+    stored_id = ctx.state.config.get("api_key_id")
+    reusable: str | None = None
+    if stored and not rotate:
+        if stored_id and any(k.id == stored_id for k in remote):
+            reusable = str(stored_id)
+        elif not stored_id and remote:
+            reusable = remote[0].id
+            ctx.state.config["api_key_id"] = reusable
+            await ctx.persist()
+        else:
+            print("api_key: la key guardada ya no existe en Zernio; se crea otra.")
+    if reusable:
+        ctx.report.record("api_key", "reused", f"{name} id={reusable}")
+        for extra in (k for k in remote if k.id != reusable):
+            await _delete_key(ctx, extra, "duplicada")
+        return
+    if not rotate:
+        for orphan in remote:
+            await _delete_key(ctx, orphan, "huérfana: no hay valor guardado")
+    if ctx.dry_run:
+        ctx.report.record("api_key", "created", f"POST /api-keys {json.dumps(body)}")
+    else:
+        created = await ctx.admin.request("POST", "/api-keys", json=body)
+        api_key = created.get("apiKey") or created.get("api_key") or {}
+        value, new_id = api_key.get("key"), api_key.get("id") or api_key.get("_id")
+        if not value or not new_id:
+            raise SystemExit("Zernio creó la key pero la respuesta no trae id y valor.")
+        ctx.state.credentials["api_key"] = value
+        ctx.state.config["api_key_id"] = str(new_id)
+        ctx.report.record("api_key", "created", f"{name} id={new_id}")
+        await _persist_or_rollback(
+            ctx,
+            "api_key",
+            lambda: ctx.admin.delete(f"/api-keys/{new_id}"),
+            f"la key {name} id={new_id}",
+        )
+        remote = [k for k in remote if k.id != str(new_id)]
+    if rotate:
+        for old in remote:
+            await _delete_key(ctx, old, "reemplazada por rotación")
+
+
+async def _delete_webhook(ctx: Ctx, remote: RemoteWebhook, why: str) -> None:
+    detail = f"{remote.name} id={remote.id} ({why})"
+    if ctx.dry_run:
+        ctx.report.record(
+            "webhook", "deleted", f"DELETE /webhooks/settings?webhookId={remote.id} — {detail}"
+        )
+    elif await ctx.admin.delete("/webhooks/settings", params={"webhookId": remote.id}):
+        ctx.report.record("webhook", "deleted", detail)
+    else:
+        ctx.report.record("webhook", "skipped", f"{detail}: ya no existía")
+
+
+async def ensure_webhook(ctx: Ctx, *, api_base: str, profile_id: str | None) -> None:
+    """Un webhook firmado por tenant. Sin el secreto guardado no se puede reutilizar (Zernio
+    no lo devuelve), así que un webhook del mismo nombre sin secreto se borra y se recrea."""
+    name = webhook_name(ctx.slug)
+    remote = [w for w in await ctx.admin.list_webhooks() if w.name == name]
+    stored_id = ctx.state.config.get("webhook_id")
+    secret_ok = bool(ctx.state.credentials.get("webhook_secret"))
+    reusable = (
+        str(stored_id)
+        if stored_id and secret_ok and any(w.id == stored_id for w in remote)
+        else None
+    )
+    if stored_id and not reusable:
+        print("webhook: el guardado no coincide con Zernio o falta su secreto; se recrea.")
+    if reusable:
+        ctx.report.record("webhook", "reused", f"{name} id={reusable}")
+        for extra in (w for w in remote if w.id != reusable):
+            await _delete_webhook(ctx, extra, "duplicado")
+        return
+    for orphan in remote:
+        await _delete_webhook(ctx, orphan, "huérfano: no hay secreto guardado")
+    secret = secrets.token_hex(32)
+    body = webhook_request(ctx.slug, webhook_url(api_base), secret, profile_id=profile_id)
+    if ctx.dry_run:
+        ctx.report.record(
+            "webhook", "created", f"POST /webhooks/settings {json.dumps({**body, 'secret': '***'})}"
+        )
+        return
+    created = await ctx.admin.request("POST", "/webhooks/settings", json=body)
+    webhook = created.get("webhook") or {}
+    new_id = _id_of(webhook) if isinstance(webhook, dict) else None
+    if new_id is None:
+        raise SystemExit("Zernio creó el webhook pero no devolvió su id.")
+    ctx.state.config["webhook_id"] = new_id
+    ctx.state.credentials["webhook_secret"] = secret
+    ctx.report.record("webhook", "created", f"{name} id={new_id}")
+    await _persist_or_rollback(
+        ctx,
+        "webhook",
+        lambda: ctx.admin.delete("/webhooks/settings", params={"webhookId": new_id}),
+        f"el webhook {name} id={new_id}",
+    )
+
+
 # ─── Subcomandos ──────────────────────────────────────────────────────────────
 
 
@@ -321,162 +659,204 @@ async def _warn_handoff_target(conn: Any, tenant_id: UUID) -> None:
 
 
 async def cmd_prepare(args: argparse.Namespace, conn: Any, admin: ZernioAdmin, key: bytes) -> None:
-    tenant_id = await _resolve_tenant_id(conn, args.tenant)
-    await _warn_handoff_target(conn, tenant_id)
-    _, state = await _load_state(conn, tenant_id, key)
-    ensure_not_sandbox(state)
+    ctx, _ = await _open_ctx(args, conn, admin, key)
+    await _warn_handoff_target(conn, ctx.tenant_id)
+    ensure_not_sandbox(ctx.state)
     api_base = _require_env("AUYAN_API_BASE_URL")
 
-    profile_id = state.config.get("profile_id")
-    if not profile_id:
-        profile_id = (
-            "<profile_id>"
-            if args.dry_run
-            else await admin.find_or_create_profile(profile_name(args.tenant))
+    profile_id = await ensure_profile(ctx)
+    key_body = api_key_request(ctx.slug, profile_id)
+    await ensure_api_key(ctx, name=key_body["name"], body=key_body, rotate=bool(args.rotate_key))
+    await ensure_webhook(ctx, api_base=api_base, profile_id=profile_id)
+
+    connected = False
+    if profile_id != "<profile_id>":
+        data = await admin.request("GET", "/accounts", params={"profileId": profile_id})
+        connected = (
+            pick_whatsapp_account(_items(data, "accounts", "data", what="cuentas")) is not None
         )
-    state.config["profile_id"] = profile_id
-
-    if not state.credentials.get("api_key") or args.rotate_key:
-        body = api_key_request(args.tenant, profile_id)
-        if args.dry_run:
-            print("POST /api-keys", json.dumps(body))
+    if connected:
+        ctx.report.record(
+            "signup_link", "skipped", "el profile ya tiene WhatsApp conectado: corre `finalize`"
+        )
+    else:
+        params = connect_url_params(profile_id, args.brand, args.redirect_url, args.onboarding)
+        if ctx.dry_run:
+            ctx.report.record(
+                "signup_link", "created", f"GET /connect/whatsapp {json.dumps(params)}"
+            )
         else:
-            created = await admin.request("POST", "/api-keys", json=body)
-            api_key = created.get("apiKey") or created.get("api_key") or {}
-            state.credentials["api_key"] = api_key["key"]
-            state.config["api_key_id"] = api_key.get("id") or api_key.get("_id")
+            connect = await admin.request("GET", "/connect/whatsapp", params=params)
+            ctx.report.record("signup_link", "created", f"onboarding={args.onboarding}")
+            print("Enlace del signup hospedado para el cliente:\n ", connect.get("authUrl"))
+    ctx.report.summary()
+    if not ctx.dry_run:
+        print("Integración INACTIVA hasta `finalize`.")
 
-    if not state.config.get("webhook_id"):
-        secret = secrets.token_hex(32)
-        body = webhook_request(args.tenant, webhook_url(api_base), secret, profile_id=profile_id)
-        if args.dry_run:
-            print("POST /webhooks/settings", json.dumps({**body, "secret": "***"}))
-        else:
-            created = await admin.request("POST", "/webhooks/settings", json=body)
-            webhook = created.get("webhook") or {}
-            state.config["webhook_id"] = webhook.get("_id") or webhook.get("id")
-            state.credentials["webhook_secret"] = secret
 
-    params = connect_url_params(profile_id, args.brand, args.redirect_url)
-    if args.dry_run:
-        print("GET /connect/whatsapp", json.dumps(params))
-        print("Plan:", json.dumps(state.redacted(), indent=2))
-        return
-    connect = await admin.request("GET", "/connect/whatsapp", params=params)
-    await _save_state(conn, tenant_id, key, state)
-    print("OK: profile, key limitada y webhook listos (integración INACTIVA hasta finalize).")
-    print("Enlace del signup hospedado para el cliente:\n ", connect.get("authUrl"))
+async def _list_templates(admin: ZernioAdmin, account_id: str) -> list[dict[str, Any]] | None:
+    """None si no se pudo listar (se intenta crear igualmente, como antes)."""
+    try:
+        data = await admin.request("GET", "/whatsapp/templates", params={"accountId": account_id})
+        return _items(data, "templates", "data", what="plantillas")
+    except SystemExit as exc:
+        print(f"template: no se pudo listar plantillas ({exc}); se intenta crear.")
+        return None
 
 
 async def cmd_finalize(args: argparse.Namespace, conn: Any, admin: ZernioAdmin, key: bytes) -> None:
-    tenant_id = await _resolve_tenant_id(conn, args.tenant)
-    await _warn_handoff_target(conn, tenant_id)
-    current, state = await _load_state(conn, tenant_id, key)
+    ctx, current = await _open_ctx(args, conn, admin, key)
+    await _warn_handoff_target(conn, ctx.tenant_id)
+    state = ctx.state
     if current is None or not state.config.get("profile_id"):
         raise SystemExit("Primero `prepare`: el tenant no tiene integración de Zernio.")
     data = await admin.request("GET", "/accounts", params={"profileId": state.config["profile_id"]})
-    accounts = data.get("accounts") or data.get("data") or []
-    account = pick_whatsapp_account([a for a in accounts if isinstance(a, dict)])
+    account = pick_whatsapp_account(_items(data, "accounts", "data", what="cuentas"))
     if account is None:
         raise SystemExit("El profile aún no tiene cuenta de WhatsApp: ¿terminó el signup?")
     account_id = account_id_of(account)
     if account_id is None:
         raise SystemExit(f"Cuenta de WhatsApp sin id: {account}")
-    state.config.update(
-        {
-            "account_id": account_id,
-            "phone_number": account_phone_of(account),
-            "reengagement_template": {
-                "name": REENGAGEMENT_TEMPLATE_NAME,
-                "language": REENGAGEMENT_TEMPLATE_LANGUAGE,
-            },
-        }
+    ctx.report.record("account", "reused", f"WhatsApp account_id={account_id}")
+
+    desired = {
+        "account_id": account_id,
+        "phone_number": account_phone_of(account),
+        "reengagement_template": {
+            "name": REENGAGEMENT_TEMPLATE_NAME,
+            "language": REENGAGEMENT_TEMPLATE_LANGUAGE,
+        },
+    }
+    if state.is_active and all(state.config.get(k) == v for k, v in desired.items()):
+        ctx.report.record("integration", "reused", "ya activa con la misma cuenta")
+    else:
+        state.config.update(desired)
+        state.is_active = True
+        await ctx.persist()
+        ctx.report.record("integration", "created", "activada con la cuenta de WhatsApp")
+
+    existing = await _list_templates(admin, account_id)
+    already = existing is not None and any(
+        t.get("name") == REENGAGEMENT_TEMPLATE_NAME
+        and str(t.get("language") or REENGAGEMENT_TEMPLATE_LANGUAGE)
+        == REENGAGEMENT_TEMPLATE_LANGUAGE
+        for t in existing
     )
-    state.is_active = True
     template = reengagement_template_request(account_id)
-    if args.dry_run:
-        print("POST /whatsapp/templates", json.dumps(template))
-        print("Plan:", json.dumps(state.redacted(), indent=2))
-        return
-    await _save_state(conn, tenant_id, key, state)
-    try:
-        await admin.request("POST", "/whatsapp/templates", json=template)
-        print("Plantilla de re-enganche creada: pendiente de aprobación de Meta.")
-    except SystemExit as exc:
-        # Ya existe (re-ejecución) u otro error: se informa, la integración queda activa.
-        print(f"AVISO plantilla: {exc}")
-    print(f"OK: WhatsApp activo para {args.tenant} (account_id={account_id}).")
+    if already:
+        ctx.report.record("template", "reused", REENGAGEMENT_TEMPLATE_NAME)
+    elif ctx.dry_run:
+        ctx.report.record("template", "created", f"POST /whatsapp/templates {json.dumps(template)}")
+    else:
+        try:
+            await admin.request("POST", "/whatsapp/templates", json=template)
+            ctx.report.record(
+                "template",
+                "created",
+                f"{REENGAGEMENT_TEMPLATE_NAME}: pendiente de aprobación de Meta",
+            )
+        except SystemExit as exc:
+            ctx.report.record("template", "skipped", f"AVISO plantilla: {exc}")
+    ctx.report.summary()
+    if not ctx.dry_run:
+        print(f"OK: WhatsApp activo para {args.tenant} (account_id={account_id}).")
 
 
 async def cmd_sandbox(args: argparse.Namespace, conn: Any, admin: ZernioAdmin, key: bytes) -> None:
     if not args.staging:
         raise SystemExit("El sandbox es solo para staging: añade --staging.")
-    tenant_id = await _resolve_tenant_id(conn, args.tenant)
-    await _warn_handoff_target(conn, tenant_id)
-    _, state = await _load_state(conn, tenant_id, key)
+    ctx, _ = await _open_ctx(args, conn, admin, key)
+    await _warn_handoff_target(conn, ctx.tenant_id)
+    state = ctx.state
+    if state.config.get("profile_id") and not state.config.get("sandbox"):
+        raise SystemExit(
+            "El tenant tiene un profile real de Zernio: primero `offboard` y después `sandbox`."
+        )
     phone = normalize_phone(args.phone)
     if phone is None:
         raise SystemExit(f"Teléfono inválido: {args.phone}")
-    if args.dry_run:
-        print("POST /whatsapp/sandbox/sessions", json.dumps({"phone": phone}))
+    api_base = _require_env("AUYAN_API_BASE_URL")
+
+    if state.config.get("sandbox") and state.config.get("sandbox_phone") == phone:
+        ctx.report.record("session", "skipped", f"{phone} ya registrada")
+    elif ctx.dry_run:
+        ctx.report.record(
+            "session", "created", f"POST /whatsapp/sandbox/sessions {json.dumps({'phone': phone})}"
+        )
     else:
         await admin.request("POST", "/whatsapp/sandbox/sessions", json={"phone": phone})
-        print(f"Activación enviada a {phone}: responde al WhatsApp del sandbox para activarla.")
+        ctx.report.record(
+            "session", "created", f"activación enviada a {phone}: responde al WhatsApp del sandbox"
+        )
     account_id = args.account_id or sandbox_account_id(await admin.request("GET", "/phone-numbers"))
     if not account_id:
         raise SystemExit("Zernio no devuelve el número del sandbox (GET /phone-numbers).")
-    if not state.credentials.get("api_key"):
-        # El sandbox compartido no tiene profile: la key limitada por profile no lo ve.
-        # Excepción SOLO de staging: key de alcance completo, caduca en 30 días.
-        body = {"name": f"auyan-{args.tenant}-sandbox", "scope": "full", "expiresIn": 30}
-        if args.dry_run:
-            print("POST /api-keys", json.dumps(body))
-        else:
-            created = await admin.request("POST", "/api-keys", json=body)
-            api_key = created.get("apiKey") or created.get("api_key") or {}
-            state.credentials["api_key"] = api_key["key"]
-            state.config["api_key_id"] = api_key.get("id") or api_key.get("_id")
-            # Se guarda ya (inactiva): si falla el webhook, la key no queda huérfana en Zernio.
-            await _save_state(conn, tenant_id, key, state)
-    if not state.config.get("webhook_id"):
-        secret = secrets.token_hex(32)
-        # Sin filtro `accountIds`: el número del sandbox es de Zernio, no del equipo (filtrar
-        # por él → 404 account_not_found). El routing a tenant lo hace /webhooks/zernio.
-        body = webhook_request(args.tenant, webhook_url(_require_env("AUYAN_API_BASE_URL")), secret)
-        if args.dry_run:
-            print("POST /webhooks/settings", json.dumps({**body, "secret": "***"}))
-        else:
-            created = await admin.request("POST", "/webhooks/settings", json=body)
-            webhook = created.get("webhook") or {}
-            state.config["webhook_id"] = webhook.get("_id") or webhook.get("id")
-            state.credentials["webhook_secret"] = secret
-    state.config.update({"account_id": account_id, "sandbox": True})
-    state.is_active = True
-    if args.dry_run:
-        print("Plan:", json.dumps(state.redacted(), indent=2))
-        return
-    await _save_state(conn, tenant_id, key, state)
-    print(f"OK: sandbox registrado para {args.tenant} (account_id={account_id}).")
+
+    # El sandbox compartido no tiene profile: la key limitada por profile no lo ve.
+    # Excepción SOLO de staging: key de alcance completo, caduca en 30 días.
+    key_name = f"auyan-{ctx.slug}-sandbox"
+    await ensure_api_key(
+        ctx, name=key_name, body={"name": key_name, "scope": "full", "expiresIn": 30}
+    )
+    # Sin filtro `accountIds`: el número del sandbox es de Zernio, no del equipo (filtrar por
+    # él → 404 account_not_found). El routing a tenant lo hace /webhooks/zernio.
+    await ensure_webhook(ctx, api_base=api_base, profile_id=None)
+
+    desired = {"account_id": account_id, "sandbox": True, "sandbox_phone": phone}
+    if state.is_active and all(state.config.get(k) == v for k, v in desired.items()):
+        ctx.report.record("integration", "reused", "sandbox ya registrado")
+    else:
+        state.config.update(desired)
+        state.is_active = True
+        await ctx.persist()
+        ctx.report.record("integration", "created", f"sandbox account_id={account_id}")
+    ctx.report.summary()
 
 
 async def cmd_offboard(args: argparse.Namespace, conn: Any, admin: ZernioAdmin, key: bytes) -> None:
-    tenant_id = await _resolve_tenant_id(conn, args.tenant)
-    current, state = await _load_state(conn, tenant_id, key)
+    """Borra primero en Zernio y al final hace el soft delete: si algo falla en medio, repetir
+    el comando termina el trabajo (lo ya borrado sale como `skipped`)."""
+    ctx, current = await _open_ctx(args, conn, admin, key)
+    state = ctx.state
+    key_names = {f"auyan-{ctx.slug}-runtime", f"auyan-{ctx.slug}-sandbox"}
+    hook_name = webhook_name(ctx.slug)
+
+    stored_key_id = state.config.get("api_key_id")
+    all_keys = await admin.list_api_keys()
+    targets = [k for k in all_keys if k.name in key_names or k.id == stored_key_id]
+    for remote_key in targets:
+        why = (
+            "guardada en la integración"
+            if remote_key.id == stored_key_id
+            else "huérfana por nombre"
+        )
+        await _delete_key(ctx, remote_key, why)
+    if stored_key_id and not any(k.id == stored_key_id for k in targets):
+        ctx.report.record("api_key", "skipped", f"id={stored_key_id}: ya no existía en Zernio")
+
+    stored_hook_id = state.config.get("webhook_id")
+    all_hooks = await admin.list_webhooks()
+    hook_targets = [h for h in all_hooks if h.name == hook_name or h.id == stored_hook_id]
+    for remote_hook in hook_targets:
+        why = (
+            "guardado en la integración"
+            if remote_hook.id == stored_hook_id
+            else "huérfano por nombre"
+        )
+        await _delete_webhook(ctx, remote_hook, why)
+    if stored_hook_id and not any(h.id == stored_hook_id for h in hook_targets):
+        ctx.report.record("webhook", "skipped", f"id={stored_hook_id}: ya no existía en Zernio")
+
     if current is None:
-        raise SystemExit("El tenant no tiene integración de Zernio.")
-    webhook_id = state.config.get("webhook_id")
-    api_key_id = state.config.get("api_key_id")
-    if args.dry_run:
-        print(f"DELETE /webhooks/settings?webhookId={webhook_id}")
-        print(f"DELETE /api-keys/{api_key_id}")
-        print(f"soft delete tenant_integrations {current.id}")
-        return
-    if webhook_id:
-        await admin.request("DELETE", "/webhooks/settings", params={"webhookId": webhook_id})
-    if api_key_id:
-        await admin.request("DELETE", f"/api-keys/{api_key_id}")
-    await soft_delete_integration(conn, tenant_id=tenant_id, integration_id=current.id)
-    print(f"OK: WhatsApp dado de baja para {args.tenant}. El profile se conserva (historial).")
+        ctx.report.record("integration", "skipped", "el tenant no tiene integración de Zernio")
+    elif ctx.dry_run:
+        ctx.report.record("integration", "deleted", f"soft delete tenant_integrations {current.id}")
+    else:
+        await soft_delete_integration(conn, tenant_id=ctx.tenant_id, integration_id=current.id)
+        ctx.report.record("integration", "deleted", f"soft delete {current.id}")
+    ctx.report.summary()
+    if not ctx.dry_run and current is not None:
+        print(f"OK: WhatsApp dado de baja para {args.tenant}. El profile se conserva (historial).")
 
 
 COMMANDS = {
@@ -498,6 +878,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             p.add_argument("--brand", required=True, help="Nombre de la marca (signup hospedado)")
             p.add_argument("--redirect-url", default=None)
             p.add_argument("--rotate-key", action="store_true", help="Crea una key nueva")
+            p.add_argument(
+                "--onboarding",
+                choices=ONBOARDING_MODES,
+                default="business_app",
+                help="business_app (coexistence, por defecto) o api (solo Cloud API)",
+            )
         if name == "sandbox":
             p.add_argument("--phone", required=True, help="Móvil que activa el sandbox")
             p.add_argument("--account-id", default=None, help="account.id del sandbox")
@@ -514,8 +900,10 @@ async def main(argv: list[str] | None = None) -> None:
     )
     conn = await _connect_database(_require_env("DATABASE_URL"))
     try:
-        async with conn.transaction():
-            await COMMANDS[args.command](args, conn, admin, key)
+        # Sin transacción envolvente: cada paso guarda en cuanto crea un recurso remoto. Con
+        # una sola transacción, un fallo posterior revertía el guardado y dejaba la key
+        # huérfana en Zernio (s81).
+        await COMMANDS[args.command](args, conn, admin, key)
     finally:
         await conn.close()
         await admin.close()
