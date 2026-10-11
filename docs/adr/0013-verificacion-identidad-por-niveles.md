@@ -56,8 +56,7 @@ Qué permite cada nivel sobre su pedido:
 
 | Acción | `guest` | `verified` |
 |---|---|---|
-| Ver estado, artículos, importes y tracking | Sí | Sí |
-| Ver la dirección de envío | No | Sí |
+| Ver el pedido completo: estado, artículos, importes, tracking y dirección de envío | Sí | Sí |
 | Listar "mis pedidos" | No | Sí |
 | L2 (`tag_order`, `add_order_note`) | Sí | Sí |
 | L3 cancelar, reembolsar, devolver | Sí, con la aprobación humana de hoy | Sí, con la aprobación humana de hoy |
@@ -196,10 +195,12 @@ sustituye a `_l3_ownership_error`. Resuelve el pedido del input y llama a `level
 Todo bloqueo queda en `skill_audit_log` con `status = 'rejected_by_permissions'` y
 `error_message = 'identity_required'` o `'verified_required'`.
 
-**Proyección.** La skill no decide qué campos devuelve. Lo hace una función de código,
-`project_order(order, level)`, con una tabla de campos por nivel: `guest` recibe todo menos
-`shipping_address`, y `verified` lo recibe todo. Se borran `shipping_address_withheld`,
-`ownership_verified` y `ownership_note` de `OrderDetail`.
+**Pedido completo para los dos niveles** (decisión de Kenny, s84). `guest` y `verified` reciben
+el pedido entero, dirección de envío incluida: quien tiene el email y el número de pedido tiene
+también el correo de confirmación con esos datos. No hay proyección de campos por nivel: lo que
+el nivel decide es **qué pedidos** se pueden leer (el gate) y **qué acciones** se pueden
+pedir. Se borran `shipping_address_withheld`, `ownership_verified` y `ownership_note` de
+`OrderDetail`.
 
 Las aprobaciones L3 no vuelven a comprobar la identidad al ejecutarse desde el dashboard. El
 gate decidió al crearlas, y el operador ve con qué nivel (punto 7).
@@ -329,7 +330,7 @@ filas de más de 90 días.
 | Comparar el contacto con el pedido | Sí, con hashes | Nada |
 | Decidir el nivel | Sí | Nada |
 | Qué tools ve el LLM | Sí, según el nivel | Nada |
-| Qué campos del pedido se devuelven | `project_order` | Nada |
+| Qué pedidos se pueden leer | Gate, según el nivel | Nada |
 | Permitir o rechazar una skill | Gate, con error tipado | Nada |
 | Respuesta a datos que no coinciden, bloqueo o pausa | Texto fijo, sin `reason` | Nada |
 | Contar intentos y aplicar límites | Sí | Nada |
@@ -401,7 +402,7 @@ Cada PR va contra `develop` y termina en una comprobación.
    - Deja temporalmente sin acceso al no dueño hasta PR-3.
 2. **PR-2 `refactor:` modelo, `resolve_identity` y gate único.** `Grant`, `IdentityContext`,
    `order_claims`, `identity_evidence` en los cuatro intakes, `identity_scope` y `min_level`
-   en las skills, filtrado de tools, `project_order`. Borra `_l3_ownership_error` y
+   en las skills, filtrado de tools. Borra `_l3_ownership_error` y
    `check_order_ownership`. Comprobación: tests de tabla por canal y origen, y la suite del
    gate L3 en verde.
 3. **PR-3 `feat:` nivel `guest`.** Migración de `identity_checks`, parsers, `attempt_guest`,
