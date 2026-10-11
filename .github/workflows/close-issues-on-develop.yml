@@ -1,0 +1,54 @@
+name: Close issues on develop
+
+# GitHub solo autocierra issues al mergear en la rama por defecto (main).
+# Los PRs van contra develop, así que cerramos aquí los `Closes #N` del cuerpo.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [develop]
+
+permissions:
+  issues: write
+  pull-requests: read
+  contents: read
+
+jobs:
+  close:
+    name: Cerrar issues referenciados
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: Cerrar issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          issues="$(python3 .github/scripts/closing_refs.py)"
+          if [ -z "$issues" ]; then
+            echo "PR #${PR_NUMBER} no referencia ningún issue a cerrar."
+            exit 0
+          fi
+          failed=0
+          for n in $issues; do
+            state="$(gh issue view "$n" --json state --jq .state)" || {
+              echo "::error::Issue #${n} no existe o no se pudo leer."
+              failed=1
+              continue
+            }
+            if [ "$state" != "OPEN" ]; then
+              echo "::warning::Issue #${n} ya está cerrado, se omite."
+              continue
+            fi
+            gh issue close "$n" --comment "Resuelto en #${PR_NUMBER} (mergeado a develop)." || {
+              echo "::error::No se pudo cerrar el issue #${n}."
+              failed=1
+            }
+          done
+          exit "$failed"
