@@ -24,7 +24,7 @@ un ADR nuevo que la supersede y se actualiza el `Estado` del viejo.
 | [0010](0010-whatsapp-zernio-handoff.md) | WhatsApp vía Zernio como canal desacoplado del helpdesk, con handoff modular al helpdesk del cliente | Propuesta |
 | [0011](0011-transcripcion-notas-de-voz.md) | Transcripción de notas de voz de WhatsApp detrás de `Transcriber` | Propuesta |
 | [0012](0012-escritura-natural-por-canal.md) | Escritura natural por canal: el código pone el formato y la firma, el LLM la redacción | Propuesta |
-| [0013](0013-verificacion-identidad-por-niveles.md) | Verificación de identidad por niveles decidida en código: resolutor antes de `reason`, gate único de ownership y OTP al contacto del pedido | Propuesta |
+| [0013](0013-verificacion-identidad-por-niveles.md) | Verificación de identidad en dos niveles (`guest` con número de pedido + contacto, `verified` por remitente, sesión firmada u OTP) decidida en código, con gate único y OTP opcional | Propuesta |
 
 ## Estados posibles
 

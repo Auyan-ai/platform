@@ -1,447 +1,421 @@
-# ADR 0013 — Verificación de identidad por niveles, decidida en código (+ OTP)
+# ADR 0013 — Verificación de identidad en dos niveles, decidida en código (+ OTP opcional)
 
-**Estado:** Propuesta (Kenny revisa antes de programar; pasa a Aceptada cuando se mergee la implementación)
+**Estado:** Propuesta (pasa a Aceptada cuando se mergee la implementación)
 **Fecha:** 2026-10-12 (sesión 84, issue [#257](https://github.com/Auyan-ai/platform/issues/257))
+**Relación:** amplía el punto 6 de [ADR 0010](0010-whatsapp-zernio-handoff.md) (L3 por email o teléfono del pedido).
 
 ## Contexto
 
-Hoy la identidad del comprador se usa en dos sitios, los dos con la misma función
-`services/identity.check_order_ownership(order, customer_email=, customer_phone=)`:
+Hoy la identidad se comprueba en dos sitios con `services/identity.check_order_ownership`: el
+gate L3 (`execute_skill._l3_ownership_error`) y la dirección en `shopify.get_order_status`.
+Faltan cuatro cosas:
 
-- **Gate L3** en `agents/nodes/execute_skill._l3_ownership_error`. Bloquea una L3 sobre un
-  pedido si ni el email ni el teléfono del comprador coinciden con los del pedido (#259, ADR 0010).
-- **Dirección en `shopify.get_order_status`**. La retiene si quien escribe no es el dueño y
-  devuelve `ownership_note` para que el agente no prometa lo que el gate L3 va a bloquear.
+1. **Consultar pedidos solo con un email.** `get_order_by_email` y `get_customer_history`
+   reciben el email como input del LLM. Basta con escribir "mis pedidos son de ana@x.com" para
+   ver los pedidos de Ana y su total gastado.
+2. **Consultar con un número de pedido suelto.** `get_order_status` devuelve artículos, importes
+   y tracking de cualquier número, y los números de Shopify son correlativos (`#1001`,
+   `#1002`…). Las L2 (`tag_order`, `add_order_note`) no miran la identidad.
+3. **El email del remitente vale lo mismo venga de donde venga.** En un ticket de chat de
+   Zendesk, Gorgias o Chatwoot, el email lo teclea el visitante y nadie lo comprueba. Aun así,
+   el gate lo trata igual que el remitente de un correo.
+4. **La identidad sale del perfil (`end_customers`), no del mensaje.** `resolve_end_customer`
+   enlaza perfiles por BSUID, teléfono y email, y con la memoria cross-canal (#256) los
+   enlazará más. Un enlace heurístico no puede dar permisos.
 
-Lo que falta, visto en el código:
+Además, quien no escribe desde el contacto de la compra (un familiar, WhatsApp con solo BSUID,
+el invitado del widget de #258) acaba siempre en "pasa el caso a una persona".
 
-1. **Las demás lecturas no comprueban nada.** `get_order_status` entrega estado, artículos,
-   importes y tracking de **cualquier** número de pedido, y los números de Shopify son
-   correlativos (`#1001`, `#1002`…). `get_order_by_email` y `get_customer_history` reciben el
-   email **como input del LLM**: si alguien escribe "mis pedidos son de ana@x.com", el agente
-   puede listar los pedidos y el total gastado de Ana. Las L2 (`tag_order`, `add_order_note`)
-   tampoco miran la identidad.
-2. **El email del remitente vale lo mismo venga de donde venga.** El intake de Zendesk,
-   Gorgias y Chatwoot pasa el email del solicitante a `end_customers`, y el gate lo da por
-   bueno. En un ticket que entró por **correo**, la respuesta vuelve a ese buzón. En un ticket
-   de **chat** (Zendesk messaging, Gorgias chat, widget de Chatwoot) el email lo teclea el
-   visitante y nadie lo comprueba, y la respuesta se ve en el mismo chat.
-3. **La identidad sale del perfil, no del mensaje.** `build_skill_context` toma email y
-   teléfono de `state["end_customer"]`. `resolve_end_customer` enlaza perfiles por BSUID,
-   teléfono y email y rellena huecos. Con la memoria cross-canal (#256) un mismo perfil
-   juntará identidades de varios canales, y un enlace heurístico no puede dar permisos.
-4. **No hay forma de verificar a quien no escribe desde el contacto del pedido**: un familiar
-   desde otro correo, WhatsApp con solo BSUID, Instagram, o un invitado en el widget (#258).
-   Hoy todos esos casos acaban en "pasa el caso a una persona".
+Regla dura del proyecto: **código sobre LLM**. Todo lo determinista es código con tests.
 
-Restricciones:
-
-- **Código sobre LLM** (ADR 0010 punto 10, ADR 0012). El LLM nunca decide si alguien está
-  verificado. Solo recibe el resultado y redacta.
-- El widget de chat (#258) es requisito del piloto, y en el widget el caso normal es el
-  invitado sin identidad.
-- Postmark ya está verificado en `auyan.es` (s83), con la cuenta pendiente de aprobación.
-- Decisión s79: el OTP quedó en el backlog post-piloto. Este ADR lo diseña entero y deja la
-  fecha como pregunta abierta.
-
-Referencias del sector (investigación del issue, 2026-09-29): Decagon verifica por nivel de
-riesgo y ejecuta la validación en código. Intercom Fin y Chatbase aceptan identidad firmada
-(HMAC o JWT) desde la web del cliente. Gorgias fuerza confirmación en cancelar y editar
-dirección.
+Referencia: Chatbase, acciones de Shopify, sección "Signed-in and guest customers"
+(chatbase.co/docs/user-guides/chatbot/actions/shopify-actions.md). El cliente con sesión
+iniciada se identifica por sesión firmada, y el invitado da email y número de pedido.
 
 ## Decisión
 
-**Un resolutor en código calcula, en cada turno, qué identidades están verificadas y con qué
-fuerza. Un único gate en `execute_skill` compara esa identidad con el sujeto de cada skill
-sensible (un pedido o un email) según la política del tenant. El OTP sube la fuerza enviando
-un código al contacto que figura en Shopify, nunca al que diga el cliente.**
+**Hay dos niveles, `guest` y `verified`, y los calcula el código antes de `reason`. Sin
+ninguno de los dos, el agente no toca pedidos. Un gate único en `execute_skill` comprueba el
+nivel y el pedido de cada skill, y la proyección de campos depende del nivel.**
 
-### 1. Modelo: verificaciones, fuerza y claims
+### 1. Niveles
+
+| Nivel | Cómo se obtiene | Alcance |
+|---|---|---|
+| ninguno | Nada de lo de abajo | Productos, políticas y KB. Ningún dato de pedidos. |
+| `guest` | El cliente aporta **número de pedido + email o teléfono**, y el código comprueba que coinciden con ese pedido | **Solo ese pedido** |
+| `verified` | **Remitente**, **sesión firmada** u **OTP**. Los tres valen lo mismo. | Todos los pedidos cuyo email, teléfono o cliente de Shopify coincidan con la identidad verificada |
+
+**Remitente** significa que el mensaje llega desde el email de la compra por un ticket de
+origen correo o formulario web, o desde el teléfono de la compra por WhatsApp. El origen es el
+`source_channel` que el intake ya guarda (ADR 0012). Un origen de chat, messaging, API o
+desconocido no da remitente. En ese caso, el email que el visitante tecleó cuenta como **dato
+aportado**: sirve para `guest` si va con un número de pedido, y nunca como remitente.
+
+Qué permite cada nivel sobre su pedido:
+
+| Acción | `guest` | `verified` |
+|---|---|---|
+| Ver estado, artículos, importes y tracking | Sí | Sí |
+| Ver la dirección de envío | No | Sí |
+| Listar "mis pedidos" | No | Sí |
+| L2 (`tag_order`, `add_order_note`) | Sí | Sí |
+| L3 cancelar, reembolsar, devolver | Sí, con la aprobación humana de hoy | Sí, con la aprobación humana de hoy |
+| Cambiar la dirección de envío | No | Sí, con la aprobación humana de hoy |
+| Cambiar datos de cuenta o perfil (skills futuras) | No | Sí |
+
+### 2. Modelo
 
 ```python
-VerificationMethod = Literal["signed_session", "otp", "sender_phone", "sender_email"]
-AssuranceLevel = Literal["none", "sender", "strong"]   # orden total: none < sender < strong
-
-LEVEL: dict[VerificationMethod, AssuranceLevel] = {
-    "signed_session": "strong",
-    "otp": "strong",
-    "sender_phone": "sender",
-    "sender_email": "sender",
-}
-
-ClaimHash = NewType("ClaimHash", str)
-# HMAC-SHA256(pii_salt del tenant, "email:<casefold>" | "phone:<E.164>" | "shopify_customer:<id>")
+Level = Literal["guest", "verified"]
+Method = Literal["sender_email", "sender_phone", "signed_session", "otp", "order_contact"]
+ClaimHash = NewType("ClaimHash", str)  # HMAC-SHA256(pii_salt del tenant, "email:…" | "phone:+34…" | "shopify_customer:…")
 
 @dataclass(frozen=True)
-class Verification:
-    method: VerificationMethod
-    claims: frozenset[ClaimHash]
-    source: str                    # "zendesk:email", "whatsapp", "widget:app_proxy", "otp:<challenge_id>"
-    verified_at: datetime
-    valid_until: datetime | None   # None = vale mientras dure el mensaje que la aporta
+class Grant:
+    level: Level
+    method: Method
+    claims: frozenset[ClaimHash]   # verified: la identidad. guest: vacío.
+    order_id: int | None           # guest: el id interno del pedido. verified: None.
+    valid_until: datetime | None   # None = solo este mensaje (remitente, sesión)
 
 @dataclass(frozen=True)
 class IdentityContext:
-    verifications: tuple[Verification, ...]    # vacío = sin identidad ("none")
+    grants: tuple[Grant, ...]
 
-    def level_for(self, subject: frozenset[ClaimHash], now: datetime) -> tuple[AssuranceLevel, Verification | None]:
-        """La verificación vigente más fuerte cuyos claims tocan el sujeto."""
+    def level_for(self, order: ShopifyOrder) -> Level | None:
+        """verified si algún claim de un grant verified toca los claims del pedido;
+        guest si hay un grant guest con su order_id; si no, None."""
 ```
 
-- **Varias verificaciones a la vez.** Un ticket de correo aporta `sender_email` del remitente.
-  Si luego el remitente verifica por OTP el email de otro pedido (el caso del familiar), la
-  conversación tiene dos verificaciones con claims distintos. La propiedad se decide por
-  intersección: `subject_claims ∩ verification.claims ≠ ∅`.
-- **Claims con hash.** El estado del grafo, el snapshot de la aprobación y la tabla del OTP
-  guardan solo `ClaimHash`, nunca el email o el teléfono en claro. La comparación es una
-  intersección de conjuntos. Se usa el `pii_salt` de `tenant_secrets`, que ya existe. Rotarlo
-  invalida verificaciones vivas, lo que es aceptable con ventanas de minutos.
-- **Claims del pedido**: `order.email`, `customer.email`, los teléfonos de `order_phones()`
-  (función actual) y `customer.id` de Shopify.
+Los claims de un pedido son `order.email`, `customer.email`, los teléfonos de `order_phones()`
+y `customer.id`, todos pasados por el HMAC. El estado del grafo, las tablas y las trazas
+guardan solo hashes. `check_order_ownership` se sustituye por `order_claims()` más
+`IdentityContext.level_for`, y sus dos callers migran en el mismo PR.
 
-`check_order_ownership(order, customer_email=, customer_phone=)` pasa a
-`order_claims(order, salt, region) -> frozenset[ClaimHash]` más `IdentityContext.level_for`.
-Los dos callers actuales migran en el mismo PR y la firma vieja se borra.
+### 3. Nodo `resolve_identity` (código, sin LLM)
 
-### 2. Resolutor de identidad: nodo `resolve_identity`
+Va entre `load_conversation` y `select_aop`. En cada turno hace cuatro cosas, en este orden:
 
-Nodo nuevo, solo código y sin LLM, entre `load_conversation` y `select_aop`:
+1. **Remitente y sesión.** Lee `messages.metadata.identity_evidence` del mensaje entrante.
+   Cada intake la escribe al persistir: email del remitente con su origen, teléfono E.164 de
+   WhatsApp y claims de una sesión firmada ya validada. De ahí salen los grants `verified` del
+   mensaje. Nunca usa el perfil `end_customers`.
+2. **Grants guardados.** Carga de `identity_checks` los grants `guest` y `otp` vigentes de
+   **esta** conversación.
+3. **Código OTP.** Si hay un reto pendiente, busca el código en el mensaje y lo valida (punto 6).
+4. **Datos aportados.** Extrae del texto de los mensajes del cliente en esta conversación, con
+   parsers y sin LLM:
+   - emails, con regex y `casefold`;
+   - teléfonos, con `phonenumbers.PhoneNumberMatcher` y la región del tenant;
+   - números de pedido, con el patrón del tenant (`tenant_facts.order_name_pattern`, por
+     defecto `#?\d{4,}`), excluyendo los dígitos que ya reconoció como teléfono.
 
-```
-load_tenant_context → load_conversation → resolve_identity → select_aop → retrieve_knowledge → reason …
-```
+   Suma también el email del solicitante de un ticket de chat de helpdesk. Con cada par
+   (pedido, contacto) que no se haya probado antes, intenta un `guest` (punto 4).
 
-Construye `IdentityContext` a partir de **la evidencia del mensaje entrante** y de las
-verificaciones OTP vigentes de **esta** conversación. Nunca lo construye a partir del perfil
-`end_customers`. El intake de cada canal escribe la evidencia en
-`messages.metadata.identity_evidence` al persistir el mensaje.
+Salidas al estado:
 
-| Canal y origen | Evidencia que escribe el intake | Verificación |
-|---|---|---|
-| WhatsApp (Zernio) con teléfono | `phone_e164` del remitente | `sender_phone` |
-| WhatsApp solo BSUID, Instagram, Messenger | nada utilizable | ninguna |
-| Zendesk, Gorgias o Chatwoot con origen `email` | email del solicitante | `sender_email` |
-| Zendesk o Gorgias con origen formulario web | email del solicitante | `sender_email` (la respuesta vuelve a ese buzón) |
-| Helpdesk con origen chat, messaging, API o desconocido | nada utilizable | ninguna |
-| Widget de Auyan con sesión firmada válida (#258) | claims de la sesión validada en el intake | `signed_session` |
-| Widget de Auyan como invitado | nada | ninguna |
-| `/webhooks/inbound` (HMAC de Auyan, interno y de pruebas) | email del payload | `sender_email` |
+- `identity`: los grants, solo con hashes.
+- `identity_summary`: nivel, métodos y evento OTP, para trazas.
+- `identity_missing`: qué falta para tocar pedidos. Vale `["order_number", "contact"]`,
+  `["contact"]`, `["order_number"]` o `[]`.
 
-El origen de un ticket de helpdesk es el `source_channel` que el intake ya guarda para ADR 0012
-(Zendesk `via.channel`, Gorgias `message.channel`, Chatwoot `conversation.channel`). La lista
-de orígenes que cuentan como correo vive en una tabla junto a `writing_surface._CHAT_SOURCES`.
-Un origen desconocido no cuenta, al revés que en ADR 0012: un saludo de más no rompe nada,
-pero una verificación de más sí.
+`reason` recibe en el bloque volátil del turno una línea generada por código, como "Identidad:
+ninguna. Para consultar un pedido falta el número de pedido y el email o teléfono de la
+compra". Nunca recibe los datos firmados ni los contactos del pedido.
 
-El resolutor también procesa el OTP (punto 4): si hay un reto pendiente y el mensaje trae un
-código, lo valida antes de que `reason` vea nada.
+### 4. `guest`: comprobación y límites
 
-Salida al estado: `identity` (el `IdentityContext` serializado, solo con hashes) e
-`identity_summary` (`{"level", "methods", "otp_event"}`). `reason` recibe una línea en el
-bloque volátil del turno, por ejemplo "Identidad: verificada por el email del remitente" o
-"Identidad: sin verificar". Esa línea no va en el bloque cacheado del AOP. Sirve para que el
-agente no pida skills que el gate va a rechazar, pero el gate no depende de ella.
+`attempt_guest(order_ref, contact)` resuelve el pedido por el adapter y compara el contacto
+con los claims del pedido. Si coinciden, guarda un grant `guest` para ese `order_id`, válido
+24 h dentro de la conversación. El pedido, ya proyectado (punto 5), entra en `known_facts`, así
+el agente no necesita una llamada más.
 
-### 3. Gate único de ownership en `execute_skill`
+Si el pedido no existe o el contacto no coincide, la salida es la misma:
 
-Cada skill declara qué toca, en un `ClassVar` y no en condicionales repartidos:
+- El turno termina con un **texto fijo** y no corre `reason`. Ejemplo: "No he podido verificar
+  esos datos. Revisa el número de pedido y el email o teléfono con el que compraste." El texto
+  nunca dice si el pedido existe.
+- El intento queda en `identity_checks` con su motivo interno (`order_not_found` o
+  `contact_mismatch`) para forense. Ese motivo nunca llega al cliente ni al LLM.
+
+Límites contra la enumeración, contados en `identity_checks` con índices:
+
+- Cada par (pedido, contacto) se prueba una sola vez por conversación.
+- Como máximo se prueban 3 pares por mensaje.
+- **5 fallos por conversación** bloquean `guest` en esa conversación. A partir de ahí, un texto
+  fijo ofrece pasar el caso a una persona. Remitente, sesión y OTP siguen funcionando.
+- **50 fallos por tenant en una hora** (configurable) registran un error con alerta y pausan
+  `guest` en todo el tenant durante 15 minutos, con texto fijo. Cuesta una consulta indexada
+  por intento.
+
+Si los parsers no encuentran el dato (por ejemplo, "mi pedido es el mil dos"), el LLM tiene una
+skill `identity.check_order_contact(order_number, contact)`. Esa skill llama a la misma
+`attempt_guest`, con los mismos límites y el mismo texto fijo. El LLM transcribe el dato y el
+código compara.
+
+### 5. Gate único y proyección de campos
+
+Cada skill declara qué toca y qué nivel mínimo exige, como `ClassVar`:
 
 ```python
-IdentitySubject = Literal["none", "order", "customer_email"]
-
 class Skill(ABC):
-    identity_subject: ClassVar[IdentitySubject] = "none"
-    subject_field: ClassVar[str | None] = None   # "order_id" | "order_identifier" | "email"
+    identity_scope: ClassVar[Literal["public", "order", "own_orders"]] = "public"
+    min_level: ClassVar[Level | None] = None
 ```
 
-| Skill | `identity_subject` | Clase de política |
+| Skill | `identity_scope` | `min_level` |
 |---|---|---|
-| `get_product_info`, `get_shop_policies` | `none` | pública |
-| `get_order_status` | `order` | `l1_pii` |
-| `get_order_by_email`, `get_customer_history` | `customer_email` | `l1_pii` |
-| `tag_order`, `add_order_note` | `order` | `l2` |
-| `cancel_order`, `refund_partial`, `start_return`, `update_shipping_address` | `order` | `l3` |
+| `get_product_info`, `get_shop_policies` | `public` | ninguno |
+| `get_order_status`, `tag_order`, `add_order_note` | `order` | `guest` |
+| `cancel_order`, `refund_partial`, `start_return` | `order` | `guest` (`verified` con `l3_requires_otp`) |
+| `update_shipping_address` | `order` | `verified` |
+| `list_my_orders` (sustituye a `get_order_by_email` y `get_customer_history`) | `own_orders` | `verified` |
 
-El gate corre después de la comprobación de permisos (`tenant_tool_permissions`) y antes del
-piso de aprobación L3. Sustituye a `_l3_ownership_error` y a la comprobación interna de
-`get_order_status`:
+**Skills de email.** `get_customer_history` se elimina. `get_order_by_email` pasa a ser
+`shopify.list_my_orders`, **sin input**. El código busca los pedidos con el email verificado
+(o el teléfono, si es lo único verificado) y nunca con un dato que escriba el LLM. Los AOPs
+canónicos (`complaint`, `consulta_envio`…) se actualizan y se vuelven a sembrar.
 
-1. Resuelve el sujeto: el pedido por el adapter (como hoy, visible o interno), o el email del
-   input. Un pedido que no se resuelve cuenta como "sin dueño" (fail-closed, como hoy).
-2. Calcula `level_for(claims del sujeto)` y lo compara con el nivel que exige la política del
-   tenant para la clase de la skill.
-3. Si llega al nivel, ejecuta. Si no, devuelve un error estructurado al loop ReAct:
-   `identity_required` con `required_level`, `current_level` y `verification_offer`
-   (`"otp_email"`, `"otp_phone"` o `null` según la política y los contactos del pedido).
-   Nunca devuelve el contacto del pedido. El mensaje al LLM depende del canal, como hoy.
-4. Hay una excepción de lectura parcial. Con `get_order_status` y política
-   `l1_order_unverified = "status_only"`, el gate no bloquea y pasa
-   `SkillContext.disclosure = "status_only"`. La skill devuelve entonces solo `found`,
-   `financial_status`, `fulfillment_status` y `shipment_status`, sin artículos, importes,
-   tracking ni dirección.
+**Lista de tools.** Antes de `reason`, el código quita de la lista de tools las skills `order`
+y `own_orders` si no hay ningún grant, y las `own_orders` si no hay grant `verified`. El LLM
+no puede pedir lo que no ve.
+
+**Gate.** Va después de `tenant_tool_permissions` y antes del piso de aprobación L3, y
+sustituye a `_l3_ownership_error`. Resuelve el pedido del input y llama a `level_for(order)`:
+
+| Resultado | Qué hace el código |
+|---|---|
+| Nivel suficiente | Ejecuta |
+| Sin grant sobre **este** pedido | Error tipado `identity_required{missing: [...]}`. El LLM pide el dato que falta. |
+| `guest`, la acción exige `verified`, OTP activado | El gate crea el reto y envía el código (punto 6), y el turno termina con texto fijo: "Te he enviado un código de 6 dígitos al email de la compra. Escríbelo aquí para continuar." |
+| `guest`, la acción exige `verified`, OTP apagado | Error tipado `verified_required`. El LLM explica que tiene que escribir desde el email o el teléfono de la compra, o le ofrece pasar el caso a una persona. |
+| Pedido que no se resuelve | Igual que sin grant (fail-closed) |
 
 Todo bloqueo queda en `skill_audit_log` con `status = 'rejected_by_permissions'` y
-`error_message = 'identity_required:<nivel>'`, igual que el gate L3 de hoy.
+`error_message = 'identity_required'` o `'verified_required'`.
+
+**Proyección.** La skill no decide qué campos devuelve. Lo hace una función de código,
+`project_order(order, level)`, con una tabla de campos por nivel: `guest` recibe todo menos
+`shipping_address`, y `verified` lo recibe todo. Se borran `shipping_address_withheld`,
+`ownership_verified` y `ownership_note` de `OrderDetail`.
 
 Las aprobaciones L3 no vuelven a comprobar la identidad al ejecutarse desde el dashboard. El
-gate ya decidió al crearlas, y el operador ve el método (punto 7).
+gate decidió al crearlas, y el operador ve con qué nivel (punto 7).
 
-### 4. OTP
+### 6. OTP (opcional, apagado por defecto)
 
-**Quién lo pide.** Una skill de código, `identity.request_verification`, con input
-`{order_id}` o `{email}`. El LLM decide **cuándo ofrecerlo**: tras un `identity_required` con
-`verification_offer`, pregunta al cliente si quiere recibir un código, y la pide si dice que
-sí. El código decide todo lo demás: si la política permite OTP, a qué contacto va, los límites
-y la validación. El gate no envía códigos solo, porque cualquiera que escriba un número de
-pedido ajeno haría llegar correos no pedidos al dueño.
+Sirve para subir de `guest` a `verified`, por ejemplo para cambiar la dirección. Siempre lo
+dispara el gate (punto 5), nunca el LLM. Requiere `identity_policy.otp_enabled = true`.
 
-**Destino.** Siempre un contacto que figura en Shopify:
+- **Destino.** El email del pedido sobre el que el cliente ya es `guest`, nunca uno que dicte
+  el cliente. Solo email, por Postmark, desde `no-reply@auyan.es` con el nombre de la marca
+  como remitente visible, sin seguimiento de aperturas ni enlaces. El texto lleva el código, la
+  caducidad y "si no lo pediste, ignora este correo".
+- **Código.** 6 dígitos de `secrets.randbelow`, guardados como `HMAC-SHA256(pepper del
+  servidor, challenge_id || código)`. Caduca a los 10 minutos y admite 5 intentos. Hay un solo
+  reto pendiente por conversación. Si se pide otro antes de 60 s, se devuelve el mismo. Se
+  envían como máximo 3 por conversación y hora y 5 por destino en 24 h.
+- **Validación en `resolve_identity`.** Con un reto pendiente, cuenta como intento un token de
+  6 dígitos que no sea el número del pedido en curso. El nodo lo consume con un `UPDATE …
+  WHERE status = 'pending' AND attempts < max_attempts RETURNING` atómico y lo compara con
+  `hmac.compare_digest`. Los turnos ya van serializados por conversación (ADR 0008).
+  - Si el código es correcto, crea un grant `verified` (método `otp`, claims del email del
+    pedido) válido 30 minutos en esa conversación.
+  - Si es incorrecto, ha caducado o se agotaron los intentos, el turno termina con texto fijo.
+  - El token se sustituye por `[código]` antes de que lo vean `reason` o LangSmith. El widget
+    lo enviará en un campo propio.
+- **"L3 siempre con OTP".** Con `identity_policy.l3_requires_otp = true`, las L3 exigen un
+  grant `otp` o de sesión firmada vigente, aunque el remitente coincida. Está apagado por
+  defecto, y el modelo de la política rechaza activarlo con `otp_enabled = false`.
 
-- Con `order_id`: el email del pedido (o del `customer`). En la v2, el teléfono del pedido.
-- Con `email`: solo si Shopify tiene un cliente con ese email. Si no existe, la respuesta al
-  LLM es la misma ("si el correo está registrado, le llegará un código") para no confirmar qué
-  emails son clientes.
-- Nunca un contacto que el cliente dicte para recibir el código.
+### 7. Política, trazas y aprobación humana
 
-**El código.**
+**Política** en `tenant_configurations.extra["identity_policy"]`, parseada con un modelo
+Pydantic en `load_tenant_context`. No necesita migración.
 
-- 6 dígitos de `secrets.randbelow`, guardados como `HMAC-SHA256(pepper del servidor,
-  challenge_id || code)`. El código en claro no se guarda en ningún sitio.
-- Caduca a los 10 minutos.
-- Admite 5 intentos. Al quinto fallo el reto pasa a `locked` y el agente ofrece pasar el caso
-  a una persona.
-- Hay un solo reto pendiente por conversación. Pedir otro antes de 60 s devuelve el mismo
-  (idempotente). Después de 60 s, el nuevo cancela el anterior.
-- Límites de envío: 3 por conversación y hora, y 5 por destino (hash) y tenant en 24 h. El
-  segundo límite evita el bombardeo de correos a una víctima.
+| Clave | Default |
+|---|---|
+| `otp_enabled` | `false` |
+| `l3_requires_otp` | `false` |
+| `guest_max_failures_per_conversation` | `5` |
+| `guest_max_failures_per_tenant_hour` | `50` |
 
-**Validación en `resolve_identity`.** Hay intento si existe un reto `pending` y el mensaje trae
-exactamente un token de 6 dígitos que no sea un número de pedido citado en la conversación. El
-nodo consume el reto con un `UPDATE … WHERE status = 'pending' AND attempts < max_attempts
-RETURNING` atómico y compara con `hmac.compare_digest`. Los turnos ya van serializados por
-conversación (ADR 0008). Si el código es correcto, el reto pasa a `verified`, se añade una
-`Verification(method="otp", claims={hash del destino}, valid_until=verified_at + 30 min)` y el
-token se sustituye por `[código de verificación]` en el contenido que ven `reason` y LangSmith.
-El widget enviará el código por un campo propio, sin texto libre.
+Un `super_admin` cambia `otp_enabled` y `l3_requires_otp` desde el dashboard, en la ficha del
+tenant. El endpoint rechaza a `tenant_admin`.
 
-**Ventana.** La verificación OTP vale 30 minutos dentro de **esa** conversación y no se
-hereda en otras ni en el perfil. En WhatsApp, cuyo chat no termina nunca, la ventana es lo
-que la acota.
+**Trazas.**
 
-**Canal de envío: Postmark.** Correo transaccional desde `no-reply@auyan.es` con el nombre de
-la marca como remitente visible ("Marea Studio"), sin seguimiento de aperturas ni de enlaces y
-con plantilla en `services/email_templates/`. El texto incluye el código, la caducidad y "si
-no lo pediste, ignora este correo; nadie de {marca} te pedirá este código". El OTP por
-teléfono (plantilla `AUTHENTICATION` de WhatsApp al número del pedido) queda para una v2,
-cuando un tenant tenga pedidos solo con teléfono.
+- LangSmith. `resolve_identity` entra en la allowlist `_NODE_OUTPUT_KEYS` con
+  `identity_summary`, y la fila de `identity_checks` sirve para correlacionar con Supabase.
+  Nunca salen claims, contactos ni códigos.
+- `ReasoningTracker`. Emite `identity_resolved`, `guest_check_failed`, `guest_locked`,
+  `otp_sent`, `otp_failed` y `otp_verified`.
 
-### 5. Política por tenant y clase
+**Aprobación humana y escalado.** El gate guarda `pending_approvals.identity_verification`
+con `{level, method, matched, contact_masked, verified_at}`. El detalle de la aprobación lo
+muestra en una línea: "Invitado: número de pedido + email k\*\*\*@h\*\*\*.com",
+"Verificado: remitente (email de la compra)" o "Verificado: código enviado a k\*\*\*@h\*\*\*.com".
+La nota interna del escalado y del handoff (ADR 0010) lleva la misma línea.
 
-La política vive en `tenant_configurations.extra["identity_policy"]`, la edita el equipo
-interno y se parsea con un modelo Pydantic en `load_tenant_context`, con defaults si falta. No
-necesita migración.
+### 8. Widget con sesión firmada (#258)
 
-| Clave | Valores | Default | Qué significa el default |
-|---|---|---|---|
-| `l1_pii` | `none`, `sender`, `strong` | `sender` | Leer datos de un pedido o de un cliente exige ser su dueño por el canal |
-| `l1_order_unverified` | `status_only`, `none` | `status_only` | Quien no es dueño ve el estado del pedido, nada más |
-| `l2` | `sender`, `strong` | `sender` | Nuevo (hoy las L2 no miran la identidad): solo el dueño anota su pedido |
-| `l3` | `sender`, `strong` | `sender` | Igual que hoy, más la aprobación humana de siempre |
-| `otp.enabled` | bool | `true` | Se ofrece el código cuando falta nivel |
-| `otp.ttl_minutes`, `otp.max_attempts`, `otp.window_minutes` | int | 10, 5, 30 | Punto 4 |
+Igual que Chatbase. La sesión se valida en el intake del widget, antes de persistir, y en cada
+mensaje. Hay dos fuentes:
 
-`l3 = "strong"` es el "siempre OTP" del issue: una L3 exige OTP o sesión firmada aunque el
-remitente coincida. La aprobación humana de las L3 (piso de #231) no cambia con este ADR.
+- **App Proxy de Shopify.** Shopify añade el cliente con sesión iniciada a la petición y la
+  firma con el secreto de la app.
+- **JWT HS256** firmado por el servidor de la tienda con un secreto por tenant
+  (`tenant_integrations(kind='channel', provider='widget')`), con `exp` de 1 h como máximo y
+  `aud` igual al slug del tenant.
 
-### 6. Tablas y migraciones
+Con firma válida, el intake escribe los claims en `identity_evidence` y el turno es
+`verified`. Con firma inválida o caducada, el visitante es invitado y queda un log. Los datos
+firmados nunca se pasan al LLM.
 
-**Nueva: `identity_challenges`.**
+En el onboarding se lee `shop.customerAccountsV2` y se guarda en `tenant_facts`. Si la tienda
+no tiene cuentas de cliente, el doctor lo avisa.
+
+Queda como opción la acción que usa Chatbase para llevar invitados a iniciar sesión: una skill
+L2 que envía el email de activación de cuenta de Shopify al email del pedido sobre el que el
+cliente ya es `guest`. El spike de #258 confirma si la API lo permite con cuentas de cliente
+nuevas.
+
+### 9. Tablas
+
+**`identity_checks`** guarda cada intento y cada grant `guest` y `otp`:
 
 ```sql
-create table identity_challenges (
-  id                  uuid primary key default gen_random_uuid(),
-  tenant_id           uuid not null references tenants(id),
-  conversation_id     uuid not null,
-  subject_kind        text not null check (subject_kind in ('order', 'customer_email')),
-  subject_ref         text not null,          -- id interno del pedido o hash del email
-  destination_kind    text not null check (destination_kind in ('email', 'phone')),
-  destination_hash    text not null,          -- ClaimHash del destino
-  destination_masked  text not null,          -- "k***@h***.com", para el operador
-  delivery_provider   text not null check (delivery_provider in ('postmark', 'whatsapp')),
-  delivery_message_id text,
-  code_hash           text not null,
-  status              text not null default 'pending'
-                      check (status in ('pending', 'verified', 'expired', 'locked', 'cancelled')),
-  attempts            int  not null default 0,
-  max_attempts        int  not null,
-  expires_at          timestamptz not null,
-  verified_at         timestamptz,
-  valid_until         timestamptz,
-  created_at          timestamptz not null default now(),
-  updated_at          timestamptz not null default now(),
-  deleted_at          timestamptz,
+create table identity_checks (
+  id               uuid primary key default gen_random_uuid(),
+  tenant_id        uuid not null references tenants(id),
+  conversation_id  uuid not null,
+  kind             text not null check (kind in ('guest', 'otp')),
+  outcome          text not null check (outcome in ('granted', 'order_not_found', 'contact_mismatch', 'locked', 'paused')),
+  method           text not null,
+  order_id         bigint,                 -- id interno de Shopify
+  claim_hashes     text[] not null default '{}',
+  attempt_key      text not null,          -- hash de (pedido, contacto): dedupe por conversación
+  contact_masked   text,
+  valid_until      timestamptz,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  deleted_at       timestamptz,
   foreign key (conversation_id, tenant_id) references conversations(id, tenant_id)
 );
-create unique index uq_identity_challenges_pending
-  on identity_challenges (tenant_id, conversation_id)
-  where status = 'pending' and deleted_at is null;
-create index idx_identity_challenges_destination
-  on identity_challenges (tenant_id, destination_hash, created_at desc)
-  where deleted_at is null;
+create unique index uq_identity_checks_attempt on identity_checks (tenant_id, conversation_id, attempt_key) where deleted_at is null;
+create index idx_identity_checks_failures on identity_checks (tenant_id, created_at desc) where outcome <> 'granted' and deleted_at is null;
 -- trigger set_updated_at; RLS: is_super_admin() or tenant_id = current_tenant_id()
 ```
 
-No guarda emails ni teléfonos en claro, solo hash y máscara. `services/cleanup` aplica soft
-delete a los retos de más de 90 días.
+**`identity_challenges`** guarda los retos OTP: `tenant_id`, `conversation_id`, `order_id`,
+`destination_hash`, `destination_masked`, `postmark_message_id`, `code_hash`, `status`
+(`pending`, `verified`, `expired`, `locked`, `cancelled`), `attempts`, `max_attempts`,
+`expires_at`, `verified_at`, timestamps y `deleted_at`. Tiene un índice único parcial con un
+solo `pending` por conversación, y la misma RLS que `identity_checks`.
 
-**Cambio: `pending_approvals.identity_verification jsonb`** (nullable). Es el snapshot de la
-verificación que permitió crear la aprobación (punto 7).
+**`pending_approvals.identity_verification jsonb`**, nullable.
 
-**Sin migración:** la política (`extra`), la evidencia del mensaje (`messages.metadata`) y el
-secreto del widget (`tenant_integrations`, en #258).
+Ninguna tabla guarda emails ni teléfonos en claro. `services/cleanup` aplica soft delete a las
+filas de más de 90 días.
 
-### 7. Trazas, auditoría y aprobación humana
+### 10. Qué decide el código y qué hace el LLM
 
-- **LangSmith.** El span de `resolve_identity` entra en la allowlist `_NODE_OUTPUT_KEYS` con
-  `identity_summary` (nivel, métodos, `otp_event`: `none`, `attempt_failed`, `verified` o
-  `locked`) y el `challenge_id` como metadata para correlacionar con Supabase. Nunca claims ni
-  códigos. El token del código se redacta del contenido antes de llegar al LLM.
-- **Razonamiento (dashboard).** `ReasoningTracker` emite `identity_resolved`,
-  `verification_requested`, `verification_failed`, `verification_locked` y
-  `verification_succeeded`.
-- **Auditoría.** `identity.request_verification` queda en `skill_audit_log` como cualquier
-  skill. Los bloqueos del gate quedan como `identity_required:<nivel>`. El ciclo de vida del
-  OTP queda en la fila de `identity_challenges`.
-- **Aprobación humana.** El gate escribe el snapshot en `pending_approvals.identity_verification`:
-  `{"method", "level", "source", "verified_at", "matched": "email" | "phone" | "shopify_customer",
-  "destination_masked"}`. El detalle de la aprobación lo muestra en una línea, por ejemplo
-  "Verificado con código enviado a k\*\*\*@h\*\*\*.com hace 3 min" o "Remitente: el email de la
-  compra". Si el método es `sender_email` y la acción es `update_shipping_address`, añade un
-  aviso: "el remitente de un correo se puede falsificar; confirma si dudas".
-- **Escalado al helpdesk.** La nota interna y el handoff (ADR 0010) incluyen la misma línea,
-  para que el equipo CX sepa con quién habla.
+| Paso | Código | LLM |
+|---|---|---|
+| Extraer email, teléfono y número de pedido | Regex, `phonenumbers` y patrón del tenant, antes de `reason` | Solo si los parsers fallan: transcribe el dato a `identity.check_order_contact` |
+| Validar la sesión firmada y el remitente | Sí, en el intake | Nada |
+| Comparar el contacto con el pedido | Sí, con hashes | Nada |
+| Decidir el nivel | Sí | Nada |
+| Qué tools ve el LLM | Sí, según el nivel | Nada |
+| Qué campos del pedido se devuelven | `project_order` | Nada |
+| Permitir o rechazar una skill | Gate, con error tipado | Nada |
+| Respuesta a datos que no coinciden, bloqueo o pausa | Texto fijo, sin `reason` | Nada |
+| Contar intentos y aplicar límites | Sí | Nada |
+| Disparar, enviar, validar y caducar el OTP | Sí | Nada |
+| Respuesta al OTP enviado o fallido | Texto fijo | Nada |
+| Qué dato falta | `identity_missing` y `identity_required{missing}` | Pide al cliente el dato que falta, con la voz de la marca |
+| Redactar el resto de la respuesta | Nada | Sí |
 
-### 8. Widget (#258) y sesión firmada
+Los textos fijos viven en `services/identity_messages.py`, uno por clave, con trato de tú.
+Cada tenant puede sobrescribirlos en `tenant_facts.identity_messages`. Siguen el patrón de los
+mensajes fijos de ADR 0010.
 
-El intake del widget valida la sesión **en la frontera**, antes de persistir. Con firma válida
-y sin caducar, escribe los claims (`shopify_customer:<id>` y el email) en `identity_evidence`.
-Con firma inválida o caducada, trata al visitante como invitado y deja un log. No rechaza el
-mensaje, para no romper el chat. La sesión se valida en cada mensaje, así que no hay estado
-de sesión en Auyan.
+### 11. Relación con #256
 
-Fuente de la firma, a confirmar en el spike del widget:
-
-- **Tiendas Shopify: App Proxy.** Shopify añade `logged_in_customer_id` a la petición y la
-  firma con el secreto de la app. El comerciante no escribe código de firma. Depende de la app
-  de Shopify de Auyan (backlog transversal) o de la app por cliente del piloto.
-- **Otras webs: JWT HS256** con un secreto por tenant (`tenant_integrations(kind='channel',
-  provider='widget')`), `exp` de 1 h como máximo y `aud` igual al slug del tenant.
-
-En el onboarding se lee `shop.customerAccountsV2` (`customerAccountsVersion`,
-`loginRequiredAtCheckout`) y se guarda en `tenant_facts`. Si la tienda no tiene cuentas de
-cliente, todos los visitantes del widget son invitados y el OTP es la única forma de pasar de
-`status_only`. El doctor (`services/doctor`) lo avisa.
-
-### 9. Relación con #256 (memoria cross-canal)
-
-La identidad unificada de #256 sirve para **recordar**, no para **autorizar**. Que dos perfiles
-estén enlazados nunca añade claims a `IdentityContext`. Los claims salen solo de la evidencia
-del mensaje y de verificaciones vigentes de la conversación.
+La identidad unificada de la memoria cross-canal sirve para **recordar**, no para
+**autorizar**. Enlazar dos perfiles nunca añade grants.
 
 ## Alternativas consideradas
 
 | Alternativa | Por qué se descartó |
 |---|---|
-| Reglas en el prompt o en el AOP ("verifica antes de dar datos") | El LLM decidiría quién está verificado. Viola código sobre LLM y no se puede testear. |
-| Ownership en cada skill, como `get_order_status` hoy | Repite la regla en 9 skills y cada skill nueva puede olvidarla. Un gate con `identity_subject` declarado no se salta. |
-| Identidad desde `end_customers` (como hoy) | El perfil mezcla canales y se enlaza por heurística. Con #256 daría permisos por enlace. |
-| El gate envía el OTP en cuanto falla el ownership | Manda correos no pedidos al dueño cada vez que alguien cita su número de pedido. |
-| OTP al email o teléfono que diga el cliente | Cualquiera se verifica a sí mismo. |
-| Enlace mágico en vez de código | Los escáneres de correo (Outlook Safe Links, Gmail) abren el enlace solos, así que haría falta una página con botón. No encaja en WhatsApp. Puede añadirse después sobre la misma tabla. |
-| OTP por SMS | No hay proveedor (Zernio no da SMS en España) y sería otro subencargado de PII. |
-| OTP por el propio helpdesk (ticket saliente al email del pedido) | Tres implementaciones (Zendesk, Gorgias, Chatwoot), el código queda visible al equipo CX y ensucia su bandeja. |
-| Preguntas de conocimiento (código postal, últimos dígitos de la tarjeta) | Son datos que circulan en filtraciones. Decagon lo pone el último de su lista. |
-| Verificación persistente en el perfil, entre conversaciones | Una verificación de hace semanas no prueba quién escribe hoy. |
-| Tabla propia para la política | El equipo interno es quien la edita, y `extra` con modelo Pydantic basta, como `allow_emojis`. |
-| Política por skill en `tenant_tool_permissions` | Demasiado fina para lo que se acuerda en el onboarding. Las clases L1-PII, L2 y L3 bastan. |
+| Reglas en el prompt o en el AOP | El LLM decidiría quién está verificado. |
+| Comprobación dentro de cada skill (como `get_order_status` hoy) | Repite la regla en cada skill, y una skill nueva puede olvidarla. |
+| Identidad desde `end_customers` | El perfil se enlaza por heurística, y con #256 daría permisos por enlace. |
+| Tres o más niveles (por ejemplo, separar remitente de OTP) | Más casos que probar sin cambiar ninguna decisión: con la aprobación humana en las L3, remitente, sesión y OTP valen lo mismo. |
+| `guest` con solo número de pedido, o con solo email | Los números son correlativos y los emails circulan. Hacen falta los dos, comprobados juntos. |
+| Que el LLM extraiga los datos y decida cuándo pedir el OTP | Ambas cosas son deterministas. El LLM queda como respaldo para transcribir. |
+| OTP al contacto que diga el cliente | Cualquiera se verificaría a sí mismo. |
+| OTP por SMS, por el helpdesk o por WhatsApp | SMS: no hay proveedor en España. Helpdesk: tres implementaciones, y el equipo CX vería el código. WhatsApp: se puede añadir si un tenant tiene pedidos solo con teléfono. |
+| Enlace mágico en vez de código | Los escáneres de correo abren los enlaces solos, y no encaja en WhatsApp. |
+| Preguntas de conocimiento (código postal, dígitos de la tarjeta) | Son datos que circulan en filtraciones. |
 
 ## Consecuencias
 
 **Positivas:**
 
-- Se cierra el hueco de privacidad de la L1. Nadie lista los pedidos de otro por su email ni
-  ve artículos, importes o tracking de un pedido ajeno.
-- Una sola regla en un solo sitio. Una skill nueva declara su sujeto y queda protegida.
-- El familiar, WhatsApp con solo BSUID, Instagram y el invitado del widget pueden verificarse
-  sin pasar a una persona.
-- El operador ve con qué fuerza se verificó cada acción antes de aprobarla.
-- Los claims con hash permiten trazar y guardar snapshots sin PII.
+- Se cierran los huecos de consultar con un email suelto y con un número de pedido suelto.
+- El familiar, WhatsApp con solo BSUID y el invitado del widget pueden reembolsar, cancelar o
+  devolver con número de pedido + email, siempre con aprobación humana.
+- Una sola regla en un solo sitio, y una skill nueva solo declara su alcance.
+- El operador ve el nivel y el método antes de aprobar.
 
 **Negativas / costes asumidos:**
 
-- **Cambio de comportamiento visible.** Los tickets de helpdesk de origen chat, API o
-  desconocido dejan de contar como verificados, y quien no es dueño de un pedido ve menos que
-  hoy. Hay que actualizar las fixtures de evals y del simulador (que hoy ponen
-  `end_customer.email`) para que lleven `identity_evidence`.
-- Fricción. Un invitado del widget que quiera más que el estado de su pedido tiene que
-  recibir y escribir un código.
-- `sender_email` sigue siendo falsificable en dominios sin DMARC estricto. Se mitiga con la
-  aprobación humana de las L3, el aviso en el cambio de dirección y `l3 = "strong"` para los
-  tenants que lo pidan.
-- Un token de 6 dígitos puede coincidir con un número de pedido largo. Cuesta un intento, no
-  verifica nada, y el widget lo evita con su campo propio.
-- El OTP depende de que Postmark apruebe la cuenta. Hasta entonces solo entrega a `@auyan.es`.
-- Una migración nueva (`identity_challenges`) y una columna (`pending_approvals`), que se
-  aplican a mano como siempre.
+- **Cambio visible.** Quien escribe sin datos ya no ve el estado de un pedido por su número.
+  Los chats de helpdesk dejan de contar como remitente. Las fixtures de evals y del simulador
+  tienen que llevar `identity_evidence` o datos aportados.
+- `guest` puede pedir una L3 con datos que un tercero conozca, por ejemplo alguien de la casa
+  con el email del pedido. La aprobación humana es la barrera, y `l3_requires_otp` existe para
+  el tenant que quiera más.
+- El remitente de un correo es falsificable en dominios sin DMARC estricto. Se mitiga con la
+  aprobación humana y la línea del método.
+- Los parsers fallan con números escritos en letra o con formatos raros. Para eso está la skill
+  de respaldo.
+- El OTP depende de que Postmark apruebe la cuenta (hoy solo entrega a `@auyan.es`).
+- Dos tablas y una columna nuevas, que se aplican a mano como siempre.
 
 ## Plan de implementación
 
-Cada PR va contra `develop`, deja el sistema funcionando y termina en una comprobación.
+Cada PR va contra `develop` y termina en una comprobación.
 
-1. **PR-1 `refactor:` modelo de identidad y resolutor.** `IdentityContext`, `Verification`,
-   `order_claims`. Nodo `resolve_identity` con `sender_email` y `sender_phone` desde
-   `identity_evidence`, que escriben los cuatro intakes. Migra `_l3_ownership_error` y
-   `get_order_status` y borra `customer_email` y `customer_phone` de `SkillContext`.
-   Comprobación: tests de tabla del resolutor por canal y origen, la suite actual del gate L3
-   en verde, y `/verify` con un ticket de origen `email` y otro de origen `chat`.
-2. **PR-2 `feat:` gate único y política.** `identity_subject` en las 11 skills, gate en
-   `execute_skill`, `identity_policy` con defaults y `status_only`. Comprobación: tests del gate
-   por clase y nivel, evals con fixtures de no-dueño (`get_order_by_email` con email ajeno
-   bloqueado, estado sin artículos), `/verify` sobre Marea.
-3. **PR-3 `feat:` verificación visible.** Migración de `pending_approvals.identity_verification`,
-   snapshot en el gate, línea en el detalle de la aprobación y en la nota del escalado, eventos
-   del tracker y allowlist de LangSmith. Comprobación: `/verify` de una L3 y captura del
-   dashboard con el método.
-4. **PR-4 `feat:` OTP por email.** Migración de `identity_challenges`, skill
-   `identity.request_verification`, validación en `resolve_identity`, plantilla de Postmark,
-   límites y redacción del código. Comprobación: tests de caducidad, intentos, bloqueo,
-   idempotencia y límites por destino, y E2E en staging con Postmark aprobado (pedido de
-   Marea, código a un `@auyan.es`).
-5. **PR-5 `feat:` sesión firmada (con #258).** Validación en el intake del widget (App Proxy o
-   JWT), `signed_session`, lectura de `customerAccountsV2` en el onboarding y aviso del doctor.
-   Comprobación: tests con firmas válidas, caducadas y alteradas, y E2E con un cliente logueado
-   en la tienda de Marea.
-
-PR-1 a PR-3 no dependen de Postmark ni del widget y cierran el hueco de la L1 por sí solos.
-
-## Preguntas para Kenny
-
-1. **¿Qué ve de un pedido quien no está verificado?** `status_only` (estado de pago y de envío,
-   sin artículos, importes, tracking ni dirección) o nada. **Recomiendo `status_only`.** Es la
-   consulta más común ("¿dónde está mi pedido?"), y el estado solo no expone datos personales
-   aunque alguien pruebe números correlativos.
-2. **¿Qué orígenes de ticket cuentan como "remitente verificado"?** **Recomiendo solo correo y
-   formulario web**, porque la respuesta vuelve al buzón. Chat, messaging, API y desconocido no
-   cuentan. Los chats de Zendesk o Gorgias pasarían a `status_only` o al OTP.
-3. **¿El OTP entra en el piloto o sigue post-piloto (decisión s79)?** **Recomiendo meterlo en
-   el Sprint 3, junto al widget.** En el widget el invitado es el caso normal, y sin OTP solo
-   vería el estado de sus pedidos y cualquier otra cosa acabaría en una persona. Son un PR y una
-   tabla, y Postmark ya está casi listo.
-4. **¿Canal del OTP en la v1?** **Recomiendo solo email por Postmark.** El teléfono (plantilla
-   `AUTHENTICATION` de WhatsApp) cuando un tenant tenga pedidos solo con teléfono.
-5. **¿Default de las L3: `sender` (como hoy) o `strong` (siempre OTP)?** **Recomiendo `sender`
-   más la aprobación humana mostrando el método**, y `strong` como opción por tenant. Con
-   aprobación humana en todas las L3, exigir OTP siempre añade fricción sin cambiar quién decide.
-6. **¿Firma del widget: App Proxy de Shopify o JWT propio?** **Recomiendo App Proxy** para
-   tiendas Shopify, porque el comerciante no programa nada. Se confirma en el spike de #258, y
-   el JWT queda para webs que no sean Shopify.
+1. **PR-1 `fix:` cerrar las consultas con dato suelto.**
+   - `get_order_by_email` pasa a `list_my_orders` sin input, solo con remitente verificado.
+   - `get_customer_history` se elimina, y los AOPs canónicos se actualizan y se vuelven a sembrar.
+   - `get_order_status` devuelve solo `found=false` a quien no es dueño.
+   - Un email de origen chat deja de contar como remitente.
+   - Comprobación: tests de las tres skills con email ajeno, número ajeno y origen chat, más
+     `/verify` sobre Marea.
+   - Deja temporalmente sin acceso al no dueño hasta PR-3.
+2. **PR-2 `refactor:` modelo, `resolve_identity` y gate único.** `Grant`, `IdentityContext`,
+   `order_claims`, `identity_evidence` en los cuatro intakes, `identity_scope` y `min_level`
+   en las skills, filtrado de tools, `project_order`. Borra `_l3_ownership_error` y
+   `check_order_ownership`. Comprobación: tests de tabla por canal y origen, y la suite del
+   gate L3 en verde.
+3. **PR-3 `feat:` nivel `guest`.** Migración de `identity_checks`, parsers, `attempt_guest`,
+   límites por conversación y por tenant, textos fijos, skill de respaldo y `known_facts`.
+   Comprobación: tests de enumeración (respuesta idéntica para pedido inexistente y contacto
+   erróneo, bloqueo al quinto fallo, pausa del tenant) y `/verify` con número + email de un
+   pedido de Marea.
+4. **PR-4 `feat:` nivel visible.** Migración de `pending_approvals.identity_verification`,
+   línea en la aprobación, en el escalado y en el handoff, eventos del tracker y allowlist de
+   LangSmith. Comprobación: `/verify` de una L3 como `guest` y captura del dashboard.
+5. **PR-5 `feat:` OTP apagado por defecto.** Migración de `identity_challenges`, disparo desde
+   el gate, Postmark, validación, `l3_requires_otp` e interruptor de `super_admin` en el
+   dashboard. Comprobación: tests de caducidad, intentos, idempotencia y límites, y E2E en
+   staging con Postmark aprobado.
+6. **PR-6 `feat:` sesión firmada, con #258.** App Proxy y JWT en el intake del widget,
+   `customerAccountsV2` en el onboarding y aviso del doctor. Comprobación: tests con firmas
+   válidas, caducadas y alteradas.
