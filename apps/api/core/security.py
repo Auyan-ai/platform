@@ -18,7 +18,9 @@ Tenant scope:
 
 Cache de usuarios:
 - `TTLCache(maxsize=settings.auth_user_cache_maxsize, ttl=settings.auth_user_cache_ttl_seconds)`.
-- Maxsize acota memoria; ttl invalida cambios de role/tenant tras el TTL.
+- Maxsize acota memoria; ttl invalida cambios de role/tenant/email tras el TTL.
+- El email manda en `auth.users`: `public.users.email` es una copia que mantiene el
+  trigger `trg_auth_users_sync_email` (migración 20261002000002).
 - `reset_user_cache()` expuesto para tests.
 
 Cache de JWKS:

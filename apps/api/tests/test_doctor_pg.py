@@ -12,6 +12,7 @@ import json
 import os
 import re
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -61,8 +62,9 @@ alter table storage.objects enable row level security;
 _PGCRYPTO = re.compile(r"create extension if not exists pgcrypto[^;]*;", re.I)
 
 
-@pytest.fixture
-async def conn() -> AsyncIterator[asyncpg.Connection]:
+@asynccontextmanager
+async def migrated_database() -> AsyncIterator[asyncpg.Connection]:
+    """Base desechable con los stubs de Supabase y todas las migraciones aplicadas."""
     import asyncpg
 
     database = f"doctor_{uuid.uuid4().hex[:8]}"
@@ -82,6 +84,12 @@ async def conn() -> AsyncIterator[asyncpg.Connection]:
         await connection.close()
         await admin.execute(f"drop database {database} with (force)")
         await admin.close()
+
+
+@pytest.fixture
+async def conn() -> AsyncIterator[asyncpg.Connection]:
+    async with migrated_database() as connection:
+        yield connection
 
 
 async def test_clean_database_has_every_migration_applied(conn: asyncpg.Connection) -> None:
