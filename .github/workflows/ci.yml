@@ -67,3 +67,6 @@ jobs:
 
       - name: Typecheck
         run: pnpm --filter @auyan/web typecheck
+
+      - name: Tests
+        run: pnpm --filter @auyan/web test
