@@ -42,7 +42,9 @@ from apps.api.db.queries import (
 )
 from apps.api.services.agent_resolution import finalize_agent_resolution
 from apps.api.services.conversations import reopen_if_resolved
+from apps.api.services.handoff import is_approval_gate
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
+from apps.api.services.inbound_media import fallback_message
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
 from apps.api.services.usage import UsageRecorder, check_tenant_budget
@@ -318,6 +320,38 @@ async def inbound(
             reason=outcome.escalation_reason or "unspecified_escalation",
         )
 
+    # Chat: si el turno escaló y no le llegó texto al cliente (p. ej. low_confidence),
+    # el body lleva el acuse fijo `escalation_ack` y queda guardado como mensaje outbound.
+    ack_text: str | None = None
+    ack_message_id: str | None = None
+    if (
+        payload.channel == "chat"
+        and outcome.decision == "escalate"
+        and not outcome.response_text
+        and not is_approval_gate(outcome.escalation_reason)
+    ):
+        ack_text = fallback_message("escalation_ack", None)
+        try:
+            async with tenant_scope(tenant.id) as conn:
+                ack_msg = await insert_message(
+                    conn,
+                    tenant_id=tenant.id,
+                    conversation_id=conversation.id,
+                    role="agent_ai",
+                    direction="outbound",
+                    content=ack_text,
+                    metadata={"fixed_message": "escalation_ack"},
+                )
+                await update_conversation_last_message(conn, tenant.id, conversation.id)
+            ack_message_id = str(ack_msg.id)
+        except Exception:
+            # El cliente igual recibe el acuse en el body; el fallo queda visible.
+            logger.error(
+                "chat_escalation_ack_persist_failed",
+                extra={"tenant_id": str(tenant.id), "conversation_id": str(conversation.id)},
+                exc_info=True,
+            )
+
     # 6. Registrar uso (fire-and-forget, no bloquea la respuesta).
     _usage_recorder.record(
         tenant_id=tenant.id,
@@ -331,9 +365,9 @@ async def inbound(
         decision=outcome.decision,
         conversation_id=str(conversation.id),
         inbound_message_id=str(inbound_msg.id),
-        output_message_id=outcome.output_message_id,
+        output_message_id=ack_message_id or outcome.output_message_id,
         escalation_id=outcome.escalation_id,
-        response_text=outcome.response_text,
+        response_text=ack_text or outcome.response_text,
         escalation_reason=outcome.escalation_reason,
         trace_id=outcome.trace_id,
         error=outcome.error,
