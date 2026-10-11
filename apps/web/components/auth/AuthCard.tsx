@@ -10,7 +10,7 @@ interface AuthCardProps {
 export function AuthCard({ title, description, children }: AuthCardProps) {
   return (
     <Card className="w-full max-w-sm p-8">
-      <div className="mb-6">
+      <div className="mb-6 text-center">
         <h1 className="text-lg font-semibold text-foreground">{title}</h1>
         {description && <p className="mt-1 text-sm text-foreground-muted">{description}</p>}
       </div>

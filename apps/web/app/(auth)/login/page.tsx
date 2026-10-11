@@ -240,7 +240,7 @@ function LoginForm() {
 
   return (
     <AuthCard
-      title="Accede a Auyan"
+      title="Bienvenido a Auyan"
       description={
         passwordMode
           ? 'Entra con tu email y contraseña.'
