@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from apps.api.services.reply_format import strip_emojis, strip_formatting
+
 if TYPE_CHECKING:
     import anthropic
 
@@ -40,24 +42,24 @@ _FAILED = (
 _SKILL_GATE: dict[str, str] = {
     "shopify.update_shipping_address": (
         "¡Genial! Ya tengo todos los datos para cambiar la dirección de tu pedido. "
-        "Lo paso a mi equipo para una última comprobación y te confirmo en cuanto esté hecho. 😊"
+        "Lo paso a mi equipo para una última comprobación y te confirmo en cuanto esté hecho."
     ),
     "shopify.cancel_order": (
         "Entendido. Voy a tramitar la cancelación de tu pedido; lo paso a mi equipo "
-        "para confirmarlo y te aviso en cuanto esté listo. 😊"
+        "para confirmarlo y te aviso en cuanto esté listo."
     ),
     "shopify.refund_partial": (
         "¡Perfecto! Estoy gestionando el reembolso de tu pedido; lo paso a mi equipo "
-        "para confirmarlo y te aviso en cuanto esté hecho. 😊"
+        "para confirmarlo y te aviso en cuanto esté hecho."
     ),
     "shopify.start_return": (
         "¡Listo! Voy a iniciar la devolución de tu pedido; lo paso a mi equipo para "
-        "confirmarlo y te aviso en cuanto esté en marcha. 😊"
+        "confirmarlo y te aviso en cuanto esté en marcha."
     ),
 }
 _DEFAULT_GATE = (
     "¡Perfecto! Ya tengo lo que necesito. Lo paso a mi equipo para una última "
-    "comprobación y te confirmo en cuanto esté listo. 😊"
+    "comprobación y te confirmo en cuanto esté listo."
 )
 
 
@@ -74,24 +76,24 @@ def gate_message(skill_slug: str | None) -> str:
 _SKILL_WAITING: dict[str, str] = {
     "shopify.update_shipping_address": (
         "Tu cambio de dirección sigue en revisión con mi equipo; te confirmo en "
-        "cuanto esté hecho. ¡Gracias por la paciencia! 😊"
+        "cuanto esté hecho. ¡Gracias por la paciencia!"
     ),
     "shopify.cancel_order": (
         "Tu cancelación sigue en revisión con mi equipo; te aviso en cuanto esté "
-        "lista. ¡Gracias por la paciencia! 😊"
+        "lista. ¡Gracias por la paciencia!"
     ),
     "shopify.refund_partial": (
         "Tu reembolso sigue en revisión con mi equipo; te aviso en cuanto esté "
-        "hecho. ¡Gracias por la paciencia! 😊"
+        "hecho. ¡Gracias por la paciencia!"
     ),
     "shopify.start_return": (
         "Tu devolución sigue en revisión con mi equipo; te aviso en cuanto esté en "
-        "marcha. ¡Gracias por la paciencia! 😊"
+        "marcha. ¡Gracias por la paciencia!"
     ),
 }
 _DEFAULT_WAITING = (
     "Tu solicitud sigue en revisión con mi equipo; te confirmo en cuanto esté "
-    "lista. ¡Gracias por la paciencia! 😊"
+    "lista. ¡Gracias por la paciencia!"
 )
 
 
@@ -107,19 +109,19 @@ def waiting_message(skill_slug: str | None) -> str:
 # hecho" que el cliente ya recibió): confirmar que está aplicado y ofrecer ayuda.
 _SKILL_DONE_FOLLOWUP: dict[str, str] = {
     "shopify.update_shipping_address": (
-        "Tu cambio de dirección ya quedó aplicado. Si necesitas algo más, aquí estoy. 😊"
+        "Tu cambio de dirección ya quedó aplicado. Si necesitas algo más, aquí estoy."
     ),
     "shopify.cancel_order": (
-        "Tu cancelación ya quedó registrada. Si necesitas algo más, aquí estoy. 😊"
+        "Tu cancelación ya quedó registrada. Si necesitas algo más, aquí estoy."
     ),
     "shopify.refund_partial": (
-        "Tu reembolso ya quedó procesado. Si necesitas algo más, aquí estoy. 😊"
+        "Tu reembolso ya quedó procesado. Si necesitas algo más, aquí estoy."
     ),
     "shopify.start_return": (
-        "Tu devolución ya quedó en marcha. Si necesitas algo más, aquí estoy. 😊"
+        "Tu devolución ya quedó en marcha. Si necesitas algo más, aquí estoy."
     ),
 }
-_DEFAULT_DONE_FOLLOWUP = "Tu solicitud ya quedó completada. Si necesitas algo más, aquí estoy. 😊"
+_DEFAULT_DONE_FOLLOWUP = "Tu solicitud ya quedó completada. Si necesitas algo más, aquí estoy."
 
 
 def done_followup_message(skill_slug: str | None) -> str:
@@ -210,4 +212,7 @@ async def generate_customer_reply(
     except Exception:
         logger.warning("approval_reply_generation_failed skill=%s", skill_slug, exc_info=True)
         warm = base
+    # Lo redactado por el LLM pasa por el mismo filtro que las respuestas del agente
+    # (ADR 0012); `details` son datos literales y no se tocan.
+    warm = strip_emojis(strip_formatting(warm)) or base
     return f"{warm}\n\n{details}" if details else warm

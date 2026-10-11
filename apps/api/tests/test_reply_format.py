@@ -286,3 +286,11 @@ def test_finalize_is_idempotent_for_email() -> None:
 
 def test_finalize_blank_text_stays_blank() -> None:
     assert finalize_reply("  ", surface="email", allow_emojis=False, signature="X") == ""
+
+
+def test_finalize_email_keeps_multiline_signature() -> None:
+    out = finalize_reply(
+        "Hola Ana,\n\nYa está.", surface="email", allow_emojis=False,
+        signature="El equipo de Marea\nhola@marea.com",
+    )
+    assert out.endswith("El equipo de Marea\nhola@marea.com")
