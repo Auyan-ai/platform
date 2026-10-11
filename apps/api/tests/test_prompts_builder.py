@@ -274,3 +274,36 @@ def test_block_goes_after_cache_breakpoint() -> None:
     )
     assert "cache_control" in blocks[0] and "PRIMERA" not in blocks[0]["text"]
     assert "PRIMERA" in blocks[1]["text"]
+
+
+# ─── Registro por canal ──────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("surface", "needle"),
+    [
+        ("chat", "1 a 3 frases"),
+        ("whatsapp", "mensaje corto de móvil"),
+        ("email", "la firma la añade el sistema"),
+    ],
+)
+def test_channel_register_goes_in_volatile_block(surface: str, needle: str) -> None:
+    blocks = build_system_blocks("AOP base", [], writing_surface=surface)
+
+    assert needle not in blocks[0]["text"]
+    assert blocks[0]["text"] == "AOP base"
+    assert needle in blocks[1]["text"]
+
+
+def test_cached_block_is_identical_across_surfaces() -> None:
+    texts = {
+        build_system_blocks("AOP base", [], writing_surface=s)[0]["text"]
+        for s in ("chat", "whatsapp", "email", None)
+    }
+
+    assert texts == {"AOP base"}
+
+
+def test_no_register_block_without_surface() -> None:
+    assert len(build_system_blocks("AOP base", [])) == 1
+    assert len(build_system_blocks("AOP base", [], writing_surface="fax")) == 1

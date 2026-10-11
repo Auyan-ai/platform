@@ -17,6 +17,7 @@ from apps.api.db.models import (
     SkillAuditLog,
 )
 from apps.api.services.pii import redact_inputs
+from apps.api.services.reply_format import has_emoji, has_markdown
 
 _OUTCOME_MAP: dict[str, str] = {
     "resolved": "resuelto",
@@ -71,6 +72,28 @@ def build_transcript(
     )
 
 
+@dataclass(frozen=True)
+class NaturalnessReport:
+    """Chequeo determinista de naturalidad: respuestas del agente con Markdown o emojis.
+
+    Los mensajes persistidos ya pasaron por el normalizador (ADR 0012), así que lo normal
+    es 0 de n: un valor mayor delata un camino de entrega que se salta el normalizador,
+    o un tenant con `allow_emojis` activo."""
+
+    agent_messages: int
+    with_markdown: int
+    with_emoji: int
+
+
+def naturalness_report(messages: list[Message]) -> NaturalnessReport:
+    agent_texts = [m.content for m in messages if m.role == "agent_ai"]
+    return NaturalnessReport(
+        agent_messages=len(agent_texts),
+        with_markdown=sum(1 for t in agent_texts if has_markdown(t)),
+        with_emoji=sum(1 for t in agent_texts if has_emoji(t)),
+    )
+
+
 def format_for_judge(transcript: ConversationTranscript) -> str:
     """Serializa el transcript como texto estructurado para el modelo judge."""
     lines: list[str] = []
@@ -96,6 +119,16 @@ def format_for_judge(transcript: ConversationTranscript) -> str:
     for msg in transcript.messages:
         label = role_labels.get(msg.role, msg.role)
         lines.append(f"**{label}:** {msg.content}")
+
+    report = naturalness_report(transcript.messages)
+    if report.agent_messages:
+        lines.append("")
+        lines.append("## Chequeo determinista de naturalidad")
+        lines.append(
+            f"Respuestas del agente con Markdown: {report.with_markdown} de "
+            f"{report.agent_messages}. Con emojis: {report.with_emoji} de "
+            f"{report.agent_messages}."
+        )
 
     if transcript.skill_audit_entries:
         lines.append("")

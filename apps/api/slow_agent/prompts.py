@@ -16,6 +16,10 @@ Señales claras de que hay un problema:
 - El agente dio información incorrecta o faltante que el AOP debería haber cubierto
 - El agente no tenía un AOP adecuado para el intent del cliente (escalada estructural)
 - El agente ejecutó una acción de alto riesgo (L2/L3) sin suficiente verificación
+- Naturalidad para el canal: el chequeo determinista del transcript marca respuestas con
+  Markdown o emojis (salvo que la marca los permita), o el registro no encaja con el canal
+  (correo seco y sin saludo, chat con párrafos largos). Propón un cambio solo si se repite
+  y viene del AOP, no de la voz de marca
 
 # Tipos de propuestas
 

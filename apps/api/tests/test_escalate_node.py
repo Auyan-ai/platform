@@ -297,3 +297,27 @@ async def test_claimed_escalation_also_reused(fake_deps, monkeypatch) -> None:
     await node(_state())
 
     insert_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_escalation_message_is_normalized_and_returned(fake_deps, monkeypatch) -> None:
+    insert_message = AsyncMock(return_value=make_message(id=OUTBOUND_MSG_ID))
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    _mock_no_existing(monkeypatch)
+    monkeypatch.setattr(f"{MODULE}.insert_escalation", AsyncMock(return_value=make_escalation()))
+    monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
+    monkeypatch.setattr(f"{MODULE}.insert_message", insert_message)
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    node = make_escalate_node(fake_deps)
+
+    out = await node(
+        _state(
+            channel="gorgias",
+            tenant_name="Marea SL",
+            agent_response="Te paso con **mi equipo** 😊",
+        )
+    )
+
+    expected = "Te paso con mi equipo\n\nEl equipo de Marea SL"
+    assert insert_message.await_args.kwargs["content"] == expected
+    assert out["agent_response"] == expected

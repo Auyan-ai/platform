@@ -44,6 +44,20 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
+def _source_channel(payload: dict[str, Any]) -> str | None:
+    """Tipo de canal de la bandeja de origen (`Channel::Email`, `Channel::WebWidget`...).
+
+    Chatwoot lo expone en `conversation.channel`; según versión también en
+    `inbox.channel_type` o `conversation.meta.channel`."""
+    conversation = payload.get("conversation") or {}
+    candidates = (
+        conversation.get("channel"),
+        (payload.get("inbox") or {}).get("channel_type"),
+        (conversation.get("meta") or {}).get("channel"),
+    )
+    return next((str(c) for c in candidates if c), None)
+
+
 @router.post(
     "/chatwoot",
     status_code=status.HTTP_200_OK,
@@ -154,7 +168,11 @@ async def chatwoot_webhook(
         customer_email=sender.get("email"),
         customer_name=sender.get("name"),
         subject=None,
-        message_metadata={"channel": "chatwoot", "chatwoot_message_id": chatwoot_message_id},
+        message_metadata={
+            "channel": "chatwoot",
+            "chatwoot_message_id": chatwoot_message_id,
+            "source_channel": _source_channel(payload),
+        },
     )
     if not result.duplicate:
         notify_inbound_worker(request)

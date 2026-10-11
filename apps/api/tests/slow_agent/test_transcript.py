@@ -125,3 +125,51 @@ def test_transcript_has_l2_l3_false():
 def test_transcript_has_l2_l3_empty():
     t = build_transcript(_conv(), [], [], None, None, "salt")
     assert transcript_has_l2_l3_skills(t) is False
+
+
+# ─── Chequeo determinista de naturalidad ─────────────────────────────────────
+
+
+def _agent_message(content: str):
+    from tests.conftest import make_message
+
+    return make_message(role="agent_ai", direction="outbound", content=content)
+
+
+def test_naturalness_report_counts_markdown_and_emoji_in_agent_messages_only() -> None:
+    from apps.api.slow_agent.transcript import naturalness_report
+
+    from tests.conftest import make_message
+
+    messages = [
+        make_message(role="customer", content="**hola** 😊"),
+        _agent_message("Tu pedido sale hoy."),
+        _agent_message("**Tu pedido** sale hoy"),
+        _agent_message("Gracias 😊"),
+    ]
+
+    report = naturalness_report(messages)
+
+    assert (report.agent_messages, report.with_markdown, report.with_emoji) == (3, 1, 1)
+
+
+def test_naturalness_report_without_agent_messages_is_zero() -> None:
+    from apps.api.slow_agent.transcript import naturalness_report
+
+    report = naturalness_report([])
+
+    assert (report.agent_messages, report.with_markdown, report.with_emoji) == (0, 0, 0)
+
+
+def test_format_for_judge_includes_naturalness_check():
+    msgs = [_msg("customer", "Hola"), _msg("agent_ai", "**Hola** 😊"), _msg("agent_ai", "Listo.")]
+    t = build_transcript(_conv(), msgs, [], None, None, "salt")
+    text = format_for_judge(t)
+    assert "## Chequeo determinista de naturalidad" in text
+    assert "Markdown: 1 de 2" in text
+    assert "emojis: 1 de 2" in text
+
+
+def test_format_for_judge_skips_naturalness_check_without_agent_messages():
+    t = build_transcript(_conv(), [_msg("customer", "Hola")], [], None, None, "salt")
+    assert "naturalidad" not in format_for_judge(t)

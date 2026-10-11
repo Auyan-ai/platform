@@ -156,3 +156,132 @@ async def test_message_metadata_links_the_inbound_message(fake_deps, monkeypatch
     await node({**_state(), "inbound_message_id": "inbound-123"})
 
     assert insert_mock.await_args.kwargs["metadata"]["inbound_message_id"] == "inbound-123"
+
+
+async def _run_respond(fake_deps, monkeypatch, state: dict) -> tuple[dict, AsyncMock]:
+    insert_mock = AsyncMock(return_value=make_message(id=OUTBOUND_MSG_ID))
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(f"{MODULE}.insert_message", insert_mock)
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+    return await make_respond_node(fake_deps)(state), insert_mock
+
+
+@pytest.mark.asyncio
+async def test_chat_reply_is_normalized_before_persisting_and_returned(
+    fake_deps, monkeypatch
+) -> None:
+    out, insert_mock = await _run_respond(
+        fake_deps,
+        monkeypatch,
+        _state(channel="chat", agent_response="**Hola** 😊 tu pedido #1001 sale hoy"),
+    )
+
+    assert insert_mock.await_args.kwargs["content"] == "Hola tu pedido #1001 sale hoy"
+    assert out["agent_response"] == "Hola tu pedido #1001 sale hoy"
+    assert insert_mock.await_args.kwargs["metadata"]["writing_surface"] == "chat"
+
+
+@pytest.mark.asyncio
+async def test_emojis_survive_when_tenant_opted_in(fake_deps, monkeypatch) -> None:
+    out, _ = await _run_respond(
+        fake_deps,
+        monkeypatch,
+        _state(
+            channel="chat",
+            agent_response="¡Gracias! 😊",
+            tenant_config={"extra": {"allow_emojis": True}},
+        ),
+    )
+
+    assert out["agent_response"] == "¡Gracias! 😊"
+
+
+@pytest.mark.asyncio
+async def test_emojis_stripped_when_allow_emojis_is_not_literally_true(
+    fake_deps, monkeypatch
+) -> None:
+    out, _ = await _run_respond(
+        fake_deps,
+        monkeypatch,
+        _state(
+            channel="chat",
+            agent_response="Gracias 😊",
+            tenant_config={"extra": {"allow_emojis": "yes"}},
+        ),
+    )
+
+    assert out["agent_response"] == "Gracias"
+
+
+@pytest.mark.asyncio
+async def test_zendesk_email_ticket_gets_system_signature(fake_deps, monkeypatch) -> None:
+    out, insert_mock = await _run_respond(
+        fake_deps,
+        monkeypatch,
+        _state(
+            channel="zendesk",
+            conversation_history=[{"role": "customer", "metadata": {"source_channel": "email"}}],
+            tenant_name="Marea SL",
+            tenant_facts={"company_name": "Marea Studio"},
+            agent_response="Hola Ana,\n\nTu pedido sale hoy.\n\nSaludos,\nLucía",
+        ),
+    )
+
+    expected = "Hola Ana,\n\nTu pedido sale hoy.\n\nEl equipo de Marea Studio"
+    assert insert_mock.await_args.kwargs["content"] == expected
+    assert out["agent_response"] == expected
+    assert insert_mock.await_args.kwargs["metadata"]["writing_surface"] == "email"
+
+
+@pytest.mark.asyncio
+async def test_zendesk_chat_ticket_is_not_signed(fake_deps, monkeypatch) -> None:
+    out, _ = await _run_respond(
+        fake_deps,
+        monkeypatch,
+        _state(
+            channel="zendesk",
+            conversation_history=[
+                {"role": "customer", "metadata": {"source_channel": "native_messaging"}}
+            ],
+            tenant_name="Marea SL",
+            agent_response="Tu pedido sale hoy.",
+        ),
+    )
+
+    assert out["agent_response"] == "Tu pedido sale hoy."
+
+
+@pytest.mark.asyncio
+async def test_email_uses_client_signature_from_facts(fake_deps, monkeypatch) -> None:
+    out, _ = await _run_respond(
+        fake_deps,
+        monkeypatch,
+        _state(
+            channel="email",
+            tenant_facts={"email_signature": "Ana · Atención al cliente"},
+            agent_response="Hola.",
+        ),
+    )
+
+    assert out["agent_response"] == "Hola.\n\nAna · Atención al cliente"
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_reply_has_no_markup_and_no_signature(fake_deps, monkeypatch) -> None:
+    out, _ = await _run_respond(
+        fake_deps,
+        monkeypatch,
+        _state(channel="whatsapp", tenant_name="Marea SL", agent_response="*Hola* Ana, ya salió"),
+    )
+
+    assert out["agent_response"] == "Hola Ana, ya salió"
+
+
+@pytest.mark.asyncio
+async def test_reply_that_is_only_emoji_is_treated_as_empty(fake_deps, monkeypatch) -> None:
+    out, insert_mock = await _run_respond(
+        fake_deps, monkeypatch, _state(channel="chat", agent_response="😊")
+    )
+
+    assert out["error"] == "respond_without_text"
+    insert_mock.assert_not_called()

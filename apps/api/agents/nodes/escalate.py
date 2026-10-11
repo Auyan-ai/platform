@@ -14,6 +14,7 @@ from uuid import UUID
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
+from apps.api.agents.nodes._reply import finalize_agent_reply
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import (
@@ -64,6 +65,7 @@ def make_escalate_node(
                 agent_response = gate_message(skill_slug)
         else:
             agent_response = state.get("agent_response") or ""
+        agent_response, surface = finalize_agent_reply(state, agent_response)
 
         metadata: dict = {
             "confidence": state.get("confidence"),
@@ -116,6 +118,7 @@ def make_escalate_node(
                         "completion_tokens": state.get("tokens_out", 0),
                         "cost_usd": state.get("cost_usd", 0.0),
                         "confidence": state.get("confidence"),
+                        "writing_surface": surface,
                     },
                 )
                 await update_conversation_last_message(conn, tenant_id, conversation_id)

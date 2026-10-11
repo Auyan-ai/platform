@@ -28,6 +28,8 @@ class AgentState(TypedDict, total=False):
 
     # --- Producido por load_tenant_context ---
     tenant_config: dict
+    # Nombre comercial del tenant: fallback de la firma de correo (`El equipo de {nombre}`).
+    tenant_name: str
     system_prompt: str
     model_used: str
     # Credenciales descifradas de la integración commerce activa del tenant.

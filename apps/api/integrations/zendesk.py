@@ -386,6 +386,9 @@ class ZendeskInboundComment:
     requester_email: str | None
     requester_name: str | None
     subject: str | None
+    # `via.channel` del comentario (o del ticket si el comentario no lo trae): `email`,
+    # `web`, `native_messaging`, `chat`... Decide la superficie de escritura de la respuesta.
+    via_channel: str | None = None
 
     @property
     def from_requester(self) -> bool:
@@ -487,6 +490,8 @@ class ZendeskAdapter:
             requester_email=requester.get("email"),
             requester_name=requester.get("name"),
             subject=ticket.get("subject") or None,
+            via_channel=(comment.get("via") or {}).get("channel")
+            or (ticket.get("via") or {}).get("channel"),
         )
 
     # ── MessageProvider ───────────────────────────────────────────────────────
