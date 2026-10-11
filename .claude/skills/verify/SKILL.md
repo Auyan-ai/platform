@@ -121,4 +121,5 @@ Nunca mates por nombre de proceso (`pkill uvicorn`/`next`): puede haber instanci
 `features/README.md` indexa lo verificable (agente → respuesta, escalado, inbox, aprobaciones L3, conocimiento/hechos).
 `isolation.cjs <conv propia> <conv ajena>` prueba el aislamiento de tenant en la API con el token del tenant_admin.
 `web-reject-approval.cjs <tenantId> "<motivo>"` rechaza la única aprobación L3 pendiente (nunca aprueba; ver `features/approvals-l3.md`).
+`web-facts.cjs` (editar un hecho), `web-kb-submit.cjs` (enviar KB como cliente) y `web-kb-review.cjs` (aprobar/rechazar KB como super_admin) **modifican Marea**: solo con OK de Kenny y dejándolo como estaba (ver `features/knowledge-facts.md`).
 Una prueba que solo conduce un punto de entrada cuando el mapa lista varios está incompleta: cúbrelos o di cuáles no.

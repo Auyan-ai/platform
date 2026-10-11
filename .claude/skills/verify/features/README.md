@@ -26,5 +26,5 @@ Fuente mantenida para verificar el comportamiento de cara al usuario. Léelo ant
 | [Agente escala](./agent-escalate.md) — pide humano / queja grave → escalación con motivo | ✅ probada (2026-10-11) |
 | [Inbox del dashboard](./inbox.md) — conversaciones, razonamiento, escalaciones | ✅ probada (2026-10-11, super_admin, rutas `/tenants/...`) |
 | [Aprobaciones L3](./approvals-l3.md) — cola de aprobación y rechazo | ✅ pendiente + rechazo probados (2026-10-11); aprobar no se automatiza |
-| [Conocimiento y hechos](./knowledge-facts.md) — KB y `tenant_facts` del cliente | ✅ lectura probada (2026-10-11, tenant_admin y super_admin); enviar/editar sin probar |
+| [Conocimiento y hechos](./knowledge-facts.md) — KB y `tenant_facts` del cliente | ✅ lectura y escritura probadas (2026-10-11): hecho editado/restaurado y KB enviada → aprobada → en la respuesta → retirada |
 | [Vista del cliente](./client-views.md) — overview, conversaciones, escalaciones, aprobaciones, insights, reportes y configuración | ✅ probada (2026-10-11, tenant_admin) |
