@@ -6,7 +6,7 @@ Fuente mantenida para verificar el comportamiento de cara al usuario. Léelo ant
 
 - Entorno: **staging real** (Supabase `johidurhcobdkpvlnowl`, LLM real) con código local. Tenant `marea-studio` (id `683246c2-10ce-4f6c-a299-5053f32f8c01`). Ver `../SKILL.md`.
 - `scripts/doctor.sh` sin `FAIL`; API local en `:8000` arrancada con `scripts/up.sh api` (worker de cola apagado).
-- Para las features de dashboard: `scripts/up.sh web` y una sesión guardada por Kenny (`scripts/web-login.sh`) con `super-admin@auyan.ai`: cubre `/tenants/...`; **las rutas `/clients/...` exigen un `tenant_admin`** y no son verificables con esa sesión. Sin sesión, esas features **no son verificables**: repórtalo, no las des por probadas por otra vía.
+- Para las features de dashboard: `scripts/up.sh web` y una sesión guardada por Kenny (`scripts/web-login.sh`) con `super-admin@auyan.ai` (rutas `/tenants/...`) y, para `/clients/...`, otra con `VERIFY_PROFILE=tenant` (`kennyrmv@gmail.com`, tenant_admin de Marea). **La web necesita la API local arriba.** Sin sesión, esas features **no son verificables**: repórtalo, no las des por probadas por otra vía.
 - Nunca conduzcas una instancia que no arrancó esta corrida.
 
 ## Convenciones
@@ -25,5 +25,6 @@ Fuente mantenida para verificar el comportamiento de cara al usuario. Léelo ant
 | [Agente responde](./agent-respond.md) — webhook → grafo → respuesta con KB/skills L1 | ✅ probada (2026-10-11) |
 | [Agente escala](./agent-escalate.md) — pide humano / queja grave → escalación con motivo | ✅ probada (2026-10-11) |
 | [Inbox del dashboard](./inbox.md) — conversaciones, razonamiento, escalaciones | ✅ probada (2026-10-11, super_admin, rutas `/tenants/...`) |
-| [Aprobaciones L3](./approvals-l3.md) — cola de aprobación y rechazo | 🟡 parcial: la cola carga; crear/rechazar sin probar (necesita email de pedido real) |
-| [Conocimiento y hechos](./knowledge-facts.md) — KB y `tenant_facts` del cliente | 🟡 parcial: solo `KB pending review` del super_admin; la vista del cliente exige un `tenant_admin` |
+| [Aprobaciones L3](./approvals-l3.md) — cola de aprobación y rechazo | ✅ pendiente + rechazo probados (2026-10-11); aprobar no se automatiza |
+| [Conocimiento y hechos](./knowledge-facts.md) — KB y `tenant_facts` del cliente | ✅ lectura probada (2026-10-11, tenant_admin y super_admin); enviar/editar sin probar |
+| [Vista del cliente](./client-views.md) — overview, conversaciones, escalaciones, aprobaciones, insights, reportes y configuración | ✅ probada (2026-10-11, tenant_admin) |

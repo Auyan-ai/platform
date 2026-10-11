@@ -2,11 +2,11 @@
 //   e.g. node web-shot.cjs /tenants/<tenantId>/conversations conversations 'a[href*="/conversations/"]'
 // Headless, reuses the saved login. Writes evidence/<ts>-<name>.png and <ts>-<name>.txt (visible text).
 // Exits 3 if the dashboard bounced to /login (session expired → human re-runs web-login.cjs).
-const { chromium, PROFILE, EVID, WEB, fs, path, base } = require('./_pw.cjs');
+const { EVID, WEB, fs, path, openCtx, saveState } = require('./_pw.cjs');
 const [route, name, waitFor] = process.argv.slice(2);
 if (!route || !name) { console.error('uso: web-shot.cjs <ruta> <nombre> [selector]'); process.exit(2); }
 (async () => {
-  const ctx = await chromium.launchPersistentContext(PROFILE, { ...base, headless: true, viewport: { width: 1360, height: 860 } });
+  const ctx = await openCtx({ headless: true });
   const page = ctx.pages()[0] || await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
@@ -24,5 +24,6 @@ if (!route || !name) { console.error('uso: web-shot.cjs <ruta> <nombre> [selecto
   fs.writeFileSync(out + '.txt', `url: ${page.url()}\n\n` + (await page.innerText('body')) + (errors.length ? '\n\n--- errores de consola ---\n' + errors.join('\n') : ''));
   console.log(out + '.png');
   console.log(errors.length ? `${errors.length} errores de consola (ver .txt)` : 'sin errores de consola');
+  await saveState(ctx);
   await ctx.close();
 })().catch((e) => { console.error(e.message); process.exit(1); });
