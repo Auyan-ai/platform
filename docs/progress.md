@@ -152,7 +152,7 @@ Producción ya no puede ir en Railway: **definir su deploy** (Cloud Run `auyan-a
 - **Marea staging (s81):** 25 escalaciones `pending` de pruebas viejas → resolver/limpiar (soft). `scripts/smoke_whatsapp_flow.py` emite `SyntaxWarning` (en el docstring, `-f \;` perdió el `$f`).
 - **Sprint 2 (s80):** `packages/shared/src/api-types.ts` iba desfasado respecto de la API (~800 líneas) y solo se añadieron los esquemas nuevos → regenerarlo entero en un PR aparte. `find_outbound_message_by_platform_id` (cruce de `message.failed`/`message.sent`) busca en `messages.metadata` sin índice GIN: añadirlo si crece el volumen. La respuesta desde el dashboard de Auyan (`POST /conversations/{id}/reply`) solo guarda el mensaje, no lo entrega a ningún canal (ya era así). Scope OAuth de Zendesk con `uploads` y `users:write` ✅ verificado en s81 (requester creado, foto y audio adjuntos al ticket).
 - `/webhooks/inbound` (script de pruebas) sigue síncrono y fuera de la cola.
-- **Labels canónicos** (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`) no existen en el repo; los issues de s77 usan `enhancement`.
+- **Labels de la cola de agentes:** `agent-queue` y `needs-human` (creados en s82; sustituyen a los `needs-triage`/`ready-for-agent`… que nunca existieron en el repo). Los issues de s77 usan `enhancement`.
 - **Fixtures de eval huérfanas** (slugs legacy ≠ canónicos; `smalltalk` sin fixture) → el promote gate falla "sin fixtures". Bloquea B2 (JEV).
 - **Gorgias OAuth:** persistir `refresh_token` (`oauth_gorgias.py` lo descarta).
 - `get_tool_permissions` en `db/queries.py` es código muerto.
