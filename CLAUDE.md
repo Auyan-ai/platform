@@ -88,13 +88,6 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - Postmark: email saliente Auyan→cliente (reports, notificaciones)
 - WhatsApp vía Zernio: canal de mensajería, NO helpdesk (ADR 0010). Los escalados van por handoff al helpdesk del cliente. La key maestra de Zernio solo vive en scripts de operación (`.env.zernio` local), nunca en el runtime ni en `.env.staging`
 
-## Selección de modelo
-- Al inicio de cada sesión, recomendar qué modelo usar según la tarea descrita antes de arrancar.
-- Si el usuario no especifica la tarea al inicio, preguntar qué va a hacer antes de arrancar.
-- **Sonnet**: modelo por defecto. Tareas rutinarias de código, scaffolding, fixes, boilerplate, integraciones y preguntas de contexto. Donde la velocidad y el costo importan más que la profundidad.
-- **Opus**: diseño de arquitectura, decisiones complejas del grafo de LangGraph, revisión de seguridad y RLS, latencia/diseño del grafo, y cuando Sonnet falle repetidamente en algo.
-- **Fable**: el modelo más potente — tier por encima de Opus y más caro. NO es "Opus más rápido": es más inteligente y más caro. Reservar para lo que Opus no resuelve (arquitectura crítica o lógica del grafo de máxima dificultad donde el costo extra se justifica). Nunca por defecto.
-
 ## Lo que nunca hay que hacer
 - Modificar datos de un tenant desde el contexto de otro
 - Responder al cliente final sin pasar por el grafo de LangGraph + AOP selector
