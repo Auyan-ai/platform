@@ -217,6 +217,11 @@ async def provision_tenant(
 
 # ─── Supabase Auth Admin API ─────────────────────────────────────────────────
 
+# Auth solo guarda usuarios del dashboard (tenant_admin y equipo interno): 50
+# páginas de 200 cubren 10.000 sin tocar el tope.
+_ADMIN_USERS_PER_PAGE = 200
+_ADMIN_USERS_MAX_PAGES = 50
+
 
 def _admin_headers(service_role: str) -> dict[str, str]:
     return {
@@ -323,20 +328,49 @@ async def _find_user_by_email(
     service_role: str,
     email: str,
 ) -> UUID | None:
-    """GET /auth/v1/admin/users?email=... — paginado, devuelve el id si encuentra."""
+    """Recorre GET /auth/v1/admin/users página a página y devuelve el id del email.
+
+    GoTrue no filtra este endpoint por email: solo acepta `page` y `per_page`
+    (offset). Se para en la primera página con menos de `per_page` usuarios.
+    Pasar `page` y `per_page` explícitos fija el modo offset aunque el servidor
+    tenga activa la paginación por cursor.
+
+    Returns:
+        El id del usuario, o None si se agotaron las páginas sin encontrarlo.
+
+    Raises:
+        SupabaseAdminError: respuesta distinta de 200, cuerpo sin lista `users`,
+            o más de `_ADMIN_USERS_MAX_PAGES` páginas llenas.
+    """
     headers = _admin_headers(service_role)
-    resp = await http.get(
-        f"{supabase_url}/auth/v1/admin/users",
-        headers=headers,
-        params={"email": email},
-        timeout=15,
-    )
-    if resp.status_code != 200:
-        return None
-    data = resp.json()
-    users = data.get("users", []) if isinstance(data, dict) else []
     needle = email.strip().lower()
-    for user in users:
-        if str(user.get("email", "")).strip().lower() == needle:
-            return UUID(user["id"])
-    return None
+    for page in range(1, _ADMIN_USERS_MAX_PAGES + 1):
+        resp = await http.get(
+            f"{supabase_url}/auth/v1/admin/users",
+            headers=headers,
+            params={"page": page, "per_page": _ADMIN_USERS_PER_PAGE},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            raise SupabaseAdminError(
+                f"No se pudo listar usuarios de Supabase Auth (página {page}): "
+                f"{resp.status_code} {resp.text[:200]}"
+            )
+        try:
+            data = resp.json()
+        except ValueError:
+            data = None
+        users = data.get("users") if isinstance(data, dict) else None
+        if not isinstance(users, list):
+            raise SupabaseAdminError(
+                f"Respuesta inesperada de GET /admin/users (página {page}): {resp.text[:200]}"
+            )
+        for user in users:
+            if str(user.get("email", "")).strip().lower() == needle:
+                return UUID(user["id"])
+        if len(users) < _ADMIN_USERS_PER_PAGE:
+            return None
+    raise SupabaseAdminError(
+        f"Búsqueda de {email} en Supabase Auth cortada tras {_ADMIN_USERS_MAX_PAGES} páginas "
+        f"de {_ADMIN_USERS_PER_PAGE} usuarios sin agotar el listado"
+    )

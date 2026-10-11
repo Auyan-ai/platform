@@ -14,6 +14,7 @@ from apps.api.services.tenant_provisioning import (
     ProvisionRequest,
     SlugTakenError,
     SupabaseAdminError,
+    _find_user_by_email,
     provision_tenant,
 )
 
@@ -260,6 +261,134 @@ class TestProvisionService:
             await provision_tenant(
                 conn, settings=_make_settings(), http=http, request=_make_request()
             )
+
+
+# ---------------------------------------------------------------------------
+# Service: _find_user_by_email (#304)
+# ---------------------------------------------------------------------------
+
+
+def _paged_admin_users(
+    users: list[dict[str, str]], requested_pages: list[int]
+) -> httpx.MockTransport:
+    """Simula la paginación offset de GoTrue en GET /admin/users (page/per_page)."""
+
+    async def _handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/auth/v1/admin/users"
+        page = int(request.url.params["page"])
+        per_page = int(request.url.params["per_page"])
+        requested_pages.append(page)
+        start = (page - 1) * per_page
+        return httpx.Response(200, json={"aud": "", "users": users[start : start + per_page]})
+
+    return httpx.MockTransport(_handler)
+
+
+def _other_users(count: int) -> list[dict[str, str]]:
+    return [{"id": str(uuid4()), "email": f"user{i}@otro.test"} for i in range(count)]
+
+
+async def _find(http: httpx.AsyncClient, email: str = "admin@lunaria.test") -> UUID | None:
+    return await _find_user_by_email(
+        http=http, supabase_url=SUPABASE_URL, service_role=SERVICE_ROLE, email=email
+    )
+
+
+class TestFindUserByEmail:
+    @pytest.mark.asyncio
+    async def test_user_on_second_page_is_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("apps.api.services.tenant_provisioning._ADMIN_USERS_PER_PAGE", 2)
+        users = [*_other_users(2), {"id": str(AUTH_USER_ID), "email": "admin@lunaria.test"}]
+        pages: list[int] = []
+
+        found = await _find(_make_http(_paged_admin_users(users, pages)))
+
+        assert found == AUTH_USER_ID
+        assert pages == [1, 2]
+
+    @pytest.mark.asyncio
+    async def test_missing_user_returns_none_after_last_page(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("apps.api.services.tenant_provisioning._ADMIN_USERS_PER_PAGE", 2)
+        pages: list[int] = []
+
+        found = await _find(_make_http(_paged_admin_users(_other_users(4), pages)))
+
+        assert found is None
+        # Páginas 1 y 2 llenas; la 3 llega vacía y cierra la búsqueda.
+        assert pages == [1, 2, 3]
+
+    @pytest.mark.asyncio
+    async def test_email_comparison_is_case_insensitive(self) -> None:
+        users = [{"id": str(AUTH_USER_ID), "email": "Admin@Lunaria.test"}]
+
+        found = await _find(_make_http(_paged_admin_users(users, [])), " ADMIN@lunaria.TEST ")
+
+        assert found == AUTH_USER_ID
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status_code", "body"),
+        [
+            (401, '{"msg": "invalid JWT"}'),
+            (403, '{"msg": "User not allowed"}'),
+            (500, "upstream down"),
+        ],
+    )
+    async def test_non_200_raises_with_status_and_message(
+        self, status_code: int, body: str
+    ) -> None:
+        async def _handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code, text=body)
+
+        with pytest.raises(SupabaseAdminError) as excinfo:
+            await _find(_make_http(httpx.MockTransport(_handler)))
+        message = str(excinfo.value)
+        assert str(status_code) in message
+        assert body in message
+
+    @pytest.mark.asyncio
+    async def test_unexpected_body_raises(self) -> None:
+        async def _handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"items": []})
+
+        with pytest.raises(SupabaseAdminError):
+            await _find(_make_http(httpx.MockTransport(_handler)))
+
+    @pytest.mark.asyncio
+    async def test_page_cap_exceeded_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("apps.api.services.tenant_provisioning._ADMIN_USERS_PER_PAGE", 2)
+        monkeypatch.setattr("apps.api.services.tenant_provisioning._ADMIN_USERS_MAX_PAGES", 3)
+        pages: list[int] = []
+
+        with pytest.raises(SupabaseAdminError) as excinfo:
+            await _find(_make_http(_paged_admin_users(_other_users(10), pages)))
+        assert "3 páginas" in str(excinfo.value)
+        assert pages == [1, 2, 3]
+
+    @pytest.mark.asyncio
+    async def test_provision_reports_admin_users_failure_not_user_missing(self) -> None:
+        # Antes un 401 en /admin/users se reportaba como "no se encontró usuario".
+        conn = _make_conn(slug_taken=False)
+
+        async def _handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/auth/v1/invite":
+                return httpx.Response(422, json={"msg": "already registered"})
+            if request.url.path == "/auth/v1/admin/users":
+                return httpx.Response(401, json={"msg": "invalid JWT"})
+            return httpx.Response(404)
+
+        http = _make_http(httpx.MockTransport(_handler))
+        with pytest.raises(SupabaseAdminError) as excinfo:
+            await provision_tenant(
+                conn, settings=_make_settings(), http=http, request=_make_request()
+            )
+        message = str(excinfo.value)
+        assert "401" in message
+        assert "invalid JWT" in message
+        assert "no se encontró" not in message
+        conn.execute.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
