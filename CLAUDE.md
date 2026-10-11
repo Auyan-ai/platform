@@ -45,11 +45,13 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - Toda función nueva lleva su test básico
 
 ## Ramas y commits
-- main → producción, solo recibe merges desde develop
+- main → producción, solo recibe merges desde develop, siempre por PR
 - develop → staging, aquí se integran todos los cambios
-- Ramas de trabajo: feature/nombre, fix/nombre
+- Ramas de trabajo: feature/nombre, fix/nombre, chore/nombre, docs/nombre
 - Ramas automáticas de Claude Code: claude/* (las crea el worktree, válidas tal cual; el PR igual va contra develop)
-- Nunca commitear directo a main ni develop
+- Nunca commitear directo a main
+- Todo cambio va por rama + PR contra develop (así corre el CI), salvo la excepción de abajo
+- Excepción: commit directo a develop solo si el commit toca únicamente `docs/**` (p. ej. el cierre de sesión en progress.md). Si mezcla docs con cualquier otra ruta, va por PR
 - Formato de commits: feat:, fix:, chore:, docs:
 
 ## Observabilidad — lo más importante
