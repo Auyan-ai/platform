@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 # Enums espejados desde supabase/migrations/20260513000000_initial_schema.sql
 MessageRole = Literal["customer", "agent_ai", "agent_human", "system"]
@@ -588,12 +588,46 @@ class TenantIntegration(_BaseModel):
     updated_at: datetime | None = None
 
 
+_CHANNEL_LABELS: dict[str, str] = {
+    "whatsapp": "WhatsApp",
+    "instagram": "Instagram",
+    "messenger": "Messenger",
+    "tiktok": "TikTok",
+    "email": "Email",
+    "chat": "Chat",
+    "widget": "Widget",
+}
+# Proveedores que solo dan un canal; sirven de respaldo si la fila no lo guarda.
+_PROVIDER_DEFAULT_CHANNEL: dict[str, str] = {"zernio": "whatsapp"}
+
+
+def integration_label(kind: str, provider: str, channel: str | None = None) -> str:
+    """Nombre visible de una integración. Canales: el canal (Zernio es solo el transporte)."""
+    if kind == "channel":
+        key = (channel or _PROVIDER_DEFAULT_CHANNEL.get(provider) or provider).lower()
+        if key in _CHANNEL_LABELS:
+            return _CHANNEL_LABELS[key]
+        if key == "zernio":  # canal desconocido tras Zernio: nunca mostrar el proveedor
+            return "Mensajería"
+        return key.replace("_", " ").capitalize()
+    return provider.replace("_", " ").capitalize()
+
+
 class IntegrationSummary(_BaseModel):
     """Vista en lista blanca de una integración activa: nunca credenciales ni config."""
 
     kind: IntegrationKind
     provider: str
     is_primary: bool
+    # Canal concreto (`config->>'channel'`, escalar en lista blanca). Hoy las filas de
+    # Zernio no lo guardan: se asume WhatsApp, el único canal que Zernio da (ADR 0010).
+    channel: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def label(self) -> str:
+        """Nombre legible: en canales sale del canal, no del proveedor; el resto, del proveedor."""
+        return integration_label(self.kind, self.provider, self.channel)
 
 
 class IntegrationGroup(_BaseModel):

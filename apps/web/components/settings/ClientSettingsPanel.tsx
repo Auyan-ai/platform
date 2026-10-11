@@ -16,23 +16,6 @@ const KIND_LABELS: Record<IntegrationGroup['kind'], string> = {
   llm: 'Modelo',
 }
 
-const PROVIDER_LABELS: Record<string, string> = {
-  whatsapp: 'WhatsApp',
-  chat: 'Chat',
-  widget: 'Widget',
-  email: 'Email',
-  instagram: 'Instagram',
-  zendesk: 'Zendesk',
-  gorgias: 'Gorgias',
-  intercom: 'Intercom',
-  chatwoot: 'Chatwoot',
-  shopify: 'Shopify',
-}
-
-function providerLabel(provider: string) {
-  return PROVIDER_LABELS[provider] ?? provider.charAt(0).toUpperCase() + provider.slice(1)
-}
-
 function textFromExtra(extra: Record<string, unknown>, keys: string[], fallback: string) {
   for (const key of keys) {
     const value = extra[key]
@@ -110,8 +93,8 @@ export function ClientSettingsPanel() {
                   {KIND_LABELS[group.kind]}
                 </p>
                 {group.integrations.map((integration) => (
-                  <Badge key={integration.provider} variant="success">
-                    {providerLabel(integration.provider)}
+                  <Badge key={`${integration.provider}-${integration.channel ?? ''}`} variant="success">
+                    {integration.label}
                   </Badge>
                 ))}
               </div>
