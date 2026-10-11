@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -89,13 +90,17 @@ class TestProvisionService:
         # El seeding de los AOPs canónicos se prueba aparte (test_canonical_aops); aquí no-op.
         monkeypatch.setattr(
             "apps.api.services.tenant_provisioning.provision_canonical_aops",
-            AsyncMock(return_value={"created": 8, "updated": 0, "skipped": 0, "tool_permissions": 11}),
+            AsyncMock(
+                return_value={"created": 8, "updated": 0, "skipped": 0, "tool_permissions": 11}
+            ),
         )
 
         async def _handler(request: httpx.Request) -> httpx.Response:
             assert request.url.path == "/auth/v1/invite"
             assert request.headers["authorization"] == f"Bearer {SERVICE_ROLE}"
-            return httpx.Response(200, json={"id": str(AUTH_USER_ID), "email": "admin@lunaria.test"})
+            return httpx.Response(
+                200, json={"id": str(AUTH_USER_ID), "email": "admin@lunaria.test"}
+            )
 
         http = _make_http(httpx.MockTransport(_handler))
         result = await provision_tenant(
@@ -117,7 +122,8 @@ class TestProvisionService:
         sql_calls = [call.args[0] for call in conn.execute.await_args_list]
         assert any("INSERT INTO tenant_configurations" in sql for sql in sql_calls)
         prompt_call = next(
-            call for call in conn.execute.await_args_list
+            call
+            for call in conn.execute.await_args_list
             if "INSERT INTO tenant_prompts" in call.args[0]
         )
         # El prompt base interpola el company_name del request.
@@ -141,26 +147,34 @@ class TestProvisionService:
         conn.execute.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_email_exists_falls_back_to_find_and_magic_link(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_email_exists_sends_magic_link_email_via_otp(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # #299: generate_link solo devuelve el enlace y no manda correo. Para un usuario
+        # existente hay que llamar a POST /otp con create_user=false, que sí lo envía.
         conn = _make_conn(slug_taken=False)
         monkeypatch.setattr(
             "apps.api.services.tenant_provisioning.provision_canonical_aops",
-            AsyncMock(return_value={"created": 8, "updated": 0, "skipped": 0, "tool_permissions": 11}),
+            AsyncMock(
+                return_value={"created": 8, "updated": 0, "skipped": 0, "tool_permissions": 11}
+            ),
         )
         calls: list[str] = []
+        otp_bodies: list[dict[str, Any]] = []
 
         async def _handler(request: httpx.Request) -> httpx.Response:
             calls.append(f"{request.method} {request.url.path}")
             if request.url.path == "/auth/v1/invite":
                 return httpx.Response(
-                    422, json={"msg": "Email address already registered"}
+                    422, json={"code": "email_exists", "msg": "Email address already registered"}
                 )
             if request.url.path == "/auth/v1/admin/users":
                 return httpx.Response(
                     200, json={"users": [{"id": str(AUTH_USER_ID), "email": "admin@lunaria.test"}]}
                 )
-            if request.url.path == "/auth/v1/admin/generate_link":
-                return httpx.Response(200, json={"properties": {"action_link": "https://link"}})
+            if request.url.path == "/auth/v1/otp":
+                otp_bodies.append(json.loads(request.content))
+                return httpx.Response(200, json={})
             return httpx.Response(404)
 
         http = _make_http(httpx.MockTransport(_handler))
@@ -172,8 +186,50 @@ class TestProvisionService:
         assert calls == [
             "POST /auth/v1/invite",
             "GET /auth/v1/admin/users",
-            "POST /auth/v1/admin/generate_link",
+            "POST /auth/v1/otp",
         ]
+        # create_user=false: nunca crea un usuario nuevo por esta vía.
+        assert otp_bodies == [{"email": "admin@lunaria.test", "create_user": False}]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status_code", "body"),
+        [
+            (429, {"code": "over_email_send_rate_limit", "msg": "email rate limit exceeded"}),
+            (422, {"code": "otp_disabled", "msg": "Signups not allowed for otp"}),
+            (500, {"msg": "upstream down"}),
+        ],
+    )
+    async def test_email_exists_but_magic_link_send_fails_raises_before_db(
+        self, status_code: int, body: dict[str, str]
+    ) -> None:
+        conn = _make_conn(slug_taken=False)
+
+        async def _handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/auth/v1/invite":
+                return httpx.Response(
+                    422, json={"code": "email_exists", "msg": "already registered"}
+                )
+            if request.url.path == "/auth/v1/admin/users":
+                return httpx.Response(
+                    200, json={"users": [{"id": str(AUTH_USER_ID), "email": "admin@lunaria.test"}]}
+                )
+            if request.url.path == "/auth/v1/otp":
+                return httpx.Response(status_code, json=body)
+            return httpx.Response(404)
+
+        http = _make_http(httpx.MockTransport(_handler))
+        with pytest.raises(SupabaseAdminError) as excinfo:
+            await provision_tenant(
+                conn, settings=_make_settings(), http=http, request=_make_request()
+            )
+        message = str(excinfo.value)
+        assert "admin@lunaria.test" in message
+        assert str(status_code) in message
+        assert body["msg"] in message
+        # Sin correo no hay tenant: nada se escribió y el super_admin puede reintentar.
+        conn.fetchrow.assert_not_awaited()
+        conn.execute.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_email_exists_but_not_found_raises(self) -> None:
@@ -329,7 +385,33 @@ class TestCreateTenantEndpoint:
         resp = client.post("/tenants", json=self._payload())
         assert resp.status_code == 409
 
-    def test_403_when_super_admin_without_internal_user(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_502_shows_magic_link_send_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from contextlib import asynccontextmanager
+
+        from apps.api.routers import tenants as tenants_router
+
+        async def _raise_send(*a, **kw):
+            raise SupabaseAdminError("No se pudo enviar el magic link a admin@lunaria.test")
+
+        @asynccontextmanager
+        async def _fake_bootstrap_cm():
+            yield MagicMock()
+
+        async def _fake_get_internal(conn, user_id):
+            return _make_internal_user()
+
+        monkeypatch.setattr(tenants_router, "provision_tenant", _raise_send)
+        monkeypatch.setattr(tenants_router, "bootstrap_connection", _fake_bootstrap_cm)
+        monkeypatch.setattr(tenants_router, "get_internal_user_by_auth_id", _fake_get_internal)
+
+        client = _make_endpoint_app("super_admin")
+        resp = client.post("/tenants", json=self._payload())
+        assert resp.status_code == 502
+        assert "No se pudo enviar el magic link" in resp.text
+
+    def test_403_when_super_admin_without_internal_user(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from contextlib import asynccontextmanager
 
         from apps.api.routers import tenants as tenants_router
