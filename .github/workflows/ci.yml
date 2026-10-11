@@ -70,3 +70,13 @@ jobs:
 
       - name: Tests
         run: pnpm --filter @auyan/web test
+
+  github-scripts:
+    name: Scripts de .github — unittest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s .github/scripts -p "test_*.py"

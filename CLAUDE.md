@@ -53,6 +53,7 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - Todo cambio va por rama + PR contra develop (así corre el CI), salvo la excepción de abajo
 - Excepción: commit directo a develop solo si el commit toca únicamente `docs/**` (p. ej. el cierre de sesión en progress.md). Si mezcla docs con cualquier otra ruta, va por PR
 - Formato de commits: feat:, fix:, chore:, docs:
+- El cuerpo del PR lleva `Closes #N` por cada issue que resuelve (el workflow `close-issues-on-develop` los cierra al mergear en develop, porque GitHub solo autocierra al mergear en main); `Refs #N` si el issue sigue abierto
 
 ## Observabilidad — lo más importante
 - LangSmith es la fuente primaria de observabilidad en staging/evals
