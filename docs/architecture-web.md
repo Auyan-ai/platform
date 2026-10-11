@@ -86,7 +86,7 @@ Browser                    Next.js (apps/web)              Supabase Auth        
 - En el cliente, TanStack Query usa un hook `useApiClient()` que lee el token del cliente browser de Supabase y arma el wrapper tipado.
 - El header `X-Tenant-Id` se pone en cada request del `/dashboard/tenants/[tenantId]/*` leyendo el segmento de URL — el tenant activo vive en la URL, no en estado global, así el deep-linking funciona y el browser back también.
 
-**Roles del JWT:** los pobla el seed de Supabase (ver `db/queries.get_user_for_auth`). El rol vive en `public.users.role`; el JWT solo trae `sub` (user_id) y el lookup contra `public.users` resuelve role + tenant.
+**Roles del JWT:** los pobla el seed de Supabase (ver `db/queries.get_user_for_auth`). El rol vive en `public.users.role`; el JWT solo trae `sub` (user_id) y el lookup contra `public.users` resuelve role + tenant. El email manda en `auth.users`; `public.users.email` es una copia que sincroniza el trigger `trg_auth_users_sync_email` (#307), y `GET /users/me` la ve tras el TTL de la caché de usuarios (60 s).
 
 ---
 
