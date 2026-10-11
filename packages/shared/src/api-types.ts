@@ -2611,6 +2611,34 @@ export interface components {
              */
             period_anchor_day: number;
         };
+        /**
+         * IntegrationGroup
+         * @description Integraciones activas del tenant agrupadas por kind (canal, helpdesk, tienda…).
+         */
+        IntegrationGroup: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "helpdesk" | "commerce" | "channel" | "llm";
+            /** Integrations */
+            integrations: components["schemas"]["IntegrationSummary"][];
+        };
+        /**
+         * IntegrationSummary
+         * @description Vista en lista blanca de una integración activa: nunca credenciales ni config.
+         */
+        IntegrationSummary: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "helpdesk" | "commerce" | "channel" | "llm";
+            /** Provider */
+            provider: string;
+            /** Is Primary */
+            is_primary: boolean;
+        };
         /** TenantConfigResponse */
         TenantConfigResponse: {
             /**
@@ -2622,8 +2650,8 @@ export interface components {
             agent_model: string;
             /** Escalation Threshold */
             escalation_threshold: number;
-            /** Active Channels */
-            active_channels: ("email" | "chat" | "widget" | "whatsapp" | "instagram" | "zendesk" | "gorgias" | "intercom" | "chatwoot")[];
+            /** Integrations */
+            integrations: components["schemas"]["IntegrationGroup"][];
             /** Branding */
             branding: {
                 [key: string]: unknown;

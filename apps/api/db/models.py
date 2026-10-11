@@ -59,7 +59,6 @@ class TenantConfiguration(_BaseModel):
     tenant_id: UUID
     agent_model: str
     escalation_threshold: float
-    active_channels: list[ChannelType] = Field(default_factory=list)
     branding: dict = Field(default_factory=dict)
     extra: dict = Field(default_factory=dict)
 
@@ -587,6 +586,21 @@ class TenantIntegration(_BaseModel):
     enabled_by: UUID | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class IntegrationSummary(_BaseModel):
+    """Vista en lista blanca de una integración activa: nunca credenciales ni config."""
+
+    kind: IntegrationKind
+    provider: str
+    is_primary: bool
+
+
+class IntegrationGroup(_BaseModel):
+    """Integraciones activas del tenant agrupadas por kind (canal, helpdesk, tienda…)."""
+
+    kind: IntegrationKind
+    integrations: list[IntegrationSummary]
 
 
 class TenantUsageDaily(_BaseModel):

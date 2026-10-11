@@ -9,11 +9,18 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from apps.api.core.errors import NotFoundError
-from apps.api.db.models import OnboardingChecklist, Tenant, TenantConfiguration
+from apps.api.db.models import (
+    IntegrationGroup,
+    IntegrationKind,
+    OnboardingChecklist,
+    Tenant,
+    TenantConfiguration,
+)
 from apps.api.db.queries import (
     compute_onboarding_checklist,
     get_tenant_by_id,
     get_tenant_configuration,
+    list_active_integration_summaries,
     update_tenant_lifecycle_state,
 )
 from apps.api.db.queries import get_tenant_insights as _get_tenant_insights
@@ -56,6 +63,26 @@ async def get_tenant_config(
             f"config for tenant {tenant_id} not found", code="tenant_config_not_found"
         )
     return config
+
+
+# Orden estable de los grupos en la tarjeta del cliente. `llm` es interno de Auyan
+# (credenciales del proveedor de modelos) y no se muestra al cliente.
+_CLIENT_VISIBLE_KINDS: tuple[IntegrationKind, ...] = ("channel", "helpdesk", "commerce")
+
+
+async def list_tenant_integration_groups(
+    conn: asyncpg.Connection, tenant_id: UUID
+) -> list[IntegrationGroup]:
+    """Integraciones activas del tenant agrupadas por kind, en lista blanca."""
+    summaries = await list_active_integration_summaries(conn, tenant_id=tenant_id)
+    return [
+        IntegrationGroup(
+            kind=kind,
+            integrations=[s for s in summaries if s.kind == kind],
+        )
+        for kind in _CLIENT_VISIBLE_KINDS
+        if any(s.kind == kind for s in summaries)
+    ]
 
 
 async def get_tenant_metrics(conn: asyncpg.Connection, tenant_id: UUID) -> dict[str, object]:

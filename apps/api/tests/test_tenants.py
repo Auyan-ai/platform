@@ -199,6 +199,9 @@ class TestGetMyTenantConfig:
             return config
 
         monkeypatch.setattr("apps.api.routers.tenants.get_tenant_config", _fake_get_config)
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.list_tenant_integration_groups", AsyncMock(return_value=[])
+        )
         app = _make_app(monkeypatch)
         client = TestClient(app)
         resp = client.get("/tenants/me/config", headers={"Authorization": f"Bearer {_make_jwt()}"})
