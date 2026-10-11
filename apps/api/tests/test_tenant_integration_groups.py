@@ -12,7 +12,7 @@ from uuid import UUID
 
 import pytest
 from apps.api.db import queries
-from apps.api.db.models import IntegrationGroup, IntegrationSummary
+from apps.api.db.models import IntegrationGroup, IntegrationSummary, integration_label
 from apps.api.services.tenants import list_tenant_integration_groups
 from apps.api.tests.conftest import TENANT_ID, make_tenant_configuration
 from apps.api.tests.test_tenants import _make_app, _make_jwt
@@ -33,8 +33,10 @@ class _FakeConn:
         return self.rows_by_tenant.get(tenant_id, [])
 
 
-def _row(kind: str, provider: str, primary: bool = False) -> dict[str, Any]:
-    return {"kind": kind, "provider": provider, "is_primary_for_kind": primary}
+def _row(
+    kind: str, provider: str, primary: bool = False, channel: str | None = None
+) -> dict[str, Any]:
+    return {"kind": kind, "provider": provider, "is_primary_for_kind": primary, "channel": channel}
 
 
 class TestListActiveIntegrationSummaries:
@@ -56,7 +58,7 @@ class TestListActiveIntegrationSummaries:
 
         select_clause = conn.queries[0].lower().split("from")[0]
         assert "credentials" not in select_clause
-        assert "config" not in select_clause
+        assert select_clause.replace("config->>'channel'", "").count("config") == 0
         assert "select *" not in select_clause
 
     async def test_other_tenant_rows_do_not_leak(self) -> None:
@@ -152,7 +154,7 @@ class TestConfigEndpointIntegrations:
         body = resp.json()
         assert "active_channels" not in body
         assert body["integrations"] == [
-            {"kind": "channel", "integrations": [{"kind": "channel", "provider": "whatsapp", "is_primary": True}]}
+            {"kind": "channel", "integrations": [{"kind": "channel", "provider": "whatsapp", "is_primary": True, "channel": None, "label": "WhatsApp"}]}
         ]
         raw = resp.text.lower()
         assert "credentials" not in raw
@@ -171,3 +173,34 @@ class TestConfigEndpointIntegrations:
         resp = client.get("/tenants/me/config", headers={"Authorization": f"Bearer {_make_jwt()}"})
 
         assert resp.json()["integrations"] == []
+
+
+class TestIntegrationLabel:
+    @pytest.mark.parametrize(
+        ("kind", "provider", "channel", "expected"),
+        [
+            ("channel", "zernio", None, "WhatsApp"),
+            ("channel", "zernio", "whatsapp", "WhatsApp"),
+            ("channel", "zernio", "instagram", "Instagram"),
+            ("channel", "zernio", "tiktok", "TikTok"),
+            ("channel", "whatsapp", None, "WhatsApp"),
+            ("channel", "zernio", "line_chat", "Line chat"),
+            ("channel", "zernio", "zernio", "Mensajería"),
+            ("helpdesk", "zendesk", None, "Zendesk"),
+            ("helpdesk", "gorgias", None, "Gorgias"),
+            ("commerce", "shopify", None, "Shopify"),
+        ],
+    )
+    def test_label(self, kind: str, provider: str, channel: str | None, expected: str) -> None:
+        assert integration_label(kind, provider, channel) == expected
+
+    def test_summary_exposes_label_and_never_provider_for_zernio(self) -> None:
+        summary = IntegrationSummary(kind="channel", provider="zernio", is_primary=True)
+        assert summary.model_dump()["label"] == "WhatsApp"
+
+    async def test_query_reads_channel_scalar_only(self) -> None:
+        conn = _FakeConn({TENANT_ID: [_row("channel", "zernio", True, "instagram")]})
+        result = await queries.list_active_integration_summaries(conn, tenant_id=TENANT_ID)  # type: ignore[arg-type]
+        assert result[0].label == "Instagram"
+        assert "config->>'channel'" in conn.queries[0]
+        assert "credentials_encrypted" not in conn.queries[0]

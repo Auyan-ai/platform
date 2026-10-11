@@ -2638,6 +2638,13 @@ export interface components {
             provider: string;
             /** Is Primary */
             is_primary: boolean;
+            /** Channel */
+            channel?: string | null;
+            /**
+             * Label
+             * @description Nombre legible: en canales sale del canal, no del proveedor; el resto, del proveedor.
+             */
+            readonly label: string;
         };
         /** TenantConfigResponse */
         TenantConfigResponse: {

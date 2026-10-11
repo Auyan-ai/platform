@@ -3359,11 +3359,12 @@ async def list_active_integration_summaries(
 ) -> list[IntegrationSummary]:
     """Integraciones activas del tenant, solo kind/provider/primaria (lista blanca).
 
-    Nunca selecciona `credentials_encrypted` ni `config`: es lo que ve el cliente.
+    Nunca selecciona `credentials_encrypted` ni `config` crudo (solo el escalar
+    `config->>'channel'`): es lo que ve el cliente.
     """
     rows = await conn.fetch(
         """
-        SELECT kind, provider, is_primary_for_kind
+        SELECT kind, provider, is_primary_for_kind, config->>'channel' AS channel
           FROM tenant_integrations
          WHERE tenant_id  = $1
            AND deleted_at IS NULL
@@ -3374,7 +3375,10 @@ async def list_active_integration_summaries(
     )
     return [
         IntegrationSummary(
-            kind=r["kind"], provider=r["provider"], is_primary=r["is_primary_for_kind"]
+            kind=r["kind"],
+            provider=r["provider"],
+            is_primary=r["is_primary_for_kind"],
+            channel=r["channel"],
         )
         for r in rows
     ]
