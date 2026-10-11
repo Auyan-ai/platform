@@ -265,6 +265,7 @@ async def zendesk_webhook(
             "channel": "zendesk",
             "zendesk_ticket_id": zendesk_ticket_id,
             "zendesk_comment_id": comment.comment_id,
+            "source_channel": comment.via_channel,
         },
     )
     if not result.duplicate:

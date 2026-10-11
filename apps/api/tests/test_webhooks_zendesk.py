@@ -152,7 +152,12 @@ class TestFetchInboundComment:
                 return httpx.Response(
                     200,
                     json={
-                        "ticket": {"id": 2, "requester_id": 7, "subject": "Pedido"},
+                        "ticket": {
+                            "id": 2,
+                            "requester_id": 7,
+                            "subject": "Pedido",
+                            "via": {"channel": "web"},
+                        },
                         "users": [
                             {"id": 99, "email": "agente@acme.test", "name": "Agente"},
                             {"id": 7, "email": "cliente@test.com", "name": "Cliente"},
@@ -164,7 +169,13 @@ class TestFetchInboundComment:
                 200,
                 json={
                     "comments": [
-                        {"id": 901, "author_id": 7, "public": True, "plain_body": 'dijo "hola"\ny'},
+                        {
+                            "id": 901,
+                            "author_id": 7,
+                            "public": True,
+                            "plain_body": 'dijo "hola"\ny',
+                            "via": {"channel": "email"},
+                        },
                         {"id": 900, "author_id": 99, "public": True, "plain_body": "respuesta"},
                     ]
                 },
@@ -195,6 +206,7 @@ class TestFetchInboundComment:
             requester_email="cliente@test.com",
             requester_name="Cliente",
             subject="Pedido",
+            via_channel="email",
         )
         assert comment.from_requester is True
         assert requests == ["/api/v2/tickets/2.json", "/api/v2/tickets/2/comments.json"]

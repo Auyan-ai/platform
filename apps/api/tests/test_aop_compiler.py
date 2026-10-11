@@ -225,12 +225,12 @@ def test_render_global_rules_caps_response_length() -> None:
     assert "preámbulo" in result or "relleno" in result
 
 
-def test_render_global_rules_includes_chat_format_rule() -> None:
-    """Las respuestas van a un widget de chat: nada de tablas ni Markdown pesado,
-    texto plano y conciso — regla global, aplica a todos los AOPs y marcas."""
+def test_render_global_rules_includes_natural_writing_rule() -> None:
+    """Regla global agnóstica al canal: prosa natural, sin Markdown ni tablas. El formato
+    por canal se añade aparte en el bloque volátil (ADR 0012)."""
     result = _render_global_rules([]).lower()
     assert "tablas" in result
-    assert "chat" in result
+    assert "markdown" in result
 
 
 def test_render_global_rules_includes_escalation_triggers() -> None:
@@ -724,3 +724,29 @@ def test_compile_aop_no_facts_no_playbook_no_extra_blocks() -> None:
 
     assert "Datos del cliente" not in result.system_prompt
     assert "Conocimiento de la Marca" not in result.system_prompt
+
+
+# ─── Escritura natural: el prompt no imita Markdown ─────────────────────────
+
+
+def test_global_rules_have_no_markdown_emphasis() -> None:
+    rules = _render_global_rules(["Cliente pide un reembolso"])
+
+    assert "**" not in rules
+    assert "Escritura natural" in rules
+    assert "Precedencia" in rules
+    assert "ventana de chat" not in rules
+
+
+def test_tenant_facts_render_without_bold() -> None:
+    assert "**" not in _render_tenant_facts({"support_email": "hola@tienda.com"})
+
+
+def test_email_signature_fact_is_not_injected_in_the_prompt() -> None:
+    result = _render_tenant_facts(
+        {"email_signature": "Ana · Soporte Marea", "support_email": "hola@tienda.com"}
+    )
+
+    assert "Ana" not in result
+    assert "hola@tienda.com" in result
+    assert _render_tenant_facts({"email_signature": "Ana"}) == ""

@@ -81,6 +81,7 @@ def make_load_tenant_context_node(
 
         out: dict = {
             "tenant_config": config_dump,
+            "tenant_name": tenant.name,
             "system_prompt": system_prompt,
             "model_used": config.agent_model,
             "tool_permissions": tool_permissions,

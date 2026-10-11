@@ -22,6 +22,7 @@ un ADR nuevo que la supersede y se actualiza el `Estado` del viejo.
 | [0008](0008-inbound-queue-postgres.md) | Turnos inbound en una cola Postgres, serializados por conversación | Aceptada |
 | [0009](0009-cloud-run-vercel.md) | API en Cloud Run y dashboard en Vercel (sustituye a Railway); `min-instances` activable con el primer cliente de pago | Aceptada |
 | [0010](0010-whatsapp-zernio-handoff.md) | WhatsApp vía Zernio como canal desacoplado del helpdesk, con handoff modular al helpdesk del cliente | Propuesta |
+| [0012](0012-escritura-natural-por-canal.md) | Escritura natural por canal: el código pone el formato y la firma, el LLM la redacción | Propuesta |
 
 ## Estados posibles
 

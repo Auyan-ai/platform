@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
+from apps.api.agents.nodes._reply import surface_of
 from apps.api.agents.prompts.builder import (
     build_message_history,
     build_system_blocks,
@@ -251,6 +252,7 @@ def make_reason_node(
             conversation_context=conversation_context_block(
                 state["conversation_history"], state.get("end_customer")
             ),
+            writing_surface=surface_of(state),
         )
         messages = build_message_history(state["conversation_history"])
         messages = _append_tool_result_blocks(messages, state.get("tool_results", []))

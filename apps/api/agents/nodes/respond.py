@@ -13,6 +13,7 @@ from uuid import UUID
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
+from apps.api.agents.nodes._reply import finalize_agent_reply
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import insert_message, update_conversation_last_message
@@ -27,7 +28,7 @@ def make_respond_node(
     async def _node(state: AgentState) -> dict:
         tenant_id = UUID(state["tenant_id"])
         conversation_id = UUID(state["conversation_id"])
-        content = state.get("agent_response") or ""
+        content, surface = finalize_agent_reply(state, state.get("agent_response") or "")
 
         if not content.strip():
             # Defensa: reason debería haber validado esto. Si llegamos sin texto,
@@ -44,6 +45,7 @@ def make_respond_node(
             "completion_tokens": state.get("tokens_out", 0),
             "cost_usd": state.get("cost_usd", 0.0),
             "confidence": state.get("confidence"),
+            "writing_surface": surface,
         }
 
         # El agente resuelve salvo que su respuesta pida más datos al cliente
@@ -73,6 +75,11 @@ def make_respond_node(
             status="done",
         )
 
-        return {"output_message_id": str(msg.id), "resolves_on_delivery": resolves}
+        # `agent_response` vuelve normalizado: es el texto que el caller entrega.
+        return {
+            "output_message_id": str(msg.id),
+            "resolves_on_delivery": resolves,
+            "agent_response": content,
+        }
 
     return _node

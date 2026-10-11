@@ -59,6 +59,12 @@ def _is_from_agent(value: Any) -> bool:
     return bool(value)
 
 
+def source_channel(message: dict[str, Any], ticket: dict[str, Any]) -> str | None:
+    """Canal de origen (`email`, `chat`, `facebook`...): el del mensaje, o el del ticket."""
+    value = message.get("channel") or ticket.get("channel")
+    return str(value) if value else None
+
+
 @router.post(
     "/gorgias",
     status_code=status.HTTP_200_OK,
@@ -162,6 +168,7 @@ async def gorgias_webhook(
             "channel": "gorgias",
             "gorgias_ticket_id": ticket_id,
             "gorgias_message_id": message_id,
+            "source_channel": source_channel(message, ticket),
         },
     )
     if not result.duplicate:

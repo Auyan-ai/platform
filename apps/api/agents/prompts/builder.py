@@ -76,6 +76,30 @@ def conversation_context_block(
     )
 
 
+_CHANNEL_REGISTER: dict[str, str] = {
+    "chat": (
+        "Canal: chat. Responde en 1 a 3 frases, directo, sin saludo formal ni despedida."
+    ),
+    "whatsapp": (
+        "Canal: WhatsApp. Escribe como un mensaje corto de móvil, en texto plano, sin "
+        "saludo formal ni despedida."
+    ),
+    "email": (
+        "Canal: correo electrónico. Saluda con el nombre de pila si lo tienes y es seguro "
+        "usarlo, escribe frases completas en párrafos cortos y cierra con una línea breve. "
+        "NO firmes ni añadas despedida con nombre: la firma la añade el sistema."
+    ),
+}
+
+
+def channel_register_block(surface: str | None) -> str:
+    """Registro por canal (volátil: va tras el breakpoint, el AOP cacheado no depende del canal).
+
+    La superficie la resuelve el código (`services.writing_surface`)."""
+    text = _CHANNEL_REGISTER.get(surface or "")
+    return f"## Reglas del canal\n\n{text}" if text else ""
+
+
 def _supervisor_feedback_block(feedback: str) -> str:
     return (
         "## Feedback del supervisor (corrección requerida)\n\n"
@@ -106,6 +130,7 @@ def build_system_blocks(
     known_facts: str | None = None,
     supervisor_feedback: str | None = None,
     conversation_context: str | None = None,
+    writing_surface: str | None = None,
 ) -> list[dict]:
     """Compone el system como bloques para Anthropic, optimizado para prompt caching.
 
@@ -133,6 +158,9 @@ def build_system_blocks(
         dynamic.append(_date_preamble(current_date))
     if conversation_context:
         dynamic.append(conversation_context)
+    register = channel_register_block(writing_surface)
+    if register:
+        dynamic.append(register)
     if known_facts:
         dynamic.append(_facts_block(known_facts))
     kb = _kb_wrapper(knowledge_chunks)
@@ -153,6 +181,7 @@ def build_system_prompt(
     known_facts: str | None = None,
     supervisor_feedback: str | None = None,
     conversation_context: str | None = None,
+    writing_surface: str | None = None,
 ) -> str:
     """Versión string del system prompt (AOP base + fecha + datos + RAG).
 
@@ -166,6 +195,7 @@ def build_system_prompt(
         known_facts=known_facts,
         supervisor_feedback=supervisor_feedback,
         conversation_context=conversation_context,
+        writing_surface=writing_surface,
     )
     return "\n\n---\n\n".join(b["text"] for b in blocks)
 

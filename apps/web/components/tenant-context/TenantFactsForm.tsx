@@ -60,7 +60,19 @@ const STANDARD_FIELDS = [
     type: 'text',
     suffix: '',
   },
+  {
+    key: 'email_signature',
+    label: 'Firma de correo',
+    placeholder: 'El equipo de Marea Studio',
+    type: 'text',
+    suffix: '',
+  },
 ] as const
+
+const FIELD_HELPERS: Partial<Record<string, string>> = {
+  email_signature:
+    'Se añade al final de las respuestas por correo. Si la dejas vacía, usamos "El equipo de" y el nombre de tu marca.',
+}
 
 type StandardKey = (typeof STANDARD_FIELDS)[number]['key']
 type FactsFormState = Record<StandardKey, string>
@@ -73,6 +85,7 @@ const EMPTY_FORM: FactsFormState = {
   return_window_days: '',
   return_policy_url: '',
   shipping_info: '',
+  email_signature: '',
 }
 
 function stringifyValue(value: unknown): string {
@@ -103,6 +116,7 @@ export function TenantFactsForm({ tenantId }: { tenantId: string }) {
       return_window_days: stringifyValue(data.data.return_window_days),
       return_policy_url: stringifyValue(data.data.return_policy_url),
       shipping_info: stringifyValue(data.data.shipping_info),
+      email_signature: stringifyValue(data.data.email_signature),
     })
     setCustomJson(JSON.stringify(pickCustomFacts(data.data), null, 2))
   }, [data])
@@ -184,7 +198,14 @@ export function TenantFactsForm({ tenantId }: { tenantId: string }) {
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           {STANDARD_FIELDS.map((field) => (
-            <div key={field.key} className={field.key === 'shipping_info' ? 'md:col-span-2' : ''}>
+            <div
+              key={field.key}
+              className={
+                field.key === 'shipping_info' || field.key === 'email_signature'
+                  ? 'md:col-span-2'
+                  : ''
+              }
+            >
               <Label htmlFor={field.key}>{field.label}</Label>
               <div className="mt-1.5 flex items-center gap-2">
                 <Input
@@ -203,6 +224,9 @@ export function TenantFactsForm({ tenantId }: { tenantId: string }) {
                   <span className="shrink-0 text-sm text-foreground-muted">{field.suffix}</span>
                 )}
               </div>
+              {FIELD_HELPERS[field.key] && (
+                <p className="mt-1.5 text-xs text-foreground-muted">{FIELD_HELPERS[field.key]}</p>
+              )}
             </div>
           ))}
         </div>
