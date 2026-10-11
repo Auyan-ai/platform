@@ -10,6 +10,7 @@ from apps.api.agents.nodes.retrieve_knowledge import make_retrieve_knowledge_nod
 from tests.conftest import (
     CONVERSATION_ID,
     CUSTOMER_ID,
+    DOCUMENT_ID,
     TENANT_ID,
     make_fake_tenant_scope,
     make_knowledge_chunk,
@@ -47,6 +48,27 @@ async def test_happy_path_with_chunks(fake_deps, monkeypatch) -> None:
     assert "error" not in out
     assert len(out["retrieved_chunks"]) == 2
     assert out["retrieved_chunks"][0]["similarity"] == 0.92
+    [event] = fake_deps.reasoning_tracker.events
+    assert event["phase"] == "supervisor"
+    assert event["event_type"] == "check"
+    assert event["status"] == "done"
+    assert event["label"] == "Knowledge retrieved (2 chunks)"
+    assert event["detail"] == {
+        "chunk_count": 2,
+        "chunks": [
+            {
+                "document_id": str(DOCUMENT_ID),
+                "document_title": "FAQ",
+                "similarity": 0.92,
+            },
+            {
+                "document_id": str(DOCUMENT_ID),
+                "document_title": "FAQ",
+                "similarity": 0.75,
+            },
+        ],
+    }
+    assert "Envíos a Argentina" not in str(event)
 
 
 @pytest.mark.asyncio
@@ -63,6 +85,10 @@ async def test_empty_knowledge_base(fake_deps, monkeypatch) -> None:
 
     assert out["retrieved_chunks"] == []
     assert "error" not in out
+    [event] = fake_deps.reasoning_tracker.events
+    assert event["label"] == "Knowledge retrieved (0 chunks)"
+    assert event["status"] == "done"
+    assert event["detail"] == {"chunk_count": 0, "chunks": []}
 
 
 @pytest.mark.asyncio
@@ -85,6 +111,16 @@ async def test_embedding_failure_degrades_to_no_chunks(fake_deps, monkeypatch) -
     assert "error" not in out
     # Sin embedding no hay búsqueda que hacer.
     search_mock.assert_not_awaited()
+    [event] = fake_deps.reasoning_tracker.events
+    assert event["label"] == "Knowledge retrieval failed"
+    assert event["status"] == "error"
+    assert event["phase"] == "supervisor"
+    assert event["detail"] == {
+        "chunk_count": 0,
+        "error_type": "RuntimeError",
+        "chunks": [],
+    }
+    assert "openai_down" not in str(event)
 
 
 @pytest.mark.asyncio
