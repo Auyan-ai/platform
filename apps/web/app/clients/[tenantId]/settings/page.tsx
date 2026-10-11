@@ -1,3 +1,4 @@
+import { ChangePasswordCard } from '@/components/settings/ChangePasswordCard'
 import { ClientSettingsPanel } from '@/components/settings/ClientSettingsPanel'
 
 export default async function ClientSettingsPage() {
@@ -12,6 +13,8 @@ export default async function ClientSettingsPage() {
       </div>
 
       <ClientSettingsPanel />
+
+      <ChangePasswordCard />
     </div>
   )
 }

@@ -78,6 +78,10 @@ Browser                    Next.js (apps/web)              Supabase Auth        
 - `middleware.ts` corre en cada request: refresca el access_token si está por expirar y redirige a `/login` si no hay sesión.
 - `super_admin` accede al dashboard interno y puede operar tenants vía `X-Tenant-Id`.
 - `tenant_admin` accede al dashboard cliente bajo `/clients/[tenantId]`.
+- Login (`/login`): email + contraseña, o "Recibir enlace de acceso" (`signInWithOtp`, `shouldCreateUser: false`), o "¿Olvidaste tu contraseña?" (`resetPasswordForEmail`). Las respuestas al pedir enlaces son idénticas exista o no el email.
+- `/auth/callback` (servidor, PKCE) canjea el enlace. Enlace de acceso: solo `tenant_admin` (rol vía `GET /users/me`, misma fuente que el resto de la web); si es otro rol cierra sesión y vuelve a `/login?error=password_required`. `flow=recovery` vale para cualquier rol y fuerza `/auth/set-password` (cookie `auyan_pw_required` + middleware). Las invitaciones y enlaces generados por el API llegan por hash a `/login` y aplican el mismo criterio.
+- `/auth/set-password`: obligatoria tras invitación/recuperación; saltable tras enlace de acceso (`user_metadata.password_set` / `password_prompt_dismissed`). El cambio con sesión iniciada vive en `/clients/[tenantId]/settings`.
+- Lógica en `apps/web/lib/auth/*` con tests (`pnpm --filter @auyan/web test`).
 - El rol `tenant_agent` fue removido en Bloque 0.1. No debe aparecer en rutas, permisos ni documentación nueva.
 - En el cliente, TanStack Query usa un hook `useApiClient()` que lee el token del cliente browser de Supabase y arma el wrapper tipado.
 - El header `X-Tenant-Id` se pone en cada request del `/dashboard/tenants/[tenantId]/*` leyendo el segmento de URL — el tenant activo vive en la URL, no en estado global, así el deep-linking funciona y el browser back también.
