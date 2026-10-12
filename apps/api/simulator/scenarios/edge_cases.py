@@ -92,8 +92,9 @@ SCENARIOS: list[dict[str, Any]] = [
         "id": "EX-05",
         "name": "EX-05: Cancelar pedido ya enviado (L3 rechazada en código)",
         "description": (
-            "Cliente quiere cancelar un pedido que Shopify ya da por enviado con tracking. "
-            "El código rechaza la cancelación antes de pedir aprobación y escala con texto fijo."
+            "Cliente quiere cancelar un pedido que el agente lee como no enviado, pero que "
+            "sale del almacén antes de pedir la aprobación (la relectura del pedido trae "
+            "tracking). El código rechaza la cancelación y escala con texto fijo."
         ),
         "aop_slug": "default",
         "profile": "cooperativo",
@@ -110,7 +111,7 @@ SCENARIOS: list[dict[str, Any]] = [
                     "id": 4001,
                     "order_number": "#1500",
                     "financial_status": "paid",
-                    "fulfillment_status": "fulfilled",
+                    "fulfillment_status": "unfulfilled",
                     "created_at": "2026-05-24T10:00:00Z",
                     "line_items": [{"id": 6001, "title": "Zapatillas", "quantity": 1}],
                 },
