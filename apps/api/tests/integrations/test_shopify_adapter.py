@@ -105,13 +105,27 @@ class TestAdapterMethods:
         inst.get_orders_by_email.assert_awaited_once_with("a@b.com", limit=5)
 
     @pytest.mark.asyncio
-    async def test_get_customer_by_email(self) -> None:
+    async def test_search_orders_by_phone_reads_the_customer_orders(self) -> None:
         adapter = ShopifyAdapter()
         with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             inst = MockClient.return_value
-            inst.get_customer_by_email = AsyncMock(return_value=None)
-            await adapter.get_customer_by_email(_CTX, "a@b.com")
-        inst.get_customer_by_email.assert_awaited_once_with("a@b.com")
+            inst.get_customer_by_phone = AsyncMock(return_value={"id": 3001})
+            inst.get_orders_by_customer_id = AsyncMock(return_value=[{"id": 1}])
+            result = await adapter.search_orders_by_phone(_CTX, "+34600111222", limit=5)
+        assert result == [{"id": 1}]
+        inst.get_customer_by_phone.assert_awaited_once_with("+34600111222")
+        inst.get_orders_by_customer_id.assert_awaited_once_with(3001, limit=5)
+
+    @pytest.mark.asyncio
+    async def test_search_orders_by_phone_without_customer_is_empty(self) -> None:
+        adapter = ShopifyAdapter()
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
+            inst = MockClient.return_value
+            inst.get_customer_by_phone = AsyncMock(return_value=None)
+            inst.get_orders_by_customer_id = AsyncMock()
+            result = await adapter.search_orders_by_phone(_CTX, "+34600111222")
+        assert result == []
+        inst.get_orders_by_customer_id.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_cancel_order_passes_kwargs(self) -> None:

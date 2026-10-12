@@ -1,9 +1,10 @@
-"""Skill L1: devuelve el estado detallado de un pedido por nombre/número."""
+"""Skill L1: devuelve el estado detallado de un pedido por nombre/número, solo a su dueño."""
 
 from __future__ import annotations
 
+import logging
+
 from apps.api.integrations.shopify import ShopifyAdapter
-from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.identity import check_order_ownership
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
@@ -17,6 +18,8 @@ from apps.api.skills.shopify._models import (
     shop_money_if_different,
 )
 from pydantic import Field
+
+logger = logging.getLogger(__name__)
 
 
 class GetOrderStatusInput(SkillInput):
@@ -43,39 +46,31 @@ class OrderDetail(SkillOutput):
     fulfillments: list[FulfillmentInfo]
     # Artículos del pedido — el agente necesita line_item_id para start_return.
     line_items: list[LineItemInfo] = Field(default_factory=list)
-    # Dirección de envío: solo si quien escribe es el dueño del pedido (su email
-    # coincide con el del pedido). Si no, se retiene y `shipping_address_withheld`
-    # lo indica para que el agente lo explique sin revelarla.
     shipping_address: ShippingAddressInfo | None = None
-    shipping_address_withheld: bool = False
-    # Mismo gate determinista que las L3. Si es False, `ownership_note` le dice al agente
-    # qué NO puede ofrecer (s81: prometía un cambio que el gate L3 iba a bloquear).
-    ownership_verified: bool | None = None
-    ownership_note: str | None = None
+    # Solo con found=False: qué decirle al cliente, igual exista o no el pedido.
+    note: str | None = None
 
 
-_NOT_OWNER_NOTE = (
-    "No se puede verificar que este pedido sea de quien escribe{why}. No ofrezcas ni "
-    "prometas cambiar, cancelar ni devolver este pedido (el sistema lo bloquearía), ni "
-    "prometas que el equipo lo hará, y no compartas su dirección ni sus datos de contacto. "
-    "Explícaselo con amabilidad y {next}."
+# Mismo texto si el pedido no existe y si no es de quien escribe: no revela cuál de
+# los dos casos es (los números de pedido son correlativos y se pueden enumerar).
+NOT_FOUND_NOTE = (
+    "No hay ningún pedido con ese número asociado al email o teléfono desde el que "
+    "escribe el cliente. No digas si ese pedido existe ni des ningún dato de él. Pídele "
+    "que revise el número y que escriba desde el email o el teléfono con el que hizo la "
+    "compra, u ofrécele pasar el caso a una persona del equipo."
 )
 
-
-def ownership_note(channel: str | None) -> str:
-    """Aviso para el agente cuando quien escribe no es el dueño del pedido, según el canal."""
-    if channel is not None and is_messaging_channel(channel):
-        return _NOT_OWNER_NOTE.format(
-            why=" desde este número de teléfono",
-            next="ofrécele pasar el caso a una persona del equipo",
-        )
-    return _NOT_OWNER_NOTE.format(
-        why=": el mensaje no viene del email de la compra",
-        next=(
-            "pídele que escriba desde el email con el que hizo la compra u ofrécele pasar "
-            "el caso a una persona del equipo"
-        ),
-    )
+_NOT_FOUND = OrderDetail(
+    found=False,
+    order_id=None,
+    order_number=None,
+    financial_status=None,
+    fulfillment_status=None,
+    total=None,
+    created_at=None,
+    fulfillments=[],
+    note=NOT_FOUND_NOTE,
+)
 
 
 @SkillRegistry.register
@@ -84,7 +79,8 @@ class GetOrderStatus(Skill):
     description = (
         "Devuelve el estado detallado de un pedido de Shopify. "
         "Acepta el número de orden (#1234 o 1234). "
-        "Incluye estado de pago, fulfillment, tracking y artículos. "
+        "Incluye estado de pago, fulfillment, tracking, artículos y dirección de envío. "
+        "Solo devuelve pedidos del email o teléfono desde el que escribe el cliente. "
         "Los importes vienen en la moneda en que pagó el cliente: úsala tal cual."
     )
     tier: SkillTier = "L1"
@@ -100,16 +96,19 @@ class GetOrderStatus(Skill):
         raw = await adapter.get_order_by_name(ctx.integration_ctx, inputs.order_identifier)
 
         if raw is None:
-            return OrderDetail(
-                found=False,
-                order_id=None,
-                order_number=None,
-                financial_status=None,
-                fulfillment_status=None,
-                total=None,
-                created_at=None,
-                fulfillments=[],
+            return _NOT_FOUND
+        ownership = check_order_ownership(
+            raw,
+            customer_email=ctx.customer_email,
+            customer_phone=ctx.customer_phone,
+            default_region=ctx.phone_region,
+        )
+        if not ownership.owner:
+            logger.info(
+                "order_status_not_owner",
+                extra={"conversation_id": ctx.conversation_id, "reason": ownership.reason},
             )
+            return _NOT_FOUND
 
         raw_fulfillments = raw.get("fulfillments", [])
         fulfillments = [
@@ -135,16 +134,9 @@ class GetOrderStatus(Skill):
         )
         line_items = [map_line_item(li, raw) for li in raw.get("line_items", []) if "id" in li]
         raw_address = raw.get("shipping_address") or None
-        # Dueño por email o teléfono (mismo gate determinista que las L3).
-        is_owner = check_order_ownership(
-            raw,
-            customer_email=ctx.customer_email,
-            customer_phone=ctx.customer_phone,
-            default_region=ctx.phone_region,
-        ).owner
         shipping_address = (
             ShippingAddressInfo(**{k: raw_address.get(k) for k in ShippingAddressInfo.model_fields})
-            if raw_address and is_owner
+            if raw_address
             else None
         )
         return OrderDetail(
@@ -161,7 +153,4 @@ class GetOrderStatus(Skill):
             fulfillments=fulfillments,
             line_items=line_items,
             shipping_address=shipping_address,
-            shipping_address_withheld=bool(raw_address) and not is_owner,
-            ownership_verified=is_owner,
-            ownership_note=None if is_owner else ownership_note(ctx.channel),
         )

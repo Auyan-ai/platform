@@ -168,26 +168,26 @@ class TestSearchProducts:
 # ----------------------------------------------------------------
 
 
-class TestGetCustomerByEmail:
+class TestGetCustomerByPhone:
     async def test_returns_customer_when_found(self) -> None:
         mock_cm, _ = _mock_httpx({"customers": [_CUSTOMER]})
         with patch("apps.api.integrations.shopify.httpx.AsyncClient", return_value=mock_cm):
-            result = await ShopifyClient(DOMAIN, TOKEN).get_customer_by_email("cliente@example.com")
+            result = await ShopifyClient(DOMAIN, TOKEN).get_customer_by_phone("+34600111222")
         assert result is not None
         assert result["id"] == 3001
 
     async def test_returns_none_when_not_found(self) -> None:
         mock_cm, _ = _mock_httpx({"customers": []})
         with patch("apps.api.integrations.shopify.httpx.AsyncClient", return_value=mock_cm):
-            result = await ShopifyClient(DOMAIN, TOKEN).get_customer_by_email("ghost@example.com")
+            result = await ShopifyClient(DOMAIN, TOKEN).get_customer_by_phone("+34699999999")
         assert result is None
 
-    async def test_query_uses_email_prefix(self) -> None:
+    async def test_query_uses_phone_prefix(self) -> None:
         mock_cm, mock_client = _mock_httpx({"customers": []})
         with patch("apps.api.integrations.shopify.httpx.AsyncClient", return_value=mock_cm):
-            await ShopifyClient(DOMAIN, TOKEN).get_customer_by_email("test@example.com")
+            await ShopifyClient(DOMAIN, TOKEN).get_customer_by_phone("+34600111222")
         params = mock_client.get.call_args.kwargs.get("params", {})
-        assert params["query"] == "email:test@example.com"
+        assert params["query"] == "phone:+34600111222"
 
 
 class TestGetOrdersByCustomerId:

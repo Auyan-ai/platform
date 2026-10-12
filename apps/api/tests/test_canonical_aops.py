@@ -8,7 +8,7 @@ que hereda cada tenant:
   - los permisos cubren todas las skills usadas; L3 con approval, L1/L2 sin él
   - raw_source round-trippea con el parser del editor del dashboard
   - cada AOP compila
-  - provision_canonical_aops: crea 8 + 11 permisos, idempotente, y propaga con --update
+  - provision_canonical_aops: crea 8 + 10 permisos, idempotente, y propaga con --update
 """
 
 from __future__ import annotations
@@ -57,11 +57,10 @@ def _ensure_shopify_skills_registered():
     for name in (
         "add_order_note",
         "cancel_order",
-        "get_customer_history",
-        "get_order_by_email",
         "get_order_status",
         "get_product_info",
         "get_shop_policies",
+        "list_my_orders",
         "refund_partial",
         "start_return",
         "tag_order",
@@ -117,7 +116,7 @@ def test_order_change_never_promises_on_unverified_orders():
     retenida, pero el gate L3 bloquea siempre ese caso → el agente prometía en falso."""
     order_change = next(a for a in CANONICAL_AOPS if a["slug"] == "order_change")
     guardrails = " ".join(order_change["frontmatter"]["guardrails"])
-    assert "ownership_verified: false" in guardrails
+    assert "found: false" in guardrails
     assert "NO ofrezcas ni prometas" in guardrails
     assert "Puedes seguir con el cambio" not in guardrails
 
@@ -405,7 +404,7 @@ async def test_provision_creates_eight_aops_and_all_permissions(monkeypatch):
     assert result["updated"] == 0
     assert result["skipped"] == 0
     assert set(created_slugs) == EXPECTED_SLUGS
-    assert len(perms) == len(CANONICAL_TOOL_PERMISSIONS) == 11
+    assert len(perms) == len(CANONICAL_TOOL_PERMISSIONS) == 10
 
 
 @pytest.mark.asyncio
@@ -432,7 +431,7 @@ async def test_provision_idempotent_skips_existing(monkeypatch):
     assert result["created"] == 0
     assert result["skipped"] == 9
     # los permisos se hacen upsert igual (idempotente)
-    assert result["tool_permissions"] == 11
+    assert result["tool_permissions"] == 10
 
 
 @pytest.mark.asyncio

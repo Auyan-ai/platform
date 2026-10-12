@@ -29,10 +29,9 @@ _ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(_ENV_FILE)
 
 ALLOWED_SKILLS = [
-    "shopify.get_order_by_email",
+    "shopify.list_my_orders",
     "shopify.get_order_status",
     "shopify.get_product_info",
-    "shopify.get_customer_history",
     "shopify.get_shop_policies",
 ]
 MAX_TOOL_ITERATIONS = 5

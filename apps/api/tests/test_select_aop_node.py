@@ -33,7 +33,7 @@ CONSULTA_ENVIO = AopWithContent(
         "name": "Consulta de envío",
         "slug": "consulta_envio",
         "workspace": "production",
-        "allowed_skills": ["shopify.get_order_by_email"],
+        "allowed_skills": ["shopify.list_my_orders"],
         "triggers": {"description": "El cliente pregunta por su pedido"},
         "guardrails": ["NUNCA inventes un número de tracking."],
         "max_tool_iterations": 3,
@@ -284,7 +284,7 @@ async def test_select_aop_happy_path(fake_deps: Any) -> None:
     assert result["aop_version"] == 1
     assert result["intent_confidence"] == 0.92
     assert "system_prompt" in result
-    assert result["allowed_skills"] == ["shopify.get_order_by_email"]
+    assert result["allowed_skills"] == ["shopify.list_my_orders"]
     assert result["max_tool_iterations"] == 3
     # Guardrails estructurados para el supervisor (no parsea el system_prompt).
     assert result["aop_guardrails"] == ["NUNCA inventes un número de tracking."]

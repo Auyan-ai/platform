@@ -62,10 +62,9 @@ const SKILL_LABELS: Record<string, string> = {
   'shopify.add_order_note': 'Añadir nota al pedido',
   'shopify.tag_order': 'Etiquetar pedido',
   'shopify.get_order_status': 'Consultar estado del pedido',
-  'shopify.get_order_by_email': 'Buscar pedido por email',
+  'shopify.list_my_orders': 'Listar pedidos del cliente',
   'shopify.get_shop_policies': 'Consultar políticas de la tienda',
   'shopify.get_product_info': 'Consultar producto',
-  'shopify.get_customer_history': 'Consultar historial del cliente',
 }
 
 const AOP_LABELS: Record<string, string> = {

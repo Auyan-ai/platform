@@ -20,12 +20,12 @@ async def test_returns_fixture_when_present() -> None:
 async def test_lookup_default_is_none_when_no_fixture() -> None:
     mock = MockShopifyAdapter({})
     assert await mock.get_order_by_name(None, "#1") is None
-    assert await mock.get_customer_by_email(None, "a@b.com") is None
 
 
 async def test_list_default_is_empty_when_no_fixture() -> None:
     mock = MockShopifyAdapter({})
     assert await mock.search_orders_by_email(None, "a@b.com") == []
+    assert await mock.search_orders_by_phone(None, "+34600111222") == []
     assert await mock.get_policies(None) == []
 
 

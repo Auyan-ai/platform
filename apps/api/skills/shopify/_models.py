@@ -75,17 +75,6 @@ class ProductSummary(BaseModel):
     description_snippet: str  # primeros 300 chars del body sin HTML
 
 
-class CustomerInfo(BaseModel):
-    customer_id: int
-    email: str
-    first_name: str
-    last_name: str
-    orders_count: int
-    # Suma de pedidos en la moneda de la tienda (los pedidos pueden venir en varias).
-    # None si no hay pedidos de los que leer la moneda de la tienda.
-    total_spent: Money | None
-
-
 class PolicyInfo(BaseModel):
     title: str
     body: str  # HTML eliminado, truncado a 2000 chars

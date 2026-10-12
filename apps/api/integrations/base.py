@@ -158,11 +158,11 @@ class CommerceProvider(Protocol):
         email: str,
     ) -> list[dict[str, Any]]: ...
 
-    async def get_customer_by_email(
+    async def search_orders_by_phone(
         self,
         ctx: IntegrationContext,
-        email: str,
-    ) -> dict[str, Any] | None: ...
+        phone: str,
+    ) -> list[dict[str, Any]]: ...
 
 
 class HandoffTarget(Protocol):

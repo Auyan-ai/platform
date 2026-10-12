@@ -29,7 +29,12 @@ from apps.api.db.client import tenant_scope
 from apps.api.db.queries import create_pending_approval, get_recent_approval_for_skill
 from apps.api.integrations.base import IntegrationContext
 from apps.api.services.channel_routing import is_messaging_channel
-from apps.api.services.identity import check_order_ownership, default_phone_region
+from apps.api.services.identity import (
+    check_order_ownership,
+    default_phone_region,
+    inbound_source_channel,
+    sender_origin,
+)
 from apps.api.services.pii import redact_inputs
 from apps.api.skills.base import Skill, SkillContext
 from apps.api.skills.registry import SkillRegistry
@@ -64,13 +69,27 @@ def build_skill_context(state: AgentState) -> SkillContext:
         shopify_fixtures = (state.get("simulation_fixtures") or {}).get("shopify", {})
         commerce_mock = MockShopifyAdapter(shopify_fixtures)
 
+    # Solo cuenta el contacto que el origen del mensaje verifica (ADR 0013): un email de
+    # chat lo teclea el visitante. El cliente del simulador escribe como remitente de correo.
+    origin = (
+        "email"
+        if state.get("simulation_mode")
+        else sender_origin(
+            state.get("channel"),
+            inbound_source_channel(
+                state.get("conversation_history"), state.get("inbound_message_id")
+            ),
+        )
+    )
+    customer = state.get("end_customer") or {}
+
     return SkillContext(
         tenant_id=state["tenant_id"],
         conversation_id=state["conversation_id"],
         integration_ctx=integration_ctx,
         commerce_mock=commerce_mock,
-        customer_email=(state.get("end_customer") or {}).get("email"),
-        customer_phone=(state.get("end_customer") or {}).get("phone"),
+        customer_email=customer.get("email") if origin == "email" else None,
+        customer_phone=customer.get("phone") if origin == "phone" else None,
         channel=state.get("channel"),
         phone_region=default_phone_region(state.get("tenant_config"), state.get("tenant_facts")),
     )

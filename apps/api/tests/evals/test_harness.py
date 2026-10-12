@@ -32,7 +32,7 @@ AOP_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 GOOD_CE_FRONTMATTER = {
     "slug": "consulta_envio",
     "name": "Consulta de Envío",
-    "allowed_skills": ["shopify.get_order_by_email", "shopify.get_order_status"],
+    "allowed_skills": ["shopify.list_my_orders", "shopify.get_order_status"],
     "required_data": ["email del cliente"],
     "guardrails": ["No compartas datos de otros clientes"],
     "max_tool_iterations": 4,
@@ -122,7 +122,7 @@ def good_aop_ce():
 def good_compiled_ce(good_aop_ce):
     """CompiledAOP de un buen AOP de consulta_envio."""
     with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry(
-        ["shopify.get_order_by_email", "shopify.get_order_status"]
+        ["shopify.list_my_orders", "shopify.get_order_status"]
     ).side_effect):
         from apps.api.aops.compiler import compile_aop
         return compile_aop(good_aop_ce, make_tenant_configuration())
@@ -178,7 +178,7 @@ class TestSkillsIncludeAssertion:
     def test_passes_when_all_present(self, good_aop_ce, good_compiled_ce):
         result = _check_assertion(
             "skills_include",
-            ["shopify.get_order_by_email", "shopify.get_order_status"],
+            ["shopify.list_my_orders", "shopify.get_order_status"],
             good_aop_ce, good_compiled_ce, None
         )
         assert result.passed
@@ -201,7 +201,7 @@ class TestSkillsNotIncludeAssertion:
     def test_fails_when_present(self, good_aop_ce, good_compiled_ce):
         result = _check_assertion(
             "skills_not_include",
-            ["shopify.get_order_by_email"],
+            ["shopify.list_my_orders"],
             good_aop_ce, good_compiled_ce, None
         )
         assert not result.passed
@@ -234,11 +234,11 @@ class TestToolCountMatchesSkillsAssertion:
 
     def test_fails_when_unregistered_skill(self, good_aop_ce):
         aop_with_unknown = _make_aop(
-            {**GOOD_CE_FRONTMATTER, "allowed_skills": ["shopify.get_order_by_email", "skill.no_registrada"]},
+            {**GOOD_CE_FRONTMATTER, "allowed_skills": ["shopify.list_my_orders", "skill.no_registrada"]},
             GOOD_CE_BODY,
         )
         with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry(
-            ["shopify.get_order_by_email"]
+            ["shopify.list_my_orders"]
         ).side_effect):
             from apps.api.aops.compiler import compile_aop
             compiled = compile_aop(aop_with_unknown, make_tenant_configuration())
@@ -273,7 +273,7 @@ def test_run_fixture_all_pass():
         assertions=[Assertion(kind="frontmatter_has_key", expected="slug")],
     )
     with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry(
-        ["shopify.get_order_by_email", "shopify.get_order_status"]
+        ["shopify.list_my_orders", "shopify.get_order_status"]
     ).side_effect):
         result = run_fixture(aop, make_tenant_configuration(), fixture)
     assert result.passed
@@ -290,7 +290,7 @@ def test_run_fixture_one_fail():
         ],
     )
     with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry(
-        ["shopify.get_order_by_email", "shopify.get_order_status"]
+        ["shopify.list_my_orders", "shopify.get_order_status"]
     ).side_effect):
         result = run_fixture(aop, make_tenant_configuration(), fixture)
     assert not result.passed
@@ -312,7 +312,7 @@ def test_run_eval_no_fixtures_returns_not_meets_gate():
 def test_run_eval_good_aop_passes_gate():
     aop = _make_aop(GOOD_CE_FRONTMATTER, GOOD_CE_BODY)
     with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry(
-        ["shopify.get_order_by_email", "shopify.get_order_status"]
+        ["shopify.list_my_orders", "shopify.get_order_status"]
     ).side_effect):
         result = run_eval(aop, make_tenant_configuration())
     assert result.total_fixtures == 8
@@ -324,7 +324,7 @@ def test_run_eval_bad_aop_fails_gate():
     """AOP sin skills, sin name, sin escalation_triggers → falla varios fixtures."""
     bad_frontmatter = {
         "slug": "consulta_envio",
-        "allowed_skills": [],  # falta get_order_by_email, get_order_status
+        "allowed_skills": [],  # falta list_my_orders, get_order_status
         "max_tool_iterations": 1,  # < 3
         "confidence_threshold": 0.70,
     }

@@ -27,7 +27,7 @@ SAMPLE_FRONTMATTER = {
     "name": "Consulta de envío",
     "slug": "consulta_envio",
     "workspace": "production",
-    "allowed_skills": ["shopify.get_order_by_email", "shopify.get_order_status"],
+    "allowed_skills": ["shopify.list_my_orders", "shopify.get_order_status"],
     "triggers": {"description": "El cliente pregunta por el estado de su envío o pedido"},
 }
 SAMPLE_BODY = "## Cómo te comportas\n\nSiempre pide el email antes de buscar el pedido."

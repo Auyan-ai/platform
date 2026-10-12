@@ -158,7 +158,7 @@ def _build_tools(allowed_skills: list[str]) -> list[dict[str, Any]]:
 
 
 def _slug_from_anthropic_name(tool_name: str, allowed_skills: list[str]) -> str | None:
-    """Mapea nombre Anthropic ('shopify_get_order_by_email') → slug interno.
+    """Mapea nombre Anthropic ('shopify_list_my_orders') → slug interno.
 
     El mapeo `slug.replace('.', '_')` no es bijectivo, así que buscamos en
     `allowed_skills` cuál coincide.

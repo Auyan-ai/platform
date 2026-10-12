@@ -64,10 +64,10 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             },
             "allowed_skills": [
                 "shopify.get_order_status",
-                "shopify.get_order_by_email",
+                "shopify.list_my_orders",
             ],
             "required_data": [
-                "Identificador del pedido: nº de pedido O el email de la compra",
+                "Nº de pedido, o que el cliente escriba desde el email o teléfono de la compra",
             ],
             "guardrails": [
                 "Nunca inventes tracking, transportista ni fecha de entrega: solo lo que devuelva la skill.",
@@ -87,9 +87,9 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
         "body": (
             "## Procedimiento: estado de pedido\n"
             "Objetivo: decirle al cliente dónde está su pedido con datos reales, sin inventar.\n\n"
-            "1. Si dio nº de pedido (#1234) → `shopify.get_order_status`. Si dio solo email → `shopify.get_order_by_email`.\n"
-            "2. Si no dio ninguno → pídele el nº de pedido o el email de la compra antes de consultar.\n"
-            "3. Si el email tiene varios pedidos → pregúntale cuál (menciónalos por fecha y nº).\n"
+            "1. Si dio nº de pedido (#1234) → `shopify.get_order_status`. Si no → `shopify.list_my_orders` (busca con el email o teléfono desde el que escribe; no recibe parámetros).\n"
+            "2. Si `get_order_status` devuelve `found: false` o `list_my_orders` devuelve `verified_sender: false` → sigue su `note`, sin decir si el pedido existe. Si `list_my_orders` no trae pedidos → dile que no hay pedidos asociados al email o teléfono desde el que escribe.\n"
+            "3. Si tiene varios pedidos → pregúntale cuál (menciónalos por fecha y nº).\n"
             "4. Con el pedido:\n"
             "   - Con tracking → comparte estado + transportista + nº de tracking + link de seguimiento.\n"
             "   - Sin tracking (en preparación): calcula los días desde `created_at` y compáralos con el\n"
@@ -166,12 +166,12 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             },
             "allowed_skills": [
                 "shopify.get_order_status",
-                "shopify.get_order_by_email",
+                "shopify.list_my_orders",
                 "shopify.get_shop_policies",
                 "shopify.start_return",
             ],
             "required_data": [
-                "Identificador del pedido (nº o email)",
+                "Nº de pedido, o que el cliente escriba desde el email o teléfono de la compra",
                 "Qué artículo(s) quiere devolver y el motivo",
             ],
             "guardrails": [
@@ -192,7 +192,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
         "body": (
             "## Procedimiento: devolución\n"
             "Objetivo: ayudar a devolver un producto elegible, según la política real de la tienda.\n\n"
-            "1. Identifica el pedido: nº → get_order_status; email → get_order_by_email.\n"
+            "1. Identifica el pedido: nº → get_order_status; sin nº → list_my_orders.\n"
             "2. ANTES de afirmar nada sobre plazos: determina plazo, condiciones y exclusiones desde la\n"
             "   política REAL, en este orden de fuentes: el contexto de la KB inyectado (si lo hay),\n"
             "   `tenant_facts` (p.ej. plazo de devolución) y `get_shop_policies`. Si el dato ya viene en la\n"
@@ -234,12 +234,12 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             },
             "allowed_skills": [
                 "shopify.get_order_status",
-                "shopify.get_order_by_email",
+                "shopify.list_my_orders",
                 "shopify.get_shop_policies",
                 "shopify.refund_partial",
             ],
             "required_data": [
-                "Identificador del pedido (nº o email)",
+                "Nº de pedido, o que el cliente escriba desde el email o teléfono de la compra",
                 "Motivo del reembolso y artículo/importe afectado",
             ],
             "guardrails": [
@@ -353,7 +353,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
                 "Antes de update_shipping_address, lee al cliente la dirección completa parseada (calle, ciudad, provincia, país, código postal) y espera su confirmación: un error de transcripción no debe llegar a aprobación sin validarlo con el cliente.",
                 "En update_shipping_address, `address1` es solo la calle y el número; el piso, la puerta, el portal o la escalera van en `address2`.",
                 "La dirección de envío actual (`shipping_address` de get_order_status) menciónala SOLO si el cliente la pide o para comparar con la nueva al confirmar el cambio; nunca la ofrezcas sin que venga al caso.",
-                "Si get_order_status devuelve `ownership_verified: false`, no puedes verificar que el pedido sea de quien escribe: sigue `ownership_note`. NO ofrezcas ni prometas cambiar ni cancelar ese pedido (el sistema lo bloquearía) ni menciones su dirección (`shipping_address_withheld: true`); explícalo con amabilidad y ofrece pasar el caso a una persona del equipo.",
+                "Si get_order_status devuelve `found: false`, sigue su `note`: no digas si el pedido existe, NO ofrezcas ni prometas cambiar ni cancelar ese pedido (el sistema lo bloquearía) ni que el equipo lo hará.",
                 "Cambio y cancelación quedan pendientes de aprobación; informa que está en proceso.",
                 "No canceles ni modifiques sin petición explícita del cliente.",
                 "Una vez que el cambio o la cancelación ya quedó en aprobación o se aplicó en esta conversación, NO vuelvas a llamar la skill ante agradecimientos, confirmaciones o mensajes de cortesía del cliente: responde con cordialidad y cierra. Ejecuta de nuevo solo si el cliente pide explícitamente una acción nueva o distinta.",
@@ -398,7 +398,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             },
             "allowed_skills": [
                 "shopify.get_order_status",
-                "shopify.get_customer_history",
+                "shopify.list_my_orders",
                 "shopify.tag_order",
                 "shopify.add_order_note",
             ],
@@ -420,7 +420,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             "## Procedimiento: queja / incidencia\n"
             "Objetivo: contener con empatía y escalar a una persona con contexto. NO resolver tú.\n\n"
             "1. Reconoce el problema con empatía, sin prometer soluciones concretas.\n"
-            "2. Recoge contexto: get_order_status (si hay pedido) y get_customer_history.\n"
+            "2. Recoge contexto: get_order_status si dio nº de pedido; si no, list_my_orders.\n"
             "3. Marca el pedido como incidencia con tag_order y deja un add_order_note con el resumen para el equipo.\n"
             "4. Dile al cliente que lo estás escalando a una persona que lo revisará en breve.\n"
             "5. Escala con resumen: pedido, naturaleza de la incidencia y contexto relevante."
@@ -447,7 +447,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
                 "shopify.get_shop_policies",
                 "shopify.get_product_info",
                 "shopify.get_order_status",
-                "shopify.get_customer_history",
+                "shopify.list_my_orders",
             ],
             "required_data": [],
             "guardrails": [
@@ -533,10 +533,9 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
 CANONICAL_TOOL_PERMISSIONS: list[dict[str, Any]] = [
     # L1 — lectura, autónomas
     {"skill_slug": "shopify.get_order_status", "is_enabled": True, "human_approval_required": False},
-    {"skill_slug": "shopify.get_order_by_email", "is_enabled": True, "human_approval_required": False},
+    {"skill_slug": "shopify.list_my_orders", "is_enabled": True, "human_approval_required": False},
     {"skill_slug": "shopify.get_product_info", "is_enabled": True, "human_approval_required": False},
     {"skill_slug": "shopify.get_shop_policies", "is_enabled": True, "human_approval_required": False},
-    {"skill_slug": "shopify.get_customer_history", "is_enabled": True, "human_approval_required": False},
     # L2 — escritura reversible, autónomas
     {"skill_slug": "shopify.add_order_note", "is_enabled": True, "human_approval_required": False},
     {"skill_slug": "shopify.tag_order", "is_enabled": True, "human_approval_required": False},

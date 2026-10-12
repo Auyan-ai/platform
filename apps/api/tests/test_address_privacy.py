@@ -1,7 +1,8 @@
 """Punto 1 y 4 del mini-sprint (E2E pedido #1429).
 
-1. get_order_status devuelve la dirección de envío SOLO si quien escribe es el
-   dueño del pedido (email del cliente == email del pedido). Si no, la retiene.
+1. get_order_status devuelve el pedido, con la dirección de envío, SOLO si quien
+   escribe es el dueño (email o teléfono verificados del remitente). Si no, responde
+   igual que a un pedido inexistente (ADR 0013).
 4. update_shipping_address acepta address2 (piso/puerta/portal).
 """
 
@@ -13,7 +14,11 @@ from unittest.mock import AsyncMock
 import pytest
 from apps.api.integrations.base import IntegrationContext
 from apps.api.skills.base import SkillContext
-from apps.api.skills.shopify.get_order_status import GetOrderStatus, GetOrderStatusInput
+from apps.api.skills.shopify.get_order_status import (
+    NOT_FOUND_NOTE,
+    GetOrderStatus,
+    GetOrderStatusInput,
+)
 from apps.api.skills.shopify.update_shipping_address import (
     UpdateShippingAddress,
     UpdateShippingAddressInput,
@@ -66,48 +71,31 @@ async def _status(customer_email: str | None, **extra: Any) -> Any:
 @pytest.mark.asyncio
 async def test_owner_sees_shipping_address() -> None:
     out = await _status(" kenny.medina@AHORACRYPTO.com ")
+    assert out.found is True
     assert out.shipping_address is not None
     assert out.shipping_address.address1 == "Calle de Serrano 1"
     assert out.shipping_address.zip == "28001"
-    assert out.shipping_address_withheld is False
     # Solo campos de dirección: ni teléfono ni nombre.
     assert "phone" not in out.shipping_address.model_dump()
 
 
-@pytest.mark.parametrize("email", ["otro@example.com", None])
+@pytest.mark.parametrize(
+    ("email", "extra"),
+    [
+        ("otro@example.com", {"channel": "zendesk"}),
+        (None, {"channel": "zendesk"}),
+        (None, {"channel": "whatsapp", "customer_phone": "+34610637711"}),
+    ],
+    ids=["email_ajeno", "sin_remitente", "whatsapp_otro_telefono"],
+)
 @pytest.mark.asyncio
-async def test_non_owner_gets_address_withheld(email: str | None) -> None:
-    out = await _status(email)
-    assert out.shipping_address is None
-    assert out.shipping_address_withheld is True
-    assert out.found is True
-
-
-@pytest.mark.asyncio
-async def test_owner_is_verified_without_note() -> None:
-    out = await _status("kenny.medina@ahoracrypto.com")
-    assert out.ownership_verified is True
-    assert out.ownership_note is None
-
-
-@pytest.mark.asyncio
-async def test_non_owner_by_email_gets_note_against_promises() -> None:
-    """s81: sin aviso, el agente prometía un cambio que el gate L3 iba a bloquear."""
-    out = await _status("otro@example.com", channel="zendesk")
-    assert out.ownership_verified is False
-    assert "No ofrezcas ni prometas" in out.ownership_note
-    assert "email con el que hizo la compra" in out.ownership_note
-
-
-@pytest.mark.asyncio
-async def test_non_owner_on_whatsapp_gets_phone_note_without_email() -> None:
-    out = await _status(None, channel="whatsapp", customer_phone="+34610637711")
-    assert out.ownership_verified is False
-    assert "número de teléfono" in out.ownership_note
-    assert "email" not in out.ownership_note
-    assert "persona del equipo" in out.ownership_note
-    # s81: tras el fix el agente ya no prometía, pero sí en nombre del equipo.
-    assert "ni prometas que el equipo lo hará" in out.ownership_note
+async def test_non_owner_gets_the_not_found_answer(
+    email: str | None, extra: dict[str, Any]
+) -> None:
+    """ADR 0013: a quien no es dueño no se le revela ni que el pedido existe."""
+    out = await _status(email, **extra)
+    assert (out.found, out.order_id, out.shipping_address) == (False, None, None)
+    assert out.note == NOT_FOUND_NOTE
 
 
 @pytest.mark.asyncio
