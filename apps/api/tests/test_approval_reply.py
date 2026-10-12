@@ -172,3 +172,69 @@ class TestNoEmojiOrMarkdownToCustomer:
         )
         assert msg.startswith("Listo, ya está")
         assert "😊" not in msg
+
+
+# ----------------------------------------------------------------
+# #318: skills que releen el pedido → plantilla fija por resultado, sin LLM
+# ----------------------------------------------------------------
+
+
+class TestOutcomeReplies:
+    async def test_outcome_reply_skips_the_llm(self) -> None:
+        client = MagicMock()
+        client.messages.create = AsyncMock()
+
+        msg = await generate_customer_reply(
+            client,
+            "shopify.cancel_order",
+            success=True,
+            output={"order_id": 1001, "outcome": "refund_pending"},
+        )
+
+        assert msg == (
+            "Hemos cancelado tu pedido. El reembolso a tu método de pago original está en "
+            "proceso con la pasarela de pago."
+        )
+        client.messages.create.assert_not_awaited()
+
+    async def test_failed_refund_promises_the_team_not_the_money(self) -> None:
+        msg = await generate_customer_reply(
+            None,
+            "shopify.cancel_order",
+            success=True,
+            output={"outcome": "refund_failed", "detail": "CARD_DECLINED"},
+        )
+        assert msg == (
+            "Hemos cancelado tu pedido, pero el reembolso no se ha podido completar de forma "
+            "automática. Nuestro equipo ya está avisado y te escribirá en cuanto lo tenga "
+            "resuelto."
+        )
+
+    async def test_confirmed_address_restates_it_without_delivery_promise(self) -> None:
+        msg = await generate_customer_reply(
+            None,
+            "shopify.update_shipping_address",
+            success=True,
+            output={
+                "outcome": "confirmed",
+                "new_address1": "Calle Nueva 42",
+                "new_zip": "28001",
+                "new_city": "Madrid",
+            },
+        )
+        assert msg == (
+            "Hemos actualizado la dirección de envío de tu pedido.\n\n"
+            "Nueva dirección de envío: Calle Nueva 42, 28001 Madrid."
+        )
+
+    async def test_unconfirmed_address_does_not_restate_it(self) -> None:
+        msg = await generate_customer_reply(
+            None,
+            "shopify.update_shipping_address",
+            success=True,
+            output={"outcome": "not_confirmed", "new_address1": "Calle Vieja 1"},
+        )
+        assert msg == (
+            "No hemos podido confirmar el cambio de dirección de tu pedido. Nuestro equipo "
+            "ya está avisado y te escribirá en cuanto lo tenga resuelto."
+        )

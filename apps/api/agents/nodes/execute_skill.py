@@ -31,7 +31,7 @@ from apps.api.integrations.base import IntegrationContext
 from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.identity import check_order_ownership, default_phone_region
 from apps.api.services.pii import redact_inputs
-from apps.api.skills.base import Skill, SkillContext
+from apps.api.skills.base import Skill, SkillContext, SkillRefusal
 from apps.api.skills.registry import SkillRegistry
 from pydantic import ValidationError
 
@@ -267,6 +267,56 @@ def make_execute_skill_node(
                 "tool_iterations": iter_count + 1,
             }
 
+        def _escalate_refusal(
+            refusal: SkillRefusal, skill_cls: type[Skill], inputs: dict[str, Any]
+        ) -> dict[str, Any]:
+            # Regla en código (p. ej. pedido ya enviado): el cliente recibe el texto
+            # fijo de la skill y el caso va al equipo; el LLM no vuelve a decidir.
+            logger.info(
+                "skill_refused",
+                extra={
+                    "tenant_id": state.get("tenant_id"),
+                    "conversation_id": state.get("conversation_id"),
+                    "slug": slug,
+                    "code": refusal.code,
+                },
+            )
+            if state.get("conversation_id") and state.get("tenant_id"):
+                auditor.log(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    aop_slug=state.get("aop_slug") or "unknown",
+                    aop_version=state.get("aop_version") or 0,
+                    skill_slug=slug,
+                    skill_tier=skill_cls.tier,
+                    inputs_raw=inputs,
+                    status="rejected_by_permissions",
+                    error_message=f"skill_refused: {refusal.code}",
+                    langfuse_trace_id=state.get("langfuse_trace_id"),
+                )
+                tracker.emit(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    phase="decision",
+                    event_type="tool_result",
+                    label=slug,
+                    detail={"refused": refusal.code, "reason": refusal.team_reason},
+                    status="error",
+                )
+            return {
+                **_append_and_finish(
+                    _error_entry(
+                        tool_use_id=tool_use_id,
+                        slug=slug,
+                        raw_input=inputs,
+                        error=f"skill_refused: {refusal.code}",
+                    )
+                ),
+                "decision": "escalate",
+                "agent_response": refusal.customer_message,
+                "escalation_reason": refusal.team_reason,
+            }
+
         # 1) Skill permitida por el AOP (lista vacía = ninguna, fail-safe).
         allowed = state.get("allowed_skills") or []
         if slug not in allowed:
@@ -356,6 +406,8 @@ def make_execute_skill_node(
                     raw_input = await skill_cls().prepare_approval(
                         build_skill_context(state), raw_input
                     )
+                except SkillRefusal as refusal:
+                    return _escalate_refusal(refusal, skill_cls, raw_input)
                 except Exception as exc:
                     precheck_error = f"approval_precheck_failed: {type(exc).__name__}: {exc!s}"
                     logger.warning(
@@ -511,6 +563,8 @@ def make_execute_skill_node(
         t0 = time.monotonic()
         try:
             output = await skill.execute(ctx, validated_input)
+        except SkillRefusal as refusal:
+            return _escalate_refusal(refusal, skill_cls, raw_input)
         except Exception as exc:
             latency = int((time.monotonic() - t0) * 1000)
             logger.warning(

@@ -582,7 +582,11 @@ class TestUpdateToolPermission:
 
 
 def _patch_success_path(
-    monkeypatch: pytest.MonkeyPatch, *, channel: str, delivered: bool
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    channel: str,
+    delivered: bool,
+    output: dict[str, Any] | None = None,
 ) -> tuple[AsyncMock, AsyncMock]:
     from pydantic import BaseModel
 
@@ -595,7 +599,9 @@ def _patch_success_path(
     class _FakeSkill:
         input_schema = _FakeInput
 
-        async def execute(self, ctx: Any, inputs: Any) -> _FakeOutput:
+        async def execute(self, ctx: Any, inputs: Any) -> Any:
+            if output is not None:
+                return MagicMock(model_dump=lambda mode: output)
             return _FakeOutput()
 
     class _FakeMsg:
@@ -671,6 +677,68 @@ class TestCloseAfterApproval:
         self._approve(client)
 
         assert finalize.await_args.kwargs["delivered"] is True
+
+    def test_manual_refund_hands_the_case_to_the_team(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cancelación ejecutada con pasarela manual (#318): el cliente recibe la
+        plantilla fija, la conversación queda escalada con el motivo para el equipo y
+        no hay resolución autónoma."""
+        client = self._client(monkeypatch)
+        release, finalize = _patch_success_path(
+            monkeypatch,
+            channel="zendesk",
+            delivered=True,
+            output={
+                "order_id": 1001,
+                "cancelled": True,
+                "outcome": "refund_manual",
+                "detail": None,
+                "refund_mode": "manual",
+                "refund_gateway": "Transferencia",
+                "success": False,
+            },
+        )
+        hand_off = AsyncMock(return_value=UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"))
+        push = AsyncMock(return_value=True)
+        monkeypatch.setattr("apps.api.routers.approvals.hand_executed_action_to_team", hand_off)
+        monkeypatch.setattr("apps.api.routers.approvals.push_escalation_to_helpdesk_safe", push)
+
+        resp = self._approve(client)
+
+        expected_reason = (
+            "La cancelación del pedido 1001 se ejecutó en Shopify, pero el cobro es de una "
+            "pasarela manual (Transferencia) o no consta en Shopify: Shopify no devuelve el "
+            "dinero. Haced el reembolso a mano si el cliente pagó y confirmádselo."
+        )
+        assert resp.json()["team_followup"] == expected_reason
+        assert hand_off.await_args.kwargs["reason"] == expected_reason
+        assert push.await_args.kwargs["reason"] == expected_reason
+        from apps.api.routers import approvals as approvals_module
+
+        sent = approvals_module.insert_message.await_args.kwargs["content"]  # type: ignore[attr-defined]
+        assert sent == (
+            "Hemos cancelado tu pedido. Si ya realizaste el pago, la tienda te devolverá el "
+            "importe por el mismo medio con el que pagaste. Nuestro equipo ya está avisado y "
+            "te escribirá en cuanto lo tenga resuelto."
+        )
+        release.assert_not_awaited()
+        finalize.assert_not_awaited()
+
+    def test_confirmed_outcome_resolves_as_before(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = self._client(monkeypatch)
+        release, finalize = _patch_success_path(
+            monkeypatch,
+            channel="zendesk",
+            delivered=True,
+            output={"order_id": 1001, "outcome": "confirmed", "success": True},
+        )
+
+        resp = self._approve(client)
+
+        assert resp.json()["team_followup"] is None
+        release.assert_awaited_once()
+        finalize.assert_awaited_once()
 
     def test_execution_failure_keeps_escalation(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client = self._client(monkeypatch)

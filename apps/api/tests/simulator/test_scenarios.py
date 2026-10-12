@@ -26,7 +26,7 @@ class TestPersonas:
 
 class TestScenarioStructure:
     def test_total_count(self):
-        assert len(ALL) == 27
+        assert len(ALL) == 28
 
     def test_unique_ids(self):
         ids = [sc["id"] for sc in ALL]
@@ -79,6 +79,6 @@ class TestScenarioGroups:
             assert sc["id"].startswith("DE-")
 
     def test_ex_group(self):
-        assert len(EX) == 4
+        assert len(EX) == 5
         for sc in EX:
             assert sc["id"].startswith("EX-")

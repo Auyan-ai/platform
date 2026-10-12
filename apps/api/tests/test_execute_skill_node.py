@@ -942,7 +942,14 @@ class TestRefundApprovalPrecheck:
 
         assert result.get("pending_approval_id") is not None
         stored = self.create.await_args.kwargs["inputs_raw"]
-        assert stored == {"order_id": 1002, "amount": "12.50", "currency": "GBP"}
+        assert stored == {
+            "order_id": 1002,
+            "amount": "12.50",
+            "currency": "GBP",
+            # La fixture no trae cobros: sin pago en Shopify devuelve la tienda.
+            "refund_mode": "manual",
+            "refund_gateway": None,
+        }
 
     async def test_amount_above_refundable_is_rejected_without_approval(
         self, deps: AgentDependencies
@@ -955,6 +962,84 @@ class TestRefundApprovalPrecheck:
         assert "solo quedan 45.00 GBP" in entry["error"]
         assert "pending_approval_id" not in result
         self.create.assert_not_awaited()
+
+
+class TestShippedOrderRefusal:
+    """cancel_order real contra el mock de Shopify: un pedido que ya salió no crea
+    aprobación ni vuelve al LLM; escala con el texto fijo de la skill (#318)."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, monkeypatch: pytest.MonkeyPatch) -> Generator[AsyncMock, None, None]:
+        from apps.api.skills.shopify.cancel_order import CancelOrder
+
+        SkillRegistry._reset()
+        SkillRegistry.register(CancelOrder)
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill._l3_ownership_error",
+            AsyncMock(return_value=None),
+        )
+        self.create = AsyncMock()
+        TestL3HumanApprovalGate()._mock_l3_scope(monkeypatch, self.create, None)
+        yield self.create
+        SkillRegistry._reset()
+
+    def _state(self, display_status: str) -> dict[str, Any]:
+        return _base_state(
+            pending_tool_call=_pending(
+                slug="shopify.cancel_order",
+                input={"order_id": 1500, "refund_payment": False},
+            ),
+            allowed_skills=["shopify.cancel_order"],
+            tool_permissions={"shopify.cancel_order": _perm(human_approval_required=True)},
+            commerce_integration_ctx={
+                "tenant_id": "11111111-1111-1111-1111-111111111111",
+                "credentials": {"domain": "marea.myshopify.com", "access_token": "t"},
+            },
+            simulation_mode=True,
+            simulation_fixtures={
+                "shopify": {
+                    "get_order_snapshot": {
+                        "id": "gid://shopify/Order/4001",
+                        "name": "#1500",
+                        "cancelledAt": None,
+                        "displayFulfillmentStatus": display_status,
+                        "fulfillments": [],
+                        "transactions": [],
+                    }
+                }
+            },
+        )
+
+    async def test_shipped_order_escalates_with_the_fixed_message(
+        self, deps: AgentDependencies
+    ) -> None:
+        result = await make_execute_skill_node(deps)(self._state("FULFILLED"))
+
+        assert result["decision"] == "escalate"
+        assert result["agent_response"] == (
+            "Tu pedido ya ha salido del almacén, así que no puedo cancelarlo desde aquí. "
+            "Paso tu caso a mi equipo para que te indique cómo seguir."
+        )
+        assert result["escalation_reason"].startswith(
+            "El cliente pidió cancelar el pedido #1500, pero Shopify lo marca como enviado"
+        )
+        assert result["tool_results"][-1]["error"] == "skill_refused: order_shipped"
+        assert "pending_approval_id" not in result
+        self.create.assert_not_awaited()
+
+    async def test_unshipped_order_creates_the_approval_without_refund_payment(
+        self, deps: AgentDependencies
+    ) -> None:
+        result = await make_execute_skill_node(deps)(self._state("UNFULFILLED"))
+
+        assert result.get("pending_approval_id") is not None
+        assert self.create.await_args.kwargs["inputs_raw"] == {
+            "order_id": 1500,
+            "reason": "customer",
+            "send_email": True,
+            "refund_mode": "manual",
+            "refund_gateway": None,
+        }
 
 
 # ----------------------------------------------------------------

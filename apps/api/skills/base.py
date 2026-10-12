@@ -18,6 +18,20 @@ SkillTier = Literal["L1", "L2", "L3"]
 TIER_THRESHOLDS: dict[SkillTier, float] = {"L1": 0.70, "L2": 0.85, "L3": 0.95}
 
 
+class SkillRefusal(Exception):
+    """La skill se niega, por una regla en código, a actuar sobre el estado actual.
+
+    No vuelve al LLM: el cliente recibe `customer_message` tal cual y el caso se
+    escala al equipo con `team_reason` como motivo.
+    """
+
+    def __init__(self, code: str, *, customer_message: str, team_reason: str) -> None:
+        super().__init__(f"{code}: {team_reason}")
+        self.code = code
+        self.customer_message = customer_message
+        self.team_reason = team_reason
+
+
 class SkillInput(BaseModel):
     """Base para los inputs de cualquier skill. Subclasear por skill concreto."""
 
@@ -78,7 +92,8 @@ class Skill(ABC):
 
         Una skill la sobrescribe para rechazar antes de pedir aprobación lo que fallaría
         al ejecutar, o para añadir datos derivados en código (p. ej. la moneda del
-        pedido). Si lanza, el error vuelve al LLM y no se crea la aprobación.
+        pedido). Si lanza, no se crea la aprobación: un `SkillRefusal` escala con su
+        mensaje fijo y cualquier otro error vuelve al LLM.
         """
         return raw_input
 

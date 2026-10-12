@@ -103,3 +103,59 @@ class TestReplyDelivered:
         """WhatsApp tiene ruta de entrega (Zernio): sin entrega confirmada no cuenta."""
         assert approval_resolution.reply_delivered("whatsapp", delivered=False) is False
         assert approval_resolution.reply_delivered("whatsapp", delivered=True) is True
+
+
+# ----------------------------------------------------------------
+# #318: acción ejecutada que el equipo tiene que rematar
+# ----------------------------------------------------------------
+
+
+def test_followup_reason_for_failed_refund_names_the_gateway_error() -> None:
+    reason = approval_resolution.team_followup_reason(
+        "shopify.refund_partial",
+        {"order_id": 1001, "outcome": "refund_failed", "detail": "CARD_DECLINED"},
+    )
+    assert reason == (
+        "El reembolso parcial del pedido 1001 se ejecutó en Shopify, pero el reembolso no "
+        "se completó (CARD_DECLINED). Revisad el pago y devolvedlo a mano si hace falta."
+    )
+
+
+@pytest.mark.parametrize(
+    "output",
+    [{"outcome": "confirmed"}, {"outcome": "refund_pending"}, {"cancelled": True}],
+    ids=["confirmed", "pending", "no-outcome"],
+)
+def test_no_followup_when_the_action_is_settled(output: dict) -> None:
+    assert approval_resolution.team_followup_reason("shopify.cancel_order", output) is None
+
+
+@pytest.mark.asyncio
+async def test_hand_off_closes_the_gate_and_opens_an_escalation_with_the_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    escalation_id = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
+    resolve_all = AsyncMock(return_value=1)
+    insert = AsyncMock(return_value=type("Esc", (), {"id": escalation_id})())
+    set_status = AsyncMock()
+    monkeypatch.setattr(f"{MODULE}.resolve_open_escalations_for_conversation", resolve_all)
+    monkeypatch.setattr(f"{MODULE}.insert_escalation", insert)
+    monkeypatch.setattr(f"{MODULE}.update_conversation_status", set_status)
+
+    result = await approval_resolution.hand_executed_action_to_team(
+        AsyncMock(),
+        tenant_id=TENANT_ID,
+        conversation_id=CONVERSATION_ID,
+        approval_id=APPROVAL_ID,
+        reason="Reembolso manual pendiente",
+    )
+
+    assert result == escalation_id
+    resolve_all.assert_awaited_once_with(ANY, TENANT_ID, CONVERSATION_ID)
+    assert insert.await_args.kwargs == {
+        "tenant_id": TENANT_ID,
+        "conversation_id": CONVERSATION_ID,
+        "reason": "Reembolso manual pendiente",
+        "metadata": {"approval_id": str(APPROVAL_ID)},
+    }
+    set_status.assert_awaited_once_with(ANY, TENANT_ID, CONVERSATION_ID, "escalated")

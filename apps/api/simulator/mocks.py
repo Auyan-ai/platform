@@ -26,6 +26,11 @@ Defaults cuando no hay fixture para un método:
 - `get_refundable_balance` → error `order_has_no_refundable_payment`. Un reembolso
   necesita la fixture `{"captured": "45.00", "refunded": "0", "currency": "GBP"}`;
   `refund_partial` aplica el mismo tope y la misma moneda que el adapter real.
+- `get_order_snapshot` → pedido sin enviar, sin cancelar y sin transacciones. La
+  fixture es el `order` de la query GraphQL (`displayFulfillmentStatus`,
+  `fulfillments`, `transactions`…) y pasa por el mismo parser que el adapter real.
+  Una lista se consume en orden, una fixture por llamada (la última se repite), para
+  simular el pedido antes y después de una escritura.
 """
 
 from __future__ import annotations
@@ -34,7 +39,12 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
-from apps.api.integrations.shopify import IssuedRefund, RefundableBalance
+from apps.api.integrations.shopify import (
+    IssuedRefund,
+    OrderSnapshot,
+    RefundableBalance,
+    order_snapshot_from_graphql,
+)
 
 
 class MockShopifyError(Exception):
@@ -42,6 +52,14 @@ class MockShopifyError(Exception):
 
 
 _WRITE_DEFAULT: dict[str, Any] = {"ok": True, "simulated": True}
+_SNAPSHOT_DEFAULT: dict[str, Any] = {
+    "id": "gid://shopify/Order/4001",
+    "name": "#1500",
+    "cancelledAt": None,
+    "displayFulfillmentStatus": "UNFULFILLED",
+    "fulfillments": [],
+    "transactions": [],
+}
 
 
 @dataclass
@@ -49,6 +67,7 @@ class MockShopifyAdapter:
     """Implementa la superficie de ShopifyAdapter con respuestas predefinidas."""
 
     fixtures: dict[str, Any] = field(default_factory=dict)
+    _snapshot_calls: int = field(default=0, init=False)
 
     def _resolve(self, method: str, default: Any) -> Any:
         if method not in self.fixtures:
@@ -113,9 +132,17 @@ class MockShopifyAdapter:
         *,
         reason: str = "customer",
         email: bool = True,
-        refund: bool = False,
+        refund: bool,
+        restock: bool,
     ) -> dict[str, Any]:
         return self._resolve("cancel_order", dict(_WRITE_DEFAULT))
+
+    async def get_order_snapshot(self, ctx: Any, order_id: int) -> OrderSnapshot:
+        data = self._resolve("get_order_snapshot", _SNAPSHOT_DEFAULT)
+        if isinstance(data, list):
+            data = data[min(self._snapshot_calls, len(data) - 1)]
+            self._snapshot_calls += 1
+        return order_snapshot_from_graphql(data)
 
     async def update_shipping_address(
         self,

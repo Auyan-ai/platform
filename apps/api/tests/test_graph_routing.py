@@ -72,3 +72,9 @@ class TestRouteAfterExecuteSkill:
     def test_pending_approval_escalates(self) -> None:
         state = {"pending_approval_id": "a-1", "tool_iterations": 1, "max_tool_iterations": 5}
         assert route_after_execute_skill(state) == "escalate"  # type: ignore[arg-type]
+
+    def test_skill_refusal_escalates_without_reason(self) -> None:
+        """Una skill que se niega por regla en código (pedido enviado) deja
+        decision='escalate': no vuelve al LLM."""
+        state = {"decision": "escalate", "tool_iterations": 1, "max_tool_iterations": 5}
+        assert route_after_execute_skill(state) == "escalate"  # type: ignore[arg-type]
