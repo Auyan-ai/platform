@@ -244,7 +244,6 @@ async def approve_action(
         approval.skill_slug,
         success=True,
         output=output_data,
-        model=get_settings().reply_model,
     )
 
     # Marcar aprobada y añadir mensaje a la conversación
@@ -381,7 +380,6 @@ async def reject_action(
             approval.skill_slug,
             success=False,
             reject_comment=body.comment,
-            model=get_settings().reply_model,
         )
         msg = await insert_message(
             conn,

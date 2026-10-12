@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from apps.api.core.config import get_models
 from apps.api.services.reply_format import strip_emojis, strip_formatting
 from apps.api.skills.shopify._order_guard import ActionOutcome
 
@@ -23,9 +24,6 @@ if TYPE_CHECKING:
     import anthropic
 
 logger = logging.getLogger(__name__)
-
-# Modelo barato/rápido para reescribir una frase de confirmación.
-REPLY_MODEL = "claude-haiku-4-5-20251001"
 
 # Confirmación limpia por skill (sirve de base para Haiku y de fallback).
 _SKILL_DONE: dict[str, str] = {
@@ -250,7 +248,6 @@ async def generate_customer_reply(
     success: bool,
     reject_comment: str | None = None,
     output: dict[str, Any] | None = None,
-    model: str = REPLY_MODEL,
     timeout_seconds: int = 15,
 ) -> str:
     """Devuelve el mensaje al cliente. Usa Haiku para darle calidez; cae a plantilla.
@@ -270,7 +267,7 @@ async def generate_customer_reply(
     base = fallback_message(skill_slug, success=success, reject_comment=reject_comment)
     try:
         resp = await client.messages.create(
-            model=model,
+            model=get_models().reply_model,
             max_tokens=200,
             system=_SYSTEM,
             messages=[{"role": "user", "content": base}],

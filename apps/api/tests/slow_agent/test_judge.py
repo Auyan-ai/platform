@@ -8,10 +8,9 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from apps.api.core.config import get_models
 from apps.api.db.models import Conversation
 from apps.api.slow_agent.judge import (
-    OPUS_JUDGE_MODEL,
-    SONNET_JUDGE_MODEL,
     _call_judge,
     judge_conversation,
 )
@@ -65,14 +64,14 @@ async def test_call_judge_propose_true():
         "flag_for_opus": False,
     }
     anthropic = _mock_anthropic(payload)
-    verdict = await _call_judge(anthropic, _transcript(), SONNET_JUDGE_MODEL)
+    verdict = await _call_judge(anthropic, _transcript(), get_models().slow_agent_model)
 
     assert verdict.should_propose is True
     assert verdict.proposal_type == "aop_edit"
     assert verdict.aop_slug == "consulta_envio"
     assert verdict.confidence == 0.85
     assert verdict.flag_for_opus is False
-    assert verdict.model_used == SONNET_JUDGE_MODEL
+    assert verdict.model_used == get_models().slow_agent_model
     assert verdict.input_tokens == 500
     assert verdict.output_tokens == 200
 
@@ -81,7 +80,7 @@ async def test_call_judge_propose_true():
 async def test_call_judge_no_propose():
     payload = {"should_propose": False, "confidence": 0.9}
     anthropic = _mock_anthropic(payload)
-    verdict = await _call_judge(anthropic, _transcript(), SONNET_JUDGE_MODEL)
+    verdict = await _call_judge(anthropic, _transcript(), get_models().slow_agent_model)
 
     assert verdict.should_propose is False
     assert verdict.proposal_type is None
@@ -104,7 +103,7 @@ async def test_call_judge_handles_json_embedded_in_text():
     anthropic = MagicMock()
     anthropic.messages.create = AsyncMock(return_value=message)
 
-    verdict = await _call_judge(anthropic, _transcript(), SONNET_JUDGE_MODEL)
+    verdict = await _call_judge(anthropic, _transcript(), get_models().slow_agent_model)
     assert verdict.should_propose is False
 
 
@@ -121,7 +120,7 @@ async def test_call_judge_handles_invalid_json():
     anthropic = MagicMock()
     anthropic.messages.create = AsyncMock(return_value=message)
 
-    verdict = await _call_judge(anthropic, _transcript(), SONNET_JUDGE_MODEL)
+    verdict = await _call_judge(anthropic, _transcript(), get_models().slow_agent_model)
     assert verdict.should_propose is False
     assert verdict.confidence == 0.0
 
@@ -143,7 +142,7 @@ async def test_judge_conversation_uses_sonnet_when_confident():
     anthropic = _mock_anthropic(payload)
     verdict = await judge_conversation(anthropic, _transcript())
 
-    assert verdict.model_used == SONNET_JUDGE_MODEL
+    assert verdict.model_used == get_models().slow_agent_model
     # Solo una llamada — no escaló a Opus
     assert anthropic.messages.create.call_count == 1
 
@@ -194,7 +193,7 @@ async def test_judge_conversation_escalates_to_opus_on_low_confidence():
     verdict = await judge_conversation(anthropic, _transcript())
 
     assert anthropic.messages.create.call_count == 2
-    assert verdict.model_used == OPUS_JUDGE_MODEL
+    assert verdict.model_used == get_models().judge_opus_model
     assert verdict.confidence == 0.88
 
 
@@ -237,5 +236,5 @@ async def test_judge_conversation_escalates_to_opus_on_flag():
     verdict = await judge_conversation(anthropic, _transcript())
 
     assert anthropic.messages.create.call_count == 2
-    assert verdict.model_used == OPUS_JUDGE_MODEL
+    assert verdict.model_used == get_models().judge_opus_model
     assert verdict.should_propose is False

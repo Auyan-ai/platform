@@ -47,7 +47,6 @@ DOCUMENT_ID = UUID("77777777-7777-7777-7777-777777777777")
 
 @dataclass
 class FakeSettings:
-    default_agent_model: str = "claude-sonnet-4-6"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
     rag_top_k: int = 5
@@ -57,8 +56,6 @@ class FakeSettings:
     llm_timeout_seconds: int = 30
     intent_min_confidence: float = 0.60
     intent_switch_threshold: float = 0.70
-    intent_classifier_model: str = "claude-haiku-4-5-20251001"
-    simple_turn_model: str = "claude-haiku-4-5-20251001"
     rate_limit_tenant_per_minute: int = 300
     rate_limit_customer_per_minute: int = 30
     budget_usd_daily: float = 10.0

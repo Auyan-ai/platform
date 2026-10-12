@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from apps.api.agents.state import AgentState
+from apps.api.core.config import get_models
 from apps.api.db.client import tenant_scope
 from apps.api.db.identity_checks import (
     count_conversation_attempts,
@@ -48,7 +49,7 @@ from apps.api.db.queries import (
 )
 from apps.api.simulator.assertions import check_assertions, summarize
 from apps.api.simulator.judge import (
-    DEFAULT_JUDGE_MODEL,
+    DEFAULT_JUDGE_ALIAS,
     JUDGE_TIMEOUT_SECONDS,
     JudgeModelAlias,
     SimulatorJudgeVerdict,
@@ -96,7 +97,7 @@ class _RunAccumulator:
     tokens_judge_in: int = 0
     tokens_judge_out: int = 0
     cost_usd: float = 0.0
-    judge_model: str = DEFAULT_JUDGE_MODEL
+    judge_model: str = field(default_factory=lambda: get_models().judge_sonnet_model)
     last_agent_messages: list[str] = field(default_factory=list)
     # Última razón de escalado que dejó el grafo y contactos de las respuestas del agente
     # que ni los datos de la tienda, ni las herramientas ni el cliente respaldan.
@@ -144,7 +145,7 @@ async def run_simulation(
     triggered_by: UUID | None = None,
     batch_id: UUID | None = None,
     skip_judge: bool = False,
-    judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_MODEL,
+    judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_ALIAS,
     observability: ObservabilityClient | None = None,
 ) -> UUID:
     """Corre un scenario completo. Retorna el run_id.
@@ -176,7 +177,7 @@ async def run_batch(
     anthropic: AsyncAnthropic,
     graph: CompiledStateGraph,
     triggered_by: UUID | None = None,
-    judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_MODEL,
+    judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_ALIAS,
 ) -> UUID:
     """Corre múltiples scenarios en paralelo (limitado por el semáforo global).
     Retorna un batch_id compartido por todos los runs del batch.
@@ -212,7 +213,7 @@ async def _run_simulation_inner(
     triggered_by: UUID | None,
     batch_id: UUID | None,
     skip_judge: bool = False,
-    judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_MODEL,
+    judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_ALIAS,
     observability: ObservabilityClient | None = None,
 ) -> UUID:
     async with tenant_scope(tenant_id) as conn:

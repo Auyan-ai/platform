@@ -10,10 +10,9 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from apps.api.core.config import get_models
 from apps.api.db.models import SimulationScenario, UserProfile
 from apps.api.simulator import runner
-from apps.api.simulator.judge import SONNET_JUDGE_MODEL
-from apps.api.simulator.user_simulator import SIMULATOR_MODEL
 
 TENANT = uuid4()
 
@@ -55,7 +54,7 @@ def _anthropic() -> MagicMock:
     )
 
     async def create(**kwargs: Any) -> SimpleNamespace:
-        return {SIMULATOR_MODEL: sim_turn, SONNET_JUDGE_MODEL: judge}[kwargs["model"]]
+        return {get_models().simulator_model: sim_turn, get_models().judge_sonnet_model: judge}[kwargs["model"]]
 
     client = MagicMock()
     client.messages.create = AsyncMock(side_effect=create)
@@ -67,6 +66,7 @@ def _graph() -> MagicMock:
     graph.ainvoke = AsyncMock(
         return_value={
             "agent_response": "Tu pedido llega mañana.",
+            "system_prompt": "Eres el agente.",
             "decision": "respond",
             "tokens_in": 10_000,
             "tokens_out": 500,
@@ -108,6 +108,7 @@ def finalize(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     monkeypatch.setattr(runner, "_pending_approval_present", AsyncMock(return_value=False))
     monkeypatch.setattr(runner, "finalize_simulation_run", finalize_mock)
     monkeypatch.setattr(runner, "soft_delete_conversation", AsyncMock())
+    monkeypatch.setattr(runner, "soft_delete_conversation_checks", AsyncMock(return_value=0))
     return finalize_mock
 
 
