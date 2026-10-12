@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from anthropic import AsyncAnthropic
+from apps.api.core.config import get_models
 from apps.api.db.models import SimulationScenario
 from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.simulator.prompts import SIM_JUDGE_SYSTEM_PROMPT
@@ -21,9 +22,7 @@ from apps.api.simulator.transcript import SimulatorTranscript, format_for_sim_ju
 
 logger = logging.getLogger(__name__)
 
-SONNET_JUDGE_MODEL = "claude-sonnet-4-6"
-OPUS_JUDGE_MODEL = "claude-opus-4-7"
-DEFAULT_JUDGE_MODEL = SONNET_JUDGE_MODEL
+DEFAULT_JUDGE_ALIAS: Literal["sonnet"] = "sonnet"
 JudgeModelAlias = Literal["sonnet", "opus"]
 JUDGE_MAX_TOKENS = 1024
 JUDGE_TIMEOUT_SECONDS = 90  # tope por llamada analizando transcript
@@ -67,7 +66,7 @@ async def judge_simulation(
     transcript: SimulatorTranscript,
     scenario: SimulationScenario,
     *,
-    judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_MODEL,
+    judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_ALIAS,
 ) -> SimulatorJudgeVerdict:
     """Llama al judge y retorna el veredicto 4-dim."""
     formatted = format_for_sim_judge(transcript)
@@ -96,10 +95,11 @@ async def judge_simulation(
 
 def normalize_judge_model(judge_model: JudgeModelAlias | str | None) -> str:
     """Normaliza alias CLI/API a IDs reales de Anthropic."""
-    if judge_model in (None, "", "sonnet", SONNET_JUDGE_MODEL):
-        return SONNET_JUDGE_MODEL
-    if judge_model in ("opus", OPUS_JUDGE_MODEL):
-        return OPUS_JUDGE_MODEL
+    models = get_models()
+    if judge_model in (None, "", "sonnet", models.judge_sonnet_model):
+        return models.judge_sonnet_model
+    if judge_model in ("opus", models.judge_opus_model):
+        return models.judge_opus_model
     raise ValueError(f"unsupported_simulator_judge_model:{judge_model}")
 
 
@@ -107,7 +107,7 @@ def _parse_verdict(
     raw: str,
     usage: LLMUsage,
     *,
-    model_used: str = DEFAULT_JUDGE_MODEL,
+    model_used: str,
 ) -> SimulatorJudgeVerdict:
     """Parsea el JSON del judge. Retorna veredicto conservador en caso de error."""
     try:
@@ -151,7 +151,7 @@ def _parse_verdict(
 def _fallback_verdict(
     usage: LLMUsage,
     *,
-    model_used: str = DEFAULT_JUDGE_MODEL,
+    model_used: str,
 ) -> SimulatorJudgeVerdict:
     return SimulatorJudgeVerdict(
         reasoning_score=0,

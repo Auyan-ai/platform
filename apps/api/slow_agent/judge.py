@@ -12,14 +12,13 @@ import logging
 from dataclasses import dataclass, replace
 
 from anthropic import AsyncAnthropic
+from apps.api.core.config import get_models
 from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.slow_agent.prompts import JUDGE_SYSTEM_PROMPT
 from apps.api.slow_agent.transcript import ConversationTranscript, format_for_judge
 
 logger = logging.getLogger(__name__)
 
-SONNET_JUDGE_MODEL = "claude-sonnet-4-6"
-OPUS_JUDGE_MODEL = "claude-opus-4-7"
 OPUS_CONFIDENCE_THRESHOLD = 0.7
 JUDGE_MAX_TOKENS = 2048
 
@@ -116,7 +115,7 @@ async def judge_conversation(
     transcript: ConversationTranscript,
 ) -> JudgeVerdict:
     """Analiza el transcript. Escalona a Opus si Sonnet duda."""
-    sonnet_verdict = await _call_judge(anthropic, transcript, SONNET_JUDGE_MODEL)
+    sonnet_verdict = await _call_judge(anthropic, transcript, get_models().slow_agent_model)
 
     if sonnet_verdict.confidence < OPUS_CONFIDENCE_THRESHOLD or sonnet_verdict.flag_for_opus:
         logger.info(
@@ -125,7 +124,7 @@ async def judge_conversation(
             sonnet_verdict.confidence,
             sonnet_verdict.flag_for_opus,
         )
-        opus_verdict = await _call_judge(anthropic, transcript, OPUS_JUDGE_MODEL)
+        opus_verdict = await _call_judge(anthropic, transcript, get_models().judge_opus_model)
         return replace(opus_verdict, escalated_from=sonnet_verdict)
 
     return sonnet_verdict

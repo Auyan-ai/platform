@@ -4,14 +4,19 @@ Las tarifas están hardcodeadas aquí porque cambian con poca frecuencia y se
 auditan por revisión de código. Verificar contra
 https://platform.claude.com/docs/en/about-claude/pricing antes de cada release.
 
-Si el modelo no está en la tabla, devolvemos 0.0 — preferible a inflar costo
-con un valor inventado. Si ves $0 en LangSmith, agregá la fila acá.
+Un modelo sin fila nunca cuesta $0: un cobro en cero dejaría pasar los topes de
+`services/usage.py` y `cost_guard`. Se cobra a la tarifa más cara de la tabla
+y se loguea como `error`. Agregá la fila acá; un test y el arranque de la API
+avisan si un modelo configurado no la tiene.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -49,6 +54,41 @@ LLM_PRICING_PER_MILLION_TOKENS: dict[str, ModelRates] = {
         input=1.0, cache_write_5m=1.25, cache_write_1h=2.0, cache_read=0.10, output=5.0
     ),
 }
+
+
+def fallback_rates() -> ModelRates:
+    """Tarifa más cara de la tabla, categoría a categoría: conservadora para los topes."""
+    rows = LLM_PRICING_PER_MILLION_TOKENS.values()
+    return ModelRates(
+        input=max(r.input for r in rows),
+        cache_write_5m=max(r.cache_write_5m for r in rows),
+        cache_write_1h=max(r.cache_write_1h for r in rows),
+        cache_read=max(r.cache_read for r in rows),
+        output=max(r.output for r in rows),
+    )
+
+
+def models_without_price(models: dict[str, str]) -> dict[str, str]:
+    """Subconjunto de `rol -> modelo` cuyo modelo no tiene fila en la tabla."""
+    return {
+        role: model
+        for role, model in models.items()
+        if model not in LLM_PRICING_PER_MILLION_TOKENS
+    }
+
+
+def check_model_prices(models: dict[str, str]) -> list[str]:
+    """Loguea como `error` cada rol cuyo modelo no tiene precio. Devuelve los roles afectados."""
+    missing = models_without_price(models)
+    for role, model in missing.items():
+        logger.error(
+            "model_without_price role=%s model=%s: agregá la fila en integrations/pricing.py; "
+            "mientras tanto se cobra a la tarifa más cara",
+            role,
+            model,
+            extra={"role": role, "model": model},
+        )
+    return sorted(missing)
 
 
 @dataclass(frozen=True)
@@ -100,10 +140,15 @@ def _int_field(source: Any, name: str) -> int:
 
 
 def compute_llm_cost(model: str, usage: LLMUsage) -> float:
-    """Costo en USD de una llamada al LLM. 0.0 si el modelo es desconocido."""
+    """Costo en USD de una llamada al LLM. Un modelo desconocido se cobra a `fallback_rates()`."""
     rate = LLM_PRICING_PER_MILLION_TOKENS.get(model)
     if rate is None:
-        return 0.0
+        logger.error(
+            "model_without_price model=%s: cobrado a la tarifa más cara de la tabla",
+            model,
+            extra={"model": model},
+        )
+        rate = fallback_rates()
     return (
         usage.input_tokens * rate.input
         + usage.cache_write_5m_tokens * rate.cache_write_5m

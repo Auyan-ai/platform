@@ -11,10 +11,14 @@ from unittest.mock import MagicMock
 
 import pytest
 from anthropic.types import Usage
+from apps.api.core.config import ModelRegistry, get_models
 from apps.api.integrations.pricing import (
     LLM_PRICING_PER_MILLION_TOKENS,
     LLMUsage,
+    check_model_prices,
     compute_llm_cost,
+    fallback_rates,
+    models_without_price,
 )
 
 
@@ -78,10 +82,67 @@ class TestComputeLlmCost:
         usage = _api_usage(input_tokens=100, output_tokens=50, cache_read=4000)
         assert _cost("claude-haiku-4-5-20251001", usage) == pytest.approx(0.00075)
 
-    def test_unknown_model_returns_zero(self) -> None:
-        """Modelo desconocido → 0.0. Señal visible en LangSmith de 'agregar fila'."""
+    def test_unknown_model_is_charged_at_the_most_expensive_rates(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Modelo desconocido → tarifa más cara de la tabla (nunca $0) y log de error."""
         usage = _api_usage(input_tokens=1000, output_tokens=500, cache_read=900)
-        assert _cost("claude-future-99", usage) == 0.0
+        with caplog.at_level("ERROR"):
+            cost = _cost("claude-future-99", usage)
+        # Opus 4.7 es la fila más cara en todas las categorías hoy:
+        # 1000 in a $5 + 900 cache read a $0.50 + 500 out a $25, por millón.
+        assert cost == pytest.approx(0.01795)
+        assert cost > 0.0
+        assert any(
+            r.levelname == "ERROR" and "claude-future-99" in r.getMessage()
+            for r in caplog.records
+        )
+
+    def test_fallback_rates_take_the_max_of_each_category(self) -> None:
+        rates = fallback_rates()
+        rows = LLM_PRICING_PER_MILLION_TOKENS.values()
+        assert rates.input == max(r.input for r in rows)
+        assert rates.output == max(r.output for r in rows)
+        assert rates.cache_read == max(r.cache_read for r in rows)
+
+    def test_check_model_prices_reports_roles_without_price(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level("ERROR"):
+            missing = check_model_prices(
+                {"agent": "claude-sonnet-4-6", "judge": "claude-future-99"}
+            )
+        assert missing == ["judge"]
+        assert any("role=judge" in r.getMessage() for r in caplog.records)
+
+    def test_check_model_prices_is_silent_when_all_priced(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level("ERROR"):
+            assert check_model_prices({"agent": "claude-sonnet-4-6"}) == []
+        assert caplog.records == []
+
+    def test_every_configured_model_has_a_price(self) -> None:
+        """Si añades o cambias un rol en ModelRegistry, añade su fila en pricing.py."""
+        models = get_models().by_role()
+        assert len(models) >= 10
+        assert models_without_price(models) == {}
+
+    def test_every_configured_model_is_priced_even_with_env_defaults_only(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for name in ModelRegistry.model_fields:
+            monkeypatch.delenv(name.upper(), raising=False)
+        registry = ModelRegistry(_env_file=None)  # type: ignore[call-arg]
+        assert models_without_price(registry.by_role()) == {}
+
+    def test_env_var_overrides_a_role(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("SUPERVISOR_MODEL_L3", "claude-future-99")
+        registry = ModelRegistry(_env_file=None)  # type: ignore[call-arg]
+        assert registry.supervisor_model_l3 == "claude-future-99"
+        assert models_without_price(registry.by_role()) == {
+            "supervisor_model_l3": "claude-future-99"
+        }
 
     def test_zero_tokens(self) -> None:
         assert compute_llm_cost("claude-sonnet-4-6", LLMUsage()) == 0.0

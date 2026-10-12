@@ -41,7 +41,6 @@ class FakeAuthSettings:
     auth_user_cache_ttl_seconds: int = 60
     supabase_jwt_algorithm: str = JWT_ALG
     supabase_jwt_audience: str = JWT_AUD
-    reply_model: str = "claude-haiku-4-5-20251001"
 
     @property
     def supabase_jwt_secret(self) -> _SecretWrap:

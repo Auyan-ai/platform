@@ -10,8 +10,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from apps.api.core.config import get_models
 from apps.api.db.models import Conversation, SlowAgentRun
-from apps.api.slow_agent.judge import OPUS_JUDGE_MODEL, SONNET_JUDGE_MODEL
 from apps.api.slow_agent.runner import RunStats
 
 TENANT = uuid.uuid4()
@@ -209,11 +209,11 @@ async def test_run_cost_counts_sonnet_and_opus_calls_at_current_rates(monkeypatc
     from apps.api.slow_agent import runner
 
     responses = {
-        SONNET_JUDGE_MODEL: (
+        get_models().slow_agent_model: (
             {"should_propose": False, "confidence": 0.5},
             SimpleNamespace(input_tokens=4000, output_tokens=300),
         ),
-        OPUS_JUDGE_MODEL: (
+        get_models().judge_opus_model: (
             {"should_propose": False, "confidence": 0.9},
             SimpleNamespace(input_tokens=4000, output_tokens=500),
         ),

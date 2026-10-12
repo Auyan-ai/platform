@@ -11,13 +11,13 @@ import logging
 from dataclasses import dataclass
 
 from anthropic import AsyncAnthropic
+from apps.api.core.config import get_models
 from apps.api.db.models import UserProfile
 from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.simulator.prompts import SIMULATOR_PROMPT
 
 logger = logging.getLogger(__name__)
 
-SIMULATOR_MODEL = "claude-haiku-4-5-20251001"
 SIMULATOR_TEMPERATURE = 0.7
 SIMULATOR_MAX_TOKENS = 512
 SIMULATOR_TIMEOUT_SECONDS = 30  # tope por llamada para no colgar el run
@@ -42,7 +42,7 @@ class SimulatorTurn:
 
     @property
     def cost_usd(self) -> float:
-        return compute_llm_cost(SIMULATOR_MODEL, self.usage)
+        return compute_llm_cost(get_models().simulator_model, self.usage)
 
 
 class UserSimulator:
@@ -71,7 +71,7 @@ class UserSimulator:
         history = conversation_history[-HISTORY_TRUNCATION:]
 
         response = await self._anthropic.messages.create(
-            model=SIMULATOR_MODEL,
+            model=get_models().simulator_model,
             max_tokens=SIMULATOR_MAX_TOKENS,
             temperature=SIMULATOR_TEMPERATURE,
             system=[

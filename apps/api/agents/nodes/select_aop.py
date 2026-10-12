@@ -31,6 +31,7 @@ from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.state import AgentState
 from apps.api.aops.compiler import compile_aop, load_active_aops, load_aop
+from apps.api.core.config import get_models
 from apps.api.db.client import tenant_scope
 from apps.api.db.models import TenantConfiguration
 from apps.api.db.queries import (
@@ -273,7 +274,7 @@ def make_select_aop_node(
 
         response = await call_claude_with_tools(
             client=deps.anthropic,
-            model=deps.settings.intent_classifier_model,
+            model=get_models().intent_classifier_model,
             system=INTENT_CLASSIFIER_PROMPT,
             messages=[{"role": "user", "content": user_message}],
             tools=[SELECT_AOP_TOOL],

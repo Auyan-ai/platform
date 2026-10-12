@@ -131,9 +131,7 @@ class TestSelectReasonModel:
     def _fn(self, state: dict) -> str:
         from apps.api.agents.nodes.reason import _select_reason_model
 
-        from tests.conftest import FakeSettings
-
-        return _select_reason_model(state, FakeSettings())  # type: ignore[arg-type]
+        return _select_reason_model(state)  # type: ignore[arg-type]
 
     def test_simple_turn_uses_fast_model(self) -> None:
         model = self._fn(

@@ -13,10 +13,7 @@ al LLM. El resto lo juzga el LLM con una tool forzada:
   - reject + tactical → el agente puede arreglar reintentando (una sola vez)
   - reject + structural → el AOP no aplica / falta capability → escala directo
 
-Modelos:
-  - L1/AOP sin tier específico: claude-sonnet-4-6
-  - L2:                         claude-sonnet-4-6
-  - L3:                         claude-opus-4-7
+Modelos: `supervisor_model_l1_l2` (L1/L2/sin tier) y `supervisor_model_l3` en core/config.py.
 
 El supervisor es stateless respecto al grafo: solo lee el state y emite
 `supervisor_verdict`, `supervisor_reason`, `supervisor_reject_kind`.
@@ -34,6 +31,7 @@ from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.nodes.reason import agent_system_blocks
 from apps.api.agents.state import AgentState
+from apps.api.core.config import get_models
 from apps.api.integrations.anthropic_client import call_claude_with_tools
 from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.services.amount_grounding import AmountProblem, unbacked_amounts
@@ -42,10 +40,6 @@ from apps.api.services.identity import default_phone_region
 from apps.api.skills.registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
-
-# Modelos según tier
-_SUPERVISOR_MODEL_L1_L2 = "claude-sonnet-4-6"
-_SUPERVISOR_MODEL_L3 = "claude-opus-4-7"
 
 SUPERVISOR_VERDICT_TOOL: dict[str, Any] = {
     "name": "supervisor_verdict",
@@ -135,10 +129,10 @@ def _select_supervisor_model(state: AgentState) -> str:
         try:
             skill_cls = SkillRegistry.get(slug)
             if skill_cls.tier == "L3":
-                return _SUPERVISOR_MODEL_L3
+                return get_models().supervisor_model_l3
         except ValueError:
             pass
-    return _SUPERVISOR_MODEL_L1_L2
+    return get_models().supervisor_model_l1_l2
 
 
 def _supervisor_system(agent_prompt: str) -> list[dict[str, Any]]:

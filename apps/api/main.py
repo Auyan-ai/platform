@@ -31,7 +31,7 @@ import apps.api.skills  # noqa: F401
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.graph import build_graph
 from apps.api.agents.service import AgentService
-from apps.api.core.config import get_settings
+from apps.api.core.config import get_models, get_settings
 from apps.api.core.errors import UnhandledExceptionMiddleware, register_exception_handlers
 from apps.api.core.log_config import configure_logging
 from apps.api.db.client import close_pool, init_pool
@@ -41,6 +41,7 @@ from apps.api.integrations.langsmith_client import build_langsmith_client
 from apps.api.integrations.observability import ObservabilityClient
 from apps.api.integrations.openai_embeddings import build_openai_client
 from apps.api.integrations.postmark import build_postmark_adapter
+from apps.api.integrations.pricing import check_model_prices
 from apps.api.routers.aops import router as aops_router
 from apps.api.routers.approvals import router as approvals_router
 from apps.api.routers.billing import router as billing_router
@@ -95,6 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(settings.log_level)
 
     logger.info("starting auyan-api env=%s", settings.app_env)
+    check_model_prices(get_models().by_role())
 
     await init_pool()
     logger.info("db_pool_initialized")

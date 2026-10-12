@@ -30,6 +30,7 @@ from uuid import uuid4
 
 import yaml
 from apps.api.aops.compiler import CompiledAOP, compile_aop
+from apps.api.core.config import get_models
 from apps.api.db.models import AopWithContent, TenantConfiguration
 
 logger = logging.getLogger(__name__)
@@ -227,7 +228,7 @@ def _default_tenant_config(tenant_id: Any = None) -> TenantConfiguration:
     tid = tenant_id if isinstance(tenant_id, UUID) else uuid4()
     return TenantConfiguration(
         tenant_id=tid,
-        agent_model="claude-sonnet-4-6",
+        agent_model=get_models().default_agent_model,
         escalation_threshold=0.6,
         branding={},
         extra={},

@@ -19,11 +19,8 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
-if TYPE_CHECKING:
-    from apps.api.core.config import Settings
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
@@ -35,6 +32,7 @@ from apps.api.agents.prompts.builder import (
 )
 from apps.api.agents.schemas import RESPOND_OR_ESCALATE_TOOL, AgentDecisionTool
 from apps.api.agents.state import AgentState
+from apps.api.core.config import get_models
 from apps.api.integrations.anthropic_client import call_claude_with_tools
 from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.services.identity import IdentityContext
@@ -143,7 +141,7 @@ def _append_tool_result_blocks(
     return messages
 
 
-def _select_reason_model(state: AgentState, settings: Settings) -> str:
+def _select_reason_model(state: AgentState) -> str:
     """Router por complejidad (palanca de latencia): Haiku para turnos sin riesgo.
 
     Un turno es "simple" cuando NO puede tocar la tienda: el AOP activo no tiene
@@ -162,7 +160,7 @@ def _select_reason_model(state: AgentState, settings: Settings) -> str:
         return tenant_model
     if state.get("tool_results") or state.get("pending_tool_call"):
         return tenant_model
-    return settings.simple_turn_model
+    return get_models().simple_turn_model
 
 
 def _visible_skills(state: AgentState) -> list[str]:
@@ -283,7 +281,7 @@ def make_reason_node(
         allowed_skills = _visible_skills(state)
         tools = _build_tools(allowed_skills)
 
-        model = _select_reason_model(state, deps.settings)
+        model = _select_reason_model(state)
 
         # Iteraciones agotadas: último turno SOLO para decidir (respond/escalate) con
         # lo ya obtenido. Las tools siguen definidas (el historial trae tool_use de

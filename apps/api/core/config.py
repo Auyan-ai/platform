@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:3000,http://localhost:3001"
 
     # --- Defaults del agente (overridables por tenant_configurations) ---
-    default_agent_model: str = "claude-sonnet-4-6"
+    # Los modelos de LLM viven en `ModelRegistry` / `get_models()`.
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
     rag_top_k: int = 5
@@ -151,17 +151,6 @@ class Settings(BaseSettings):
     # Histéresis anti-flapping: por debajo de esto, la continuidad gana y se mantiene el
     # AOP previo (salvo que se venga de 'default', donde basta intent_min_confidence).
     intent_switch_threshold: float = 0.70
-    # Modelo para el clasificador de intent. Haiku: rápido y barato para clasificación.
-    intent_classifier_model: str = "claude-haiku-4-5-20251001"
-    # Modelo para reescribir el mensaje al cliente tras aprobar/rechazar L3.
-    # Haiku: barato/rápido para una frase de confirmación.
-    reply_model: str = "claude-haiku-4-5-20251001"
-    # Modelo para turnos conversacionales puros (sin skills disponibles ni
-    # herramientas en juego): el único desenlace es respond/escalate, así que
-    # Haiku basta y recorta latencia/costo. Apenas haya tool, reason usa el
-    # modelo del tenant. Ver _select_reason_model en agents/nodes/reason.py.
-    simple_turn_model: str = "claude-haiku-4-5-20251001"
-
     # --- Rate limiting (webhooks inbound) ---
     # Requests por minuto por tenant. Cubre ~50K tickets/día con headroom para bursts.
     # Override per-tenant: tenant_configurations.extra.rate_limits.tenant_per_minute
@@ -203,3 +192,49 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Singleton de Settings. Usar siempre esta función, nunca instanciar Settings() directo."""
     return Settings()  # type: ignore[call-arg]
+
+
+class ModelRegistry(BaseSettings):
+    """Único registro de modelos de LLM, uno por rol (#344).
+
+    Cada campo se sobrescribe con la variable de entorno del mismo nombre en
+    mayúsculas. No tiene campos obligatorios, así que se carga sin el resto de
+    `Settings` (simulador, evals y tests). Todo ID que se añada aquí necesita su
+    fila en `integrations/pricing.py`: un test y el arranque de la API lo exigen.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+    )
+
+    # Agente: modelo por defecto cuando el tenant no fija el suyo
+    # (`tenant_configurations.agent_model`).
+    default_agent_model: str = "claude-sonnet-4-6"
+    # Turnos conversacionales puros (sin skills ni herramientas): Haiku basta y recorta
+    # latencia/costo. Ver _select_reason_model en agents/nodes/reason.py.
+    simple_turn_model: str = "claude-haiku-4-5-20251001"
+    # Clasificador de intent: rápido y barato.
+    intent_classifier_model: str = "claude-haiku-4-5-20251001"
+    # Supervisor del loop ReAct: L1/L2 y L3 (acciones destructivas, con approval).
+    supervisor_model_l1_l2: str = "claude-sonnet-4-6"
+    supervisor_model_l3: str = "claude-opus-4-7"
+    # Mensaje al cliente tras aprobar/rechazar una L3.
+    reply_model: str = "claude-haiku-4-5-20251001"
+    # Simulador: cliente sintético y jueces (Sonnet por defecto, Opus en calibraciones).
+    simulator_model: str = "claude-haiku-4-5-20251001"
+    judge_sonnet_model: str = "claude-sonnet-4-6"
+    judge_opus_model: str = "claude-opus-4-7"
+    # Slow agent: primer análisis. Si duda, escala al juez Opus (`judge_opus_model`).
+    slow_agent_model: str = "claude-sonnet-4-6"
+
+    def by_role(self) -> dict[str, str]:
+        """Rol -> ID de modelo, para el test y el chequeo de precios del arranque."""
+        return {name: getattr(self, name) for name in type(self).model_fields}
+
+
+@lru_cache(maxsize=1)
+def get_models() -> ModelRegistry:
+    return ModelRegistry()

@@ -26,6 +26,7 @@ from uuid import UUID
 
 from anthropic import AsyncAnthropic
 from apps.api.aops.compiler import compile_aop
+from apps.api.core.config import get_models
 from apps.api.db.client import tenant_scope
 from apps.api.db.models import Conversation
 from apps.api.db.queries import (
@@ -43,7 +44,7 @@ from apps.api.db.queries import (
     list_skill_audit_log,
     update_slow_agent_run,
 )
-from apps.api.slow_agent.judge import SONNET_JUDGE_MODEL, JudgeVerdict, judge_conversation
+from apps.api.slow_agent.judge import JudgeVerdict, judge_conversation
 from apps.api.slow_agent.sampling import filter_candidates
 from apps.api.slow_agent.transcript import build_transcript
 
@@ -69,7 +70,7 @@ class RunStats:
         return self.opus_input_tokens + self.opus_output_tokens
 
     def add_call(self, call: JudgeVerdict) -> None:
-        if call.model_used == SONNET_JUDGE_MODEL:
+        if call.model_used == get_models().slow_agent_model:
             self.sonnet_input_tokens += call.input_tokens
             self.sonnet_output_tokens += call.output_tokens
         else:
