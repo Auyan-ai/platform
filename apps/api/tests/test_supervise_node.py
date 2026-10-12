@@ -718,3 +718,80 @@ async def test_agent_prompt_is_in_the_cached_prefix(fake_deps: Any) -> None:
     assert "Ventana de devoluciones (días): 30" in cached[0]
     assert "Ya se entregó, no puedo cancelarlo." not in cached[0]
     assert "Ya se entregó, no puedo cancelarlo." in kwargs["messages"][0]["content"]
+
+
+# ──────────────────────────────────────────────────────────
+# Importes con su moneda, comprobados en código (#332)
+# ──────────────────────────────────────────────────────────
+
+# get_order_status del trace c7b32bac: pedido en USD.
+_USD_ORDER = {
+    **_DELIVERED_ORDER,
+    "output": {
+        "found": True,
+        "order_number": "#1431",
+        "currency": "USD",
+        "line_items": [
+            {"line_item_id": 17463441162520, "price": "68.95", "title": "Blusa Satinada"},
+            {"line_item_id": 17463441195288, "price": "76.95", "title": "Bolso Bandolera"},
+        ],
+        "total_price": "145.90",
+    },
+}
+
+
+def _usd_order_state(agent_response: str) -> dict:
+    state = _store_state(agent_response)
+    state["tool_results"] = [_USD_ORDER]
+    return state
+
+
+@pytest.mark.asyncio
+async def test_euros_for_a_usd_order_are_rejected_in_code(fake_deps: Any) -> None:
+    from apps.api.agents.nodes.supervise import make_supervise_node
+
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_supervisor_response("approve")
+    )
+    result = await make_supervise_node(fake_deps)(
+        _usd_order_state("El pedido incluye:\n- Blusa Satinada (68,95 €)\n- Bolso (76,95 €)")
+    )
+
+    assert result["supervisor_verdict"] == "reject"
+    assert result["supervisor_reject_kind"] == "tactical"
+    assert result["supervisor_model_used"] == "code"
+    assert "68,95 € (la evidencia lo da en USD); 76,95 € (la evidencia lo da en USD)" in (
+        result["supervisor_feedback"]
+    )
+    assert fake_deps.anthropic.messages.create.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_amounts_in_the_tool_currency_go_to_the_llm(fake_deps: Any) -> None:
+    from apps.api.agents.nodes.supervise import make_supervise_node
+
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_supervisor_response("approve")
+    )
+    result = await make_supervise_node(fake_deps)(
+        _usd_order_state("Blusa (68,95 USD) y bolso (76,95 $): total US$145.90. Talla 38.")
+    )
+
+    assert result["supervisor_verdict"] == "approve"
+    assert fake_deps.anthropic.messages.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_amount_quoted_in_supervisor_feedback_is_not_evidence(fake_deps: Any) -> None:
+    from apps.api.agents.nodes.supervise import make_supervise_node
+
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_supervisor_response("approve")
+    )
+    state = _usd_order_state("La blusa costó 68,95 €.")
+    state["supervisor_feedback"] = "68,95 € (la evidencia lo da en USD)"
+    state["supervisor_retried"] = True
+    result = await make_supervise_node(fake_deps)(state)
+
+    assert result["escalation_reason"].startswith("supervisor_rejected (tactical)")
+    assert "68,95 €" in result["escalation_reason"]
