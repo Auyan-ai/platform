@@ -187,8 +187,11 @@ def inbound_identity_evidence(
 
 
 def evidence_from_state(state: Mapping[str, Any]) -> IdentityEvidence:
-    """Evidencia del turno. El cliente del simulador escribe como remitente de correo."""
+    """Evidencia del turno. El cliente del simulador escribe como remitente de correo,
+    salvo que el escenario pida `simulation_identity="chat"` (sin remitente verificado)."""
     if state.get("simulation_mode"):
+        if state.get("simulation_identity") == "chat":
+            return IdentityEvidence()
         email = (state.get("end_customer") or {}).get("email")
         return IdentityEvidence(email=email if isinstance(email, str) and email else None)
     return inbound_identity_evidence(

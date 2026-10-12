@@ -1,0 +1,5 @@
+name: Frontmatter define escalado
+description: Debe declarar cuándo escalar.
+assertions:
+- kind: frontmatter_has_key
+  expected: escalation_triggers

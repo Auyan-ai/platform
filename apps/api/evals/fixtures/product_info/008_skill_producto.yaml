@@ -1,0 +1,6 @@
+name: Tiene get_product_info
+description: El precio y el stock salen de la skill, con su moneda.
+assertions:
+- kind: skills_include
+  expected:
+  - shopify.get_product_info

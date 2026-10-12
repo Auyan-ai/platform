@@ -1,0 +1,7 @@
+name: Exige supervisión
+description: Una queja seria pasa por el supervisor.
+assertions:
+- kind: confidence_threshold_between
+  expected:
+  - 0.6
+  - 1.0

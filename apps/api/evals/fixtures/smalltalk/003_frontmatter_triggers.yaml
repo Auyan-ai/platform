@@ -1,0 +1,5 @@
+name: Frontmatter tiene triggers
+description: El selector de AOP clasifica con triggers; sin ellos el AOP no se elige.
+assertions:
+- kind: frontmatter_has_key
+  expected: triggers

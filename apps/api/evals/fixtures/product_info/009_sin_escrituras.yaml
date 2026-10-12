@@ -1,0 +1,11 @@
+name: Sin skills de pedido ni L3
+description: 'Pre-compra: no toca pedidos.'
+assertions:
+- kind: skills_not_include
+  expected:
+  - shopify.get_order_status
+  - shopify.list_my_orders
+  - shopify.cancel_order
+  - shopify.refund_partial
+  - shopify.start_return
+  - shopify.update_shipping_address

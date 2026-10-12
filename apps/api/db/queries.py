@@ -2810,6 +2810,31 @@ async def has_pending_approval_for_conversation(
     return row is not None
 
 
+async def list_pending_approval_inputs(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+) -> dict[str, dict]:
+    """`inputs_raw` de las aprobaciones de la conversación, por skill (la más reciente gana)."""
+    rows = await conn.fetch(
+        """
+        SELECT skill_slug, inputs_raw FROM pending_approvals
+         WHERE tenant_id = $1
+           AND conversation_id = $2
+           AND deleted_at IS NULL
+         ORDER BY created_at
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return {
+        r["skill_slug"]: json.loads(r["inputs_raw"])
+        if isinstance(r["inputs_raw"], str)
+        else dict(r["inputs_raw"])
+        for r in rows
+    }
+
+
 async def resolve_pending_approval(
     conn: asyncpg.Connection,
     *,

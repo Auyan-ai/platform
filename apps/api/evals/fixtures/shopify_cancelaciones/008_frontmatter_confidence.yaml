@@ -1,5 +1,0 @@
-name: "Frontmatter tiene clave confidence_threshold"
-description: "El umbral de confianza debe estar declarado explícitamente, no heredado del default"
-assertions:
-  - kind: frontmatter_has_key
-    expected: confidence_threshold

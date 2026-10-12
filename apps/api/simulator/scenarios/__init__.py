@@ -1,6 +1,6 @@
 """Package de scenarios del simulador.
 
-`seed_scenarios(conn, tenant_id)` inserta o actualiza los 27 scenarios base
+`seed_scenarios(conn, tenant_id)` inserta o actualiza los scenarios base
 para un tenant dado. Es idempotente: si el scenario ya existe (mismo `name`),
 no lo duplica.
 """
@@ -22,12 +22,25 @@ from apps.api.db.queries import (
 from apps.api.simulator.scenarios.consulta_envio import SCENARIOS as CE_SCENARIOS
 from apps.api.simulator.scenarios.default import SCENARIOS as DE_SCENARIOS
 from apps.api.simulator.scenarios.edge_cases import SCENARIOS as EX_SCENARIOS
+from apps.api.simulator.scenarios.identity import SCENARIOS as ID_SCENARIOS
+from apps.api.simulator.scenarios.orders import SCENARIOS as OR_SCENARIOS
 from apps.api.simulator.scenarios.profiles import PERSONAS
 from apps.api.simulator.scenarios.returns import SCENARIOS as RE_SCENARIOS
 
 logger = logging.getLogger(__name__)
 
-ALL_SCENARIOS = CE_SCENARIOS + RE_SCENARIOS + DE_SCENARIOS + EX_SCENARIOS
+ALL_SCENARIOS = (
+    CE_SCENARIOS + RE_SCENARIOS + DE_SCENARIOS + EX_SCENARIOS + ID_SCENARIOS + OR_SCENARIOS
+)
+
+
+def capabilities_by_name() -> dict[str, list[str]]:
+    """Códigos del catálogo de capacidades que cubre cada escenario, por nombre.
+
+    Viven en el código (`capabilities` de cada escenario) y no en la DB: el catálogo
+    cambia con el código, no con los datos del tenant.
+    """
+    return {sc["name"]: list(sc.get("capabilities", [])) for sc in ALL_SCENARIOS}
 
 
 async def seed_scenarios(

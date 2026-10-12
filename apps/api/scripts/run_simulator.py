@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -69,6 +70,24 @@ def _meets_checkpoint(run, *, require_judge: bool = True) -> bool:
     return True
 
 
+_EMAIL = re.compile(r"([\w.+-])[\w.+-]*@([\w-])[\w.-]*(\.[a-z]{2,})", re.I)
+_PHONE = re.compile(r"\+?\d[\d\s().-]{7,}\d")
+
+
+def mask_contacts(text: str) -> str:
+    """Enmascara emails y teléfonos para que el informe se pueda pegar en un PR."""
+    text = _EMAIL.sub(lambda m: f"{m.group(1)}***@{m.group(2)}***{m.group(3)}", text)
+    return _PHONE.sub("***", text)
+
+
+def _print_agent_replies(run) -> None:
+    """Respuestas del agente del run (contactos enmascarados) y la decisión final."""
+    for turn in run.transcript or []:
+        if turn.get("role") == "agent":
+            print(f"  Agente (turno {turn['turn_number']}): {mask_contacts(turn['content'])}")
+    print(f"  Decisión final: {run.termination_reason}")
+
+
 async def main(
     tenant_id: uuid.UUID,
     *,
@@ -77,6 +96,8 @@ async def main(
     no_judge: bool,
     judge_model: str,
     reseed: bool,
+    ids: list[str] | None = None,
+    show_replies: bool = False,
 ) -> int:
     import apps.api.skills  # noqa: F401 — registra skills
     from apps.api.agents.dependencies import AgentDependencies
@@ -86,11 +107,13 @@ async def main(
     from apps.api.db.queries import list_simulation_scenarios
     from apps.api.integrations.anthropic_client import build_anthropic_client
     from apps.api.integrations.langfuse_client import build_langfuse_client
+    from apps.api.integrations.langsmith_client import build_langsmith_client
+    from apps.api.integrations.observability import ObservabilityClient
     from apps.api.integrations.openai_embeddings import build_openai_client
     from apps.api.services.audit import AuditLogger
     from apps.api.services.reasoning import ReasoningTracker
     from apps.api.simulator.runner import run_simulation
-    from apps.api.simulator.scenarios import seed_scenarios
+    from apps.api.simulator.scenarios import capabilities_by_name, seed_scenarios
 
     settings = get_settings()
     await init_pool()
@@ -99,6 +122,7 @@ async def main(
         anthropic = build_anthropic_client(settings.anthropic_api_key.get_secret_value())
         openai = build_openai_client(settings.openai_api_key.get_secret_value())
         langfuse = build_langfuse_client(settings)
+        observability = ObservabilityClient(primary=build_langsmith_client(settings))
 
         deps = AgentDependencies(
             anthropic=anthropic,
@@ -106,6 +130,7 @@ async def main(
             settings=settings,
             reasoning_tracker=ReasoningTracker(),
             audit_logger=AuditLogger(),
+            observability=observability,
         )
         graph = build_graph(deps)
 
@@ -136,6 +161,12 @@ async def main(
                 for n in names:
                     print(f"  - {n}", file=sys.stderr)
                 return 1
+        elif ids:
+            targets = [s for s in all_scenarios if s.name.split(":")[0].strip() in ids]
+            unknown = set(ids) - {s.name.split(":")[0].strip() for s in targets}
+            if unknown:
+                print(f"IDs sin escenario en el tenant: {sorted(unknown)}", file=sys.stderr)
+                return 1
         elif run_all:
             targets = all_scenarios
         else:
@@ -152,12 +183,14 @@ async def main(
         print(f"\nCoriendo {len(targets)} scenario(s) para tenant={tenant_id}")
         print("=" * 70)
 
+        capabilities = capabilities_by_name()
         results = []
         passed = 0
         failed = 0
 
         for scenario in targets:
             print(f"\n▶ {scenario.name}")
+            print(f"  Capacidades: {', '.join(capabilities.get(scenario.name, [])) or '-'}")
             try:
                 run_id = await run_simulation(
                     scenario.id,
@@ -166,6 +199,7 @@ async def main(
                     graph=graph,
                     skip_judge=no_judge,
                     judge_model=judge_model,
+                    observability=observability,
                 )
                 # Obtener resultado
                 from apps.api.db.queries import get_simulation_run
@@ -191,6 +225,8 @@ async def main(
                             icon = "✓" if a["passed"] else "✗"
                             crit = " [CRÍTICA]" if a["is_critical"] else ""
                             print(f"    {icon} {a['key']}: {a['evidence']}{crit}")
+                    if show_replies:
+                        _print_agent_replies(run)
                     cost = run.cost_cents or 0
                     print(f"  Costo: ${cost / 100:.4f}")
 
@@ -207,13 +243,18 @@ async def main(
                 failed += 1
 
         print("\n" + "=" * 70)
+        print("Escenario | capacidades | resultado")
+        for name, run in results:
+            caps = ", ".join(capabilities.get(name, [])) or "-"
+            verdict = "OK" if _meets_checkpoint(run, require_judge=not no_judge) else "FALLA"
+            print(f"{name} | {caps} | {verdict} ({run.status})")
         bar = "assertions críticas" if no_judge else f"judge ≥ {CHECKPOINT_JUDGE_MIN:.0f} + assertions críticas"
         print(f"RESUMEN: {passed}/{len(targets)} cumplen ({bar}) | {failed} no")
         if no_judge:
             print("⚠️  Modo --no-judge: el judge NO corrió. Corrida final lo requiere.")
 
         # Checkpoint mínimo (design doc §16): judge ≥ 7 + assertions críticas OK
-        if not run_all and not scenario_name:
+        if not run_all and not scenario_name and not ids:
             checkpoint_passed = sum(
                 1 for name, run in results
                 if any(name.startswith(cid) for cid in CHECKPOINT_SCENARIOS)
@@ -233,6 +274,7 @@ async def main(
         return 0 if failed == 0 else 1
 
     finally:
+        await observability.flush()
         await langfuse.flush()
         await close_pool()
 
@@ -249,6 +291,16 @@ def _parse_args() -> argparse.Namespace:
         "--all",
         action="store_true",
         help="Correr todos los scenarios del tenant",
+    )
+    parser.add_argument(
+        "--ids",
+        default=None,
+        help="IDs de scenarios separados por coma (ej: ID-01,ID-02,OR-01).",
+    )
+    parser.add_argument(
+        "--show-replies",
+        action="store_true",
+        help="Imprime las respuestas del agente (contactos enmascarados) y la decisión.",
     )
     parser.add_argument(
         "--no-judge",
@@ -285,6 +337,8 @@ if __name__ == "__main__":
             no_judge=args.no_judge,
             judge_model=args.judge_model,
             reseed=args.reseed,
+            ids=[i.strip() for i in args.ids.split(",")] if args.ids else None,
+            show_replies=args.show_replies,
         )
     )
     sys.exit(exit_code)

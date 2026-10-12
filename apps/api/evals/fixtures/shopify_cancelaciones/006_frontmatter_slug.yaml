@@ -1,5 +1,0 @@
-name: "Frontmatter tiene clave slug"
-description: "El YAML frontmatter debe identificar el AOP con su slug"
-assertions:
-  - kind: frontmatter_has_key
-    expected: slug

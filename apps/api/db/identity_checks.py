@@ -131,3 +131,37 @@ async def insert_guest_check(
         valid_until,
     )
     return row is not None
+
+
+async def count_conversation_attempts(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> int:
+    """Todos los intentos guest de la conversación, concedidos o no."""
+    value = await conn.fetchval(
+        """
+        SELECT count(*)
+          FROM identity_checks
+         WHERE tenant_id = $1 AND conversation_id = $2
+           AND kind = 'guest' AND deleted_at IS NULL
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return int(value or 0)
+
+
+async def soft_delete_conversation_checks(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> int:
+    """Soft delete de los intentos de una conversación. El simulador lo usa al acabar un run
+    para que sus fallos no cuenten en la pausa por tenant."""
+    result = await conn.execute(
+        """
+        UPDATE identity_checks
+           SET deleted_at = now(), updated_at = now()
+         WHERE tenant_id = $1 AND conversation_id = $2 AND deleted_at IS NULL
+        """,
+        tenant_id,
+        conversation_id,
+    )
+    return int(result.rsplit(" ", 1)[-1])

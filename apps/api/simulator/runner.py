@@ -27,6 +27,10 @@ from uuid import UUID, uuid4
 
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
+from apps.api.db.identity_checks import (
+    count_conversation_attempts,
+    soft_delete_conversation_checks,
+)
 from apps.api.db.models import SimulationScenario, UserProfile
 from apps.api.db.queries import (
     create_conversation,
@@ -37,6 +41,7 @@ from apps.api.db.queries import (
     has_pending_approval_for_conversation,
     insert_message,
     insert_simulation_run,
+    list_pending_approval_inputs,
     list_skill_audit_log,
     soft_delete_conversation,
     update_conversation_last_message,
@@ -60,6 +65,7 @@ from apps.api.simulator.user_simulator import UserSimulator
 
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
+    from apps.api.integrations.observability import ObservabilityClient
     from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
@@ -92,6 +98,11 @@ class _RunAccumulator:
     cost_usd: float = 0.0
     judge_model: str = DEFAULT_JUDGE_MODEL
     last_agent_messages: list[str] = field(default_factory=list)
+    # Última razón de escalado que dejó el grafo y contactos de las respuestas del agente
+    # que ni los datos de la tienda, ni las herramientas ni el cliente respaldan.
+    escalation_reason: str | None = None
+    unbacked_contacts: list[str] = field(default_factory=list)
+    trace_run_ids: list[str] = field(default_factory=list)
 
 
 
@@ -134,11 +145,15 @@ async def run_simulation(
     batch_id: UUID | None = None,
     skip_judge: bool = False,
     judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_MODEL,
+    observability: ObservabilityClient | None = None,
 ) -> UUID:
     """Corre un scenario completo. Retorna el run_id.
 
     skip_judge=True salta la evaluación del judge. Pensado para
     cazar bugs de assertions/fixtures rápido; la corrida final SIEMPRE corre el judge.
+
+    Con `observability`, cada turno deja su traza de LangSmith (el id sale en el log
+    `sim_trace_ids`). Sin él, el run no se traza, como hasta ahora.
     """
     async with _GLOBAL_SIM_SEMAPHORE:
         return await _run_simulation_inner(
@@ -150,6 +165,7 @@ async def run_simulation(
             batch_id=batch_id,
             skip_judge=skip_judge,
             judge_model=judge_model,
+            observability=observability,
         )
 
 
@@ -197,6 +213,7 @@ async def _run_simulation_inner(
     batch_id: UUID | None,
     skip_judge: bool = False,
     judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_MODEL,
+    observability: ObservabilityClient | None = None,
 ) -> UUID:
     async with tenant_scope(tenant_id) as conn:
         scenario = await get_simulation_scenario(conn, tenant_id, scenario_id)
@@ -247,6 +264,7 @@ async def _run_simulation_inner(
                 tenant_id=tenant_id,
                 anthropic=anthropic,
                 graph=graph,
+                observability=observability,
             ),
             timeout=SIMULATION_TIMEOUT_SECONDS,
         )
@@ -272,6 +290,9 @@ async def _run_simulation_inner(
 
     last_agent_msg = _last_agent_message(acc.transcript)
     pending_approval = await _pending_approval_present(tenant_id, conversation_id)
+    approval_inputs, identity_attempts = await _behavior_evidence(
+        tenant_id, conversation_id, scenario.assertions
+    )
 
     assertion_results = check_assertions(
         assertions=scenario.assertions,
@@ -280,6 +301,10 @@ async def _run_simulation_inner(
         termination_reason=termination_reason,
         turns_count=len(acc.transcript.turns),
         pending_approval_present=pending_approval,
+        escalation_reason=acc.escalation_reason,
+        pending_approval_inputs=approval_inputs,
+        identity_attempts=identity_attempts,
+        unbacked_contacts=acc.unbacked_contacts,
     )
 
     if skip_judge:
@@ -328,6 +353,7 @@ async def _run_simulation_inner(
         cost_cents=cost_cents,
     )
 
+    logger.info("sim_trace_ids run_id=%s langsmith=%s", run_id, ",".join(acc.trace_run_ids))
     logger.info(
         "sim_run_complete run_id=%s scenario=%s status=%s turns=%d",
         run_id,
@@ -391,12 +417,15 @@ async def _execute_loop(
     tenant_id: UUID,
     anthropic: AsyncAnthropic,
     graph: CompiledStateGraph,
+    observability: ObservabilityClient | None = None,
 ) -> str:
     """Loop principal de la simulación. Retorna el termination_reason."""
     sim = UserSimulator(profile=profile, anthropic=anthropic)
     fixtures = assign_mock_orders_to_customer(
         scenario.mock_fixtures, sim_customer_email(acc.run_id)
     )
+
+    identity_mode = scenario_identity_mode(scenario.mock_fixtures)
 
     # Turno 0: primer mensaje del cliente (sin LLM)
     first = sim.first_message()
@@ -417,6 +446,18 @@ async def _execute_loop(
     for turn_number in range(1, max_turns + 1):
         # ── Invocar el grafo ──────────────────────────────────────────────────
         last_customer_msg = acc.transcript.turns[-1].content
+        trace = (
+            observability.start_conversation_trace(
+                tenant_id=str(tenant_id),
+                conversation_id=str(acc.conversation_id),
+                end_customer_id=str(acc.end_customer_id),
+                channel="chat",
+                input_text=last_customer_msg,
+            )
+            if observability is not None
+            else None
+        )
+        primary_trace = trace.primary if trace else None
         initial_state: AgentState = {
             "tenant_id": str(tenant_id),
             "conversation_id": str(acc.conversation_id),
@@ -425,8 +466,11 @@ async def _execute_loop(
             "channel": "chat",
             "simulation_mode": True,
             "simulation_fixtures": fixtures,
+            "simulation_identity": identity_mode,
             "forced_aop_slug": scenario.aop_slug,
             "langfuse_trace_id": f"sim-{acc.run_id}-t{turn_number}",
+            "_trace_run_id": str(primary_trace.run_id) if primary_trace else None,
+            "_trace_dotted_order": primary_trace.dotted_order if primary_trace else None,
             "tool_results": [],
             "tool_iterations": 0,
             "max_tool_iterations": 5,
@@ -439,7 +483,9 @@ async def _execute_loop(
             logger.exception(
                 "sim_graph_invoke_failed run_id=%s turn=%d", acc.run_id, turn_number
             )
+            _finalize_trace(observability, trace, None, error="graph_invoke_failed")
             return "error"
+        _finalize_trace(observability, trace, final_state)
 
         agent_response = final_state.get("agent_response") or ""
         decision = final_state.get("decision", "respond")
@@ -447,6 +493,12 @@ async def _execute_loop(
         acc.tokens_agent_in += final_state.get("tokens_in", 0)
         acc.tokens_agent_out += final_state.get("tokens_out", 0)
         acc.cost_usd += final_state.get("cost_usd", 0.0)
+
+        if final_state.get("escalation_reason"):
+            acc.escalation_reason = str(final_state["escalation_reason"])
+        acc.unbacked_contacts += _unbacked_contacts(final_state, agent_response)
+        if primary_trace is not None:
+            acc.trace_run_ids.append(str(primary_trace.run_id))
 
         await _persist_agent_message(tenant_id, acc.conversation_id, agent_response)
         acc.transcript.turns.append(
@@ -466,8 +518,11 @@ async def _execute_loop(
 
         # Loop detection: dos respuestas del agente con el mismo inicio
         acc.last_agent_messages.append(agent_response[:LOOP_DETECTION_WINDOW])
+        # Un texto fijo del código (sin LLM, `tokens_in` en 0) se repite por diseño: no
+        # es un bucle del agente.
         if (
-            len(acc.last_agent_messages) >= 2
+            final_state.get("tokens_in", 0) > 0
+            and len(acc.last_agent_messages) >= 2
             and acc.last_agent_messages[-1] == acc.last_agent_messages[-2]
         ):
             logger.warning("sim_agent_loop_detected run_id=%s", acc.run_id)
@@ -619,6 +674,75 @@ def _last_agent_message(transcript: SimulatorTranscript) -> str:
         if turn.role == "agent":
             return turn.content
     return ""
+
+
+def _finalize_trace(
+    observability: ObservabilityClient | None,
+    trace: Any,
+    final_state: AgentState | None,
+    error: str | None = None,
+) -> None:
+    if observability is None or trace is None:
+        return
+    state: Any = final_state or {}
+    observability.finalize_trace(
+        trace,
+        decision=state.get("decision"),
+        confidence=state.get("confidence"),
+        response_text=state.get("agent_response"),
+        escalation_reason=state.get("escalation_reason"),
+        tokens_in=state.get("tokens_in", 0),
+        tokens_cache_write=state.get("tokens_cache_write", 0),
+        tokens_cache_read=state.get("tokens_cache_read", 0),
+        tokens_out=state.get("tokens_out", 0),
+        cost_usd=state.get("cost_usd", 0.0),
+        model=state.get("model_used"),
+        error=error or state.get("error"),
+    )
+
+
+IDENTITY_MODES = ("sender", "chat")
+
+
+def scenario_identity_mode(mock_fixtures: dict[str, Any] | None) -> str:
+    """Cómo se identifica el cliente simulado: `sender` (escribe desde el email de la
+    compra, `verified`) o `chat` (solo cuenta lo que teclea, como el visitante de un chat).
+    Va en `mock_fixtures["identity"]` para no tocar el esquema de `simulation_scenarios`."""
+    mode = (mock_fixtures or {}).get("identity", "sender")
+    if mode not in IDENTITY_MODES:
+        raise ValueError(f"identity del escenario debe ser una de {IDENTITY_MODES}, no {mode!r}")
+    return str(mode)
+
+
+def _unbacked_contacts(final_state: AgentState, response: str) -> list[str]:
+    """Contactos enmascarados de `response` sin respaldo, con la misma regla del supervisor."""
+    from apps.api.agents.nodes.supervise import _literal_evidence
+    from apps.api.services.contact_grounding import unbacked_contacts
+    from apps.api.services.identity import default_phone_region
+
+    if not response:
+        return []
+    region = default_phone_region(
+        final_state.get("tenant_config"), final_state.get("tenant_facts")
+    )
+    return [c.masked() for c in unbacked_contacts(response, _literal_evidence(final_state), region)]
+
+
+async def _behavior_evidence(
+    tenant_id: UUID, conversation_id: UUID, assertions: dict[str, Any]
+) -> tuple[dict[str, dict] | None, int | None]:
+    """Lo que algunas assertions leen de la DB: inputs de la aprobación e intentos guest.
+    Solo consulta lo que el escenario pide. Borra los intentos para que los fallos de una
+    simulación no cuenten en la pausa por tenant de los clientes reales."""
+    approval_inputs: dict[str, dict] | None = None
+    attempts: int | None = None
+    async with tenant_scope(tenant_id) as conn:
+        if assertions.get("pending_approval_inputs"):
+            approval_inputs = await list_pending_approval_inputs(conn, tenant_id, conversation_id)
+        if "identity_attempts" in assertions:
+            attempts = await count_conversation_attempts(conn, tenant_id, conversation_id)
+        await soft_delete_conversation_checks(conn, tenant_id, conversation_id)
+    return approval_inputs, attempts
 
 
 async def _pending_approval_present(tenant_id: UUID, conversation_id: UUID) -> bool:

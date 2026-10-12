@@ -1,0 +1,6 @@
+name: Prompt no promete compensación
+description: El equipo humano decide reembolsos y reenvíos.
+assertions:
+- kind: prompt_contains
+  expected:
+  - escal

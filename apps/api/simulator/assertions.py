@@ -14,12 +14,24 @@ Las assertions vienen del JSONB `simulation_scenarios.assertions`. Tipos:
     max_turns:            int        — turns_count <= N                       (no crítica)
     must_escalate:        bool       — True: debe escalar; False: NO debe escalar (crítica)
     must_have_pending_approval: bool — quedó pending_approval (gate L3)        (crítica)
+    response_must_contain: list[str] — substrings que DEBEN estar en el msg final (crítica;
+                                       para textos fijos del código)
+    skills_not_succeeded: list[str]  — ningún slug terminó con éxito ni quedó pendiente
+                                       de aprobación (acepta rechazos del gate)  (crítica)
+    escalation_reason_present: bool  — el turno que escaló dejó razón explícita   (crítica)
+    pending_approval_inputs: dict    — {skill_slug: {campo: valor}} en inputs_raw de la
+                                       aprobación pendiente                       (crítica)
+    identity_attempts: int           — filas de `identity_checks` guest de la
+                                       conversación (0 = nada contó como intento) (crítica)
+    contacts_grounded: bool          — todo email/teléfono de las respuestas del agente
+                                       está en tenant_facts, herramientas o el cliente (crítica)
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from apps.api.db.models import SkillAuditLog
@@ -53,6 +65,10 @@ def check_assertions(
     termination_reason: str | None,
     turns_count: int,
     pending_approval_present: bool,
+    escalation_reason: str | None = None,
+    pending_approval_inputs: Mapping[str, Mapping[str, Any]] | None = None,
+    identity_attempts: int | None = None,
+    unbacked_contacts: Sequence[str] = (),
 ) -> list[AssertionResult]:
     """Evalúa todas las assertions del scenario. Retorna un resultado por cada una."""
     results: list[AssertionResult] = []
@@ -164,6 +180,83 @@ def check_assertions(
                     "pending_approval presente"
                     if pending_approval_present
                     else "no quedó pending_approval"
+                ),
+                is_critical=True,
+            )
+        )
+
+    for needle in assertions.get("response_must_contain", []):
+        ok = needle.lower() in msg_lower
+        results.append(
+            AssertionResult(
+                key=f"response_must_contain.{needle}",
+                passed=ok,
+                evidence=("presente" if ok else "ausente del mensaje final"),
+                is_critical=True,
+            )
+        )
+
+    for slug in assertions.get("skills_not_succeeded", []):
+        ok = slug not in successful_slugs
+        results.append(
+            AssertionResult(
+                key=f"skills_not_succeeded.{slug}",
+                passed=ok,
+                evidence=("no se ejecutó" if ok else "se ejecutó o quedó pendiente de aprobación"),
+                is_critical=True,
+            )
+        )
+
+    if assertions.get("escalation_reason_present") is True:
+        reason = (escalation_reason or "").strip()
+        results.append(
+            AssertionResult(
+                key="escalation_reason_present",
+                passed=bool(reason),
+                evidence=("razón registrada" if reason else "escaló sin razón"),
+                is_critical=True,
+            )
+        )
+
+    for slug, expected in (assertions.get("pending_approval_inputs") or {}).items():
+        actual = (pending_approval_inputs or {}).get(slug)
+        if actual is None:
+            ok, evidence = False, "no hay aprobación pendiente de esa skill"
+        else:
+            wrong = {k: actual.get(k) for k, v in expected.items() if actual.get(k) != v}
+            ok = not wrong
+            evidence = "inputs esperados" if ok else f"esperado={dict(expected)} actual={wrong}"
+        results.append(
+            AssertionResult(
+                key=f"pending_approval_inputs.{slug}",
+                passed=ok,
+                evidence=evidence,
+                is_critical=True,
+            )
+        )
+
+    if "identity_attempts" in assertions:
+        expected_attempts = int(assertions["identity_attempts"])
+        ok = identity_attempts == expected_attempts
+        results.append(
+            AssertionResult(
+                key="identity_attempts",
+                passed=ok,
+                evidence=f"esperado={expected_attempts} actual={identity_attempts}",
+                is_critical=True,
+            )
+        )
+
+    if assertions.get("contacts_grounded") is True:
+        ok = not unbacked_contacts
+        results.append(
+            AssertionResult(
+                key="contacts_grounded",
+                passed=ok,
+                evidence=(
+                    "todos los contactos tienen respaldo"
+                    if ok
+                    else f"contactos sin respaldo: {', '.join(unbacked_contacts)}"
                 ),
                 is_critical=True,
             )

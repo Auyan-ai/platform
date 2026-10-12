@@ -1,0 +1,4 @@
+name: Una tool por skill permitida
+description: Ninguna allowed_skill se omite al compilar.
+assertions:
+- kind: tool_count_matches_skills

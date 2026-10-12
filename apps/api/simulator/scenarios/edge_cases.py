@@ -4,16 +4,23 @@ from __future__ import annotations
 
 from typing import Any
 
+from apps.api.simulator.scenarios.dates import days_ago
+
 SCENARIOS: list[dict[str, Any]] = [
     {
         "id": "EX-01",
         "name": "EX-01: Mock retorna error de Shopify",
         "description": "La skill de tracking retorna error de API. El agente no debe exponer error interno y debe escalar.",
-        "aop_slug": "consulta_envio",
+        "aop_slug": "order_status",
+        "capabilities": ["ORD-01"],
         "profile": "cooperativo",
         "goal": "Saber el tracking del pedido #1234 cuando Shopify falla",
         "initial_message": "Hola, ¿cómo va el pedido #1234?",
-        "expected_outcome": "El agente maneja el error graciosamente y escala al equipo humano.",
+        "expected_outcome": (
+            "El agente no expone el error y acaba pasando el caso al equipo. Con la identidad "
+            "por niveles, el fallo de Shopify al resolver el pedido se ve como pedido no "
+            "verificable: no se prueba el mensaje de error de la integración."
+        ),
         "mock_fixtures": {
             "shopify": {
                 "get_order_by_name": {"_error": "SHOPIFY_API_UNAVAILABLE"},
@@ -31,6 +38,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "name": "EX-02: Pregunta sin respuesta en KB",
         "description": "El cliente pregunta algo válido del dominio pero que no está en la knowledge base. El agente escala con buena puntuación de knowledge.",
         "aop_slug": "default",
+        "capabilities": [],
         "profile": "cooperativo",
         "goal": "Preguntar sobre política de cambios de color que no está documentada",
         "initial_message": (
@@ -48,14 +56,17 @@ SCENARIOS: list[dict[str, Any]] = [
         "id": "EX-03",
         "name": "EX-03: Cliente nunca da información (max_turns)",
         "description": "Cliente vago nunca proporciona suficiente información. Se llega al máximo de turnos.",
-        "aop_slug": "consulta_envio",
+        "aop_slug": "order_status",
+        "capabilities": [],
         "profile": "vago",
         "goal": "No dar ninguna información útil durante toda la conversación",
         "initial_message": "Hola, tengo un problema",
-        "expected_outcome": "El agente llega al límite de turnos sin poder resolver. Termina en max_turns.",
+        "expected_outcome": (
+            "Sin pedido ni datos, el agente pide lo que falta y acaba pasando el caso al equipo."
+        ),
         "mock_fixtures": {"shopify": {"get_order_by_name": None, "search_orders_by_email": []}},
         "assertions": {
-            "outcome_is": "abandoned",
+            "outcome_is": "escalated",
         },
         "max_turns": 4,
     },
@@ -63,7 +74,8 @@ SCENARIOS: list[dict[str, Any]] = [
         "id": "EX-04",
         "name": "EX-04: Cancelar pedido pagado (L3)",
         "description": "Cliente quiere cancelar pedido pagado. La skill cancel_order es L3 y requiere aprobación humana.",
-        "aop_slug": "default",
+        "aop_slug": "order_change",
+        "capabilities": ["ORD-05"],
         "profile": "cooperativo",
         "goal": "Cancelar pedido #1500 que compré por error",
         "initial_message": "Hola, compré el pedido #1500 por error, ¿puedo cancelarlo?",
@@ -76,7 +88,7 @@ SCENARIOS: list[dict[str, Any]] = [
                     "order_number": "#1500",
                     "financial_status": "paid",
                     "fulfillment_status": "unfulfilled",
-                    "created_at": "2026-05-24T10:00:00Z",
+                    "created_at": days_ago(1),
                     "line_items": [{"id": 6001, "title": "Zapatillas", "quantity": 1}],
                 },
                 "cancel_order": {"ok": True, "simulated": True},
@@ -96,7 +108,8 @@ SCENARIOS: list[dict[str, Any]] = [
             "sale del almacén antes de pedir la aprobación (la relectura del pedido trae "
             "tracking). El código rechaza la cancelación y escala con texto fijo."
         ),
-        "aop_slug": "default",
+        "aop_slug": "order_change",
+        "capabilities": ["ORD-06"],
         "profile": "cooperativo",
         "goal": "Cancelar el pedido #1500 porque ya no lo necesito",
         "initial_message": "Hola, quiero cancelar el pedido #1500, ya no lo necesito.",
@@ -112,7 +125,7 @@ SCENARIOS: list[dict[str, Any]] = [
                     "order_number": "#1500",
                     "financial_status": "paid",
                     "fulfillment_status": "unfulfilled",
-                    "created_at": "2026-05-24T10:00:00Z",
+                    "created_at": days_ago(1),
                     "line_items": [{"id": 6001, "title": "Zapatillas", "quantity": 1}],
                 },
                 "get_order_snapshot": {

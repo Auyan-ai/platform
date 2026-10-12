@@ -127,8 +127,19 @@ def _state(channel: str, evidence: dict[str, Any] | None, **extra: Any) -> dict[
         (_state("whatsapp", {"sender_phone": "+34600111222"}), (None, "+34600111222")),
         (_state("whatsapp", None), (None, None)),
         (_state("chat", None, simulation_mode=True), ("ana@example.com", None)),
+        (
+            _state("chat", None, simulation_mode=True, simulation_identity="chat"),
+            (None, None),
+        ),
     ],
-    ids=["zendesk_correo", "zendesk_sin_evidencia", "whatsapp", "whatsapp_solo_bsuid", "simulador"],
+    ids=[
+        "zendesk_correo",
+        "zendesk_sin_evidencia",
+        "whatsapp",
+        "whatsapp_solo_bsuid",
+        "simulador",
+        "simulador_chat",
+    ],
 )
 def test_skill_context_only_carries_the_verified_contact(
     state: dict[str, Any], expected: tuple[str | None, str | None]

@@ -1,4 +1,0 @@
-name: "tool_definitions coincide con allowed_skills"
-description: "Cada skill declarada debe tener su tool_definition — ni más ni menos"
-assertions:
-  - kind: tool_count_matches_skills

@@ -1,0 +1,7 @@
+name: Puede marcar la incidencia
+description: tag_order y add_order_note dejan contexto al equipo.
+assertions:
+- kind: skills_include
+  expected:
+  - shopify.tag_order
+  - shopify.add_order_note

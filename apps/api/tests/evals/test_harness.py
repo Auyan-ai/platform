@@ -30,7 +30,7 @@ AOP_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 # ── Fixtures AOP de referencia ────────────────────────────────────────────────
 
 GOOD_CE_FRONTMATTER = {
-    "slug": "consulta_envio",
+    "slug": "order_status",
     "name": "Consulta de Envío",
     "allowed_skills": ["shopify.list_my_orders", "shopify.get_order_status"],
     "required_data": ["email del cliente"],
@@ -89,8 +89,8 @@ def _mock_registry(slugs: list[str]) -> MagicMock:
 # ── load_fixtures ─────────────────────────────────────────────────────────────
 
 
-def test_load_fixtures_consulta_envio_returns_8():
-    fixtures = load_fixtures("consulta_envio")
+def test_load_fixtures_order_status_returns_8():
+    fixtures = load_fixtures("order_status")
     assert len(fixtures) == 8
 
 
@@ -105,7 +105,7 @@ def test_load_fixtures_unknown_slug_returns_empty():
 
 
 def test_load_fixtures_have_assertions():
-    fixtures = load_fixtures("consulta_envio")
+    fixtures = load_fixtures("order_status")
     for f in fixtures:
         assert len(f.assertions) >= 1, f"Fixture '{f.name}' no tiene aserciones"
 
@@ -120,7 +120,7 @@ def good_aop_ce():
 
 @pytest.fixture
 def good_compiled_ce(good_aop_ce):
-    """CompiledAOP de un buen AOP de consulta_envio."""
+    """CompiledAOP de un buen AOP de order_status."""
     with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry(
         ["shopify.list_my_orders", "shopify.get_order_status"]
     ).side_effect):
@@ -323,7 +323,7 @@ def test_run_eval_good_aop_passes_gate():
 def test_run_eval_bad_aop_fails_gate():
     """AOP sin skills, sin name, sin escalation_triggers → falla varios fixtures."""
     bad_frontmatter = {
-        "slug": "consulta_envio",
+        "slug": "order_status",
         "allowed_skills": [],  # falta list_my_orders, get_order_status
         "max_tool_iterations": 1,  # < 3
         "confidence_threshold": 0.70,
@@ -349,3 +349,45 @@ def test_run_eval_uses_default_tenant_config_when_none():
     with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry([]).side_effect):
         result = run_eval(aop)  # sin tenant_config
     assert result.total_fixtures == 5
+
+
+# ── Cobertura de fixtures sobre los AOPs canónicos ────────────────────────────
+
+
+def _canonical_entries() -> list[dict]:
+    import apps.api.skills.shopify  # noqa: F401 — registra las skills
+    from apps.api.aops.canonical import CANONICAL_AOPS
+
+    return list(CANONICAL_AOPS)
+
+
+@pytest.mark.parametrize("entry", _canonical_entries(), ids=lambda e: e["slug"])
+def test_every_canonical_aop_meets_the_promote_gate(entry: dict):
+    """El promote gate busca fixtures por slug. Un AOP canónico sin fixtures, o con
+    fixtures que ya no lo describen, no se puede promover (deuda de la s84)."""
+    from apps.api.aops.canonical import _build_raw_source
+
+    fm = entry["frontmatter"]
+    aop = AopWithContent(
+        id=AOP_ID,
+        tenant_id=TENANT_ID,
+        slug=entry["slug"],
+        workspace="production",
+        current_version=1,
+        yaml_frontmatter=fm,
+        body_markdown=entry["body"],
+        raw_source=_build_raw_source(fm, entry["body"]),
+    )
+    result = run_eval(aop, make_tenant_configuration())
+    failed = [f.fixture_name for f in result.fixture_results if not f.passed]
+    assert result.total_fixtures > 0, f"{aop.slug}: sin fixtures"
+    assert not failed, f"{aop.slug}: fallan {failed}"
+    assert result.meets_gate
+
+
+def test_every_fixture_directory_is_a_canonical_slug():
+    from apps.api.evals.harness import FIXTURES_DIR
+
+    canonical = {e["slug"] for e in _canonical_entries()}
+    on_disk = {p.name for p in FIXTURES_DIR.iterdir() if p.is_dir()}
+    assert on_disk == canonical
