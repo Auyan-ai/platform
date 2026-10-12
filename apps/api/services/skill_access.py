@@ -35,11 +35,18 @@ def skill_visible(skill_cls: type[Skill], identity: IdentityContext) -> bool:
 
 
 def visible_skills(
-    slugs: list[str], tool_permissions: dict[str, Any], identity: IdentityContext
+    slugs: list[str],
+    tool_permissions: dict[str, Any],
+    identity: IdentityContext,
+    *,
+    commerce: bool = False,
 ) -> list[str]:
     """Las `slugs` del AOP que el LLM puede ver: encendidas, registradas y permitidas
-    por la identidad. Conserva el orden."""
+    por la identidad. Conserva el orden. Con `commerce`, suma las skills `core` del
+    sistema (la de respaldo del nivel `guest`) solo si el AOP tiene alguna skill de pedido
+    y el turno aún no tiene ningún grant: en el resto de turnos no aparece."""
     visible: list[str] = []
+    has_order_skill = False
     for slug in slugs:
         if not skill_enabled(tool_permissions.get(slug)):
             continue
@@ -48,8 +55,11 @@ def visible_skills(
         except ValueError:
             logger.warning("allowed_skill_not_in_registry: %s", slug)
             continue
+        has_order_skill = has_order_skill or skill_cls.identity_scope == "order"
         if skill_visible(skill_cls, identity):
             visible.append(slug)
+    if commerce and has_order_skill and not identity.has_grant():
+        visible.extend(s for s in SkillRegistry.core_slugs() if s not in visible)
     return visible
 
 

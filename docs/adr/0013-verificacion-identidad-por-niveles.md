@@ -348,6 +348,24 @@ mensajes fijos de ADR 0010.
 La identidad unificada de la memoria cross-canal sirve para **recordar**, no para
 **autorizar**. Enlazar dos perfiles nunca añade grants.
 
+### Notas de implementación (PR-3, nivel `guest`)
+
+- `identity_checks` persiste solo `granted`, `order_not_found` y `contact_mismatch`. El bloqueo
+  por conversación y la pausa del tenant se calculan contando esos fallos, así que no hay filas
+  `locked` ni `paused` (contarlas como fallo habría alargado la pausa por sí sola). La pausa dura
+  15 minutos desde el último fallo del tenant, mientras haya 50 o más en la última hora.
+- El email que teclea el visitante de un chat se guarda en `messages.metadata.provided_contact`
+  (lo escribe el intake cuando el origen no verifica el email). Es dato aportado: no crea grants
+  `verified`.
+- `identity.check_order_contact` es una skill `core`: la ofrece el código a todo tenant con
+  commerce, sin AOP ni fila en `tenant_tool_permissions`.
+- Sin patrón propio del tenant, un número es referencia de pedido solo con `#` o junto a una palabra clave (pedido, orden, order, compra, nº, número). Un año, un código postal o una talla no son un intento; lo ambiguo lo recoge la skill de respaldo.
+- `identity.check_order_contact` se ofrece solo si el AOP tiene alguna skill de pedido y el turno aún no tiene ningún grant.
+- Si `identity_checks` falla (lectura o escritura), el turno sigue: guest no se concede, el remitente `verified` queda intacto y el error se loguea, se traza y va al audit log.
+- Un error del adapter de commerce al comprobar un par no se registra ni cuenta como fallo.
+- Con un remitente `verified`, un par fallido no cierra el turno con texto fijo (cuenta para los
+  límites). El simulador no usa `guest`.
+
 ## Alternativas consideradas
 
 | Alternativa | Por qué se descartó |

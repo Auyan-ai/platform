@@ -72,7 +72,7 @@ DEFAULT_MAX_TOOL_ITERATIONS = 5
 # (load_conversation.conversation_history / end_customer) a un SaaS de terceros.
 # NUNCA agregar aquí keys que carguen secretos: commerce_integration_ctx, tenant_config.
 _NODE_OUTPUT_KEYS: dict[str, list[str]] = {
-    "resolve_identity": ["identity_summary"],
+    "resolve_identity": ["identity_summary", "identity_error"],
     "select_aop": ["aop_slug", "aop_version", "intent_confidence"],
     "reason": ["decision", "confidence", "pending_tool_call", "agent_response"],
     "execute_skill": ["tool_results", "pending_approval_id", "escalation_reason"],
@@ -162,6 +162,15 @@ def _traced(
     return wrapper
 
 
+def route_after_resolve_identity(state: AgentState) -> str:
+    """Routing tras `resolve_identity`: un texto fijo de identidad cierra el turno sin LLM."""
+    if state.get("error"):
+        return "handle_error"
+    if state.get("decision") == "respond" and state.get("agent_response"):
+        return "respond"
+    return "select_aop"
+
+
 def route_after_reason(state: AgentState) -> str:
     """Routing tras `reason`. Cinco destinos posibles (incluye supervise)."""
     if state.get("error"):
@@ -230,6 +239,9 @@ def route_after_execute_skill(state: AgentState) -> str:
         return "handle_error"
     if state.get("pending_approval_id") or state.get("decision") == "escalate":
         return "escalate"
+    if state.get("decision") == "respond" and state.get("agent_response"):
+        # Texto fijo de identidad (`identity.check_order_contact`): no vuelve al LLM.
+        return "respond"
     return "reason"
 
 
@@ -259,7 +271,11 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
     graph.add_edge(START, "load_tenant_context")
     graph.add_edge("load_tenant_context", "load_conversation")
     graph.add_edge("load_conversation", "resolve_identity")
-    graph.add_edge("resolve_identity", "select_aop")
+    graph.add_conditional_edges(
+        "resolve_identity",
+        route_after_resolve_identity,
+        {"select_aop": "select_aop", "respond": "respond", "handle_error": "handle_error"},
+    )
     graph.add_edge("select_aop", "retrieve_knowledge")
     graph.add_edge("retrieve_knowledge", "reason")
 
@@ -292,6 +308,7 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
         route_after_execute_skill,
         {
             "reason": "reason",
+            "respond": "respond",
             "escalate": "escalate",
             "handle_error": "handle_error",
         },

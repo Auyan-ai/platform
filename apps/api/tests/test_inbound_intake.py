@@ -382,4 +382,8 @@ async def test_intake_stores_identity_evidence_by_channel_and_origin(
     )
     stored = intake_db["insert_message"].await_args.kwargs["metadata"]
     assert stored.get("identity_evidence") == expected
-    assert {k: v for k, v in stored.items() if k != "identity_evidence"} == metadata
+    # Sin remitente verificado, el email tecleado queda como dato aportado (nivel guest).
+    provided = stored.get("provided_contact")
+    assert provided == ({"email": email} if expected is None and email else None)
+    derived = {"identity_evidence", "provided_contact"}
+    assert {k: v for k, v in stored.items() if k not in derived} == metadata

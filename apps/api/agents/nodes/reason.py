@@ -154,6 +154,7 @@ def _visible_skills(state: AgentState) -> list[str]:
         state.get("allowed_skills") or [],
         state.get("tool_permissions") or {},
         IdentityContext.from_state(state.get("identity")),
+        commerce=bool(state.get("commerce_integration_ctx") or state.get("simulation_mode")),
     )
 
 
