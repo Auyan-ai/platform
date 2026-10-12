@@ -66,6 +66,7 @@ def _graph() -> MagicMock:
     graph.ainvoke = AsyncMock(
         return_value={
             "agent_response": "Tu pedido llega mañana.",
+            "system_prompt": "Eres el agente.",
             "decision": "respond",
             "tokens_in": 10_000,
             "tokens_out": 500,
@@ -107,6 +108,7 @@ def finalize(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     monkeypatch.setattr(runner, "_pending_approval_present", AsyncMock(return_value=False))
     monkeypatch.setattr(runner, "finalize_simulation_run", finalize_mock)
     monkeypatch.setattr(runner, "soft_delete_conversation", AsyncMock())
+    monkeypatch.setattr(runner, "soft_delete_conversation_checks", AsyncMock(return_value=0))
     return finalize_mock
 
 
