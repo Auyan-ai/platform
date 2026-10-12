@@ -42,7 +42,7 @@ fi
 # Browser sessions of the dashboard (a human logs in once per profile; see SKILL.md)
 for prof in profile profile-tenant; do
   who="super_admin"; [ "$prof" = "profile-tenant" ] && who="tenant_admin (VERIFY_PROFILE=tenant)"
-  if [ -f "$VERIFY_DIR/$prof/.logged-in" ]; then ok "sesión de dashboard $who guardada ($prof/)"; else warn "sin sesión de dashboard $who: la persona debe correr web-login.sh${prof/profile-tenant/ con VERIFY_PROFILE=tenant}"; fi
+  if [ -f "$VERIFY_DIR/$prof/.logged-in" ]; then ok "sesión de dashboard $who guardada ($prof/)"; else warn "sin sesión de dashboard $who: corre web-session.sh${prof/profile-tenant/ con VERIFY_PROFILE=tenant} (los drivers lo hacen solos)"; fi
 done
 
 exit $bad

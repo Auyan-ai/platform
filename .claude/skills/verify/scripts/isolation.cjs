@@ -9,7 +9,7 @@ if (!own || !foreign) { console.error('uso: isolation.cjs <conversación propia>
   const c = await openCtx({ headless: true });
   const ck = (await c.cookies()).filter((x) => /auth-token/.test(x.name)).sort((a, b) => a.name.localeCompare(b.name));
   await c.close();
-  if (!ck.length) { console.error('sin sesión: corre web-login.sh con este perfil'); process.exit(3); }
+  if (!ck.length) { console.error('sin sesión: corre web-session.sh con este perfil'); process.exit(3); }
   let raw = ck.map((x) => x.value).join('');
   if (raw.startsWith('base64-')) raw = Buffer.from(raw.slice(7), 'base64url').toString();
   const tok = JSON.parse(decodeURIComponent(raw)).access_token;

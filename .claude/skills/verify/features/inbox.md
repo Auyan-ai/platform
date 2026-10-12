@@ -18,7 +18,7 @@ El equipo interno (super_admin) o el tenant_admin ve las conversaciones del tena
 
 Preconditions:
 
-- `doctor.sh` sin `FAIL`, web local arriba (`up.sh web`), `profile/.logged-in` existe (Kenny corrió `web-login.sh`).
+- `doctor.sh` sin `FAIL`, web local arriba (`up.sh web`), `profile/.logged-in` existe (`web-session.sh`; los drivers lo corren solos).
 - Existe al menos una conversación de la corrida de `agent-respond` / `agent-escalate`.
 
 - **Lista.** `node .claude/skills/verify/scripts/web-shot.cjs /tenants/683246c2-10ce-4f6c-a299-5053f32f8c01/conversations inbox-list`. El `.txt` contiene el h1 `Conversaciones` y la conversación de `VERIFY bot` con su política de devoluciones; 0 errores de consola.
@@ -27,7 +27,7 @@ Preconditions:
 
 ## Gotchas
 
-- Sin sesión, todo redirige a `/login`: `web-shot.cjs` sale con código 3. No intentes escribir credenciales; pídele a Kenny que corra `web-login.sh`.
+- Sin sesión, todo redirige a `/login`: `web-shot.cjs` sale con código 3. No intentes escribir credenciales: corre `web-session.sh`; si falla, díselo a Kenny.
 - El detalle usa TanStack Query: espera a que desaparezcan los esqueletos de carga antes de la captura (pasa un selector a `web-shot.cjs`).
 - Los adjuntos (foto/audio) usan URL firmada de 5 min; no los cachees en la evidencia.
 - Probado el 2026-10-11 con `kenny+admin@auyan.es` (rutas `/tenants/...`): lista (`Conversaciones`, con filtros Todas/Abiertas/Escaladas/…), detalle (mensajes cliente/Agente IA + panel `Agent reasoning`, 8 events) y `Escalaciones` (Pendiente / Tomar / Ver conversación). Las rutas `/clients/...` **no** se abren con super_admin (ver `knowledge-facts.md`).

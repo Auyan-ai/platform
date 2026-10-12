@@ -63,10 +63,12 @@ Tablas útiles: `conversations`, `messages`, `agent_reasoning_events` (seq/phase
 `skill_audit_log`, `tenant_usage_daily`, `aops`, `tenant_facts`, `knowledge_base_chunks`.
 
 ### Dashboard (Playwright)
-El login es email+contraseña de Supabase y **el agente no escribe contraseñas**. Una sola vez, a mano por Kenny:
+El login es email+contraseña de Supabase y **el agente no escribe contraseñas**. La sesión se crea sola, sin contraseña, solo contra staging:
 ```bash
-.claude/skills/verify/scripts/web-login.sh      # abre Chromium visible; Kenny inicia sesión; se guarda en profile/
+.claude/skills/verify/scripts/web-session.sh                      # super_admin (kenny+admin@auyan.es) -> profile/
+VERIFY_PROFILE=tenant .claude/skills/verify/scripts/web-session.sh   # tenant_admin de Marea (kennyrmv@gmail.com) -> profile-tenant/
 ```
+`web-session.cjs` usa la `SUPABASE_SERVICE_ROLE_KEY` de `.env.staging`: admin `generate_link` -> canje del `token_hash` en `/auth/v1/verify` -> escribe la cookie `sb-<ref>-auth-token` en el perfil. No pasa por `/auth/callback` (que cierra la sesión del super_admin a propósito desde #287/#311), así que no cambia ninguna regla de la web ni del API y no abre nada en producción. Se niega si `SUPABASE_URL` o la service role no son del proyecto `johidurhcobdkpvlnowl`, y nunca imprime token, enlace ni key (sí el usuario usado y su rol). `web-shot.cjs` y los demás drivers lo invocan solos al caer en `/login` y repiten el comando una vez; solo salen con código 3 si la renovación falla (¿staging pausado? ¿usuario borrado?). `web-login.sh` (login manual de Kenny) queda como último recurso.
 Hay dos perfiles de navegador, uno por rol. Sin variable es el **super_admin** (`profile/`, rutas `/tenants/...`). Con
 `VERIFY_PROFILE=tenant` es un **tenant_admin** de Marea (`profile-tenant/`, rutas `/clients/...`):
 ```bash
@@ -81,8 +83,7 @@ Después, el agente conduce con la sesión guardada:
 node .claude/skills/verify/scripts/web-shot.cjs /tenants/683246c2-10ce-4f6c-a299-5053f32f8c01/conversations conversaciones
 node .claude/skills/verify/scripts/web-shot.cjs <ruta> <nombre> '<selector a esperar>'
 ```
-Escribe `evidence/<ts>-<nombre>.png` y `.txt` (texto visible + errores de consola). Sale con código 3 si la
-sesión expiró (volver a pedirle `web-login.sh` a Kenny). Playwright lo instala mise (`~/.local/share/mise/installs/npm-playwright`)
+Escribe `evidence/<ts>-<nombre>.png` y `.txt` (texto visible + errores de consola). Si la sesión expiró la renueva sola (`web-session.cjs`); sale con código 3 solo si la renovación falla. Playwright lo instala mise (`~/.local/share/mise/installs/npm-playwright`)
 y espera un build de Chromium más nuevo que el del caché; `_pw.cjs` usa el Chromium que ya hay en `~/.cache/ms-playwright`
 (`PW_CHROMIUM` lo sobreescribe). No descargues browsers sin avisar.
 Rutas super_admin: `/tenants/<id>/{conversations,escalations,approvals,playbook,knowledge,reports,emails,aops,proposals,simulator}`;
@@ -133,6 +134,7 @@ Nunca mates por nombre de proceso (`pkill uvicorn`/`next`): puede haber instanci
 ## Mapa de features
 
 `features/README.md` indexa lo verificable (agente → respuesta, escalado, inbox, aprobaciones L3, conocimiento/hechos).
+Tests de las salvaguardas del mint: `node --test .claude/skills/verify/scripts/web-session.test.cjs`.
 `isolation.cjs <conv propia> <conv ajena>` prueba el aislamiento de tenant en la API con el token del tenant_admin.
 `web-reject-approval.cjs <tenantId> "<motivo>"` rechaza la única aprobación L3 pendiente (nunca aprueba; ver `features/approvals-l3.md`).
 `web-facts.cjs` (editar un hecho), `web-kb-submit.cjs` (enviar KB como cliente) y `web-kb-review.cjs` (aprobar/rechazar KB como super_admin) **modifican Marea**: solo con OK de Kenny y dejándolo como estaba (ver `features/knowledge-facts.md`).

@@ -6,7 +6,7 @@ Fuente mantenida para verificar el comportamiento de cara al usuario. Léelo ant
 
 - Entorno: **staging real** (Supabase `johidurhcobdkpvlnowl`, LLM real) con código local. Tenant `marea-studio` (id `683246c2-10ce-4f6c-a299-5053f32f8c01`). Ver `../SKILL.md`.
 - `scripts/doctor.sh` sin `FAIL`; API local en `:8000` arrancada con `scripts/up.sh api` (worker de cola apagado).
-- Para las features de dashboard: `scripts/up.sh web` y una sesión guardada por Kenny (`scripts/web-login.sh`) con `kenny+admin@auyan.es` (rutas `/tenants/...`) y, para `/clients/...`, otra con `VERIFY_PROFILE=tenant` (`kennyrmv@gmail.com`, tenant_admin de Marea). **La web necesita la API local arriba.** Sin sesión, esas features **no son verificables**: repórtalo, no las des por probadas por otra vía.
+- Para las features de dashboard: `scripts/up.sh web` y una sesión del dashboard. Se crea sola con `scripts/web-session.sh` (sin contraseña, solo staging; los drivers la renuevan al ver `/login`): `kenny+admin@auyan.es` super_admin (rutas `/tenants/...`) y, con `VERIFY_PROFILE=tenant`, `kennyrmv@gmail.com` tenant_admin de Marea (rutas `/clients/...`). **La web necesita la API local arriba.** Si la renovación falla, esas features **no son verificables**: repórtalo, no las des por probadas por otra vía.
 - Nunca conduzcas una instancia que no arrancó esta corrida.
 
 ## Convenciones
