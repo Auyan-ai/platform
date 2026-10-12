@@ -1,0 +1,421 @@
+"""Nivel `guest` (ADR 0013 §3 y §4): número de pedido + email o teléfono del pedido.
+
+Todo es código y está probado: los parsers sacan los datos del texto del cliente, el HMAC
+compara el contacto con los claims del pedido y los contadores de `identity_checks`
+aplican los límites contra la enumeración. El LLM no decide nada de esto.
+"""
+
+from __future__ import annotations
+
+import hmac
+import json
+import logging
+import re
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any, Literal
+from uuid import UUID
+
+import asyncpg
+import phonenumbers
+from apps.api.db.identity_checks import (
+    count_conversation_failures,
+    insert_guest_check,
+    list_active_guest_grants,
+    list_attempt_keys,
+    tenant_failure_stats,
+)
+from apps.api.services.identity import (
+    DEFAULT_PHONE_REGION,
+    ClaimHash,
+    Grant,
+    email_claim,
+    phone_claim,
+)
+from apps.api.services.identity_messages import identity_message
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+if TYPE_CHECKING:
+    from apps.api.skills.base import SkillContext
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_ORDER_PATTERN = r"#?\d{4,}"
+MAX_ITEMS_PER_KIND = 10
+PROVIDED_CONTACT_KEY = "provided_contact"
+
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+
+
+class GuestPolicy(BaseModel):
+    """Límites del nivel `guest`. Salen de `tenant_configurations.extra["identity_policy"]`."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    guest_max_failures_per_conversation: int = Field(default=5, ge=1)
+    guest_max_failures_per_tenant_hour: int = Field(default=50, ge=1)
+    max_pairs_per_message: int = Field(default=3, ge=1)
+    grant_ttl_hours: int = Field(default=24, ge=1)
+    tenant_pause_minutes: int = Field(default=15, ge=1)
+
+
+def guest_policy(tenant_config: Mapping[str, Any] | None) -> GuestPolicy:
+    raw = ((tenant_config or {}).get("extra") or {}).get("identity_policy")
+    if not isinstance(raw, Mapping):
+        return GuestPolicy()
+    try:
+        return GuestPolicy.model_validate(raw)
+    except ValidationError:
+        logger.warning("identity_policy_invalid: se usan los límites por defecto")
+        return GuestPolicy()
+
+
+# ─── Datos aportados (parsers) ────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Contact:
+    """Email (casefold) o teléfono (E.164) aportado por el cliente."""
+
+    kind: Literal["email", "phone"]
+    value: str
+
+    def claim(self, salt: str, region: str = DEFAULT_PHONE_REGION) -> ClaimHash | None:
+        if self.kind == "email":
+            return email_claim(salt, self.value)
+        return phone_claim(salt, self.value, region)
+
+    def masked(self) -> str:
+        """Iniciales y dominio: `k***@h***.com`, o los dos últimos dígitos de un teléfono."""
+        if self.kind == "phone":
+            return "***" + self.value[-2:]
+        local, _, domain = self.value.partition("@")
+        host, _, tld = domain.rpartition(".")
+        return f"{local[:1]}***@{host[:1]}***.{tld}"
+
+
+@dataclass(frozen=True)
+class ProvidedData:
+    order_refs: tuple[str, ...] = ()
+    contacts: tuple[Contact, ...] = ()
+
+
+def normalize_order_ref(value: str) -> str:
+    return value.strip().lstrip("#").strip()
+
+
+def _compile_order_pattern(pattern: str | None) -> re.Pattern[str]:
+    if pattern:
+        try:
+            return re.compile(pattern)
+        except re.error:
+            logger.warning("order_name_pattern_invalid: se usa el patrón por defecto")
+    return re.compile(DEFAULT_ORDER_PATTERN)
+
+
+def _unique(items: Iterable[Any]) -> list[Any]:
+    return list(dict.fromkeys(items))
+
+
+def extract_provided(
+    texts: Sequence[str],
+    *,
+    region: str = DEFAULT_PHONE_REGION,
+    order_pattern: str | None = None,
+    extra_emails: Sequence[str] = (),
+) -> ProvidedData:
+    """Pedidos, emails y teléfonos de los textos del cliente (el más reciente primero).
+
+    Regex para emails, `phonenumbers` para teléfonos y el patrón del tenant para pedidos.
+    Los dígitos que ya son parte de un email o un teléfono no cuentan como pedido.
+    """
+    pattern = _compile_order_pattern(order_pattern)
+    orders: list[str] = []
+    contacts: list[Contact] = []
+    for text in texts:
+        spans: list[tuple[int, int]] = []
+        for match in _EMAIL_RE.finditer(text):
+            contacts.append(Contact("email", match.group(0).casefold()))
+            spans.append(match.span())
+        for phone_match in phonenumbers.PhoneNumberMatcher(text, region):
+            e164 = phonenumbers.format_number(
+                phone_match.number, phonenumbers.PhoneNumberFormat.E164
+            )
+            contacts.append(Contact("phone", e164))
+            spans.append((phone_match.start, phone_match.end))
+        remaining = list(text)
+        for start, end in spans:
+            remaining[start:end] = " " * (end - start)
+        for match in pattern.finditer("".join(remaining)):
+            ref = normalize_order_ref(match.group(0))
+            if ref:
+                orders.append(ref)
+    contacts.extend(Contact("email", e.strip().casefold()) for e in extra_emails if e.strip())
+    return ProvidedData(
+        order_refs=tuple(_unique(orders)[:MAX_ITEMS_PER_KIND]),
+        contacts=tuple(_unique(contacts)[:MAX_ITEMS_PER_KIND]),
+    )
+
+
+def provided_from_history(
+    history: Sequence[Mapping[str, Any]] | None,
+    *,
+    region: str,
+    order_pattern: str | None,
+) -> ProvidedData:
+    """Datos aportados en los mensajes del cliente de la conversación, el último primero.
+
+    Suma el email que el intake guardó en `metadata.provided_contact` (el que tecleó el
+    visitante de un chat): vale como dato aportado, nunca como remitente.
+    """
+    texts: list[str] = []
+    emails: list[str] = []
+    for message in reversed([m for m in history or [] if m.get("role") == "customer"]):
+        texts.append(str(message.get("content") or ""))
+        provided = (message.get("metadata") or {}).get(PROVIDED_CONTACT_KEY)
+        if isinstance(provided, Mapping) and isinstance(provided.get("email"), str):
+            emails.append(provided["email"])
+    return extract_provided(texts, region=region, order_pattern=order_pattern, extra_emails=emails)
+
+
+def build_provided_contact(email: str | None) -> dict[str, str] | None:
+    """`messages.metadata.provided_contact` del intake: el email tecleado, sin verificar."""
+    if email and email.strip():
+        return {"email": email.strip()}
+    return None
+
+
+# ─── Pares y claves de intento ────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Pair:
+    order_ref: str
+    contact: Contact
+
+
+def attempt_key(salt: str, order_ref: str, contact_claim: ClaimHash) -> str:
+    digest = hmac.new(
+        salt.encode(), f"attempt:{order_ref.casefold()}:{contact_claim}".encode(), "sha256"
+    )
+    return digest.hexdigest()
+
+
+def candidate_pairs(provided: ProvidedData) -> list[Pair]:
+    return [Pair(o, c) for o in provided.order_refs for c in provided.contacts]
+
+
+def missing_data(provided: ProvidedData) -> list[str]:
+    """Qué falta para tocar pedidos: `order_number` y/o `contact`."""
+    missing: list[str] = []
+    if not provided.order_refs:
+        missing.append("order_number")
+    if not provided.contacts:
+        missing.append("contact")
+    return missing
+
+
+# ─── Comprobación contra el pedido ────────────────────────────────────────────
+
+GuestOutcome = Literal["granted", "order_not_found", "contact_mismatch"]
+
+
+class OrderLookupError(Exception):
+    """El adapter de commerce falló: no sabemos si el pedido existe."""
+
+
+@dataclass(frozen=True)
+class GuestAttempt:
+    outcome: GuestOutcome
+    order: dict[str, Any] | None = None
+
+
+def can_lookup_orders(ctx: SkillContext) -> bool:
+    return ctx.commerce_mock is not None or ctx.integration_ctx is not None
+
+
+async def lookup_order(ctx: SkillContext, order_ref: str) -> dict[str, Any] | None:
+    """El pedido de la referencia vía el adapter de commerce. Lanza `OrderLookupError`."""
+    adapter: Any = ctx.commerce_mock
+    if adapter is None and ctx.integration_ctx is not None:
+        from apps.api.integrations.shopify import ShopifyAdapter
+
+        adapter = ShopifyAdapter()
+    if adapter is None:
+        raise OrderLookupError("no_commerce_adapter")
+    try:
+        order: dict[str, Any] | None = await adapter.get_order_by_name(
+            ctx.integration_ctx, order_ref
+        )
+        if not order:
+            order = await adapter.get_order(ctx.integration_ctx, order_ref)
+    except Exception as exc:
+        raise OrderLookupError(type(exc).__name__) from exc
+    return order or None
+
+
+async def attempt_guest(ctx: SkillContext, order_ref: str, contact: Contact) -> GuestAttempt:
+    """Resuelve el pedido y compara el contacto con sus claims, ambos hasheados.
+
+    Pedido inexistente y contacto equivocado son casos distintos solo para el registro
+    interno: al cliente y al LLM les llega el mismo texto fijo.
+    """
+    order = await lookup_order(ctx, order_ref)
+    if order is None or order.get("id") is None:
+        return GuestAttempt("order_not_found")
+    claim = contact.claim(ctx.claim_salt, ctx.phone_region)
+    if claim is None or claim not in ctx.order_claims(order):
+        return GuestAttempt("contact_mismatch")
+    return GuestAttempt("granted", order)
+
+
+GUEST_FACTS_HEADER = (
+    "Pedido verificado como invitado en esta conversación (número de pedido y contacto de la "
+    "compra coinciden). Úsalo directamente:"
+)
+
+
+def guest_facts(existing: str | None, orders: Sequence[Mapping[str, Any]]) -> str:
+    """`known_facts` con los pedidos ya proyectados que el invitado acaba de verificar."""
+    lines = [
+        f"- shopify.get_order_status: {json.dumps(order, ensure_ascii=False)}" for order in orders
+    ]
+    block = GUEST_FACTS_HEADER + "\n" + "\n".join(lines)
+    return "\n\n".join(part for part in (existing, block) if part)
+
+
+# ─── Una ronda de comprobaciones con límites ──────────────────────────────────
+
+RoundStatus = Literal["idle", "granted", "failed", "locked", "paused"]
+
+
+@dataclass(frozen=True)
+class GuestRound:
+    status: RoundStatus = "idle"
+    grants: tuple[Grant, ...] = ()
+    orders: tuple[dict[str, Any], ...] = ()
+    # Texto fijo que cierra el turno sin pasar por el LLM; None si el turno sigue.
+    reply: str | None = None
+
+
+async def load_guest_grants(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID, now: datetime | None = None
+) -> tuple[Grant, ...]:
+    rows = await list_active_guest_grants(conn, tenant_id, conversation_id, now or _now())
+    return tuple(
+        Grant("guest", "order_contact", order_id=r.order_id, valid_until=r.valid_until)
+        for r in rows
+    )
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+async def run_guest_checks(
+    conn: asyncpg.Connection,
+    ctx: SkillContext,
+    pairs: Sequence[Pair],
+    *,
+    policy: GuestPolicy,
+    tenant_facts: Mapping[str, Any] | None = None,
+    now: datetime | None = None,
+) -> GuestRound:
+    """Prueba los pares nuevos (como mucho `max_pairs_per_message`) y aplica los límites.
+
+    Cada par se prueba una vez por conversación. Con la conversación bloqueada o el
+    tenant en pausa no se consulta nada. Si ningún par concede y alguno falló, `reply`
+    es el texto fijo. Un error del adapter no cuenta como fallo: el par no se registra.
+    """
+    moment = now or _now()
+    tenant_id, conversation_id = UUID(ctx.tenant_id), UUID(ctx.conversation_id)
+    salt = ctx.claim_salt
+
+    keyed = {
+        attempt_key(salt, p.order_ref, claim): p
+        for p in pairs
+        if (claim := p.contact.claim(salt, ctx.phone_region)) is not None
+    }
+    if not keyed:
+        return GuestRound()
+    seen = await list_attempt_keys(conn, tenant_id, conversation_id)
+    fresh = [(k, p) for k, p in keyed.items() if k not in seen][: policy.max_pairs_per_message]
+    if not fresh:
+        return GuestRound()
+
+    conversation_failures = await count_conversation_failures(conn, tenant_id, conversation_id)
+    if conversation_failures >= policy.guest_max_failures_per_conversation:
+        logger.warning(
+            "guest_locked",
+            extra={"tenant_id": ctx.tenant_id, "conversation_id": ctx.conversation_id},
+        )
+        return GuestRound("locked", reply=identity_message("guest_locked", tenant_facts))
+    tenant_failures, latest = await tenant_failure_stats(
+        conn, tenant_id, moment - timedelta(hours=1)
+    )
+    pause = timedelta(minutes=policy.tenant_pause_minutes)
+    if (
+        tenant_failures >= policy.guest_max_failures_per_tenant_hour
+        and latest is not None
+        and latest > moment - pause
+    ):
+        logger.warning("guest_paused", extra={"tenant_id": ctx.tenant_id})
+        return GuestRound("paused", reply=identity_message("guest_paused", tenant_facts))
+
+    grants: list[Grant] = []
+    orders: list[dict[str, Any]] = []
+    failed = False
+    for key, pair in fresh:
+        if conversation_failures >= policy.guest_max_failures_per_conversation:
+            break
+        try:
+            attempt = await attempt_guest(ctx, pair.order_ref, pair.contact)
+        except OrderLookupError as exc:
+            logger.warning(
+                "guest_lookup_failed",
+                extra={"tenant_id": ctx.tenant_id, "error": str(exc)},
+            )
+            continue
+        claim = pair.contact.claim(salt, ctx.phone_region)
+        order_id = int(attempt.order["id"]) if attempt.order else None
+        valid_until = (
+            moment + timedelta(hours=policy.grant_ttl_hours) if attempt.order else None
+        )
+        inserted = await insert_guest_check(
+            conn,
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            outcome=attempt.outcome,
+            order_id=order_id,
+            claim_hashes=[claim] if claim and attempt.order else [],
+            attempt_key=key,
+            contact_masked=pair.contact.masked(),
+            valid_until=valid_until,
+        )
+        if not inserted:
+            continue
+        if attempt.order is not None:
+            grants.append(
+                Grant("guest", "order_contact", order_id=order_id, valid_until=valid_until)
+            )
+            orders.append(attempt.order)
+            continue
+        failed = True
+        conversation_failures += 1
+        tenant_failures += 1
+        logger.info(
+            "guest_check_failed",
+            extra={"tenant_id": ctx.tenant_id, "outcome": attempt.outcome},
+        )
+        if tenant_failures == policy.guest_max_failures_per_tenant_hour:
+            logger.error(
+                "guest_tenant_paused",
+                extra={"tenant_id": ctx.tenant_id, "failures": tenant_failures},
+            )
+
+    if grants:
+        return GuestRound("granted", tuple(grants), tuple(orders))
+    if failed:
+        return GuestRound("failed", reply=identity_message("guest_not_verified", tenant_facts))
+    return GuestRound()

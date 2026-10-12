@@ -5,6 +5,8 @@ Quién puede verlo lo decide el gate de `execute_skill` (ADR 0013), no la skill.
 
 from __future__ import annotations
 
+from typing import Any
+
 from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
@@ -71,6 +73,54 @@ _NOT_FOUND = OrderDetail(
 )
 
 
+def map_order_detail(raw: dict[str, Any]) -> OrderDetail:
+    """El pedido de Shopify proyectado a lo que ve el agente (nivel guest y verified igual)."""
+    raw_fulfillments = raw.get("fulfillments", [])
+    fulfillments = [
+        FulfillmentInfo(
+            status=f.get("status", ""),
+            tracking_number=f.get("tracking_number"),
+            tracking_url=(f.get("tracking_urls") or [None])[0] or f.get("tracking_url"),
+            tracking_company=f.get("tracking_company"),
+            shipment_status=f.get("shipment_status"),
+        )
+        for f in raw_fulfillments
+    ]
+    # Fecha de envío: created_at del primer fulfillment. Fecha de entrega:
+    # updated_at del fulfillment que el carrier marca como "delivered".
+    fulfilled_at = raw_fulfillments[0].get("created_at") if raw_fulfillments else None
+    delivered_at = next(
+        (
+            f.get("updated_at")
+            for f in raw_fulfillments
+            if f.get("shipment_status") == "delivered"
+        ),
+        None,
+    )
+    line_items = [map_line_item(li, raw) for li in raw.get("line_items", []) if "id" in li]
+    raw_address = raw.get("shipping_address") or None
+    shipping_address = (
+        ShippingAddressInfo(**{k: raw_address.get(k) for k in ShippingAddressInfo.model_fields})
+        if raw_address
+        else None
+    )
+    return OrderDetail(
+        found=True,
+        order_id=raw["id"],
+        order_number=raw.get("name") or raw.get("order_number"),
+        financial_status=raw.get("financial_status"),
+        fulfillment_status=raw.get("fulfillment_status"),
+        total=customer_money(raw, "total_price"),
+        total_in_shop_currency=shop_money_if_different(raw, "total_price"),
+        created_at=raw.get("created_at"),
+        fulfilled_at=fulfilled_at,
+        delivered_at=delivered_at,
+        fulfillments=fulfillments,
+        line_items=line_items,
+        shipping_address=shipping_address,
+    )
+
+
 @SkillRegistry.register
 class GetOrderStatus(Skill):
     slug = "shopify.get_order_status"
@@ -99,47 +149,4 @@ class GetOrderStatus(Skill):
         if raw is None:
             return _NOT_FOUND
 
-        raw_fulfillments = raw.get("fulfillments", [])
-        fulfillments = [
-            FulfillmentInfo(
-                status=f.get("status", ""),
-                tracking_number=f.get("tracking_number"),
-                tracking_url=(f.get("tracking_urls") or [None])[0] or f.get("tracking_url"),
-                tracking_company=f.get("tracking_company"),
-                shipment_status=f.get("shipment_status"),
-            )
-            for f in raw_fulfillments
-        ]
-        # Fecha de envío: created_at del primer fulfillment. Fecha de entrega:
-        # updated_at del fulfillment que el carrier marca como "delivered".
-        fulfilled_at = raw_fulfillments[0].get("created_at") if raw_fulfillments else None
-        delivered_at = next(
-            (
-                f.get("updated_at")
-                for f in raw_fulfillments
-                if f.get("shipment_status") == "delivered"
-            ),
-            None,
-        )
-        line_items = [map_line_item(li, raw) for li in raw.get("line_items", []) if "id" in li]
-        raw_address = raw.get("shipping_address") or None
-        shipping_address = (
-            ShippingAddressInfo(**{k: raw_address.get(k) for k in ShippingAddressInfo.model_fields})
-            if raw_address
-            else None
-        )
-        return OrderDetail(
-            found=True,
-            order_id=raw["id"],
-            order_number=raw.get("name") or raw.get("order_number"),
-            financial_status=raw.get("financial_status"),
-            fulfillment_status=raw.get("fulfillment_status"),
-            total=customer_money(raw, "total_price"),
-            total_in_shop_currency=shop_money_if_different(raw, "total_price"),
-            created_at=raw.get("created_at"),
-            fulfilled_at=fulfilled_at,
-            delivered_at=delivered_at,
-            fulfillments=fulfillments,
-            line_items=line_items,
-            shipping_address=shipping_address,
-        )
+        return map_order_detail(raw)

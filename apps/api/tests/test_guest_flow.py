@@ -1,0 +1,316 @@
+"""Nivel `guest` dentro del grafo (ADR 0013): nodo, skill de respaldo, gate y routing."""
+
+from __future__ import annotations
+
+import dataclasses
+from typing import Any
+from unittest.mock import AsyncMock
+
+import pytest
+from apps.api.agents.graph import route_after_execute_skill, route_after_resolve_identity
+from apps.api.agents.nodes import execute_skill
+from apps.api.agents.nodes.execute_skill import make_execute_skill_node
+from apps.api.agents.nodes.resolve_identity import make_resolve_identity_node
+from apps.api.integrations.base import IntegrationContext
+from apps.api.services.identity import Grant, IdentityContext
+from apps.api.services.identity_messages import DEFAULT_MESSAGES
+from apps.api.services.skill_access import visible_skills
+from apps.api.skills.base import SkillContext
+from apps.api.skills.identity.check_order_contact import CheckOrderContact
+from apps.api.skills.registry import SkillRegistry
+from apps.api.skills.shopify.cancel_order import CancelOrder
+from apps.api.skills.shopify.get_order_status import GetOrderStatus
+from apps.api.skills.shopify.list_my_orders import ListMyOrders
+from apps.api.skills.shopify.tag_order import TagOrder
+from apps.api.skills.shopify.update_shipping_address import UpdateShippingAddress
+from apps.api.tests.conftest import TENANT_ID, make_fake_tenant_scope
+from apps.api.tests.identity_support import SALT, identity_state
+from apps.api.tests.test_identity_guest import Store, _adapter
+
+NODE = "apps.api.agents.nodes.resolve_identity"
+CHECK = "identity.check_order_contact"
+
+
+@pytest.fixture(autouse=True)
+def _db(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(f"{NODE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(f"{NODE}.get_tenant_pii_salt", AsyncMock(return_value=SALT))
+    monkeypatch.setattr(f"{NODE}.load_guest_grants", AsyncMock(return_value=()))
+
+
+@pytest.fixture(autouse=True)
+def _registry() -> None:
+    """Otros tests vacían el registry (`_reset`); aquí hace falta la skill de respaldo."""
+    SkillRegistry.register(CheckOrderContact)
+
+
+@pytest.fixture
+def store(monkeypatch: pytest.MonkeyPatch) -> Store:
+    s = Store()
+    s.install(monkeypatch)
+    return s
+
+
+def _commerce(monkeypatch: pytest.MonkeyPatch, adapter: Any | None = None) -> None:
+    real = execute_skill.build_skill_context
+
+    def _ctx(state: Any) -> SkillContext:
+        return dataclasses.replace(
+            real(state),
+            integration_ctx=IntegrationContext(tenant_id=TENANT_ID, credentials={}, config={}),
+            commerce_mock=adapter or _adapter(),
+        )
+
+    monkeypatch.setattr(f"{NODE}.build_skill_context", _ctx)
+    monkeypatch.setattr("apps.api.agents.nodes.execute_skill.build_skill_context", _ctx)
+
+
+def _turn(*messages: str, channel: str = "zendesk", **extra: Any) -> dict[str, Any]:
+    state = identity_state(channel=channel, **extra)
+    evidence = state["conversation_history"][0]["metadata"]
+    history = [
+        {"id": f"m{i}", "role": "customer", "content": text, "metadata": {}}
+        for i, text in enumerate(messages)
+    ]
+    history[-1]["metadata"] = evidence
+    state.update(conversation_history=history, inbound_message_id=history[-1]["id"])
+    state.pop("identity")
+    state.pop("claim_salt")
+    return state
+
+
+def _grants(out: dict[str, Any]) -> tuple[Grant, ...]:
+    return IdentityContext.from_state(out["identity"]).grants
+
+
+# ─── resolve_identity ─────────────────────────────────────────────────────────
+
+
+async def test_chat_with_order_number_and_matching_email_grants_guest(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    _commerce(monkeypatch)
+    state = _turn("Mi pedido es el #1001", "mi email es Ana@Tienda.com")
+    state["known_facts"] = "previo"
+    out = await make_resolve_identity_node(fake_deps)(state)
+    assert [(g.level, g.order_id) for g in _grants(out)] == [("guest", 9001)]
+    assert out["identity_summary"] == {"level": "guest", "methods": ["order_contact"]}
+    assert out["identity_missing"] == []
+    assert out["known_facts"].startswith("previo")
+    assert "#1001" in out["known_facts"]
+    assert "agent_response" not in out
+    assert "ana@tienda.com" not in str({k: v for k, v in out.items() if k != "claim_salt"})
+
+
+async def test_helpdesk_chat_requester_email_counts_as_provided_data(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    _commerce(monkeypatch)
+    state = _turn("Quiero saber del pedido 1001")
+    state["conversation_history"][0]["metadata"] = {"provided_contact": {"email": "ana@tienda.com"}}
+    out = await make_resolve_identity_node(fake_deps)(state)
+    assert [g.level for g in _grants(out)] == ["guest"]
+
+
+async def test_the_email_typed_in_a_chat_alone_is_never_a_sender(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    _commerce(monkeypatch)
+    out = await make_resolve_identity_node(fake_deps)(_turn("soy ana@tienda.com"))
+    assert _grants(out) == ()
+    assert out["identity_missing"] == ["order_number"]
+    assert "Falta el número de pedido" in out["identity_note"]
+    assert "agent_response" not in out
+
+
+@pytest.mark.parametrize(
+    ("messages", "missing"),
+    [
+        (("hola",), ["order_number", "contact"]),
+        (("pedido 1001",), ["contact"]),
+    ],
+)
+async def test_missing_data_is_named_for_the_agent(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, store: Store, messages: tuple[str, ...], missing: list[str]
+) -> None:
+    _commerce(monkeypatch)
+    out = await make_resolve_identity_node(fake_deps)(_turn(*messages))
+    assert out["identity_missing"] == missing
+
+
+async def test_a_correct_email_with_another_customers_order_ends_with_the_fixed_text(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    _commerce(monkeypatch)
+    out = await make_resolve_identity_node(fake_deps)(_turn("pedido 1002 ana@tienda.com"))
+    assert _grants(out) == ()
+    assert out["decision"] == "respond"
+    assert out["agent_response"] == DEFAULT_MESSAGES["guest_not_verified"]
+    assert out["awaiting_customer_reply"] is True
+    assert route_after_resolve_identity({**out, "error": None}) == "respond"
+
+
+async def test_unknown_order_gets_the_very_same_reply(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    _commerce(monkeypatch)
+    wrong = await make_resolve_identity_node(fake_deps)(_turn("pedido 1002 ana@tienda.com"))
+    store.rows.clear()
+    unknown = await make_resolve_identity_node(fake_deps)(_turn("pedido 7777 ana@tienda.com"))
+    assert wrong["agent_response"] == unknown["agent_response"]
+    assert wrong["identity_summary"] == unknown["identity_summary"]
+
+
+async def test_a_verified_sender_keeps_the_turn_when_a_guess_fails(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    _commerce(monkeypatch)
+    state = _turn("pedido 1002 ana@tienda.com", email="ana@tienda.com", channel="email")
+    out = await make_resolve_identity_node(fake_deps)(state)
+    assert out["identity_summary"]["level"] == "verified"
+    assert "agent_response" not in out
+    assert len(store.rows) == 1
+
+
+async def test_without_commerce_nothing_is_attempted(fake_deps, store: Store) -> None:
+    out = await make_resolve_identity_node(fake_deps)(_turn("pedido 1001 ana@tienda.com"))
+    assert store.rows == []
+    assert "agent_response" not in out
+
+
+async def test_simulator_turns_do_not_touch_identity_checks(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    _commerce(monkeypatch)
+    state = _turn("pedido 1001 ana@tienda.com")
+    state["simulation_mode"] = True
+    await make_resolve_identity_node(fake_deps)(state)
+    assert store.rows == []
+
+
+def test_routing_after_resolve_identity() -> None:
+    assert route_after_resolve_identity({}) == "select_aop"
+    assert route_after_resolve_identity({"error": "x"}) == "handle_error"
+    assert (
+        route_after_resolve_identity({"decision": "respond", "agent_response": "t"}) == "respond"
+    )
+
+
+# ─── Qué permite cada nivel ───────────────────────────────────────────────────
+
+
+def _guest_state(order_id: int) -> dict[str, Any]:
+    state = identity_state(channel="zendesk")
+    guest = Grant("guest", "order_contact", order_id=order_id)
+    state["identity"] = IdentityContext((guest,)).to_state()
+    return state
+
+
+@pytest.mark.parametrize(
+    ("skill", "inputs", "blocked"),
+    [
+        (GetOrderStatus, {"order_identifier": "1001"}, None),
+        (TagOrder, {"order_id": 1001}, None),
+        (CancelOrder, {"order_id": 1001}, None),
+        (UpdateShippingAddress, {"order_id": 1001}, "verified_required"),
+        (GetOrderStatus, {"order_identifier": "1002"}, "identity_required"),
+        (CancelOrder, {"order_id": 1002}, "identity_required"),
+    ],
+)
+async def test_guest_gate_table(
+    monkeypatch: pytest.MonkeyPatch, skill: Any, inputs: dict[str, Any], blocked: str | None
+) -> None:
+    _commerce(monkeypatch)
+    result = await execute_skill._identity_gate(_guest_state(9001), skill, inputs)
+    assert (result[0] if result else None) == blocked
+
+
+async def test_guest_cannot_list_my_orders(monkeypatch: pytest.MonkeyPatch) -> None:
+    _commerce(monkeypatch)
+    result = await execute_skill._identity_gate(_guest_state(9001), ListMyOrders, {})
+    assert result is not None and result[0] == "identity_required"
+
+
+def test_update_shipping_address_still_requires_verified() -> None:
+    assert UpdateShippingAddress.min_level == "verified"
+    assert UpdateShippingAddress.identity_scope == "order"
+
+
+# ─── Skill de respaldo ────────────────────────────────────────────────────────
+
+
+def _skill_node(fake_deps: Any) -> Any:
+    return make_execute_skill_node(fake_deps)
+
+
+def _call(order: str, contact: str, state: dict[str, Any]) -> dict[str, Any]:
+    state.update(
+        pending_tool_call={
+            "id": "t1",
+            "slug": CHECK,
+            "input": {"order_number": order, "contact": contact},
+        },
+        tool_permissions={},
+        allowed_skills=[],
+        claim_salt=SALT,
+    )
+    return state
+
+
+@pytest.fixture
+def skill_db(monkeypatch: pytest.MonkeyPatch, store: Store) -> None:
+    # Otros tests recargan módulos: se parchea el módulo al que la clase está atada.
+    monkeypatch.setitem(
+        CheckOrderContact.execute.__globals__, "tenant_scope", make_fake_tenant_scope()
+    )
+
+
+async def test_the_fallback_skill_is_offered_by_code_to_commerce_tenants() -> None:
+    assert SkillRegistry.is_core(CHECK)
+    assert not SkillRegistry.is_core("shopify.get_order_status")
+    assert CHECK in visible_skills([], {}, IdentityContext(), commerce=True)
+    assert CHECK not in visible_skills([], {}, IdentityContext(), commerce=False)
+
+
+async def test_the_fallback_skill_grants_guest_and_updates_the_turn(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, skill_db: None
+) -> None:
+    _commerce(monkeypatch)
+    out = await _skill_node(fake_deps)(_call("1001", "Ana@Tienda.com", identity_state()))
+    assert out["tool_results"][0]["output"]["verified"] is True
+    assert [g.level for g in _grants(out)] == ["guest"]
+    assert out["identity_summary"]["level"] == "guest"
+    assert "invitado" in out["identity_note"]
+    assert "#1001" in out["known_facts"]
+    assert "decision" not in out
+
+
+async def test_the_fallback_skill_failure_ends_with_the_same_fixed_text(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, skill_db: None
+) -> None:
+    _commerce(monkeypatch)
+    out = await _skill_node(fake_deps)(_call("1002", "ana@tienda.com", identity_state()))
+    assert out["decision"] == "respond"
+    assert out["agent_response"] == DEFAULT_MESSAGES["guest_not_verified"]
+    assert out["tool_results"][0]["output"]["order"] is None
+    assert route_after_execute_skill({**out, "error": None}) == "respond"
+
+
+async def test_the_fallback_skill_obeys_the_same_limit(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, skill_db: None, store: Store
+) -> None:
+    _commerce(monkeypatch)
+    node = _skill_node(fake_deps)
+    for i in range(5):
+        await node(_call(str(8000 + i), "ana@tienda.com", identity_state()))
+    out = await node(_call("1001", "ana@tienda.com", identity_state()))
+    assert out["agent_response"] == DEFAULT_MESSAGES["guest_locked"]
+    assert len(store.rows) == 5
+
+
+async def test_the_fallback_skill_does_not_need_the_aop_or_tenant_permissions(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, skill_db: None
+) -> None:
+    _commerce(monkeypatch)
+    out = await _skill_node(fake_deps)(_call("1001", "ana@tienda.com", identity_state()))
+    assert out["tool_results"][0]["is_error"] is False, out["tool_results"][0]["error"]

@@ -35,10 +35,15 @@ def skill_visible(skill_cls: type[Skill], identity: IdentityContext) -> bool:
 
 
 def visible_skills(
-    slugs: list[str], tool_permissions: dict[str, Any], identity: IdentityContext
+    slugs: list[str],
+    tool_permissions: dict[str, Any],
+    identity: IdentityContext,
+    *,
+    commerce: bool = False,
 ) -> list[str]:
     """Las `slugs` del AOP que el LLM puede ver: encendidas, registradas y permitidas
-    por la identidad. Conserva el orden."""
+    por la identidad. Conserva el orden. Con `commerce`, suma las skills `core` del
+    sistema (la de respaldo del nivel `guest`), que no dependen del AOP ni del tenant."""
     visible: list[str] = []
     for slug in slugs:
         if not skill_enabled(tool_permissions.get(slug)):
@@ -50,6 +55,8 @@ def visible_skills(
             continue
         if skill_visible(skill_cls, identity):
             visible.append(slug)
+    if commerce:
+        visible.extend(s for s in SkillRegistry.core_slugs() if s not in visible)
     return visible
 
 

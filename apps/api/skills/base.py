@@ -16,6 +16,7 @@ from apps.api.services.identity import (
     Level,
     order_claims,
 )
+from apps.api.services.identity_guest import GuestPolicy
 from pydantic import BaseModel
 
 SkillTier = Literal["L1", "L2", "L3"]
@@ -73,6 +74,9 @@ class SkillContext:
     channel: str | None = field(default=None)
     # Región por defecto para teléfonos sin prefijo (tenant_config/tenant_facts, "ES").
     phone_region: str = field(default="ES")
+    # Límites del nivel `guest` y textos fijos del tenant (ADR 0013 §4 y §10).
+    guest_policy: GuestPolicy = field(default_factory=GuestPolicy)
+    tenant_facts: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def order_claims(self, order: dict[str, Any]) -> frozenset[ClaimHash]:
         return order_claims(order, salt=self.claim_salt, region=self.phone_region)
@@ -105,6 +109,9 @@ class Skill(ABC):
     identity_scope: ClassVar[IdentityScope] = "public"
     min_level: ClassVar[Level | None] = None
     order_input_field: ClassVar[str] = "order_id"
+    # Skill del propio sistema: la ofrece el código a todo tenant con commerce, sin pasar por
+    # el AOP ni por `tenant_tool_permissions`. Solo para skills de identidad, de tier L1.
+    core: ClassVar[bool] = False
 
     @abstractmethod
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:

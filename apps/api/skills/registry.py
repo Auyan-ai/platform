@@ -26,6 +26,8 @@ class SkillRegistry:
         """
         if skill_class.identity_scope != "public" and skill_class.min_level is None:
             raise ValueError(f"skill_without_min_level: {skill_class.slug}")
+        if skill_class.core and skill_class.tier != "L1":
+            raise ValueError(f"core_skill_must_be_l1: {skill_class.slug}")
         cls._by_slug[skill_class.slug] = skill_class
         return skill_class
 
@@ -35,6 +37,15 @@ class SkillRegistry:
         if slug not in cls._by_slug:
             raise ValueError(f"unknown_skill: {slug}")
         return cls._by_slug[slug]
+
+    @classmethod
+    def is_core(cls, slug: str) -> bool:
+        skill_class = cls._by_slug.get(slug)
+        return skill_class is not None and skill_class.core
+
+    @classmethod
+    def core_slugs(cls) -> list[str]:
+        return [slug for slug, skill_class in cls._by_slug.items() if skill_class.core]
 
     @classmethod
     def list_for_aop(cls, allowed_slugs: list[str]) -> list[type[Skill]]:

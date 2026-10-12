@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, NewType
@@ -313,7 +313,9 @@ class IdentityContext:
         """Nivel y métodos para trazas. Nunca claims ni contactos."""
         active = self.active()
         return {
-            "level": "verified" if self.has_grant("verified") else None,
+            "level": "verified"
+            if self.has_grant("verified")
+            else ("guest" if self.has_grant("guest") else None),
             "methods": sorted({g.method for g in active}),
         }
 
@@ -343,17 +345,31 @@ def sender_identity(
 
 _NOTE_UNVERIFIED = (
     "Identidad: no verificada. Este mensaje no llega desde el email ni el teléfono de una "
-    "compra, así que no puedes consultar ni modificar pedidos. Si el cliente pregunta por "
-    "uno, explícale con amabilidad que escriba desde el email con el que compró (o por "
-    "WhatsApp desde el teléfono de la compra), u ofrécele pasar el caso a una persona del "
-    "equipo. No uses ni pidas un email o teléfono que escriba en el chat."
+    "compra, así que no puedes consultar ni modificar pedidos todavía. Para hacerlo hacen "
+    "falta el número de pedido y el email o teléfono de la compra. {missing} El sistema los "
+    "comprueba por su cuenta cuando el cliente los escribe; si los escribe en un formato "
+    "raro (por ejemplo el número de pedido en letras), usa identity.check_order_contact. "
+    "Si prefiere no darlos, ofrécele pasar el caso a una persona del equipo."
+)
+_MISSING_TEXT: dict[str, str] = {
+    "order_number": "Falta el número de pedido.",
+    "contact": "Falta el email o teléfono de la compra.",
+}
+_NOTE_GUEST = (
+    "Identidad: invitado. El código verificó número de pedido y contacto de la compra, así "
+    "que solo puedes consultar y gestionar los pedidos ya verificados en esta conversación. "
+    "No puedes listar sus pedidos ni cambiar la dirección de envío o datos de cuenta: eso "
+    "exige escribir desde el email o el teléfono de la compra."
 )
 _NOTE_METHODS: dict[str, str] = {"sender_email": "email", "sender_phone": "teléfono"}
 
 
-def identity_note(identity: IdentityContext) -> str:
+def identity_note(identity: IdentityContext, missing: Sequence[str] = ()) -> str:
     """Línea para el bloque volátil de `reason`. Texto fijo, sin datos del cliente."""
-    if not identity.has_grant("verified"):
-        return _NOTE_UNVERIFIED
-    methods = sorted({_NOTE_METHODS.get(g.method, g.method) for g in identity.active()})
-    return f"Identidad: verificada por el remitente ({', '.join(methods)})."
+    if identity.has_grant("verified"):
+        methods = sorted({_NOTE_METHODS.get(g.method, g.method) for g in identity.active()})
+        return f"Identidad: verificada por el remitente ({', '.join(methods)})."
+    if identity.has_grant("guest"):
+        return _NOTE_GUEST
+    gaps = " ".join(_MISSING_TEXT[m] for m in missing if m in _MISSING_TEXT)
+    return _NOTE_UNVERIFIED.format(missing=gaps).replace("  ", " ")

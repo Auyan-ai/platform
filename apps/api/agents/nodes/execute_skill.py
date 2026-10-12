@@ -30,13 +30,22 @@ from apps.api.db.queries import create_pending_approval, get_recent_approval_for
 from apps.api.integrations.base import IntegrationContext
 from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.identity import (
+    Grant,
     IdentityContext,
     default_phone_region,
     evidence_from_state,
+    identity_note,
+)
+from apps.api.services.identity_guest import (
+    OrderLookupError,
+    guest_facts,
+    guest_policy,
+    lookup_order,
 )
 from apps.api.services.pii import redact_inputs
 from apps.api.services.skill_access import IdentityVerdict, identity_verdict
 from apps.api.skills.base import Skill, SkillContext, SkillRefusal
+from apps.api.skills.identity.check_order_contact import CheckOrderContactOutput
 from apps.api.skills.registry import SkillRegistry
 from pydantic import ValidationError
 
@@ -84,6 +93,8 @@ def build_skill_context(state: AgentState) -> SkillContext:
         claim_salt=state.get("claim_salt") or "",
         channel=state.get("channel"),
         phone_region=default_phone_region(state.get("tenant_config"), state.get("tenant_facts")),
+        guest_policy=guest_policy(state.get("tenant_config")),
+        tenant_facts=dict(state.get("tenant_facts") or {}),
     )
 
 
@@ -166,17 +177,17 @@ async def _same_order_action(state: AgentState, existing_inputs: dict, new_input
 
 
 _IDENTITY_REQUIRED_ERROR = (
-    "identity_required: por seguridad, un pedido solo se consulta o se modifica desde el "
-    "email con el que se hizo la compra, y este mensaje no viene de ese email. Explícaselo "
-    "al cliente con amabilidad y pídele que escriba desde el email de la compra. No "
-    "reintentes la acción ni reveles el email del pedido."
+    "identity_required: por seguridad, un pedido solo se consulta o se modifica si el cliente "
+    "escribe desde el email de la compra o da el número de pedido junto con el email o "
+    "teléfono de esa compra. Pídele el dato que falte con amabilidad, o que escriba desde "
+    "el email de la compra. No reintentes la acción ni reveles el email del pedido."
 )
 # Canales de mensajería (WhatsApp): no hay email; el teléfono no coincide o no llega.
 _IDENTITY_REQUIRED_ERROR_MESSAGING = (
     "identity_required: por seguridad no puedo verificar que el pedido sea del cliente "
-    "desde este número de teléfono. Explícaselo con amabilidad y ofrécele pasar el caso a "
-    "una persona del equipo. No reintentes la acción ni reveles los datos de contacto del "
-    "pedido."
+    "desde este número de teléfono. Pídele con amabilidad el número de pedido junto con el "
+    "email o teléfono de la compra, u ofrécele pasar el caso a una persona del equipo. No "
+    "reintentes la acción ni reveles los datos de contacto del pedido."
 )
 _VERIFIED_REQUIRED_ERROR = (
     "verified_required: esta acción solo se puede pedir desde el email o el teléfono con "
@@ -187,21 +198,9 @@ _VERIFIED_REQUIRED_ERROR = (
 
 async def _resolve_order(ctx: SkillContext, order_ref: str) -> dict[str, Any] | None:
     """El pedido de la referencia vía el adapter de commerce, o None (fail-closed)."""
-    adapter: Any = ctx.commerce_mock
-    if adapter is None and ctx.integration_ctx is not None:
-        from apps.api.integrations.shopify import ShopifyAdapter
-
-        adapter = ShopifyAdapter()
-    if adapter is None:
-        return None
     try:
-        order: dict[str, Any] | None = await adapter.get_order_by_name(
-            ctx.integration_ctx, order_ref
-        )
-        if not order:
-            order = await adapter.get_order(ctx.integration_ctx, order_ref)
-        return order or None
-    except Exception:
+        return await lookup_order(ctx, order_ref)
+    except OrderLookupError:
         logger.warning("identity_gate_order_resolution_failed ref=%s", order_ref)
         return None
 
@@ -245,6 +244,43 @@ async def _identity_gate(
     if ctx.channel is not None and is_messaging_channel(ctx.channel):
         return verdict, _IDENTITY_REQUIRED_ERROR_MESSAGING
     return verdict, _IDENTITY_REQUIRED_ERROR
+
+
+def _identity_update(state: AgentState, output: Any) -> dict[str, Any]:
+    """Efecto de `identity.check_order_contact` en el estado del turno (ADR 0013 §4).
+
+    Si coincide, el grant `guest` entra ya en `identity`, la línea de identidad se
+    recalcula y el pedido proyectado pasa a `known_facts`. Si no, el turno termina con el
+    texto fijo y sin volver al LLM.
+    """
+    if not isinstance(output, CheckOrderContactOutput):
+        return {}
+    if not output.verified:
+        if output.reply is None:
+            return {}
+        return {
+            "decision": "respond",
+            "agent_response": output.reply,
+            "awaiting_customer_reply": True,
+        }
+    identity = IdentityContext.from_state(state.get("identity"))
+    identity = IdentityContext(
+        (
+            *identity.grants,
+            Grant(
+                "guest",
+                "order_contact",
+                order_id=output.granted_order_id,
+                valid_until=output.valid_until,
+            ),
+        )
+    )
+    return {
+        "identity": identity.to_state(),
+        "identity_summary": identity.summary(),
+        "identity_note": identity_note(identity),
+        "known_facts": guest_facts(state.get("known_facts"), [output.order or {}]),
+    }
 
 
 def _l3_requires_human_approval(skill_cls: type[Skill], perm: dict[str, Any]) -> bool:
@@ -345,8 +381,10 @@ def make_execute_skill_node(
             }
 
         # 1) Skill permitida por el AOP (lista vacía = ninguna, fail-safe).
+        # Las skills `core` (identidad) las ofrece el código, no el AOP ni el tenant.
+        is_core = SkillRegistry.is_core(slug)
         allowed = state.get("allowed_skills") or []
-        if slug not in allowed:
+        if slug not in allowed and not is_core:
             return _append_and_finish(
                 _error_entry(
                     tool_use_id=tool_use_id,
@@ -374,6 +412,8 @@ def make_execute_skill_node(
         #    L3 → crear pending_approval y escalar, salvo opt-out reconocido.
         tool_permissions: dict[str, Any] = state.get("tool_permissions") or {}
         perm = tool_permissions.get(slug)
+        if is_core:
+            perm = {"is_enabled": True}
 
         if perm is None or not perm.get("is_enabled", False):
             tier_error = f"skill_not_enabled_for_tenant: {slug}"
@@ -670,6 +710,6 @@ def make_execute_skill_node(
                 latency_ms=latency,
                 langfuse_trace_id=state.get("langfuse_trace_id"),
             )
-        return _append_and_finish(result_entry)
+        return {**_append_and_finish(result_entry), **_identity_update(state, output)}
 
     return _node

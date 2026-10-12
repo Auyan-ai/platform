@@ -49,6 +49,7 @@ from apps.api.db.queries import (
 from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.conversations import reopen_if_resolved
 from apps.api.services.identity import EVIDENCE_KEY, build_identity_evidence
+from apps.api.services.identity_guest import PROVIDED_CONTACT_KEY, build_provided_contact
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -75,6 +76,20 @@ class InboundIntakeResult:
             return {"received": True, "processed": False, "duplicate": True}
         return {"received": True, "queued": True, "job_id": str(self.job_id)}
 
+
+
+def _with_identity_metadata(
+    metadata: dict[str, Any], evidence: dict[str, str] | None, email: str | None
+) -> dict[str, Any]:
+    """Metadata del inbound con la evidencia del remitente (ADR 0013).
+
+    Si el origen no verifica el email (chat), el que tecleó el visitante se guarda aparte
+    como dato aportado: sirve para el nivel `guest`, nunca como remitente.
+    """
+    if evidence:
+        return {**metadata, EVIDENCE_KEY: evidence}
+    provided = build_provided_contact(email)
+    return {**metadata, PROVIDED_CONTACT_KEY: provided} if provided else metadata
 
 async def persist_and_enqueue_inbound(
     *,
@@ -150,7 +165,7 @@ async def persist_and_enqueue_inbound(
             role="customer",
             direction="inbound",
             content=content,
-            metadata={**message_metadata, EVIDENCE_KEY: evidence} if evidence else message_metadata,
+            metadata=_with_identity_metadata(message_metadata, evidence, customer_email),
         )
         await update_conversation_last_message(conn, tenant_id, conversation.id)
 
