@@ -113,5 +113,7 @@ def test_level_order() -> None:
 
 def test_note_for_the_llm_never_carries_contacts() -> None:
     verified = sender_identity(IdentityEvidence(email="carmen@example.com"), salt=SALT)
-    assert identity_note(verified) == "Identidad: verificada por el remitente (email)."
-    assert "no verificada" in identity_note(IdentityContext())
+    note = identity_note(verified)
+    assert note.startswith("Identidad: el cliente escribe desde su propio email;")
+    assert "carmen" not in note
+    assert "todavía no puedes consultar ni modificar pedidos" in identity_note(IdentityContext())

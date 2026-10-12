@@ -287,13 +287,13 @@ async def attempt_guest(ctx: SkillContext, order_ref: str, contact: Contact) -> 
 
 
 GUEST_FACTS_HEADER = (
-    "Pedido verificado como invitado en esta conversación (número de pedido y contacto de la "
-    "compra coinciden). Úsalo directamente:"
+    "Pedido que el cliente identificó en esta conversación con su número y el email o "
+    "teléfono de la compra. Úsalo directamente:"
 )
 
 
 def guest_facts(existing: str | None, orders: Sequence[Mapping[str, Any]]) -> str:
-    """`known_facts` con los pedidos ya proyectados que el invitado acaba de verificar."""
+    """`known_facts` con los pedidos ya proyectados que el cliente acaba de identificar."""
     lines = [
         f"- shopify.get_order_status: {json.dumps(order, ensure_ascii=False)}" for order in orders
     ]

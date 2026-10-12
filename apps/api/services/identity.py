@@ -343,23 +343,29 @@ def sender_identity(
     return IdentityContext(tuple(grants))
 
 
+_NOTE_PRIVATE = (
+    "Esto es contexto interno: no le expliques al cliente cómo se ha comprobado quién es "
+    "ni le pongas una etiqueta por ello. Si le hace falta algo para seguir, dile solo qué "
+    "puede hacer."
+)
 _NOTE_UNVERIFIED = (
-    "Identidad: no verificada. Este mensaje no llega desde el email ni el teléfono de una "
-    "compra, así que no puedes consultar ni modificar pedidos todavía. Para hacerlo hacen "
-    "falta el número de pedido y el email o teléfono de la compra. {missing} El sistema los "
-    "comprueba por su cuenta cuando el cliente los escribe; si los escribe en un formato "
-    "raro (por ejemplo el número de pedido en letras), usa identity.check_order_contact. "
-    "Si prefiere no darlos, ofrécele pasar el caso a una persona del equipo."
+    "Identidad: este mensaje no llega desde el email ni el teléfono de una compra, así que "
+    "todavía no puedes consultar ni modificar pedidos. Para hacerlo hacen falta el número "
+    "de pedido y el email o teléfono de la compra. {missing} El sistema los comprueba por "
+    "su cuenta cuando el cliente los escribe; si los escribe en un formato raro (por "
+    "ejemplo el número de pedido en letras), usa identity.check_order_contact. Si prefiere "
+    "no darlos, ofrécele pasar el caso a una persona del equipo."
 )
 _MISSING_TEXT: dict[str, str] = {
     "order_number": "Falta el número de pedido.",
     "contact": "Falta el email o teléfono de la compra.",
 }
 _NOTE_GUEST = (
-    "Identidad: invitado. El código verificó número de pedido y contacto de la compra, así "
-    "que solo puedes consultar y gestionar los pedidos ya verificados en esta conversación. "
-    "No puedes listar sus pedidos ni cambiar la dirección de envío o datos de cuenta: eso "
-    "exige escribir desde el email o el teléfono de la compra."
+    "Identidad: el cliente dio el número de pedido y el email o teléfono de esa compra, y "
+    "coinciden. Puedes consultar y gestionar solo los pedidos que identificó así en esta "
+    "conversación. No puedes listar sus pedidos ni cambiar la dirección de envío o los "
+    "datos de la cuenta: para eso tiene que escribir desde el email o el teléfono de la "
+    "compra."
 )
 _NOTE_METHODS: dict[str, str] = {"sender_email": "email", "sender_phone": "teléfono"}
 
@@ -368,8 +374,13 @@ def identity_note(identity: IdentityContext, missing: Sequence[str] = ()) -> str
     """Línea para el bloque volátil de `reason`. Texto fijo, sin datos del cliente."""
     if identity.has_grant("verified"):
         methods = sorted({_NOTE_METHODS.get(g.method, g.method) for g in identity.active()})
-        return f"Identidad: verificada por el remitente ({', '.join(methods)})."
-    if identity.has_grant("guest"):
-        return _NOTE_GUEST
-    gaps = " ".join(_MISSING_TEXT[m] for m in missing if m in _MISSING_TEXT)
-    return _NOTE_UNVERIFIED.format(missing=gaps).replace("  ", " ")
+        note = (
+            f"Identidad: el cliente escribe desde su propio {' y '.join(methods)}; puedes "
+            "consultar y gestionar los pedidos hechos con ese contacto."
+        )
+    elif identity.has_grant("guest"):
+        note = _NOTE_GUEST
+    else:
+        gaps = " ".join(_MISSING_TEXT[m] for m in missing if m in _MISSING_TEXT)
+        note = _NOTE_UNVERIFIED.format(missing=gaps).replace("  ", " ")
+    return f"{note} {_NOTE_PRIVATE}"
