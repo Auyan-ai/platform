@@ -121,8 +121,12 @@ class TestAdapterMethods:
             # Sin pedido por ese 'name' → 1 se trata como id interno (sin resolver).
             inst.get_order_by_name = AsyncMock(return_value=None)
             inst.cancel_order = AsyncMock(return_value={"id": 1})
-            await adapter.cancel_order(_CTX, 1, reason="fraud", email=False, refund=True)
-        inst.cancel_order.assert_awaited_once_with(1, reason="fraud", email=False, refund=True)
+            await adapter.cancel_order(
+                _CTX, 1, reason="fraud", email=False, refund=True, restock=False
+            )
+        inst.cancel_order.assert_awaited_once_with(
+            1, reason="fraud", email=False, refund=True, restock=False
+        )
 
     @pytest.mark.asyncio
     async def test_mutation_resolves_visible_number_to_internal_id(self) -> None:

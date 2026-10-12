@@ -335,7 +335,9 @@ async def test_cancel_with_refund_uses_original_payment_method(
         ]
     )
 
-    order = await _client().cancel_order(1432, reason="customer", email=True, refund=True)
+    order = await _client().cancel_order(
+        1432, reason="customer", email=True, refund=True, restock=True
+    )
 
     assert order["financial_status"] == "refunded"
     variables = json.loads(mutation.calls.last.request.content)["variables"]
@@ -355,10 +357,13 @@ async def test_cancel_without_refund_and_unknown_reason() -> None:
         200, json={"order": {"id": 9, "cancelled_at": "2026-09-30T10:00:00Z"}}
     )
 
-    await _client().cancel_order(9, reason="ya no lo quiero", email=False, refund=False)
+    await _client().cancel_order(
+        9, reason="ya no lo quiero", email=False, refund=False, restock=False
+    )
 
     variables = json.loads(mutation.calls.last.request.content)["variables"]
     assert variables["reason"] == "OTHER"
+    assert variables["restock"] is False
     assert variables["refundMethod"] is None
     assert variables["notifyCustomer"] is False
 
@@ -380,7 +385,7 @@ async def test_cancel_user_errors_raise_without_polling() -> None:
     )
     poll = respx.get(f"{BASE}/orders/9.json")
     with pytest.raises(ShopifyActionError, match="order_cancel_failed"):
-        await _client().cancel_order(9, refund=True)
+        await _client().cancel_order(9, refund=True, restock=True)
     assert not poll.called
 
 
@@ -392,5 +397,5 @@ async def test_cancel_still_processing_reports_not_cancelled(
     monkeypatch.setattr("apps.api.integrations.shopify.asyncio.sleep", AsyncMock())
     respx.post(f"{BASE}/graphql.json").respond(200, json=_cancel_ok())
     respx.get(f"{BASE}/orders/9.json").respond(200, json={"order": {"id": 9, "cancelled_at": None}})
-    order = await _client().cancel_order(9, refund=True)
+    order = await _client().cancel_order(9, refund=True, restock=True)
     assert order["cancelled_at"] is None

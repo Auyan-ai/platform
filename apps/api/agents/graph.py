@@ -71,7 +71,7 @@ DEFAULT_MAX_TOOL_ITERATIONS = 5
 _NODE_OUTPUT_KEYS: dict[str, list[str]] = {
     "select_aop": ["aop_slug", "aop_version", "intent_confidence"],
     "reason": ["decision", "confidence", "pending_tool_call", "agent_response"],
-    "execute_skill": ["tool_results", "pending_approval_id"],
+    "execute_skill": ["tool_results", "pending_approval_id", "escalation_reason"],
     "supervise": ["supervisor_verdict", "supervisor_reason", "supervisor_reject_kind"],
     "respond": ["output_message_id", "resolves_on_delivery"],
     "escalate": ["escalation_id", "escalation_reason"],
@@ -214,6 +214,8 @@ def route_after_execute_skill(state: AgentState) -> str:
     """Routing tras `execute_skill`.
 
     - pending_approval_id → skill L3 esperando aprobación humana → escalate.
+    - decision 'escalate' → la skill se negó por una regla en código (`SkillRefusal`)
+      y dejó mensaje y motivo fijos → escalate sin pasar por el LLM.
     - error de sistema → handle_error.
     - resto → volver a reason. Si se agotaron las iteraciones, `reason` hace un
       último turno forzado a decidir (respond/escalate) con lo ya obtenido: antes se
@@ -222,7 +224,7 @@ def route_after_execute_skill(state: AgentState) -> str:
     """
     if state.get("error"):
         return "handle_error"
-    if state.get("pending_approval_id"):
+    if state.get("pending_approval_id") or state.get("decision") == "escalate":
         return "escalate"
     return "reason"
 

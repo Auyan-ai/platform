@@ -19,7 +19,7 @@ import logging
 from collections import OrderedDict
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 import httpx
@@ -388,15 +388,17 @@ class ShopifyClient:
         *,
         reason: str = "customer",
         email: bool = True,
-        refund: bool = False,
+        refund: bool,
+        restock: bool,
     ) -> dict[str, Any]:
         """Cancela un pedido. Acción L3 — requiere supervisor Opus y aprobación humana.
 
         GraphQL `orderCancel`: el `cancel.json` de REST ignoraba en silencio
         `"refund": true` (espera un objeto) → cancelaba SIN devolver el pago (visto en
-        A4). Con `refund` se reembolsa al método de pago original; siempre se repone
-        stock. La mutación es asíncrona: se espera a que el pedido figure cancelado y
-        se devuelve el pedido (REST) como antes.
+        A4). Con `refund` se reembolsa al método de pago original. `refund` y
+        `restock` los decide la skill a partir del pedido, nunca el LLM. La mutación
+        es asíncrona: se espera a que el pedido figure cancelado y se devuelve el
+        pedido (REST) como antes.
         """
         reason_enum = reason.strip().upper()
         if reason_enum not in _CANCEL_REASONS:
@@ -404,7 +406,7 @@ class ShopifyClient:
         variables: dict[str, Any] = {
             "orderId": f"gid://shopify/Order/{order_id}",
             "reason": reason_enum,
-            "restock": True,
+            "restock": restock,
             "notifyCustomer": email,
             "refundMethod": {"originalPaymentMethodsRefund": True} if refund else None,
         }
@@ -493,6 +495,20 @@ class ShopifyClient:
         """Lo que queda por reembolsar del pedido, en la moneda en que pagó el cliente."""
         async with httpx.AsyncClient() as client:
             return refundable_balance(await self._get_transactions(client, order_id))
+
+    async def get_order_snapshot(self, order_id: int) -> OrderSnapshot:
+        """Envío, cancelación, dirección y transacciones del pedido en una lectura.
+
+        GraphQL porque REST no expone `manualPaymentGateway`, que distingue una
+        pasarela que devuelve el dinero de una manual donde Shopify solo lo apunta.
+        """
+        async with httpx.AsyncClient() as client:
+            data = await self._graphql(
+                client, _ORDER_SNAPSHOT_QUERY, {"id": f"gid://shopify/Order/{order_id}"}
+            )
+        if data.get("order") is None:
+            raise ShopifyActionError(f"order_not_found: {order_id}")
+        return order_snapshot_from_graphql(data["order"])
 
     async def refund_partial(
         self,
@@ -689,6 +705,131 @@ def refundable_balance(transactions: list[dict[str, Any]]) -> RefundableBalance:
     )
 
 
+RefundMode = Literal["automatic", "manual"]
+
+# Fulfillments que no cuentan como envío: cancelados o fallidos.
+_INACTIVE_FULFILLMENT = frozenset({"cancelled", "error", "failure"})
+# `displayFulfillmentStatus` de un pedido que ya salió, entero o en parte.
+_SHIPPED_DISPLAY = frozenset({"fulfilled", "partially_fulfilled"})
+
+
+@dataclass(frozen=True)
+class RefundRoute:
+    """Por dónde vuelve el dinero si se reembolsa el pedido.
+
+    `automatic`: todos los cobros son de una pasarela que devuelve el dinero al
+    reembolsar en Shopify. `manual`: algún cobro es de pasarela manual
+    (transferencia, contra reembolso, Bizum fuera de Shopify), donde Shopify solo
+    apunta el reembolso, o no hay cobro registrado y no se puede saber si el
+    cliente pagó por fuera. En ese caso devuelve la tienda.
+    """
+
+    mode: RefundMode
+    gateway: str | None
+
+
+@dataclass(frozen=True)
+class SnapshotTransaction:
+    id: str
+    kind: str  # sale, capture, authorization, refund, void…
+    status: str  # success, pending, failure, error, awaiting_response, unknown
+    gateway: str | None
+    manual_gateway: bool
+    error_code: str | None
+
+
+@dataclass(frozen=True)
+class SnapshotFulfillment:
+    status: str
+    tracking_numbers: tuple[str, ...]
+
+    @property
+    def active(self) -> bool:
+        return self.status not in _INACTIVE_FULFILLMENT
+
+
+@dataclass(frozen=True)
+class OrderSnapshot:
+    """Lo que decide si una L3 puede tocar un pedido y cómo acabó la acción."""
+
+    order_id: int
+    name: str  # número visible, "#1431"
+    cancelled: bool
+    fulfillment_status: str
+    fulfillments: tuple[SnapshotFulfillment, ...]
+    transactions: tuple[SnapshotTransaction, ...]
+    shipping_address: dict[str, str | None]
+
+    @property
+    def shipped(self) -> bool:
+        """Shopify lo da por enviado o algún envío vivo lleva tracking. No garantiza
+        lo contrario: muchas tiendas preparan y etiquetan fuera de Shopify."""
+        return self.fulfillment_status in _SHIPPED_DISPLAY or any(
+            f.active and f.tracking_numbers for f in self.fulfillments
+        )
+
+    @property
+    def has_active_fulfillment(self) -> bool:
+        return any(f.active for f in self.fulfillments)
+
+    @property
+    def payments(self) -> tuple[SnapshotTransaction, ...]:
+        return tuple(
+            t for t in self.transactions if t.kind in _PAYMENT_KINDS and t.status == "success"
+        )
+
+    @property
+    def paid(self) -> bool:
+        return bool(self.payments)
+
+    @property
+    def refund_route(self) -> RefundRoute:
+        payments = self.payments
+        manual = [t for t in payments if t.manual_gateway]
+        if payments and not manual:
+            return RefundRoute(mode="automatic", gateway=payments[-1].gateway)
+        return RefundRoute(mode="manual", gateway=manual[-1].gateway if manual else None)
+
+    def refunds_since(self, before: OrderSnapshot) -> tuple[SnapshotTransaction, ...]:
+        """Transacciones de reembolso que no estaban en `before`."""
+        seen = {t.id for t in before.transactions}
+        return tuple(t for t in self.transactions if t.kind == "refund" and t.id not in seen)
+
+
+def order_snapshot_from_graphql(node: dict[str, Any]) -> OrderSnapshot:
+    """Parsea el `order` de `_ORDER_SNAPSHOT_QUERY`. Enums de Shopify a minúsculas."""
+    address = node.get("shippingAddress") or {}
+    return OrderSnapshot(
+        order_id=int(str(node["id"]).rsplit("/", 1)[-1]),
+        name=str(node.get("name") or ""),
+        cancelled=node.get("cancelledAt") is not None,
+        fulfillment_status=str(node.get("displayFulfillmentStatus") or "").lower(),
+        fulfillments=tuple(
+            SnapshotFulfillment(
+                status=str(f.get("status") or "").lower(),
+                tracking_numbers=tuple(
+                    str(t["number"]) for t in f.get("trackingInfo") or [] if t.get("number")
+                ),
+            )
+            for f in node.get("fulfillments") or []
+        ),
+        transactions=tuple(
+            SnapshotTransaction(
+                id=str(t["id"]),
+                kind=str(t.get("kind") or "").lower(),
+                status=str(t.get("status") or "").lower(),
+                gateway=t.get("gateway") or None,
+                manual_gateway=bool(t.get("manualPaymentGateway")),
+                error_code=t.get("errorCode") or None,
+            )
+            for t in node.get("transactions") or []
+        ),
+        shipping_address={
+            key: address.get(key) for key in ("address1", "address2", "city", "zip", "country")
+        },
+    )
+
+
 # Motivo libre del agente → handle de la librería de motivos de Shopify.
 _REASON_HANDLES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("small", "pequeñ", "corto", "estrech"), "too-small"),
@@ -731,6 +872,20 @@ mutation OrderCancel(
   ) {
     job { id done }
     orderCancelUserErrors { field message code }
+  }
+}
+"""
+
+_ORDER_SNAPSHOT_QUERY = """
+query OrderSnapshot($id: ID!) {
+  order(id: $id) {
+    id
+    name
+    cancelledAt
+    displayFulfillmentStatus
+    shippingAddress { address1 address2 city zip country }
+    fulfillments(first: 20) { status trackingInfo(first: 5) { number } }
+    transactions(first: 100) { id kind status gateway manualPaymentGateway errorCode }
   }
 }
 """
@@ -865,11 +1020,12 @@ class ShopifyAdapter:
         *,
         reason: str = "customer",
         email: bool = True,
-        refund: bool = False,
+        refund: bool,
+        restock: bool,
     ) -> dict[str, Any]:
         order_id = await self._resolve_order_id(ctx, order_id)
         return await self._client(ctx).cancel_order(
-            order_id, reason=reason, email=email, refund=refund
+            order_id, reason=reason, email=email, refund=refund, restock=restock
         )
 
     async def update_shipping_address(
@@ -923,6 +1079,10 @@ class ShopifyAdapter:
             first_name=first_name,
             last_name=last_name,
         )
+
+    async def get_order_snapshot(self, ctx: IntegrationContext, order_id: int) -> OrderSnapshot:
+        order_id = await self._resolve_order_id(ctx, order_id)
+        return await self._client(ctx).get_order_snapshot(order_id)
 
     async def get_refundable_balance(
         self, ctx: IntegrationContext, order_id: int

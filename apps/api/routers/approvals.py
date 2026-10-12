@@ -34,12 +34,15 @@ from apps.api.db.queries import (
 from apps.api.services.agent_resolution import finalize_agent_resolution
 from apps.api.services.approval_reply import generate_customer_reply
 from apps.api.services.approval_resolution import (
+    hand_executed_action_to_team,
     release_approval_escalation,
     release_escalations_after_executed_action,
     reply_delivered,
+    team_followup_reason,
 )
 from apps.api.services.commerce_context import build_commerce_integration_ctx
 from apps.api.services.helpdesk_delivery import deliver_message_to_helpdesk
+from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
 from apps.api.skills.base import SkillContext
 from apps.api.skills.registry import SkillRegistry
 from fastapi import APIRouter, Depends, Query, Request
@@ -229,8 +232,12 @@ async def approve_action(
             "output": output_data,
         }
 
-    # Éxito: mensaje al cliente natural y sin jerga interna (Haiku, con fallback a
-    # plantilla). output_data crudo queda solo en metadata, no se le muestra al cliente.
+    # Ejecutada. Si la skill releyó el pedido y no quedó cerrado (reembolso manual o
+    # fallido, cambio que no aparece), el equipo tiene que rematarla.
+    followup = team_followup_reason(approval.skill_slug, output_data)
+
+    # Mensaje al cliente sin jerga interna: plantilla fija por resultado o Haiku con
+    # fallback a plantilla. output_data crudo queda solo en metadata.
     anthropic_client = getattr(getattr(request.app.state, "agent_deps", None), "anthropic", None)
     result_message = await generate_customer_reply(
         anthropic_client,
@@ -268,14 +275,23 @@ async def approve_action(
             },
         )
         await update_conversation_last_message(conn, tenant_id, approval.conversation_id)
-        # Acción ejecutada: se cierran todas las escalaciones abiertas de la
-        # conversación (la del gate y cualquier escalado previo por la misma
-        # petición) y vuelve a 'open'.
-        await release_escalations_after_executed_action(
-            conn,
-            tenant_id=tenant_id,
-            conversation_id=approval.conversation_id,
-        )
+        if followup is None:
+            # Acción ejecutada: se cierran todas las escalaciones abiertas de la
+            # conversación (la del gate y cualquier escalado previo por la misma
+            # petición) y vuelve a 'open'.
+            await release_escalations_after_executed_action(
+                conn,
+                tenant_id=tenant_id,
+                conversation_id=approval.conversation_id,
+            )
+        else:
+            await hand_executed_action_to_team(
+                conn,
+                tenant_id=tenant_id,
+                conversation_id=approval.conversation_id,
+                approval_id=approval_id,
+                reason=followup,
+            )
         # Entregar el resultado al helpdesk del cliente (el mensaje ya quedó en DB).
         conversation = await get_conversation(conn, tenant_id, approval.conversation_id)
         delivered = False
@@ -291,9 +307,23 @@ async def approve_action(
                 ),
             )
 
+    if followup is not None:
+        logger.warning(
+            "approved_action_needs_team",
+            extra={
+                "approval_id": str(approval_id),
+                "skill": approval.skill_slug,
+                "conversation_id": str(approval.conversation_id),
+                "outcome": output_data.get("outcome"),
+            },
+        )
+        if conversation is not None:
+            await push_escalation_to_helpdesk_safe(
+                tenant_id=tenant_id, conversation=conversation, reason=followup
+            )
     # Acción ejecutada y confirmada → resolución (resolved + resolution event + cierre
     # del ticket). Sin entrega confirmada queda abierta, igual que en el webhook.
-    if conversation is not None:
+    elif conversation is not None:
         await finalize_agent_resolution(
             tenant_id=tenant_id,
             conversation=conversation,
@@ -306,6 +336,8 @@ async def approve_action(
         "execution_status": execution_status,
         "message_id": str(msg.id),
         "output": output_data,
+        # Motivo con el que la acción quedó escalada al equipo; None si quedó cerrada.
+        "team_followup": followup,
     }
 
 

@@ -29,6 +29,9 @@ export interface ApproveResult {
   execution_status: 'success' | 'failed'
   message_id: string | null
   output: Record<string, unknown>
+  // Ejecutada pero sin cerrar (reembolso manual o fallido, cambio no confirmado):
+  // motivo con el que quedó escalada al equipo. Ausente si falló la ejecución.
+  team_followup?: string | null
 }
 
 async function apiFetch<T>(

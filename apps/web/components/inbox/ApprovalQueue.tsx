@@ -92,6 +92,7 @@ const INPUT_LABELS: Record<string, string> = {
   country_code: 'País',
   send_email: 'Notificar por email',
   refund_payment: 'Reembolsar pago',
+  refund_mode: 'Reembolso',
   restock: 'Reponer stock',
   amount: 'Importe',
   currency: 'Moneda',
@@ -124,17 +125,32 @@ function aopLabel(slug: string): string {
   return AOP_LABELS[slug] ?? humanizeSlug(slug)
 }
 
-function formatInputValue(key: string, value: unknown): string {
+// Acciones sobre un pedido que pudo salir del almacén sin que Shopify lo sepa.
+const WAREHOUSE_CHECK_SKILLS = new Set(['shopify.update_shipping_address', 'shopify.cancel_order'])
+
+function refundModeLabel(inputs: Record<string, unknown>): string {
+  if (inputs.refund_mode === 'automatic') {
+    const gateway = typeof inputs.refund_gateway === 'string' ? inputs.refund_gateway : 'de pago'
+    return `automático por la pasarela ${gateway}`
+  }
+  return 'manual, lo hace la tienda'
+}
+
+function formatInputValue(key: string, value: unknown, inputs: Record<string, unknown>): string {
   if (typeof value === 'boolean') return value ? 'Sí' : 'No'
   if (key === 'reason' && typeof value === 'string') {
     return CANCEL_REASON_LABELS[value] ?? value
   }
+  if (key === 'refund_mode') return refundModeLabel(inputs)
   return String(value)
 }
 
 function formatInputs(inputs: Record<string, unknown>): string {
   return Object.entries(inputs)
-    .map(([k, v]) => `${INPUT_LABELS[k] ?? k.replaceAll('_', ' ')}: ${formatInputValue(k, v)}`)
+    .filter(([k]) => k !== 'refund_gateway')
+    .map(
+      ([k, v]) => `${INPUT_LABELS[k] ?? k.replaceAll('_', ' ')}: ${formatInputValue(k, v, inputs)}`,
+    )
     .join(' · ')
 }
 
@@ -219,6 +235,11 @@ function ApprovalRow({
           <p className="mt-0.5 text-xs text-foreground-muted truncate">
             {formatInputs(approval.inputs_raw)}
           </p>
+          {isPending && WAREHOUSE_CHECK_SKILLS.has(approval.skill_slug) && (
+            <p className="mt-1 text-xs font-medium text-warning-foreground">
+              Confirma con el almacén que el pedido no ha salido.
+            </p>
+          )}
           <div className="mt-1 flex items-center gap-2 text-xs text-foreground-muted">
             <Link
               href={`${conversationBasePath}/${approval.conversation_id}`}
@@ -311,6 +332,8 @@ export function ApprovalQueue({
         const detail =
           typeof result.output?.error === 'string' ? result.output.error : 'error desconocido'
         setActionError(`No se pudo ejecutar la acción: ${detail}. Sigue pendiente, reintenta.`)
+      } else if (result.team_followup) {
+        setActionError(`Acción ejecutada, pero queda escalada al equipo: ${result.team_followup}`)
       }
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Error al aprobar')

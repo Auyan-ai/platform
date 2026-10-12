@@ -5,6 +5,10 @@ Antes el endpoint de approvals le volcaba al cliente el output crudo de la skill
 cliente final, vía Haiku (barato/rápido), partiendo de una plantilla limpia. Si
 el cliente Anthropic no está disponible o la llamada falla, devuelve la plantilla
 tal cual (fallback) — nunca jerga interna.
+
+Las skills que releen el pedido tras actuar devuelven un `outcome`. Para ellas el
+mensaje es una plantilla fija por resultado y no pasa por el LLM: lo que se le dice
+al cliente sobre su dinero o su envío no se reescribe (issue #318).
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from apps.api.services.reply_format import strip_emojis, strip_formatting
+from apps.api.skills.shopify._order_guard import ActionOutcome
 
 if TYPE_CHECKING:
     import anthropic
@@ -131,6 +136,72 @@ def done_followup_message(skill_slug: str | None) -> str:
     return _SKILL_DONE_FOLLOWUP.get(skill_slug, _DEFAULT_DONE_FOLLOWUP)
 
 
+_TEAM_WILL_WRITE = "Nuestro equipo ya está avisado y te escribirá en cuanto lo tenga resuelto."
+
+# Mensaje por (skill, resultado). Nunca promete que el paquete llegará a la nueva
+# dirección ni plazos de la pasarela: solo lo que Shopify confirmó.
+_OUTCOME_REPLY: dict[tuple[str, ActionOutcome], str] = {
+    ("shopify.update_shipping_address", ActionOutcome.CONFIRMED): (
+        "Hemos actualizado la dirección de envío de tu pedido."
+    ),
+    ("shopify.update_shipping_address", ActionOutcome.NOT_CONFIRMED): (
+        "No hemos podido confirmar el cambio de dirección de tu pedido. " + _TEAM_WILL_WRITE
+    ),
+    ("shopify.cancel_order", ActionOutcome.CONFIRMED): (
+        "Hemos cancelado tu pedido y el reembolso ya está emitido a tu método de pago "
+        "original. Según tu banco, puede tardar unos días en verse en tu cuenta."
+    ),
+    ("shopify.cancel_order", ActionOutcome.REFUND_PENDING): (
+        "Hemos cancelado tu pedido. El reembolso a tu método de pago original está en "
+        "proceso con la pasarela de pago."
+    ),
+    ("shopify.cancel_order", ActionOutcome.REFUND_MANUAL): (
+        "Hemos cancelado tu pedido. Si ya realizaste el pago, la tienda te devolverá el "
+        "importe por el mismo medio con el que pagaste. " + _TEAM_WILL_WRITE
+    ),
+    ("shopify.cancel_order", ActionOutcome.REFUND_FAILED): (
+        "Hemos cancelado tu pedido, pero el reembolso no se ha podido completar de forma "
+        "automática. " + _TEAM_WILL_WRITE
+    ),
+    ("shopify.cancel_order", ActionOutcome.NOT_CONFIRMED): (
+        "No hemos podido confirmar la cancelación de tu pedido. " + _TEAM_WILL_WRITE
+    ),
+    ("shopify.refund_partial", ActionOutcome.CONFIRMED): (
+        "Hemos emitido el reembolso a tu método de pago original. Según tu banco, puede "
+        "tardar unos días en verse en tu cuenta."
+    ),
+    ("shopify.refund_partial", ActionOutcome.REFUND_PENDING): (
+        "El reembolso a tu método de pago original está en proceso con la pasarela de pago."
+    ),
+    ("shopify.refund_partial", ActionOutcome.REFUND_MANUAL): (
+        "La tienda te devolverá el importe por el mismo medio con el que pagaste. "
+        + _TEAM_WILL_WRITE
+    ),
+    ("shopify.refund_partial", ActionOutcome.REFUND_FAILED): (
+        "No hemos podido completar el reembolso de forma automática. " + _TEAM_WILL_WRITE
+    ),
+}
+_OUTCOME_UNSETTLED_DEFAULT = (
+    "No hemos podido confirmar que tu solicitud quedara completada. " + _TEAM_WILL_WRITE
+)
+
+
+def outcome_message(skill_slug: str, output: dict[str, Any]) -> str | None:
+    """Mensaje fijo para una skill que devolvió `outcome`. None si no lo devolvió."""
+    raw = output.get("outcome")
+    if raw is None:
+        return None
+    outcome = ActionOutcome(raw)
+    default = (
+        _SKILL_DONE.get(skill_slug, _DEFAULT_DONE)
+        if outcome.settled
+        else _OUTCOME_UNSETTLED_DEFAULT
+    )
+    text = _OUTCOME_REPLY.get((skill_slug, outcome), default)
+    details = action_details(skill_slug, output) if outcome is ActionOutcome.CONFIRMED else None
+    return f"{text}\n\n{details}" if details else text
+
+
 _SYSTEM = (
     "Eres el asistente de atención al cliente de una tienda de e-commerce. "
     "Reescribe el mensaje que te doy como una confirmación breve, cálida y natural "
@@ -185,8 +256,12 @@ async def generate_customer_reply(
     """Devuelve el mensaje al cliente. Usa Haiku para darle calidez; cae a plantilla.
 
     Los datos concretos de la acción (p. ej. la dirección nueva) NO pasan por el
-    LLM: se añaden literalmente al final, para que nunca se alteren.
+    LLM: se añaden literalmente al final, para que nunca se alteren. Si la skill
+    devolvió `outcome`, el mensaje entero es la plantilla fija de ese resultado.
     """
+    fixed = outcome_message(skill_slug, output) if success and output else None
+    if fixed is not None:
+        return fixed
     details = action_details(skill_slug, output) if success else None
     if client is None:
         return fallback_message(

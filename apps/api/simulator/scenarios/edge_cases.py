@@ -88,4 +88,49 @@ SCENARIOS: list[dict[str, Any]] = [
         },
         "max_turns": 5,
     },
+    {
+        "id": "EX-05",
+        "name": "EX-05: Cancelar pedido ya enviado (L3 rechazada en código)",
+        "description": (
+            "Cliente quiere cancelar un pedido que el agente lee como no enviado, pero que "
+            "sale del almacén antes de pedir la aprobación (la relectura del pedido trae "
+            "tracking). El código rechaza la cancelación y escala con texto fijo."
+        ),
+        "aop_slug": "default",
+        "profile": "cooperativo",
+        "goal": "Cancelar el pedido #1500 porque ya no lo necesito",
+        "initial_message": "Hola, quiero cancelar el pedido #1500, ya no lo necesito.",
+        "expected_outcome": (
+            "No se crea aprobación: el agente dice que el pedido ya salió del almacén y pasa "
+            "el caso al equipo, sin prometer la cancelación."
+        ),
+        "mock_fixtures": {
+            "shopify": {
+                "get_order_by_name": {
+                    "found": True,
+                    "id": 4001,
+                    "order_number": "#1500",
+                    "financial_status": "paid",
+                    "fulfillment_status": "unfulfilled",
+                    "created_at": "2026-05-24T10:00:00Z",
+                    "line_items": [{"id": 6001, "title": "Zapatillas", "quantity": 1}],
+                },
+                "get_order_snapshot": {
+                    "id": "gid://shopify/Order/4001",
+                    "name": "#1500",
+                    "cancelledAt": None,
+                    "displayFulfillmentStatus": "FULFILLED",
+                    "fulfillments": [{"status": "SUCCESS", "trackingInfo": [{"number": "1Z9"}]}],
+                    "transactions": [],
+                },
+            }
+        },
+        "assertions": {
+            "must_escalate": True,
+            "response_contains": ["ya ha salido del almacén"],
+            # El texto del gate L3 de cancelación: si aparece, se creó la aprobación.
+            "response_not_contains": ["tramitar la cancelación"],
+        },
+        "max_turns": 4,
+    },
 ]

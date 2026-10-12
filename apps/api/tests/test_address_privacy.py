@@ -19,6 +19,7 @@ from apps.api.skills.shopify.update_shipping_address import (
     UpdateShippingAddressInput,
 )
 from apps.api.tests.conftest import TENANT_ID
+from apps.api.tests.order_snapshots import snapshot
 
 _ORDER: dict[str, Any] = {
     "id": 7404799197464,
@@ -113,17 +114,21 @@ async def test_non_owner_on_whatsapp_gets_phone_note_without_email() -> None:
 @pytest.mark.asyncio
 async def test_update_shipping_address_sends_address2() -> None:
     mock = AsyncMock()
-    mock.update_shipping_address = AsyncMock(
-        return_value={
-            "id": 7404799197464,
-            "shipping_address": {
-                "address1": "Calle José Hierro, 18",
-                "address2": "Portal 5, 1ºA",
-                "city": "San Sebastián de los Reyes",
-                "zip": "28702",
-                "country": "Spain",
-            },
-        }
+    mock.update_shipping_address = AsyncMock(return_value={"id": 7404799197464})
+    mock.get_order_snapshot = AsyncMock(
+        side_effect=[
+            snapshot(order_id=7404799197464),
+            snapshot(
+                order_id=7404799197464,
+                address={
+                    "address1": "Calle José Hierro, 18",
+                    "address2": "Portal 5, 1ºA",
+                    "city": "San Sebastián de los Reyes",
+                    "zip": "28702",
+                    "country": "Spain",
+                },
+            ),
+        ]
     )
     out = await UpdateShippingAddress().execute(
         _ctx(None, mock),

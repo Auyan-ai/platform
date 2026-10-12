@@ -1,14 +1,23 @@
 """Skill L3: actualiza la dirección de envío de un pedido.
 
-Solo aplica si el pedido aún no ha salido del almacén.
-Requiere aprobación humana.
+Requiere aprobación humana. Un pedido cancelado o que ya salió se rechaza en código
+antes de pedir aprobación y otra vez al ejecutar. Tras el cambio se relee el pedido:
+solo se confirma la dirección que Shopify tiene guardada.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
+from apps.api.skills.shopify._order_guard import (
+    ActionOutcome,
+    address_verdict,
+    ensure_order_changeable,
+)
+from pydantic import computed_field
 
 
 class UpdateShippingAddressInput(SkillInput):
@@ -28,13 +37,20 @@ class UpdateShippingAddressInput(SkillInput):
 
 
 class UpdateShippingAddressOutput(SkillOutput):
-    success: bool
     order_id: int
-    new_address1: str
+    outcome: ActionOutcome
+    detail: str | None = None
+    # La dirección que Shopify tiene guardada tras el cambio, releída del pedido.
+    new_address1: str | None = None
     new_address2: str | None = None
     new_zip: str | None = None
-    new_city: str
-    new_country: str
+    new_city: str | None = None
+    new_country: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def success(self) -> bool:
+        return self.outcome.settled
 
 
 @SkillRegistry.register
@@ -52,14 +68,28 @@ class UpdateShippingAddress(Skill):
     requires_idempotency = True
     default_threshold = 0.95
 
+    async def prepare_approval(
+        self, ctx: SkillContext, raw_input: dict[str, Any]
+    ) -> dict[str, Any]:
+        inputs = UpdateShippingAddressInput.model_validate(raw_input)
+        if not ctx.integration_ctx:
+            raise ValueError("shopify_not_configured")
+        adapter = ctx.commerce_mock or ShopifyAdapter()
+        snapshot = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
+        ensure_order_changeable(snapshot, "address")
+        return raw_input
+
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, UpdateShippingAddressInput)
         if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
         adapter = ctx.commerce_mock or ShopifyAdapter()
-        order = await adapter.update_shipping_address(
+        # La aprobación puede llevar horas en cola: el pedido pudo salir entretanto.
+        before = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
+        ensure_order_changeable(before, "address")
+        await adapter.update_shipping_address(
             ctx.integration_ctx,
-            inputs.order_id,
+            before.order_id,
             address1=inputs.address1,
             address2=inputs.address2,
             city=inputs.city,
@@ -69,15 +99,18 @@ class UpdateShippingAddress(Skill):
             first_name=inputs.first_name,
             last_name=inputs.last_name,
         )
-        shipping = order.get("shipping_address") or {}
+        after = await adapter.get_order_snapshot(ctx.integration_ctx, before.order_id)
+        verdict = address_verdict(
+            after, address1=inputs.address1, zip_code=inputs.zip_code, city=inputs.city
+        )
+        saved = after.shipping_address
         return UpdateShippingAddressOutput(
-            success=True,
-            order_id=order["id"],
-            new_address1=shipping.get("address1", inputs.address1),
-            new_address2=shipping.get("address2", inputs.address2),
-            new_zip=shipping.get("zip", inputs.zip_code),
-            new_city=shipping.get("city", inputs.city),
-            new_country=(
-                shipping.get("country") or shipping.get("country_code") or inputs.country or ""
-            ),
+            order_id=after.order_id,
+            outcome=verdict.outcome,
+            detail=verdict.detail,
+            new_address1=saved.get("address1"),
+            new_address2=saved.get("address2"),
+            new_zip=saved.get("zip"),
+            new_city=saved.get("city"),
+            new_country=saved.get("country"),
         )
