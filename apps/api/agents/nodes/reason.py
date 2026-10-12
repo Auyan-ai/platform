@@ -36,7 +36,7 @@ from apps.api.agents.prompts.builder import (
 from apps.api.agents.schemas import RESPOND_OR_ESCALATE_TOOL, AgentDecisionTool
 from apps.api.agents.state import AgentState
 from apps.api.integrations.anthropic_client import call_claude_with_tools
-from apps.api.integrations.pricing import compute_llm_cost
+from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.services.identity import IdentityContext
 from apps.api.services.skill_access import visible_skills
 from apps.api.skills.registry import SkillRegistry
@@ -314,18 +314,13 @@ def make_reason_node(
             return {"error": "claude_did_not_use_tool"}
 
         # Acumular tokens/costo con lo que ya hubiera de iteraciones previas.
-        prev_in: int = state.get("tokens_in", 0)
-        prev_out: int = state.get("tokens_out", 0)
-        prev_cost: float = state.get("cost_usd", 0.0)
-
-        this_in = response.usage.input_tokens
-        this_out = response.usage.output_tokens
-        this_cost = compute_llm_cost(model, this_in, this_out)
-
+        usage = LLMUsage.from_anthropic(response.usage)
         tokens_update: dict[str, Any] = {
-            "tokens_in": prev_in + this_in,
-            "tokens_out": prev_out + this_out,
-            "cost_usd": prev_cost + this_cost,
+            "tokens_in": state.get("tokens_in", 0) + usage.prompt_tokens,
+            "tokens_cache_write": state.get("tokens_cache_write", 0) + usage.cache_write_tokens,
+            "tokens_cache_read": state.get("tokens_cache_read", 0) + usage.cache_read_tokens,
+            "tokens_out": state.get("tokens_out", 0) + usage.output_tokens,
+            "cost_usd": state.get("cost_usd", 0.0) + compute_llm_cost(model, usage),
             "model_used": model,
         }
 

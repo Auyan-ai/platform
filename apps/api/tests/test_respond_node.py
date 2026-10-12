@@ -102,12 +102,14 @@ async def test_message_metadata_includes_telemetry(fake_deps, monkeypatch) -> No
     monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
     node = make_respond_node(fake_deps)
 
-    await node(_state())
+    await node(_state(tokens_cache_write=20, tokens_cache_read=90))
 
     metadata = insert_mock.await_args.kwargs["metadata"]
     assert metadata["langfuse_trace_id"] == "trace-abc"
     assert metadata["model"] == "claude-sonnet-4-6"
     assert metadata["prompt_tokens"] == 120
+    assert metadata["cache_write_tokens"] == 20
+    assert metadata["cache_read_tokens"] == 90
     assert metadata["completion_tokens"] == 35
     assert metadata["cost_usd"] == 0.00086
     assert metadata["confidence"] == 0.92

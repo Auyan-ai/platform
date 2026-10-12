@@ -42,6 +42,8 @@ def make_respond_node(
             "langfuse_trace_id": state.get("langfuse_trace_id"),
             "model": state.get("model_used"),
             "prompt_tokens": state.get("tokens_in", 0),
+            "cache_write_tokens": state.get("tokens_cache_write", 0),
+            "cache_read_tokens": state.get("tokens_cache_read", 0),
             "completion_tokens": state.get("tokens_out", 0),
             "cost_usd": state.get("cost_usd", 0.0),
             "confidence": state.get("confidence"),

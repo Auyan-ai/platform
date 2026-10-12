@@ -9,6 +9,7 @@ from collections.abc import Generator
 from unittest.mock import AsyncMock
 
 import pytest
+from anthropic.types import Usage
 from apps.api.agents.nodes.reason import make_reason_node
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
@@ -515,6 +516,41 @@ async def test_tokens_accumulate_across_iterations(
     assert out["tokens_in"] == 280
     assert out["tokens_out"] == 130
     assert out["cost_usd"] > 0.0123  # se acumuló costo
+
+
+@pytest.mark.asyncio
+async def test_cached_prompt_counts_in_tokens_and_cost(
+    fake_deps, make_anthropic_response, monkeypatch
+) -> None:
+    """El prefijo leído de caché suma a tokens_in y se cobra a la tarifa de lectura (#331)."""
+    fake_response = make_anthropic_response(
+        {"decision": "respond", "confidence": 0.9, "response_text": "hola"}
+    )
+    fake_response.usage = Usage.model_validate(
+        {
+            "input_tokens": 1684,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 3426,
+            "output_tokens": 166,
+        }
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        AsyncMock(return_value=fake_response),
+    )
+    node = make_reason_node(fake_deps)
+
+    state = _base_state()
+    state["tokens_in"] = 1000
+    state["tokens_cache_read"] = 400
+    out = await node(state)
+
+    assert out["model_used"] == "claude-haiku-4-5-20251001"
+    assert out["tokens_in"] == 1000 + 1684 + 3426
+    assert out["tokens_cache_read"] == 400 + 3426
+    assert out["tokens_cache_write"] == 0
+    # Haiku 4.5: 1684 @ $1 + 3426 @ $0.10 + 166 @ $5 = $0.0028566
+    assert out["cost_usd"] == pytest.approx(0.0028566)
 
 
 @pytest.mark.asyncio

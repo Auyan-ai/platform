@@ -66,6 +66,8 @@ class LangfuseClient:
         response_text: str | None,
         escalation_reason: str | None,
         tokens_in: int,
+        tokens_cache_write: int,
+        tokens_cache_read: int,
         tokens_out: int,
         cost_usd: float,
         model: str | None,
@@ -83,6 +85,8 @@ class LangfuseClient:
                 metadata={
                     "confidence": confidence,
                     "tokens_in": tokens_in,
+                    "tokens_cache_write": tokens_cache_write,
+                    "tokens_cache_read": tokens_cache_read,
                     "tokens_out": tokens_out,
                     "cost_usd": cost_usd,
                     "model": model,

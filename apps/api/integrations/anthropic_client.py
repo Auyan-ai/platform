@@ -16,6 +16,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import anthropic
+from apps.api.integrations.pricing import LLMUsage
 from tenacity import (
     AsyncRetrying,
     retry_if_exception_type,
@@ -34,14 +35,6 @@ RETRYABLE_ERRORS: tuple[type[Exception], ...] = (
     anthropic.RateLimitError,
     anthropic.InternalServerError,
 )
-
-
-def _usage_int(usage: Any, attr: str) -> int:
-    """Lee un contador de `usage` como int. Si el atributo falta o no es int
-    (p.ej. None cuando no hubo caching), devuelve 0 — así el logging de
-    instrumentación nunca rompe ante respuestas sin breakdown de cache."""
-    val = getattr(usage, attr, 0)
-    return val if isinstance(val, int) else 0
 
 
 async def call_claude_with_tools(
@@ -126,16 +119,16 @@ async def call_claude_with_tools(
         # Instrumentación de latencia/cache: una línea por llamada al LLM.
         # dur_ms cubre el happy path (sin reintentos = la llamada en sí); si
         # hubo reintentos incluye los backoffs, lo cual es raro y se nota.
-        usage = last_response.usage
+        usage = LLMUsage.from_anthropic(last_response.usage)
         logger.info(
             "llm_call label=%s model=%s dur_ms=%d in=%d cache_w=%d cache_r=%d out=%d",
             trace_label,
             model,
             int((time.monotonic() - start) * 1000),
-            _usage_int(usage, "input_tokens"),
-            _usage_int(usage, "cache_creation_input_tokens"),
-            _usage_int(usage, "cache_read_input_tokens"),
-            _usage_int(usage, "output_tokens"),
+            usage.input_tokens,
+            usage.cache_write_tokens,
+            usage.cache_read_tokens,
+            usage.output_tokens,
         )
     return last_response
 
