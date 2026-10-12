@@ -28,7 +28,9 @@ const base = { executablePath: findChromium(), args: ['--no-sandbox', '--passwor
 // (and rewrites it on exit, so rotated tokens survive). state.json is as sensitive as the profile: gitignored, never print it.
 const STATE = path.join(PROFILE, 'state.json');
 async function openCtx({ headless }) {
-  const ctx = await chromium.launchPersistentContext(PROFILE, { ...base, headless, viewport: { width: 1360, height: 880 } });
+  // VERIFY_VIDEO=1 graba un .webm en evidence/videos/ (se escribe al cerrar el contexto).
+  const video = process.env.VERIFY_VIDEO ? { recordVideo: { dir: path.join(EVID, 'videos'), size: { width: 1360, height: 880 } } } : {};
+  const ctx = await chromium.launchPersistentContext(PROFILE, { ...base, ...video, headless, viewport: { width: 1360, height: 880 } });
   if (fs.existsSync(STATE)) {
     try { await ctx.addCookies(JSON.parse(fs.readFileSync(STATE, 'utf8')).cookies || []); } catch (e) { console.error('state.json ilegible:', e.message); }
   }

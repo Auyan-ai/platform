@@ -107,6 +107,20 @@ endpoints de test; verifica efectos secundarios (filas, escalaciones) además de
 donde ya hay una frontera de producción (Shopify/helpdesks son los de staging, no se simulan aquí).
 Un `dry-run` se verifica observando (filas/red/logs), no fiándose del nombre.
 
+## Evidencia en el PR
+
+**Un cambio en `apps/api` o `apps/web` no está terminado sin el bloque de evidencia en vivo en el cuerpo del PR** (sección "Evidencia en vivo" de `.github/pull_request_template.md`). Reproducciones de solo lectura o tests no lo sustituyen. Lo que no pudiste probar va en "Qué NO se verificó y por qué" (sesión del dashboard caducada, sin ffmpeg para vídeo…).
+```bash
+.claude/skills/verify/scripts/evidence-md.py <conversation_id> [--media evidence/<ts>-<nombre>.png ...] > evidencia.md   # pégalo en el PR
+python3 .claude/skills/verify/scripts/test_evidence_md.py                                                              # prueba del enmascarado
+```
+Compone el bloque con lo que ya guardaron `inbound.sh`, `dump.sh` y `trace.sh` (corre los tres antes) y enmascara emails y teléfonos.
+Con `--media` sube capturas o vídeo de `evidence/` a la rama huérfana `verify-evidence` (una carpeta por rama de PR) y los enlaza como
+`github.com/<repo>/blob/verify-evidence/...?raw=true`. Por qué esta vía: `gh` no adjunta imágenes; un artefacto de workflow obliga a bajar un zip (mal desde el móvil);
+la rama se ve en línea con la sesión de GitHub del revisor y el repo es privado, así que no hay URL pública. El script solo sube archivos de `evidence/` con extensión de imagen o vídeo;
+que sean de staging o Marea lo garantizas tú. Vídeo: `VERIFY_VIDEO=1` en cualquier script `web-*.cjs` graba `evidence/videos/*.webm` (necesita el ffmpeg de Playwright). Se enlaza, no se incrusta:
+GitHub solo reproduce en línea los adjuntos subidos desde su editor. Cuando la rama ya no haga falta, bórrala con `git push origin --delete verify-evidence`.
+
 ## Cleanup
 
 ```bash
