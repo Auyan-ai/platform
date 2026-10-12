@@ -114,7 +114,7 @@ def hash_inputs(inputs: dict[str, Any]) -> str:
 # reemplaza por un marcador sin hash y el teléfono conserva los últimos 4 dígitos.
 # Números de pedido (#1429), importes e IDs cortos no se tocan.
 
-_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 # Teléfono: con prefijo internacional (+34 612 345 678) o 9 dígitos españoles que
 # empiezan por 6/7/8/9, admitiendo separadores de espacio, punto o guion.
 _PHONE_RE = re.compile(
@@ -124,7 +124,7 @@ _PHONE_RE = re.compile(
 
 def mask_free_text_pii(text: str) -> str:
     """Enmascara emails y teléfonos en texto libre destinado a observabilidad."""
-    masked = _EMAIL_RE.sub("<email>", text)
+    masked = EMAIL_RE.sub("<email>", text)
     return _PHONE_RE.sub(lambda m: _redact_phone(m.group(0)), masked)
 
 

@@ -228,54 +228,6 @@ class TestNeedsSupervision:
 
 
 # ──────────────────────────────────────────────────────────
-# _build_supervisor_prompt — guardrails
-# ──────────────────────────────────────────────────────────
-
-
-class TestSupervisorPromptGuardrails:
-    def _prompt(self, state: dict) -> str:
-        from apps.api.agents.nodes.supervise import _build_supervisor_prompt
-
-        return _build_supervisor_prompt(state)
-
-    def test_uses_structured_guardrails_from_state(self):
-        """Con aop_guardrails en el state, el supervisor los recibe aunque el
-        compiler reformule (o elimine) el encabezado del system_prompt."""
-        prompt = self._prompt({
-            "aop_slug": "cancelacion",
-            "system_prompt": "prompt SIN el encabezado conocido",
-            "aop_guardrails": ["NUNCA canceles un pedido enviado.", "Verifica el email."],
-        })
-        assert "NUNCA canceles un pedido enviado." in prompt
-        assert "Verifica el email." in prompt
-        assert "## Guardrails del AOP" in prompt
-
-    def test_structured_guardrails_take_priority_over_prompt_parsing(self):
-        """Si hay aop_guardrails, NO se parsea el system_prompt (evita duplicar
-        o arrastrar texto de otros bloques)."""
-        prompt = self._prompt({
-            "aop_slug": "cancelacion",
-            "system_prompt": (
-                "x\n## Reglas NO negociables\n- regla vieja del prompt\n---\nresto"
-            ),
-            "aop_guardrails": ["regla estructurada"],
-        })
-        assert "regla estructurada" in prompt
-        assert "regla vieja del prompt" not in prompt
-
-    def test_falls_back_to_prompt_parsing_for_legacy(self):
-        """Sin aop_guardrails (tenant legacy sin AOP), se mantiene el parseo del
-        system_prompt como red de compatibilidad."""
-        prompt = self._prompt({
-            "aop_slug": "legacy",
-            "system_prompt": (
-                "x\n## Reglas NO negociables\n- no inventes tracking\n---\nresto"
-            ),
-        })
-        assert "no inventes tracking" in prompt
-
-
-# ──────────────────────────────────────────────────────────
 # Nodo supervise
 # ──────────────────────────────────────────────────────────
 
@@ -532,43 +484,213 @@ class TestRouteAfterSupervise:
         assert self._route({"error": "something_failed"}) == "handle_error"
 
 
-# ----------------------------------------------------------------
-# El supervisor ve las salidas de las skills del turno (E2E ticket #3)
-# ----------------------------------------------------------------
+# ──────────────────────────────────────────────────────────
+# El supervisor ve la misma evidencia que reason (#261, #327)
+# ──────────────────────────────────────────────────────────
+
+_STORE_FACTS = {
+    "support_email": "soporte@tienda-ejemplo.es",
+    "support_phone": "612 345 678",
+    "business_hours": "lunes a viernes de 8 a 16h",
+    "return_window_days": 30,
+}
+
+_DELIVERED_ORDER = {
+    "id": "toolu_1",
+    "slug": "shopify.get_order_status",
+    "input": {"order_identifier": "#1431"},
+    "is_error": False,
+    "error": None,
+    "output": {"found": True, "order_number": "#1431", "fulfillment_status": "fulfilled"},
+}
 
 
-def test_supervisor_prompt_includes_tool_outputs() -> None:
-    """Regresión: el supervisor solo veía `- slug: OK` y rechazaba afirmaciones
-    respaldadas por la salida real (p. ej. shipping_address_withheld=true), lo que
-    escalaba respuestas correctas."""
-    from apps.api.agents.nodes.supervise import _build_supervisor_prompt
+def _store_state(agent_response: str) -> dict:
+    from apps.api.aops.compiler import compile_aop
+    from apps.api.db.models import AopWithContent
+    from apps.api.tests.conftest import TENANT_ID, make_tenant_configuration
 
-    prompt = _build_supervisor_prompt(
-        {
-            "decision": "respond",
-            "agent_response": "Por seguridad no puedo mostrarte la dirección.",
-            "tool_results": [
-                {
-                    "slug": "shopify.get_order_status",
-                    "is_error": False,
-                    "output": {"found": True, "shipping_address_withheld": True},
-                }
-            ],
-        }
+    aop = AopWithContent(
+        id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        tenant_id=TENANT_ID,
+        slug="order_change",
+        workspace="production",
+        current_version=1,
+        yaml_frontmatter={
+            "name": "Cambios de pedido",
+            "guardrails": ["No canceles pedidos enviados."],
+        },
+        body_markdown="Consulta el pedido antes de responder.",
+        raw_source="",
     )
-    assert '"shipping_address_withheld": true' in prompt
+    compiled = compile_aop(aop, make_tenant_configuration(), tenant_facts=_STORE_FACTS)
+    return {
+        "tenant_id": str(TENANT_ID),
+        "conversation_id": "22222222-2222-2222-2222-222222222222",
+        "aop_slug": "order_change",
+        "system_prompt": compiled.system_prompt,
+        "tenant_facts": _STORE_FACTS,
+        "tenant_config": {"extra": {}, "escalation_threshold": 0.7},
+        "conversation_history": [
+            {"role": "customer", "content": "Quiero cancelar el pedido #1431."}
+        ],
+        "tool_results": [_DELIVERED_ORDER],
+        "decision": "respond",
+        "agent_response": agent_response,
+    }
 
 
-def test_supervisor_prompt_truncates_long_outputs() -> None:
-    from apps.api.agents.nodes.supervise import _build_supervisor_prompt
+def _sent_to_supervisor(fake_deps: Any) -> str:
+    kwargs = fake_deps.anthropic.messages.create.call_args.kwargs
+    system = "\n".join(b["text"] for b in kwargs["system"])
+    user = "\n".join(m["content"] for m in kwargs["messages"])
+    return f"{system}\n{user}"
 
-    prompt = _build_supervisor_prompt(
-        {
-            "decision": "respond",
-            "tool_results": [
-                {"slug": "s", "is_error": False, "output": {"blob": "x" * 10_000}}
-            ],
-        }
+
+@pytest.mark.asyncio
+async def test_supervisor_sees_tenant_facts(fake_deps: Any) -> None:
+    """#327: el supervisor rechazaba como inventados el plazo y los contactos de la tienda
+    porque no recibía los datos de la tienda que el agente sí tenía."""
+    from apps.api.agents.nodes.supervise import make_supervise_node
+
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_supervisor_response("approve")
     )
-    assert len(prompt) < 5_000
-    assert "…" in prompt
+    await make_supervise_node(fake_deps)(
+        _store_state("Tienes 30 días desde la entrega para devolverlo.")
+    )
+
+    sent = _sent_to_supervisor(fake_deps)
+    assert "Ventana de devoluciones (días): 30" in sent
+    assert "Teléfono de soporte: 612 345 678" in sent
+    assert "Horario de atención: lunes a viernes de 8 a 16h" in sent
+
+
+@pytest.mark.asyncio
+async def test_store_contacts_are_left_to_the_llm(fake_deps: Any) -> None:
+    from apps.api.agents.nodes.supervise import make_supervise_node
+
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_supervisor_response("approve", reason="respaldado")
+    )
+    result = await make_supervise_node(fake_deps)(
+        _store_state(
+            "No podemos cancelarlo: ya se entregó. Para devolverlo tienes 30 días; "
+            "escríbenos a soporte@tienda-ejemplo.es o llámanos al +34 612 34 56 78."
+        )
+    )
+
+    assert result["supervisor_verdict"] == "approve"
+    assert fake_deps.anthropic.messages.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_invented_phone_is_rejected_in_code(fake_deps: Any) -> None:
+    from apps.api.agents.nodes.supervise import make_supervise_node
+
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_supervisor_response("approve")
+    )
+    result = await make_supervise_node(fake_deps)(
+        _store_state("Para devolverlo llámanos al 911 222 333.")
+    )
+
+    assert result["supervisor_verdict"] == "reject"
+    assert result["supervisor_reject_kind"] == "tactical"
+    assert result["supervisor_retried"] is True
+    assert "teléfono acabado en 2333" in result["supervisor_feedback"]
+    assert fake_deps.anthropic.messages.create.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_customer_contact_from_history_is_backed(fake_deps: Any) -> None:
+    from apps.api.agents.nodes.supervise import make_supervise_node
+
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_supervisor_response("approve")
+    )
+    state = _store_state("Te escribiremos a carmen.ruiz@correo-ejemplo.com.")
+    state["conversation_history"] = [
+        {"role": "customer", "content": "Mi email es carmen.ruiz@correo-ejemplo.com"}
+    ]
+    result = await make_supervise_node(fake_deps)(state)
+
+    assert result["supervisor_verdict"] == "approve"
+
+
+@pytest.mark.asyncio
+async def test_contact_said_only_by_the_ai_earlier_is_not_evidence(fake_deps: Any) -> None:
+    from apps.api.agents.nodes.supervise import make_supervise_node
+
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_supervisor_response("approve")
+    )
+    state = _store_state("Como te dije, llama al 911 222 333.")
+    state["conversation_history"] = [
+        {"role": "customer", "content": "¿Teléfono?"},
+        {"role": "agent_ai", "content": "Llama al 911 222 333."},
+        {"role": "customer", "content": "¿Cuál era?"},
+    ]
+    result = await make_supervise_node(fake_deps)(state)
+
+    assert result["supervisor_verdict"] == "reject"
+
+
+@pytest.mark.asyncio
+async def test_contact_quoted_in_supervisor_feedback_is_not_evidence(fake_deps: Any) -> None:
+    from apps.api.agents.nodes.supervise import make_supervise_node
+
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_supervisor_response("approve")
+    )
+    state = _store_state("Llámanos al 911 222 333.")
+    state["supervisor_feedback"] = "El teléfono 911 222 333 no tiene respaldo."
+    state["supervisor_retried"] = True
+    result = await make_supervise_node(fake_deps)(state)
+
+    assert result["supervisor_verdict"] == "reject"
+    assert result["escalation_reason"].startswith("supervisor_rejected (tactical)")
+
+
+@pytest.mark.asyncio
+async def test_supervisor_sees_whole_history_and_every_tool_output(fake_deps: Any) -> None:
+    """Antes veía 3 mensajes (300 caracteres) y 3 herramientas (1500 caracteres)."""
+    from apps.api.agents.nodes.supervise import make_supervise_node
+
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_supervisor_response("approve")
+    )
+    state = _store_state("Listo.")
+    state["conversation_history"] = [
+        {"role": "customer", "content": "Hola, es sobre el pedido #1001."},
+        *[{"role": "customer", "content": f"mensaje {i}"} for i in range(5)],
+    ]
+    long_policy = "Plazo de reembolso: " + "x" * 3000 + " 3-5 días laborables."
+    state["tool_results"] = [
+        {**_DELIVERED_ORDER, "id": "t0", "output": {"body": long_policy}},
+        *[{**_DELIVERED_ORDER, "id": f"t{i}"} for i in range(1, 4)],
+    ]
+    await make_supervise_node(fake_deps)(state)
+
+    sent = _sent_to_supervisor(fake_deps)
+    assert "pedido #1001" in sent
+    assert "3-5 días laborables" in sent
+
+
+@pytest.mark.asyncio
+async def test_agent_prompt_is_in_the_cached_prefix(fake_deps: Any) -> None:
+    """El system prompt del agente es estable por tenant y AOP: va antes del breakpoint
+    de cache; la respuesta y la salida de las herramientas, después."""
+    from apps.api.agents.nodes.supervise import make_supervise_node
+
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_supervisor_response("approve")
+    )
+    await make_supervise_node(fake_deps)(_store_state("Ya se entregó, no puedo cancelarlo."))
+
+    kwargs = fake_deps.anthropic.messages.create.call_args.kwargs
+    cached = [b["text"] for b in kwargs["system"] if "cache_control" in b]
+    assert len(cached) == 1
+    assert "Ventana de devoluciones (días): 30" in cached[0]
+    assert "Ya se entregó, no puedo cancelarlo." not in cached[0]
+    assert "Ya se entregó, no puedo cancelarlo." in kwargs["messages"][0]["content"]

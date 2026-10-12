@@ -286,8 +286,6 @@ async def test_select_aop_happy_path(fake_deps: Any) -> None:
     assert "system_prompt" in result
     assert result["allowed_skills"] == ["shopify.list_my_orders"]
     assert result["max_tool_iterations"] == 3
-    # Guardrails estructurados para el supervisor (no parsea el system_prompt).
-    assert result["aop_guardrails"] == ["NUNCA inventes un número de tracking."]
 
 
 @pytest.mark.asyncio

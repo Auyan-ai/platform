@@ -228,7 +228,6 @@ def make_select_aop_node(
                 "max_tool_iterations": compiled.max_iterations,
                 "aop_confidence_threshold": compiled.confidence_threshold,
                 "aop_require_supervision": compiled.require_supervision,
-                "aop_guardrails": compiled.guardrails,
                 "aop_steps": [
                     {"id": s.id, "name": s.name, "decision_point": s.decision_point}
                     for s in compiled.steps
@@ -389,7 +388,6 @@ def make_select_aop_node(
             "max_tool_iterations": compiled.max_iterations,
             "aop_confidence_threshold": compiled.confidence_threshold,
             "aop_require_supervision": compiled.require_supervision,
-            "aop_guardrails": compiled.guardrails,
             "aop_steps": [
                 {"id": s.id, "name": s.name, "decision_point": s.decision_point}
                 for s in compiled.steps
