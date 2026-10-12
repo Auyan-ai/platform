@@ -35,6 +35,7 @@ from apps.api.skills.shopify.list_my_orders import (
     ListMyOrdersInput,
     ListMyOrdersOutput,
 )
+from apps.api.tests.identity_support import verified_context
 
 # ----------------------------------------------------------------
 # Fixtures
@@ -48,35 +49,16 @@ _SHOPIFY_INTEGRATION_CTX = IntegrationContext(
 OWNER_EMAIL = "cliente@example.com"
 
 # Remitente verificado: el dueño de los pedidos de prueba escribe desde su email.
-CTX = SkillContext(
-    tenant_id="11111111-1111-1111-1111-111111111111",
-    conversation_id="22222222-2222-2222-2222-222222222222",
-    integration_ctx=_SHOPIFY_INTEGRATION_CTX,
-    customer_email=OWNER_EMAIL,
-)
+CTX = verified_context(email=OWNER_EMAIL, integration_ctx=_SHOPIFY_INTEGRATION_CTX)
 
 # Otro remitente verificado: no es dueño de ningún pedido de prueba.
-CTX_OTHER_SENDER = SkillContext(
-    tenant_id="11111111-1111-1111-1111-111111111111",
-    conversation_id="22222222-2222-2222-2222-222222222222",
-    integration_ctx=_SHOPIFY_INTEGRATION_CTX,
-    customer_email="ajeno@example.com",
-)
+CTX_OTHER_SENDER = verified_context(email="ajeno@example.com", integration_ctx=_SHOPIFY_INTEGRATION_CTX)
 
-# Sin remitente verificado (ticket de chat): build_skill_context no pasa contacto.
-CTX_NO_SENDER = SkillContext(
-    tenant_id="11111111-1111-1111-1111-111111111111",
-    conversation_id="22222222-2222-2222-2222-222222222222",
-    integration_ctx=_SHOPIFY_INTEGRATION_CTX,
-    channel="zendesk",
-)
+# Sin remitente verificado (ticket de chat): no hay grants.
+CTX_NO_SENDER = verified_context(channel="zendesk", integration_ctx=_SHOPIFY_INTEGRATION_CTX)
 
-CTX_PHONE_SENDER = SkillContext(
-    tenant_id="11111111-1111-1111-1111-111111111111",
-    conversation_id="22222222-2222-2222-2222-222222222222",
-    integration_ctx=_SHOPIFY_INTEGRATION_CTX,
-    customer_phone="+34600111222",
-    channel="whatsapp",
+CTX_PHONE_SENDER = verified_context(
+    phone="+34600111222", channel="whatsapp", integration_ctx=_SHOPIFY_INTEGRATION_CTX
 )
 
 CTX_NO_SHOPIFY = SkillContext(
@@ -311,19 +293,6 @@ class TestGetOrderStatus:
         ):
             result = await GetOrderStatus().execute(
                 CTX, GetOrderStatusInput(order_identifier="#9999")
-            )
-        assert result.model_dump() == _NOT_FOUND_DUMP
-
-    @pytest.mark.parametrize(
-        "ctx", [CTX_OTHER_SENDER, CTX_NO_SENDER], ids=["email_ajeno", "origen_chat"]
-    )
-    async def test_someone_elses_order_looks_exactly_like_a_missing_one(
-        self, ctx: SkillContext
-    ) -> None:
-        mock_client = _mock_shopify(get_order_by_name=_RAW_ORDER)
-        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
-            result = await GetOrderStatus().execute(
-                ctx, GetOrderStatusInput(order_identifier="#1001")
             )
         assert result.model_dump() == _NOT_FOUND_DUMP
 

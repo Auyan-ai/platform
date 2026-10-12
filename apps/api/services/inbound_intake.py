@@ -13,7 +13,8 @@ transacción (`tenant_scope`):
     3. Find-or-create de la conversación por (channel, external_id); reabrir si estaba
        resuelta. En mensajería (WhatsApp) el chat no termina: se abre una **sesión** nueva
        si la última está cerrada o resuelta hace más de `reopen_window_days`.
-    4. INSERT del mensaje inbound.
+    4. INSERT del mensaje inbound, con su `identity_evidence` (ADR 0013): el contacto del
+       remitente que el origen del mensaje verifica.
     5. Encolar el turno en `inbound_jobs`.
 
 El webhook responde 200 en cuanto esto confirma; el grafo corre en
@@ -47,6 +48,7 @@ from apps.api.db.queries import (
 )
 from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.conversations import reopen_if_resolved
+from apps.api.services.identity import EVIDENCE_KEY, build_identity_evidence
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -135,6 +137,12 @@ async def persist_and_enqueue_inbound(
             # El cliente volvió a escribir: si estaba resuelta, reactivarla.
             conversation = await reopen_if_resolved(conn, tenant_id, conversation)
 
+        evidence = build_identity_evidence(
+            channel,
+            message_metadata.get("source_channel"),
+            email=customer_email,
+            phone=customer_phone,
+        )
         inbound = await insert_message(
             conn,
             tenant_id=tenant_id,
@@ -142,7 +150,7 @@ async def persist_and_enqueue_inbound(
             role="customer",
             direction="inbound",
             content=content,
-            metadata=message_metadata,
+            metadata={**message_metadata, EVIDENCE_KEY: evidence} if evidence else message_metadata,
         )
         await update_conversation_last_message(conn, tenant_id, conversation.id)
 

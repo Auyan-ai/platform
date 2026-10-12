@@ -1,11 +1,11 @@
-"""Skill L1: devuelve el estado detallado de un pedido por nombre/número, solo a su dueño."""
+"""Skill L1: devuelve el estado detallado de un pedido por nombre/número.
+
+Quién puede verlo lo decide el gate de `execute_skill` (ADR 0013), no la skill.
+"""
 
 from __future__ import annotations
 
-import logging
-
 from apps.api.integrations.shopify import ShopifyAdapter
-from apps.api.services.identity import check_order_ownership
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._models import (
@@ -18,8 +18,6 @@ from apps.api.skills.shopify._models import (
     shop_money_if_different,
 )
 from pydantic import Field
-
-logger = logging.getLogger(__name__)
 
 
 class GetOrderStatusInput(SkillInput):
@@ -51,8 +49,8 @@ class OrderDetail(SkillOutput):
     note: str | None = None
 
 
-# Mismo texto si el pedido no existe y si no es de quien escribe: no revela cuál de
-# los dos casos es (los números de pedido son correlativos y se pueden enumerar).
+# El gate ya resolvió el pedido y comprobó que es del remitente; esto solo cubre que
+# desaparezca entre el gate y la skill. No revela nada del pedido.
 NOT_FOUND_NOTE = (
     "No hay ningún pedido con ese número asociado al email o teléfono desde el que "
     "escribe el cliente. No digas si ese pedido existe ni des ningún dato de él. Pídele "
@@ -80,13 +78,16 @@ class GetOrderStatus(Skill):
         "Devuelve el estado detallado de un pedido de Shopify. "
         "Acepta el número de orden (#1234 o 1234). "
         "Incluye estado de pago, fulfillment, tracking, artículos y dirección de envío. "
-        "Solo devuelve pedidos del email o teléfono desde el que escribe el cliente. "
+        "Solo funciona con pedidos del email o teléfono desde el que escribe el cliente. "
         "Los importes vienen en la moneda en que pagó el cliente: úsala tal cual."
     )
     tier: SkillTier = "L1"
     input_schema = GetOrderStatusInput
     output_schema = OrderDetail
     default_threshold = 0.70
+    identity_scope = "order"
+    min_level = "guest"
+    order_input_field = "order_identifier"
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, GetOrderStatusInput)
@@ -96,18 +97,6 @@ class GetOrderStatus(Skill):
         raw = await adapter.get_order_by_name(ctx.integration_ctx, inputs.order_identifier)
 
         if raw is None:
-            return _NOT_FOUND
-        ownership = check_order_ownership(
-            raw,
-            customer_email=ctx.customer_email,
-            customer_phone=ctx.customer_phone,
-            default_region=ctx.phone_region,
-        )
-        if not ownership.owner:
-            logger.info(
-                "order_status_not_owner",
-                extra={"conversation_id": ctx.conversation_id, "reason": ownership.reason},
-            )
             return _NOT_FOUND
 
         raw_fulfillments = raw.get("fulfillments", [])

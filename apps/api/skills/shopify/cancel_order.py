@@ -60,6 +60,8 @@ class CancelOrder(Skill):
     output_schema = CancelOrderOutput
     requires_idempotency = True
     default_threshold = 0.95
+    identity_scope = "order"
+    min_level = "guest"
 
     async def prepare_approval(
         self, ctx: SkillContext, raw_input: dict[str, Any]

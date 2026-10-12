@@ -607,10 +607,10 @@ class TestL3HumanApprovalGate:
 
     @pytest.fixture(autouse=True)
     def _owner_verified(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        # Estos tests cubren el gate de aprobación/deduplicación; el de ownership
+        # Estos tests cubren el gate de aprobación/deduplicación; el de identidad
         # (email cliente == email pedido) tiene los suyos en test_l3_order_ownership.
         monkeypatch.setattr(
-            "apps.api.agents.nodes.execute_skill._l3_ownership_error",
+            "apps.api.agents.nodes.execute_skill._identity_gate",
             AsyncMock(return_value=None),
         )
 
@@ -903,7 +903,7 @@ class TestRefundApprovalPrecheck:
         SkillRegistry._reset()
         SkillRegistry.register(RefundPartial)
         monkeypatch.setattr(
-            "apps.api.agents.nodes.execute_skill._l3_ownership_error",
+            "apps.api.agents.nodes.execute_skill._identity_gate",
             AsyncMock(return_value=None),
         )
         self.create = AsyncMock()
@@ -975,7 +975,7 @@ class TestShippedOrderRefusal:
         SkillRegistry._reset()
         SkillRegistry.register(CancelOrder)
         monkeypatch.setattr(
-            "apps.api.agents.nodes.execute_skill._l3_ownership_error",
+            "apps.api.agents.nodes.execute_skill._identity_gate",
             AsyncMock(return_value=None),
         )
         self.create = AsyncMock()

@@ -30,12 +30,12 @@ from apps.api.db.queries import create_pending_approval, get_recent_approval_for
 from apps.api.integrations.base import IntegrationContext
 from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.identity import (
-    check_order_ownership,
+    IdentityContext,
     default_phone_region,
-    inbound_source_channel,
-    sender_origin,
+    evidence_from_state,
 )
 from apps.api.services.pii import redact_inputs
+from apps.api.services.skill_access import IdentityVerdict, identity_verdict
 from apps.api.skills.base import Skill, SkillContext, SkillRefusal
 from apps.api.skills.registry import SkillRegistry
 from pydantic import ValidationError
@@ -69,27 +69,19 @@ def build_skill_context(state: AgentState) -> SkillContext:
         shopify_fixtures = (state.get("simulation_fixtures") or {}).get("shopify", {})
         commerce_mock = MockShopifyAdapter(shopify_fixtures)
 
-    # Solo cuenta el contacto que el origen del mensaje verifica (ADR 0013): un email de
-    # chat lo teclea el visitante. El cliente del simulador escribe como remitente de correo.
-    origin = (
-        "email"
-        if state.get("simulation_mode")
-        else sender_origin(
-            state.get("channel"),
-            inbound_source_channel(
-                state.get("conversation_history"), state.get("inbound_message_id")
-            ),
-        )
-    )
-    customer = state.get("end_customer") or {}
+    # Solo cuenta el contacto que el origen del mensaje verifica (ADR 0013): lo escribió el
+    # intake en `identity_evidence`. Un email de chat lo teclea el visitante.
+    evidence = evidence_from_state(state)
 
     return SkillContext(
         tenant_id=state["tenant_id"],
         conversation_id=state["conversation_id"],
         integration_ctx=integration_ctx,
         commerce_mock=commerce_mock,
-        customer_email=customer.get("email") if origin == "email" else None,
-        customer_phone=customer.get("phone") if origin == "phone" else None,
+        customer_email=evidence.email,
+        customer_phone=evidence.phone,
+        identity=IdentityContext.from_state(state.get("identity")),
+        claim_salt=state.get("claim_salt") or "",
         channel=state.get("channel"),
         phone_region=default_phone_region(state.get("tenant_config"), state.get("tenant_facts")),
     )
@@ -173,70 +165,86 @@ async def _same_order_action(state: AgentState, existing_inputs: dict, new_input
     return await _refs_point_to_same_order(state, ref_a, ref_b)
 
 
-_OWNERSHIP_ERROR = (
-    "order_ownership_not_verified: por seguridad, las acciones sobre un pedido solo "
-    "se pueden pedir desde el email con el que se hizo la compra, y este mensaje no "
-    "viene de ese email. Explícaselo al cliente con amabilidad y pídele que escriba "
-    "desde el email de la compra. No reintentes la acción ni reveles el email del pedido."
+_IDENTITY_REQUIRED_ERROR = (
+    "identity_required: por seguridad, un pedido solo se consulta o se modifica desde el "
+    "email con el que se hizo la compra, y este mensaje no viene de ese email. Explícaselo "
+    "al cliente con amabilidad y pídele que escriba desde el email de la compra. No "
+    "reintentes la acción ni reveles el email del pedido."
 )
 # Canales de mensajería (WhatsApp): no hay email; el teléfono no coincide o no llega.
-_OWNERSHIP_ERROR_MESSAGING = (
-    "order_ownership_not_verified: por seguridad no puedo verificar que el pedido sea "
-    "del cliente desde este número de teléfono. Explícaselo con amabilidad y ofrécele "
-    "pasar el caso a una persona del equipo. No reintentes la acción ni reveles los "
-    "datos de contacto del pedido."
+_IDENTITY_REQUIRED_ERROR_MESSAGING = (
+    "identity_required: por seguridad no puedo verificar que el pedido sea del cliente "
+    "desde este número de teléfono. Explícaselo con amabilidad y ofrécele pasar el caso a "
+    "una persona del equipo. No reintentes la acción ni reveles los datos de contacto del "
+    "pedido."
+)
+_VERIFIED_REQUIRED_ERROR = (
+    "verified_required: esta acción solo se puede pedir desde el email o el teléfono con "
+    "el que se hizo la compra. Explícaselo con amabilidad y ofrécele pasar el caso a una "
+    "persona del equipo. No reintentes la acción ni reveles los datos del pedido."
 )
 
 
-async def _l3_ownership_error(state: AgentState, raw_input: dict[str, Any]) -> str | None:
-    """Gate de ownership (código, no LLM) para skills L3 que actúan sobre un pedido.
-
-    Pasa si el email del cliente coincide con el del pedido **o** su teléfono E.164
-    (WhatsApp) con alguno del pedido (`phone`, `customer.phone`, direcciones de envío o
-    facturación). Fail-closed: sin identidad, solo BSUID, pedido no encontrado, error
-    resolviéndolo o sin coincidencia → bloquea. En WhatsApp el error pide ofrecer pasar
-    el caso a una persona (handoff). Skills sin `order_id` no se comprueban aquí.
-    Verificación por niveles (OTP, sesión firmada) → issue #257.
-    """
-    order_ref = _normalize_order_ref(raw_input.get("order_id"))
-    if order_ref is None:
-        return None
-    ctx = build_skill_context(state)
+async def _resolve_order(ctx: SkillContext, order_ref: str) -> dict[str, Any] | None:
+    """El pedido de la referencia vía el adapter de commerce, o None (fail-closed)."""
     adapter: Any = ctx.commerce_mock
     if adapter is None and ctx.integration_ctx is not None:
         from apps.api.integrations.shopify import ShopifyAdapter
 
         adapter = ShopifyAdapter()
-    order: dict[str, Any] | None = None
-    if adapter is not None:
-        try:
-            order = await adapter.get_order_by_name(ctx.integration_ctx, order_ref)
-            if not order:
-                order = await adapter.get_order(ctx.integration_ctx, order_ref)
-        except Exception:
-            logger.warning("l3_ownership_order_resolution_failed ref=%s", order_ref)
-            order = None
-    check = check_order_ownership(
-        order,
-        customer_email=ctx.customer_email,
-        customer_phone=ctx.customer_phone,
-        default_region=ctx.phone_region,
-    )
-    if check.owner:
+    if adapter is None:
         return None
-    # Nunca el teléfono ni el email en claro: solo el motivo.
+    try:
+        order: dict[str, Any] | None = await adapter.get_order_by_name(
+            ctx.integration_ctx, order_ref
+        )
+        if not order:
+            order = await adapter.get_order(ctx.integration_ctx, order_ref)
+        return order or None
+    except Exception:
+        logger.warning("identity_gate_order_resolution_failed ref=%s", order_ref)
+        return None
+
+
+async def _identity_gate(
+    state: AgentState, skill_cls: type[Skill], raw_input: dict[str, Any]
+) -> tuple[IdentityVerdict, str] | None:
+    """Gate único de identidad (ADR 0013 §5), en código y para toda skill.
+
+    Resuelve el pedido del input y compara sus claims con los grants del turno. Fail-closed:
+    sin referencia, pedido no encontrado o error resolviéndolo → `identity_required`, igual
+    que cuando el pedido existe pero es de otro, para no revelar cuáles existen. Devuelve
+    el veredicto y el error para el LLM, o None si puede ejecutar.
+    """
+    if skill_cls.identity_scope == "public":
+        return None
+    ctx = build_skill_context(state)
+    claims = None
+    order_id: int | None = None
+    if skill_cls.identity_scope == "order":
+        order_ref = _normalize_order_ref(raw_input.get(skill_cls.order_input_field))
+        order = await _resolve_order(ctx, order_ref) if order_ref is not None else None
+        if order is not None:
+            claims = ctx.order_claims(order)
+            order_id = int(order["id"]) if order.get("id") is not None else None
+    verdict = identity_verdict(skill_cls, ctx.identity, claims=claims, order_id=order_id)
+    if verdict is None:
+        return None
+    # Nunca el teléfono ni el email en claro: solo el veredicto.
     logger.warning(
-        "l3_ownership_blocked",
+        "identity_gate_blocked",
         extra={
             "tenant_id": state.get("tenant_id"),
             "conversation_id": state.get("conversation_id"),
-            "order_ref": order_ref,
-            "reason": check.reason,
+            "slug": skill_cls.slug,
+            "verdict": verdict,
         },
     )
+    if verdict == "verified_required":
+        return verdict, _VERIFIED_REQUIRED_ERROR
     if ctx.channel is not None and is_messaging_channel(ctx.channel):
-        return _OWNERSHIP_ERROR_MESSAGING
-    return _OWNERSHIP_ERROR
+        return verdict, _IDENTITY_REQUIRED_ERROR_MESSAGING
+    return verdict, _IDENTITY_REQUIRED_ERROR
 
 
 def _l3_requires_human_approval(skill_cls: type[Skill], perm: dict[str, Any]) -> bool:
@@ -391,10 +399,11 @@ def make_execute_skill_node(
                 )
             )
 
-        # Ownership en código: una L3 sobre un pedido solo la pide su dueño (email).
-        if skill_cls.tier == "L3":
-            ownership_error = await _l3_ownership_error(state, raw_input)
-            if ownership_error is not None:
+        # Identidad en código: el pedido que toca la skill tiene que ser de quien escribe.
+        blocked = await _identity_gate(state, skill_cls, raw_input)
+        if blocked is not None:
+            verdict, identity_error = blocked
+            if state.get("conversation_id") and state.get("tenant_id"):
                 auditor.log(
                     tenant_id=state["tenant_id"],
                     conversation_id=state["conversation_id"],
@@ -404,17 +413,17 @@ def make_execute_skill_node(
                     skill_tier=skill_cls.tier,
                     inputs_raw=raw_input,
                     status="rejected_by_permissions",
-                    error_message="order_ownership_not_verified",
+                    error_message=verdict,
                     langfuse_trace_id=state.get("langfuse_trace_id"),
                 )
-                return _append_and_finish(
-                    _error_entry(
-                        tool_use_id=tool_use_id,
-                        slug=slug,
-                        raw_input=raw_input,
-                        error=ownership_error,
-                    )
+            return _append_and_finish(
+                _error_entry(
+                    tool_use_id=tool_use_id,
+                    slug=slug,
+                    raw_input=raw_input,
+                    error=identity_error,
                 )
+            )
 
         # Piso L3: exige aprobación humana salvo opt-out explícito y reconocido.
         if _l3_requires_human_approval(skill_cls, perm):

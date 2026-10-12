@@ -29,6 +29,12 @@ def _base_state() -> dict:
     }
 
 
+def _allow(state: dict, *slugs: str) -> None:
+    """El AOP permite estas skills y el tenant las tiene encendidas."""
+    state["allowed_skills"] = list(slugs)
+    state["tool_permissions"] = {slug: {"is_enabled": True} for slug in slugs}
+
+
 def test_tenant_now_str_uses_tenant_timezone() -> None:
     import re
 
@@ -138,15 +144,29 @@ class TestSelectReasonModel:
         )
         assert model == "claude-haiku-4-5-20251001"
 
-    def test_aop_with_skills_uses_tenant_model(self) -> None:
+    def test_aop_with_skills_uses_tenant_model(self, _register_search: None) -> None:
         model = self._fn(
             {
                 "model_used": "claude-sonnet-4-6",
-                "allowed_skills": ["shopify.get_order_status"],
+                "allowed_skills": ["test.search"],
+                "tool_permissions": {"test.search": {"is_enabled": True}},
                 "tool_results": [],
             }
         )
         assert model == "claude-sonnet-4-6"
+
+    def test_aop_with_only_switched_off_skills_is_a_simple_turn(
+        self, _register_search: None
+    ) -> None:
+        model = self._fn(
+            {
+                "model_used": "claude-sonnet-4-6",
+                "allowed_skills": ["test.search"],
+                "tool_permissions": {"test.search": {"is_enabled": False}},
+                "tool_results": [],
+            }
+        )
+        assert model == "claude-haiku-4-5-20251001"
 
     def test_prior_tool_results_force_tenant_model(self) -> None:
         # Venimos de un hop del loop ReAct: aunque el AOP no tenga skills ahora,
@@ -362,7 +382,7 @@ async def test_skill_tool_emits_pending_tool_call(
     node = make_reason_node(fake_deps)
 
     state = _base_state()
-    state["allowed_skills"] = ["test.search"]
+    _allow(state, "test.search")
     out = await node(state)
 
     assert "pending_tool_call" in out
@@ -433,7 +453,7 @@ async def test_skill_tool_clears_stale_decision_fields(
     node = make_reason_node(fake_deps)
 
     state = _base_state()
-    state["allowed_skills"] = ["test.search"]
+    _allow(state, "test.search")
     state["decision"] = "respond"
     state["agent_response"] = "respuesta que el supervisor rechazó"
     state["escalation_reason"] = "low_confidence previa"
@@ -463,7 +483,7 @@ async def test_unknown_tool_name_sets_error(
     node = make_reason_node(fake_deps)
 
     state = _base_state()
-    state["allowed_skills"] = ["test.search"]
+    _allow(state, "test.search")
     out = await node(state)
 
     assert "error" in out
@@ -517,7 +537,7 @@ async def test_tool_results_appended_to_messages(
     node = make_reason_node(fake_deps)
 
     state = _base_state()
-    state["allowed_skills"] = ["test.search"]
+    _allow(state, "test.search")
     state["tool_results"] = [
         {
             "id": "toolu_prev",
@@ -565,7 +585,7 @@ async def test_tool_results_with_error_propagate_to_messages(
     node = make_reason_node(fake_deps)
 
     state = _base_state()
-    state["allowed_skills"] = ["test.search"]
+    _allow(state, "test.search")
     state["tool_results"] = [
         {
             "id": "toolu_err",
@@ -605,7 +625,7 @@ async def test_tools_list_includes_decide_and_allowed_skills(
     node = make_reason_node(fake_deps)
 
     state = _base_state()
-    state["allowed_skills"] = ["test.search"]
+    _allow(state, "test.search")
     await node(state)
 
     tools = captured["tools"]
@@ -635,7 +655,7 @@ async def test_tools_list_skips_unregistered_skills(
     node = make_reason_node(fake_deps)
 
     state = _base_state()
-    state["allowed_skills"] = ["test.search", "test.ghost"]
+    _allow(state, "test.search", "test.ghost")
     out = await node(state)
 
     # No error — solo skip silencioso del slug fantasma
@@ -775,7 +795,7 @@ async def test_step_completed_emitted_on_skill_call(
     node = make_reason_node(fake_deps)
 
     state = _base_state()
-    state["allowed_skills"] = ["test.search"]
+    _allow(state, "test.search")
     state["aop_steps"] = SAMPLE_STEPS
     await node(state)
 

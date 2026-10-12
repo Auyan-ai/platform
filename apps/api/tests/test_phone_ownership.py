@@ -1,4 +1,4 @@
-"""Ownership L3 por teléfono (Sprint 2, PR-6): email O teléfono del pedido, fail-closed."""
+"""Identidad por teléfono (Sprint 2, PR-6) con el gate único de ADR 0013: email O teléfono."""
 
 from __future__ import annotations
 
@@ -8,17 +8,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from apps.api.agents.nodes import execute_skill
 from apps.api.agents.nodes.execute_skill import build_skill_context
-from apps.api.integrations.base import IntegrationContext
 from apps.api.services.identity import (
-    check_order_ownership,
     default_phone_region,
     order_phones,
     phones_match,
 )
-from apps.api.skills.base import SkillContext
+from apps.api.skills.shopify.cancel_order import CancelOrder
+from apps.api.skills.shopify.get_order_status import GetOrderStatus
 from apps.api.tests.conftest import TENANT_ID
+from apps.api.tests.identity_support import identity_state, patch_commerce
 
-MODULE = "apps.api.agents.nodes.execute_skill"
 ORDER: dict[str, Any] = {
     "id": 7404799197464,
     "name": "#1432",
@@ -47,157 +46,98 @@ def test_address_phone_uses_the_address_country() -> None:
     assert order_phones(order) == {"+584121234567"}
 
 
-# ─── check_order_ownership ────────────────────────────────────────────────────
-
-
-def test_phone_match_passes() -> None:
-    check = check_order_ownership(ORDER, customer_email=None, customer_phone="+34611223344")
-    assert (check.owner, check.reason) == (True, "phone_match")
-
-
-def test_other_phone_is_blocked() -> None:
-    check = check_order_ownership(ORDER, customer_email=None, customer_phone="+34699999999")
-    assert (check.owner, check.reason) == (False, "phone_mismatch")
-
-
-def test_only_bsuid_is_blocked() -> None:
-    check = check_order_ownership(ORDER, customer_email=None, customer_phone=None)
-    assert (check.owner, check.reason) == (False, "no_customer_identity")
-
-
-def test_order_without_phone_is_blocked() -> None:
-    order = {"email": "carmen@example.com"}
-    check = check_order_ownership(order, customer_email=None, customer_phone="+34600111222")
-    assert (check.owner, check.reason) == (False, "order_without_phone")
-
-
-def test_email_match_passes_even_if_phone_differs() -> None:
-    check = check_order_ownership(
-        ORDER, customer_email="CARMEN@example.com", customer_phone="+34699999999"
-    )
-    assert (check.owner, check.reason) == (True, "email_match")
-
-
-def test_unresolved_order_is_blocked() -> None:
-    check = check_order_ownership(None, customer_email="x@y.z", customer_phone="+34600111222")
-    assert (check.owner, check.reason) == (False, "order_unresolved")
-
-
-def test_invalid_phone_is_not_a_match() -> None:
-    check = check_order_ownership(ORDER, customer_email=None, customer_phone="123")
-    assert check.owner is False
-
-
 def test_default_region_resolution() -> None:
     assert default_phone_region(None, None) == "ES"
     assert default_phone_region({"extra": {"phone_default_region": "ve"}}, None) == "VE"
     assert default_phone_region({"extra": {}}, {"country_code": "MX"}) == "MX"
 
 
-# ─── Gate L3 (execute_skill) ──────────────────────────────────────────────────
+# ─── Gate de identidad (execute_skill) ────────────────────────────────────────
 
 
-def _patch_commerce(monkeypatch: pytest.MonkeyPatch, order: dict | None, channel: str) -> None:
+def _adapter(order: dict[str, Any] | None = ORDER) -> Any:
     adapter = MagicMock()
     adapter.get_order_by_name = AsyncMock(return_value=order)
     adapter.get_order = AsyncMock(return_value=None)
-
-    def _ctx(state: Any) -> SkillContext:
-        customer = state.get("end_customer") or {}
-        return SkillContext(
-            tenant_id=str(TENANT_ID),
-            conversation_id="c",
-            integration_ctx=IntegrationContext(tenant_id=TENANT_ID, credentials={}, config={}),
-            commerce_mock=adapter,
-            customer_email=customer.get("email"),
-            customer_phone=customer.get("phone"),
-            channel=channel,
-        )
-
-    monkeypatch.setattr(f"{MODULE}.build_skill_context", _ctx)
+    return adapter
 
 
-def _state(email: str | None, phone: str | None) -> dict[str, Any]:
-    return {
-        "tenant_id": str(TENANT_ID),
-        "conversation_id": "22222222-2222-2222-2222-222222222222",
-        "end_customer": {"email": email, "phone": phone},
-    }
+async def _gate(skill: Any, state: dict[str, Any], raw_input: dict[str, Any]) -> Any:
+    return await execute_skill._identity_gate(state, skill, raw_input)
 
 
 async def test_whatsapp_owner_by_phone_passes(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_commerce(monkeypatch, ORDER, "whatsapp")
-    err = await execute_skill._l3_ownership_error(_state(None, "+34600111222"), {"order_id": 1432})
-    assert err is None
+    patch_commerce(monkeypatch, _adapter())
+    state = identity_state(phone="+34600111222", channel="whatsapp")
+    assert await _gate(CancelOrder, state, {"order_id": 1432}) is None
+
+
+async def test_whatsapp_phone_of_the_address_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_commerce(monkeypatch, _adapter())
+    state = identity_state(phone="+34611223344", channel="whatsapp")
+    assert await _gate(CancelOrder, state, {"order_id": 1432}) is None
 
 
 async def test_whatsapp_other_phone_offers_a_person(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    _patch_commerce(monkeypatch, ORDER, "whatsapp")
-    err = await execute_skill._l3_ownership_error(_state(None, "+34699999999"), {"order_id": 1432})
-    assert err is not None and "persona del equipo" in err
-    record = next(r for r in caplog.records if r.message == "l3_ownership_blocked")
-    assert record.reason == "phone_mismatch"
+    patch_commerce(monkeypatch, _adapter())
+    state = identity_state(phone="+34699999999", channel="whatsapp")
+    blocked = await _gate(CancelOrder, state, {"order_id": 1432})
+    assert blocked is not None
+    verdict, error = blocked
+    assert verdict == "identity_required" and "persona del equipo" in error
+    record = next(r for r in caplog.records if r.message == "identity_gate_blocked")
+    assert record.verdict == "identity_required"
     assert "699999999" not in str(record.__dict__)
 
 
 async def test_whatsapp_bsuid_only_is_blocked(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_commerce(monkeypatch, ORDER, "whatsapp")
-    err = await execute_skill._l3_ownership_error(_state(None, None), {"order_id": 1432})
-    assert err == execute_skill._OWNERSHIP_ERROR_MESSAGING
+    patch_commerce(monkeypatch, _adapter())
+    blocked = await _gate(CancelOrder, identity_state(channel="whatsapp"), {"order_id": 1432})
+    assert blocked == ("identity_required", execute_skill._IDENTITY_REQUIRED_ERROR_MESSAGING)
 
 
 async def test_email_channel_keeps_email_message(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_commerce(monkeypatch, ORDER, "zendesk")
-    err = await execute_skill._l3_ownership_error(_state("otro@x.com", None), {"order_id": 1432})
-    assert err == execute_skill._OWNERSHIP_ERROR
+    patch_commerce(monkeypatch, _adapter())
+    state = identity_state(email="otro@x.com")
+    blocked = await _gate(CancelOrder, state, {"order_id": 1432})
+    assert blocked == ("identity_required", execute_skill._IDENTITY_REQUIRED_ERROR)
 
 
 def test_skill_context_carries_phone_channel_and_region() -> None:
-    ctx = build_skill_context(
-        {
-            "tenant_id": str(TENANT_ID),
-            "conversation_id": "c",
-            "channel": "whatsapp",
-            "end_customer": {"email": None, "phone": "+34600111222"},
-            "tenant_config": {"extra": {"phone_default_region": "PT"}},
-        }
-    )
+    state = identity_state(phone="+34600111222", channel="whatsapp")
+    state["tenant_config"] = {"extra": {"phone_default_region": "PT"}}
+    ctx = build_skill_context(state)  # type: ignore[arg-type]
     assert (ctx.customer_phone, ctx.channel, ctx.phone_region) == (
         "+34600111222",
         "whatsapp",
         "PT",
     )
+    assert str(TENANT_ID) == ctx.tenant_id
 
 
-# ─── get_order_status: la dirección solo al dueño (email o teléfono) ─────────
+# ─── get_order_status: el pedido solo para su dueño (email o teléfono) ───────
 
 
-async def _order_status(customer_email: str | None, customer_phone: str | None) -> Any:
-    from apps.api.skills.shopify.get_order_status import GetOrderStatus
-
-    order = {**ORDER, "shipping_address": {**ORDER["shipping_address"], "address1": "Calle 1"}}
-    adapter = MagicMock()
-    adapter.get_order_by_name = AsyncMock(return_value=order)
-    adapter.get_order = AsyncMock(return_value=order)
-    ctx = SkillContext(
-        tenant_id=str(TENANT_ID),
-        conversation_id="c",
-        integration_ctx=IntegrationContext(tenant_id=TENANT_ID, credentials={}, config={}),
-        commerce_mock=adapter,
-        customer_email=customer_email,
-        customer_phone=customer_phone,
-    )
-    skill = GetOrderStatus()
-    return await skill.execute(ctx, skill.input_schema(order_identifier="1432"))
+async def test_order_status_is_open_to_the_phone_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_commerce(monkeypatch, _adapter())
+    state = identity_state(phone="+34611223344", channel="whatsapp")
+    assert await _gate(GetOrderStatus, state, {"order_identifier": "1432"}) is None
 
 
-async def test_order_status_reveals_address_to_phone_owner() -> None:
-    out = await _order_status(None, "+34611223344")
-    assert out.found is True and out.shipping_address is not None
+async def test_order_status_is_closed_to_other_phone(monkeypatch: pytest.MonkeyPatch) -> None:
+    patch_commerce(monkeypatch, _adapter())
+    state = identity_state(phone="+34699999999", channel="whatsapp")
+    blocked = await _gate(GetOrderStatus, state, {"order_identifier": "1432"})
+    assert blocked is not None and blocked[0] == "identity_required"
 
 
-async def test_order_status_hides_the_order_from_other_phone() -> None:
-    out = await _order_status(None, "+34699999999")
-    assert (out.found, out.order_id, out.shipping_address) == (False, None, None)
+async def test_a_missing_order_answers_like_a_foreign_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Los números de pedido son correlativos: existir o no no se distingue."""
+    state = identity_state(phone="+34699999999", channel="whatsapp")
+    patch_commerce(monkeypatch, _adapter(ORDER))
+    foreign = await _gate(GetOrderStatus, state, {"order_identifier": "1432"})
+    patch_commerce(monkeypatch, _adapter(None))
+    missing = await _gate(GetOrderStatus, state, {"order_identifier": "9999"})
+    assert foreign == missing and foreign is not None

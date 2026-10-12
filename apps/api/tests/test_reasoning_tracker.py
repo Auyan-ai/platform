@@ -173,6 +173,7 @@ class TestFakeReasoningTrackerInNodes:
             "tenant_config": {"escalation_threshold": 0.70, "extra": {}},
             "model_used": "claude-sonnet-4-6",
             "allowed_skills": ["shopify.test_skill_emit"],
+            "tool_permissions": {"shopify.test_skill_emit": {"is_enabled": True}},
             "tool_results": [],
         }
 

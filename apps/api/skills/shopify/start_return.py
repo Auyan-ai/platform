@@ -39,6 +39,8 @@ class StartReturn(Skill):
     output_schema = StartReturnOutput
     requires_idempotency = True
     default_threshold = 0.95
+    identity_scope = "order"
+    min_level = "guest"
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, StartReturnInput)

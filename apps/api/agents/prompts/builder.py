@@ -131,6 +131,7 @@ def build_system_blocks(
     supervisor_feedback: str | None = None,
     conversation_context: str | None = None,
     writing_surface: str | None = None,
+    identity_note: str | None = None,
 ) -> list[dict]:
     """Compone el system como bloques para Anthropic, optimizado para prompt caching.
 
@@ -161,6 +162,8 @@ def build_system_blocks(
     register = channel_register_block(writing_surface)
     if register:
         dynamic.append(register)
+    if identity_note:
+        dynamic.append(identity_note)
     if known_facts:
         dynamic.append(_facts_block(known_facts))
     kb = _kb_wrapper(knowledge_chunks)
@@ -182,6 +185,7 @@ def build_system_prompt(
     supervisor_feedback: str | None = None,
     conversation_context: str | None = None,
     writing_surface: str | None = None,
+    identity_note: str | None = None,
 ) -> str:
     """Versión string del system prompt (AOP base + fecha + datos + RAG).
 
@@ -196,6 +200,7 @@ def build_system_prompt(
         supervisor_feedback=supervisor_feedback,
         conversation_context=conversation_context,
         writing_surface=writing_surface,
+        identity_note=identity_note,
     )
     return "\n\n---\n\n".join(b["text"] for b in blocks)
 

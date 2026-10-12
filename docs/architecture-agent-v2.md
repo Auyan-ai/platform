@@ -40,12 +40,12 @@ Transversal desde el día 1: idempotency, audit log, feature flags por tenant, w
 | Tiered risk + activación progresiva | Decagon | L1 día 1, L2 opt-in, L3 tras estabilidad + approval humano |
 | Slow agent / Duet | Decagon | Job LLM-as-judge → proposals con evidencia |
 
-## 3. Grafo (LangGraph, 11 nodos + loops)
+## 3. Grafo (LangGraph, 12 nodos + loops)
 
 → `apps/api/agents/graph.py`, `agents/nodes/`, `agents/state.py`.
 
 ```
-load_tenant_context → load_conversation → select_aop → retrieve_knowledge → reason
+load_tenant_context → load_conversation → resolve_identity → select_aop → retrieve_knowledge → reason
     reason ⇄ execute_skill        (loop ReAct, tope max_tool_iterations por AOP)
     reason → supervise → …        (solo tools L2/L3 o require_supervision)
     reason → respond | escalate | handle_error → finalize_trace
@@ -53,6 +53,11 @@ load_tenant_context → load_conversation → select_aop → retrieve_knowledge 
 
 Decisiones vigentes del routing (evolucionadas post-diseño, con PR):
 
+- **Identidad en código** ([ADR 0013](adr/0013-verificacion-identidad-por-niveles.md)):
+  `resolve_identity` convierte la evidencia del remitente (`messages.metadata.identity_evidence`,
+  la escribe el intake según el origen) en grants con claims hasheados. `reason` solo ve las
+  skills encendidas en `tenant_tool_permissions` que esa identidad permite, y el gate de
+  `execute_skill` comprueba el pedido concreto de cualquier skill con `identity_scope`.
 - **Sin checkpointer**: el state se arma desde cero por mensaje. La continuidad de intent viene de
   `intent_classifier_runs` (el clasificador ve el AOP previo) + **histéresis determinista**
   (continuidad / salir-de-default fácil / pivote requiere `intent_switch_threshold=0.70` /

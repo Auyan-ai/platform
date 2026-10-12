@@ -19,7 +19,13 @@ class SkillRegistry:
 
     @classmethod
     def register(cls, skill_class: type[Skill]) -> type[Skill]:
-        """Registra una skill. Usable como decorador de clase."""
+        """Registra una skill. Usable como decorador de clase.
+
+        Una skill que toca datos de un cliente (`identity_scope` distinto de `public`)
+        declara `min_level`: sin él el gate no sabría qué exigirle.
+        """
+        if skill_class.identity_scope != "public" and skill_class.min_level is None:
+            raise ValueError(f"skill_without_min_level: {skill_class.slug}")
         cls._by_slug[skill_class.slug] = skill_class
         return skill_class
 
