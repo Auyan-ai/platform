@@ -142,8 +142,14 @@ humana), ambiguity rate, fallback rate a `default`, reclassification rate.
 → `apps/api/agents/nodes/supervise.py`.
 
 - Se activa con tools L2/L3 pendientes o `require_supervision` del AOP (ver excepciones en §3).
-- Recibe los **guardrails estructurados** del state (`aop_guardrails`), no parsea el prompt
-  ([#219](https://github.com/Auyan-ai/platform/pull/219)).
+- Ve **la misma evidencia que `reason`**: su system prompt (datos de la tienda, playbook,
+  AOP y reglas) en el prefijo cacheado, y el bloque volátil del turno, el historial completo y
+  la salida completa de las herramientas en el mensaje
+  ([#261](https://github.com/Auyan-ai/platform/pull/261), #327). Ambos salen de
+  `agent_system_blocks` en `reason.py`.
+- **Contactos en código** (#327): un email o teléfono de la respuesta que no aparece en esa
+  evidencia (sin contar lo que dijo antes la propia IA ni el feedback del supervisor) se
+  rechaza como tactical sin llamar al LLM (`services/contact_grounding.py`).
 - Verdict `approve|reject` + `reject_kind`: **tactical** (reintentable, 1 retry con feedback en
   bloque no-cacheado) vs **structural** (escala directo, sin retry).
 - **Calibración vigente** ([#228](https://github.com/Auyan-ai/platform/pull/228)): sesgo por
