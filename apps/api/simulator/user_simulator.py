@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from anthropic import AsyncAnthropic
 from apps.api.db.models import UserProfile
+from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.simulator.prompts import SIMULATOR_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -29,8 +30,19 @@ class SimulatorTurn:
     goal_achieved: bool
     give_up: bool
     internal_reasoning: str
-    input_tokens: int
-    output_tokens: int
+    usage: LLMUsage
+
+    @property
+    def input_tokens(self) -> int:
+        return self.usage.prompt_tokens
+
+    @property
+    def output_tokens(self) -> int:
+        return self.usage.output_tokens
+
+    @property
+    def cost_usd(self) -> float:
+        return compute_llm_cost(SIMULATOR_MODEL, self.usage)
 
 
 class UserSimulator:
@@ -46,8 +58,7 @@ class UserSimulator:
             goal_achieved=False,
             give_up=False,
             internal_reasoning="initial_message",
-            input_tokens=0,
-            output_tokens=0,
+            usage=LLMUsage(),
         )
 
     async def next_turn(
@@ -75,7 +86,7 @@ class UserSimulator:
         )
 
         raw = response.content[0].text.strip() if response.content else "{}"
-        return _parse_turn(raw, response.usage.input_tokens, response.usage.output_tokens)
+        return _parse_turn(raw, LLMUsage.from_anthropic(response.usage))
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -125,7 +136,7 @@ def _build_messages(history: list[dict]) -> list[dict]:
     return messages
 
 
-def _parse_turn(raw: str, input_tokens: int, output_tokens: int) -> SimulatorTurn:
+def _parse_turn(raw: str, usage: LLMUsage) -> SimulatorTurn:
     """Parsea el JSON del simulador. Fallback conservador si falla."""
     try:
         # Buscar bloque JSON si hay texto alrededor
@@ -142,8 +153,7 @@ def _parse_turn(raw: str, input_tokens: int, output_tokens: int) -> SimulatorTur
             goal_achieved=False,
             give_up=False,
             internal_reasoning="parse_error",
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            usage=usage,
         )
 
     return SimulatorTurn(
@@ -151,6 +161,5 @@ def _parse_turn(raw: str, input_tokens: int, output_tokens: int) -> SimulatorTur
         goal_achieved=bool(data.get("goal_achieved", False)),
         give_up=bool(data.get("give_up", False)),
         internal_reasoning=str(data.get("internal_reasoning", "")),
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
+        usage=usage,
     )

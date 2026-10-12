@@ -15,6 +15,7 @@ from typing import Literal
 
 from anthropic import AsyncAnthropic
 from apps.api.db.models import SimulationScenario
+from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.simulator.prompts import SIM_JUDGE_SYSTEM_PROMPT
 from apps.api.simulator.transcript import SimulatorTranscript, format_for_sim_judge
 
@@ -46,8 +47,19 @@ class SimulatorJudgeVerdict:
     judge_goal_explanation: str
     suggestions: str
     model_used: str
-    input_tokens: int
-    output_tokens: int
+    usage: LLMUsage
+
+    @property
+    def input_tokens(self) -> int:
+        return self.usage.prompt_tokens
+
+    @property
+    def output_tokens(self) -> int:
+        return self.usage.output_tokens
+
+    @property
+    def cost_usd(self) -> float:
+        return compute_llm_cost(self.model_used, self.usage)
 
 
 async def judge_simulation(
@@ -76,12 +88,7 @@ async def judge_simulation(
     )
 
     raw = response.content[0].text.strip() if response.content else "{}"
-    return _parse_verdict(
-        raw,
-        response.usage.input_tokens,
-        response.usage.output_tokens,
-        model_used=model,
-    )
+    return _parse_verdict(raw, LLMUsage.from_anthropic(response.usage), model_used=model)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -98,8 +105,7 @@ def normalize_judge_model(judge_model: JudgeModelAlias | str | None) -> str:
 
 def _parse_verdict(
     raw: str,
-    input_tokens: int,
-    output_tokens: int,
+    usage: LLMUsage,
     *,
     model_used: str = DEFAULT_JUDGE_MODEL,
 ) -> SimulatorJudgeVerdict:
@@ -113,7 +119,7 @@ def _parse_verdict(
             data = json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         logger.warning("sim_judge_json_parse_failed raw=%s", raw[:200])
-        return _fallback_verdict(input_tokens, output_tokens, model_used=model_used)
+        return _fallback_verdict(usage, model_used=model_used)
 
     r = int(data.get("reasoning_score", 0))
     k = int(data.get("knowledge_score", 0))
@@ -138,14 +144,12 @@ def _parse_verdict(
         judge_goal_explanation=str(data.get("judge_goal_explanation", "")),
         suggestions=str(data.get("suggestions", "")),
         model_used=model_used,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
+        usage=usage,
     )
 
 
 def _fallback_verdict(
-    input_tokens: int,
-    output_tokens: int,
+    usage: LLMUsage,
     *,
     model_used: str = DEFAULT_JUDGE_MODEL,
 ) -> SimulatorJudgeVerdict:
@@ -164,8 +168,7 @@ def _fallback_verdict(
         judge_goal_explanation="parse_error",
         suggestions="",
         model_used=model_used,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
+        usage=usage,
     )
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+from apps.api.integrations.pricing import LLMUsage
 from apps.api.simulator.judge import (
     DEFAULT_JUDGE_MODEL,
     OPUS_JUDGE_MODEL,
@@ -31,7 +33,7 @@ class TestParseVerdict:
             "judge_goal_explanation": "Goal logrado",
             "suggestions": "Nada que cambiar"
         }"""
-        v = _parse_verdict(raw, 500, 100)
+        v = _parse_verdict(raw, LLMUsage(input_tokens=500, output_tokens=100))
         assert v.reasoning_score == 8
         assert v.verdict == "pass"
         assert v.judge_goal_achieved
@@ -41,24 +43,33 @@ class TestParseVerdict:
 
     def test_verdict_clamped_to_fail_on_invalid(self):
         raw = '{"reasoning_score": 5, "knowledge_score": 5, "tools_score": 5, "brand_voice_score": 5, "overall_score": 5.0, "verdict": "INVALID", "reasoning_explanation": "", "knowledge_explanation": "", "tools_explanation": "", "brand_voice_explanation": "", "judge_goal_achieved": false, "judge_goal_explanation": "", "suggestions": ""}'
-        v = _parse_verdict(raw, 0, 0)
+        v = _parse_verdict(raw, LLMUsage())
         assert v.verdict == "fail"
 
     def test_fallback_on_bad_json(self):
-        v = _parse_verdict("not json", 10, 5)
+        v = _parse_verdict("not json", LLMUsage(input_tokens=10, output_tokens=5))
         assert v.verdict == "fail"
         assert v.overall_score == 0.0
         assert v.reasoning_explanation == "parse_error"
 
     def test_json_embedded_in_text(self):
         raw = 'Sure, here it is: {"reasoning_score": 7, "knowledge_score": 7, "tools_score": 7, "brand_voice_score": 7, "overall_score": 7.0, "verdict": "pass", "reasoning_explanation": "x", "knowledge_explanation": "x", "tools_explanation": "x", "brand_voice_explanation": "x", "judge_goal_achieved": true, "judge_goal_explanation": "x", "suggestions": "x"}'
-        v = _parse_verdict(raw, 0, 0)
+        v = _parse_verdict(raw, LLMUsage())
         assert v.verdict == "pass"
+
+
+class TestVerdictCost:
+    def test_opus_judge_charges_opus_4_7_rates_with_cache_read(self):
+        usage = LLMUsage(input_tokens=2000, cache_read_tokens=10_000, output_tokens=400)
+        v = _parse_verdict("not json", usage, model_used=OPUS_JUDGE_MODEL)
+        # 2000*$5 + 10_000*$0.50 + 400*$25 = $0.025
+        assert v.cost_usd == pytest.approx(0.025)
+        assert v.input_tokens == 12_000
 
 
 class TestFallbackVerdict:
     def test_returns_zeroed_fail_verdict(self):
-        v = _fallback_verdict(100, 50)
+        v = _fallback_verdict(LLMUsage(input_tokens=100, output_tokens=50))
         assert v.verdict == "fail"
         assert v.overall_score == 0.0
         assert v.input_tokens == 100
@@ -101,8 +112,7 @@ class TestVerdictToDict:
             judge_goal_explanation="logrado",
             suggestions="ninguna",
             model_used=DEFAULT_JUDGE_MODEL,
-            input_tokens=100,
-            output_tokens=50,
+            usage=LLMUsage(input_tokens=100, output_tokens=50),
         )
         d = verdict_to_dict(v)
         assert d["verdict"] == "pass"

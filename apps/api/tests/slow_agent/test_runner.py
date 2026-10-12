@@ -12,37 +12,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from apps.api.db.models import Conversation, SlowAgentRun
 from apps.api.slow_agent.judge import OPUS_JUDGE_MODEL, SONNET_JUDGE_MODEL
-from apps.api.slow_agent.runner import RunStats, _estimate_cost
+from apps.api.slow_agent.runner import RunStats
 
 TENANT = uuid.uuid4()
 RUN_ID = uuid.uuid4()
 NOW = datetime(2026, 5, 19, 12, 0, 0)
-
-
-# ─── _estimate_cost ───────────────────────────────────────────────────────────
-
-
-def test_estimate_cost_zero():
-    assert _estimate_cost(0, 0, 0, 0) == 0.0
-
-
-def test_estimate_cost_sonnet_only():
-    # 1M input Sonnet = $3, 1M output = $15
-    cost = _estimate_cost(1_000_000, 0, 0, 0)
-    assert abs(cost - 3.0) < 0.001
-
-
-def test_estimate_cost_opus_only():
-    # 1M input Opus = $15
-    cost = _estimate_cost(0, 0, 1_000_000, 0)
-    assert abs(cost - 15.0) < 0.001
-
-
-def test_estimate_cost_mixed():
-    # 500k Sonnet input + 500k Opus output
-    cost = _estimate_cost(500_000, 0, 0, 500_000)
-    expected = 500_000 * 3.0 / 1_000_000 + 500_000 * 75.0 / 1_000_000
-    assert abs(cost - expected) < 0.001
 
 
 # ─── RunStats ─────────────────────────────────────────────────────────────────

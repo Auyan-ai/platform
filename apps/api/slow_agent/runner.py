@@ -14,7 +14,7 @@ Flujo por tenant:
 
 Caps duros para no quemar presupuesto:
   - max_conversations_per_run (default 50)
-  - costos estimados basados en pricing Sonnet/Opus (aproximación)
+  - costo de cada llamada al judge con la tarifa de integrations/pricing.py
 """
 
 from __future__ import annotations
@@ -43,32 +43,11 @@ from apps.api.db.queries import (
     list_skill_audit_log,
     update_slow_agent_run,
 )
-from apps.api.slow_agent.judge import judge_conversation
+from apps.api.slow_agent.judge import SONNET_JUDGE_MODEL, JudgeVerdict, judge_conversation
 from apps.api.slow_agent.sampling import filter_candidates
 from apps.api.slow_agent.transcript import build_transcript
 
 logger = logging.getLogger(__name__)
-
-# Pricing aproximado (USD por 1M tokens, mayo 2026)
-_SONNET_INPUT_COST_PER_M = 3.0
-_SONNET_OUTPUT_COST_PER_M = 15.0
-_OPUS_INPUT_COST_PER_M = 15.0
-_OPUS_OUTPUT_COST_PER_M = 75.0
-
-
-def _estimate_cost(
-    sonnet_in: int,
-    sonnet_out: int,
-    opus_in: int,
-    opus_out: int,
-) -> float:
-    return (
-        sonnet_in * _SONNET_INPUT_COST_PER_M / 1_000_000
-        + sonnet_out * _SONNET_OUTPUT_COST_PER_M / 1_000_000
-        + opus_in * _OPUS_INPUT_COST_PER_M / 1_000_000
-        + opus_out * _OPUS_OUTPUT_COST_PER_M / 1_000_000
-    )
-
 
 @dataclass
 class RunStats:
@@ -78,6 +57,7 @@ class RunStats:
     sonnet_output_tokens: int = 0
     opus_input_tokens: int = 0
     opus_output_tokens: int = 0
+    cost_usd: float = 0.0
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -88,14 +68,14 @@ class RunStats:
     def opus_tokens(self) -> int:
         return self.opus_input_tokens + self.opus_output_tokens
 
-    @property
-    def cost_usd(self) -> float:
-        return _estimate_cost(
-            self.sonnet_input_tokens,
-            self.sonnet_output_tokens,
-            self.opus_input_tokens,
-            self.opus_output_tokens,
-        )
+    def add_call(self, call: JudgeVerdict) -> None:
+        if call.model_used == SONNET_JUDGE_MODEL:
+            self.sonnet_input_tokens += call.input_tokens
+            self.sonnet_output_tokens += call.output_tokens
+        else:
+            self.opus_input_tokens += call.input_tokens
+            self.opus_output_tokens += call.output_tokens
+        self.cost_usd += call.cost_usd
 
 
 async def run_slow_agent_for_tenant(
@@ -231,14 +211,8 @@ async def _judge_one(
     verdict = await judge_conversation(anthropic, transcript)
     stats.conversations_evaluated += 1
 
-    # Acumula tokens por modelo
-    from apps.api.slow_agent.judge import SONNET_JUDGE_MODEL
-    if verdict.model_used == SONNET_JUDGE_MODEL:
-        stats.sonnet_input_tokens += verdict.input_tokens
-        stats.sonnet_output_tokens += verdict.output_tokens
-    else:
-        stats.opus_input_tokens += verdict.input_tokens
-        stats.opus_output_tokens += verdict.output_tokens
+    for call in verdict.calls:
+        stats.add_call(call)
 
     proposal_id: UUID | None = None
     if verdict.should_propose and verdict.proposal_type:

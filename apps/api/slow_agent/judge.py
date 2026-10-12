@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from anthropic import AsyncAnthropic
+from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.slow_agent.prompts import JUDGE_SYSTEM_PROMPT
 from apps.api.slow_agent.transcript import ConversationTranscript, format_for_judge
 
@@ -33,8 +34,27 @@ class JudgeVerdict:
     confidence: float
     flag_for_opus: bool
     model_used: str
-    input_tokens: int
-    output_tokens: int
+    usage: LLMUsage
+    # El veredicto de Sonnet que se descartó al escalar a Opus: su llamada también se paga.
+    escalated_from: JudgeVerdict | None = None
+
+    @property
+    def input_tokens(self) -> int:
+        return self.usage.prompt_tokens
+
+    @property
+    def output_tokens(self) -> int:
+        return self.usage.output_tokens
+
+    @property
+    def cost_usd(self) -> float:
+        return compute_llm_cost(self.model_used, self.usage)
+
+    @property
+    def calls(self) -> list[JudgeVerdict]:
+        """Cada llamada al LLM que produjo este veredicto, en orden."""
+        earlier = self.escalated_from.calls if self.escalated_from else []
+        return [*earlier, self]
 
 
 async def _call_judge(
@@ -50,6 +70,7 @@ async def _call_judge(
         messages=[{"role": "user", "content": formatted}],
     )
     raw = response.content[0].text.strip()
+    usage = LLMUsage.from_anthropic(response.usage)
 
     try:
         data: dict = json.loads(raw)
@@ -74,8 +95,7 @@ async def _call_judge(
                 confidence=0.0,
                 flag_for_opus=False,
                 model_used=model,
-                input_tokens=response.usage.input_tokens,
-                output_tokens=response.usage.output_tokens,
+                usage=usage,
             )
 
     return JudgeVerdict(
@@ -87,8 +107,7 @@ async def _call_judge(
         confidence=float(data.get("confidence", 0.0)),
         flag_for_opus=bool(data.get("flag_for_opus", False)),
         model_used=model,
-        input_tokens=response.usage.input_tokens,
-        output_tokens=response.usage.output_tokens,
+        usage=usage,
     )
 
 
@@ -106,6 +125,7 @@ async def judge_conversation(
             sonnet_verdict.confidence,
             sonnet_verdict.flag_for_opus,
         )
-        return await _call_judge(anthropic, transcript, OPUS_JUDGE_MODEL)
+        opus_verdict = await _call_judge(anthropic, transcript, OPUS_JUDGE_MODEL)
+        return replace(opus_verdict, escalated_from=sonnet_verdict)
 
     return sonnet_verdict
