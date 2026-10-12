@@ -101,7 +101,7 @@ No vocees, habla acento caraqueño venezolano, tuteame.
 - main.py → entrada de la aplicación FastAPI
 - routers/ → endpoints organizados por dominio (webhooks, tenants, conversations, escalations, aops, approvals, proposals, reasoning, tool_permissions)
 - agents/ → grafo LangGraph y lógica del agente
-  - agents/graph.py → grafo principal (11 nodos + loop ReAct)
+  - agents/graph.py → grafo principal (12 nodos + loop ReAct)
   - agents/nodes/ → cada nodo en su propio archivo
   - agents/state.py → AgentState completo
   - agents/dependencies.py → AgentDependencies (ReasoningTracker, AuditLogger)

@@ -67,6 +67,8 @@ class UpdateShippingAddress(Skill):
     output_schema = UpdateShippingAddressOutput
     requires_idempotency = True
     default_threshold = 0.95
+    identity_scope = "order"
+    min_level = "verified"
 
     async def prepare_approval(
         self, ctx: SkillContext, raw_input: dict[str, Any]

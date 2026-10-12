@@ -37,6 +37,8 @@ from apps.api.agents.schemas import RESPOND_OR_ESCALATE_TOOL, AgentDecisionTool
 from apps.api.agents.state import AgentState
 from apps.api.integrations.anthropic_client import call_claude_with_tools
 from apps.api.integrations.pricing import compute_llm_cost
+from apps.api.services.identity import IdentityContext
+from apps.api.services.skill_access import visible_skills
 from apps.api.skills.registry import SkillRegistry
 from pydantic import ValidationError
 
@@ -137,15 +139,26 @@ def _select_reason_model(state: AgentState, settings: Settings) -> str:
     de una sola vuelta, así que la elección Haiku nunca contamina el base de otro turno.
     """
     tenant_model = state["model_used"]
-    if state.get("allowed_skills"):
+    if _visible_skills(state):
         return tenant_model
     if state.get("tool_results") or state.get("pending_tool_call"):
         return tenant_model
     return settings.simple_turn_model
 
 
+def _visible_skills(state: AgentState) -> list[str]:
+    """Skills del AOP que el LLM puede ver (ADR 0013 §5): las que el tenant tiene
+    encendidas en `tenant_tool_permissions` y que la identidad del turno permite. El
+    código no ofrece lo que el gate de `execute_skill` rechazaría."""
+    return visible_skills(
+        state.get("allowed_skills") or [],
+        state.get("tool_permissions") or {},
+        IdentityContext.from_state(state.get("identity")),
+    )
+
+
 def _build_tools(allowed_skills: list[str]) -> list[dict[str, Any]]:
-    """Construye la lista de tools que ve el LLM: decide tool + skills permitidas."""
+    """Construye la lista de tools que ve el LLM: decide tool + skills visibles."""
     tools: list[dict[str, Any]] = [RESPOND_OR_ESCALATE_TOOL]
     for slug in allowed_skills:
         try:
@@ -253,11 +266,12 @@ def make_reason_node(
                 state["conversation_history"], state.get("end_customer")
             ),
             writing_surface=surface_of(state),
+            identity_note=state.get("identity_note"),
         )
         messages = build_message_history(state["conversation_history"])
         messages = _append_tool_result_blocks(messages, state.get("tool_results", []))
 
-        allowed_skills: list[str] = state.get("allowed_skills") or []
+        allowed_skills = _visible_skills(state)
         tools = _build_tools(allowed_skills)
 
         model = _select_reason_model(state, deps.settings)

@@ -344,3 +344,42 @@ class TestChatwootRouter:
             )
         assert r.json() == {"received": True, "processed": False}
         intake.assert_not_awaited()
+
+
+# ─── identity_evidence (ADR 0013): el intake escribe el contacto que el origen verifica ───
+
+
+@pytest.mark.parametrize(
+    ("channel", "source", "phone", "expected"),
+    [
+        ("zendesk", "email", None, {"sender_email": "cliente@test.com"}),
+        ("gorgias", "contact_form", None, {"sender_email": "cliente@test.com"}),
+        ("chatwoot", "Channel::Email", None, {"sender_email": "cliente@test.com"}),
+        ("zendesk", "chat", None, None),
+        ("gorgias", "api", None, None),
+        ("chatwoot", "Channel::WebWidget", None, None),
+        ("whatsapp", None, "+34600111222", {"sender_phone": "+34600111222"}),
+        ("whatsapp", None, None, None),
+    ],
+)
+async def test_intake_stores_identity_evidence_by_channel_and_origin(
+    intake_db: dict[str, AsyncMock],
+    monkeypatch: pytest.MonkeyPatch,
+    channel: str,
+    source: str | None,
+    phone: str | None,
+    expected: dict[str, str] | None,
+) -> None:
+    monkeypatch.setattr(
+        f"{INTAKE}.find_end_customer_by_phone", AsyncMock(return_value=make_end_customer())
+    )
+    metadata: dict[str, Any] = {"channel": channel}
+    if source:
+        metadata["source_channel"] = source
+    email = None if channel == "whatsapp" else "cliente@test.com"
+    await _intake(
+        channel=channel, message_metadata=metadata, customer_email=email, customer_phone=phone
+    )
+    stored = intake_db["insert_message"].await_args.kwargs["metadata"]
+    assert stored.get("identity_evidence") == expected
+    assert {k: v for k, v in stored.items() if k != "identity_evidence"} == metadata

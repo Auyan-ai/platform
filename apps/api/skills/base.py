@@ -10,9 +10,17 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal
 
 from apps.api.integrations.base import IntegrationContext
+from apps.api.services.identity import (
+    ClaimHash,
+    IdentityContext,
+    Level,
+    order_claims,
+)
 from pydantic import BaseModel
 
 SkillTier = Literal["L1", "L2", "L3"]
+# Qué toca la skill (ADR 0013 §5): nada de un cliente, un pedido concreto o "mis pedidos".
+IdentityScope = Literal["public", "order", "own_orders"]
 
 # Confidence thresholds por tier — el grafo los usará para decidir si ejecutar.
 TIER_THRESHOLDS: dict[SkillTier, float] = {"L1": 0.70, "L2": 0.85, "L3": 0.95}
@@ -54,14 +62,27 @@ class SkillContext:
     commerce_mock: Any = field(default=None)
     # Contacto VERIFICADO del remitente del mensaje (ADR 0013): el email solo si el
     # mensaje llega por correo o formulario web, el teléfono E.164 solo por WhatsApp.
-    # Nunca lo que teclee el cliente o el LLM. Decide qué pedidos puede ver y tocar
-    # (`services.identity.check_order_ownership`).
+    # Nunca lo que teclee el cliente o el LLM. Es el que usa `list_my_orders` para buscar.
     customer_email: str | None = field(default=None)
     customer_phone: str | None = field(default=None)
+    # Grants del turno y sal con la que se hashean los claims. Qué pedidos puede ver y tocar
+    # lo decide `identity.level_for(order_claims(...))`, no un email que llegue a la skill.
+    identity: IdentityContext = field(default_factory=IdentityContext)
+    claim_salt: str = field(default="", repr=False)
     # Canal de la conversación: en mensajería el gate L3 ofrece pasar el caso a una persona.
     channel: str | None = field(default=None)
     # Región por defecto para teléfonos sin prefijo (tenant_config/tenant_facts, "ES").
     phone_region: str = field(default="ES")
+
+    def order_claims(self, order: dict[str, Any]) -> frozenset[ClaimHash]:
+        return order_claims(order, salt=self.claim_salt, region=self.phone_region)
+
+    def level_for(self, order: dict[str, Any]) -> Level | None:
+        """Nivel de la identidad del turno sobre este pedido (None = no es suyo)."""
+        order_id = order.get("id")
+        return self.identity.level_for(
+            self.order_claims(order), int(order_id) if order_id is not None else None
+        )
 
 
 class Skill(ABC):
@@ -78,6 +99,12 @@ class Skill(ABC):
     output_schema: ClassVar[type[SkillOutput]]
     requires_idempotency: ClassVar[bool] = False
     default_threshold: ClassVar[float]
+    # Identidad que exige (ADR 0013 §5). `public` no toca datos de un cliente. `order` actúa
+    # sobre el pedido que indica `order_input_field` y `own_orders` lista los del propio
+    # cliente. Toda skill que no es `public` declara `min_level`.
+    identity_scope: ClassVar[IdentityScope] = "public"
+    min_level: ClassVar[Level | None] = None
+    order_input_field: ClassVar[str] = "order_id"
 
     @abstractmethod
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:

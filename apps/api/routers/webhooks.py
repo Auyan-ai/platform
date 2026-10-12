@@ -44,6 +44,7 @@ from apps.api.services.agent_resolution import finalize_agent_resolution
 from apps.api.services.conversations import reopen_if_resolved
 from apps.api.services.handoff import is_approval_gate
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
+from apps.api.services.identity import EVIDENCE_KEY, build_identity_evidence
 from apps.api.services.inbound_media import fallback_message
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
@@ -252,6 +253,9 @@ async def inbound(
                 # El cliente volvió a escribir: si estaba resuelta, reactivarla.
                 conversation = await reopen_if_resolved(conn, tenant.id, conversation)
 
+            evidence = build_identity_evidence(
+                payload.channel, None, email=payload.customer_email, phone=None
+            )
             inbound_msg = await insert_message(
                 conn,
                 tenant_id=tenant.id,
@@ -259,7 +263,10 @@ async def inbound(
                 role="customer",
                 direction="inbound",
                 content=payload.content,
-                metadata={"channel": payload.channel},
+                metadata={
+                    "channel": payload.channel,
+                    **({EVIDENCE_KEY: evidence} if evidence else {}),
+                },
             )
             await update_conversation_last_message(conn, tenant.id, conversation.id)
 

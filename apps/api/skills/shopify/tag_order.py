@@ -33,6 +33,8 @@ class TagOrder(Skill):
     output_schema = TagOrderOutput
     requires_idempotency = False
     default_threshold = 0.85
+    identity_scope = "order"
+    min_level = "guest"
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, TagOrderInput)

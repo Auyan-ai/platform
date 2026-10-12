@@ -8,6 +8,8 @@ Diagrama actual (Sprint 8 — AOPs + ReAct loop + Supervisor):
       ↓
     load_conversation
       ↓
+    resolve_identity    ← grants de identidad (código, sin LLM)
+      ↓
     select_aop          ← clasifica intent → elige AOP → compila system_prompt
       ↓
     retrieve_knowledge
@@ -48,6 +50,7 @@ from apps.api.agents.nodes.handle_error import make_handle_error_node
 from apps.api.agents.nodes.load_conversation import make_load_conversation_node
 from apps.api.agents.nodes.load_tenant_context import make_load_tenant_context_node
 from apps.api.agents.nodes.reason import make_reason_node
+from apps.api.agents.nodes.resolve_identity import make_resolve_identity_node
 from apps.api.agents.nodes.respond import make_respond_node
 from apps.api.agents.nodes.retrieve_knowledge import make_retrieve_knowledge_node
 from apps.api.agents.nodes.select_aop import make_select_aop_node
@@ -69,6 +72,7 @@ DEFAULT_MAX_TOOL_ITERATIONS = 5
 # (load_conversation.conversation_history / end_customer) a un SaaS de terceros.
 # NUNCA agregar aquí keys que carguen secretos: commerce_integration_ctx, tenant_config.
 _NODE_OUTPUT_KEYS: dict[str, list[str]] = {
+    "resolve_identity": ["identity_summary"],
     "select_aop": ["aop_slug", "aop_version", "intent_confidence"],
     "reason": ["decision", "confidence", "pending_tool_call", "agent_response"],
     "execute_skill": ["tool_results", "pending_approval_id", "escalation_reason"],
@@ -241,6 +245,7 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
     _ltc = traced("load_tenant_context", make_load_tenant_context_node)
     graph.add_node("load_tenant_context", _ltc)
     graph.add_node("load_conversation", traced("load_conversation", make_load_conversation_node))
+    graph.add_node("resolve_identity", traced("resolve_identity", make_resolve_identity_node))
     graph.add_node("select_aop", traced("select_aop", make_select_aop_node))
     graph.add_node("retrieve_knowledge", traced("retrieve_knowledge", make_retrieve_knowledge_node))
     graph.add_node("reason", traced("reason", make_reason_node))
@@ -253,7 +258,8 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
 
     graph.add_edge(START, "load_tenant_context")
     graph.add_edge("load_tenant_context", "load_conversation")
-    graph.add_edge("load_conversation", "select_aop")
+    graph.add_edge("load_conversation", "resolve_identity")
+    graph.add_edge("resolve_identity", "select_aop")
     graph.add_edge("select_aop", "retrieve_knowledge")
     graph.add_edge("retrieve_knowledge", "reason")
 

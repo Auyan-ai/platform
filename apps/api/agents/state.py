@@ -45,6 +45,16 @@ class AgentState(TypedDict, total=False):
     conversation_history: list[dict]
     end_customer: dict
 
+    # --- Producido por resolve_identity (ADR 0013) ---
+    # Grants del turno, solo con hashes (`IdentityContext.to_state()`).
+    identity: dict
+    # Nivel y métodos para trazas; nunca claims ni contactos.
+    identity_summary: dict
+    # Línea de código para el bloque volátil de reason.
+    identity_note: str
+    # Sal del tenant para hashear los claims de los pedidos. No se traza.
+    claim_salt: str
+
     # --- Producido por retrieve_knowledge ---
     retrieved_chunks: list[dict]
 

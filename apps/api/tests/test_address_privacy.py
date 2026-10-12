@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from apps.api.agents.nodes import execute_skill
 from apps.api.integrations.base import IntegrationContext
 from apps.api.skills.base import SkillContext
 from apps.api.skills.shopify.get_order_status import (
@@ -24,6 +25,7 @@ from apps.api.skills.shopify.update_shipping_address import (
     UpdateShippingAddressInput,
 )
 from apps.api.tests.conftest import TENANT_ID
+from apps.api.tests.identity_support import identity_state, patch_commerce
 from apps.api.tests.order_snapshots import snapshot
 
 _ORDER: dict[str, Any] = {
@@ -81,20 +83,45 @@ async def test_owner_sees_shipping_address() -> None:
 
 
 @pytest.mark.parametrize(
-    ("email", "extra"),
+    ("email", "phone", "channel"),
     [
-        ("otro@example.com", {"channel": "zendesk"}),
-        (None, {"channel": "zendesk"}),
-        (None, {"channel": "whatsapp", "customer_phone": "+34610637711"}),
+        ("otro@example.com", None, "zendesk"),
+        (None, None, "zendesk"),
+        (None, "+34610637711", "whatsapp"),
     ],
     ids=["email_ajeno", "sin_remitente", "whatsapp_otro_telefono"],
 )
 @pytest.mark.asyncio
-async def test_non_owner_gets_the_not_found_answer(
-    email: str | None, extra: dict[str, Any]
+async def test_non_owner_is_stopped_by_the_gate(
+    monkeypatch: pytest.MonkeyPatch, email: str | None, phone: str | None, channel: str
 ) -> None:
-    """ADR 0013: a quien no es dueño no se le revela ni que el pedido existe."""
-    out = await _status(email, **extra)
+    """ADR 0013: a quien no es dueño no se le da el pedido ni se le dice si existe."""
+    mock = AsyncMock()
+    mock.get_order_by_name = AsyncMock(return_value=_ORDER)
+    patch_commerce(monkeypatch, mock)
+    state = identity_state(email=email, phone=phone, channel=channel)
+    blocked = await execute_skill._identity_gate(state, GetOrderStatus, {"order_identifier": "1429"})
+    assert blocked is not None and blocked[0] == "identity_required"
+
+
+@pytest.mark.asyncio
+async def test_owner_passes_the_gate_with_any_case_of_the_email(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock = AsyncMock()
+    mock.get_order_by_name = AsyncMock(return_value=_ORDER)
+    patch_commerce(monkeypatch, mock)
+    state = identity_state(email=" kenny.medina@AHORACRYPTO.com ")
+    assert await execute_skill._identity_gate(state, GetOrderStatus, {"order_identifier": "1429"}) is None
+
+
+@pytest.mark.asyncio
+async def test_order_that_vanishes_after_the_gate_answers_not_found() -> None:
+    mock = AsyncMock()
+    mock.get_order_by_name = AsyncMock(return_value=None)
+    out = await GetOrderStatus().execute(
+        _ctx("kenny.medina@ahoracrypto.com", mock), GetOrderStatusInput(order_identifier="#1429")
+    )
     assert (out.found, out.order_id, out.shipping_address) == (False, None, None)
     assert out.note == NOT_FOUND_NOTE
 

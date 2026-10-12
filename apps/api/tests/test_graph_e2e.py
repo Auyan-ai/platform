@@ -77,6 +77,13 @@ def _patch_all_db_and_llm(
         AsyncMock(return_value=None),
     )
 
+    # --- resolve_identity ---
+    monkeypatch.setattr("apps.api.agents.nodes.resolve_identity.tenant_scope", fake_scope)
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.resolve_identity.get_tenant_pii_salt",
+        AsyncMock(return_value="test-salt"),
+    )
+
     # --- load_conversation ---
     monkeypatch.setattr(
         "apps.api.agents.nodes.load_conversation.tenant_scope", fake_scope

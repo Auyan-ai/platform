@@ -36,7 +36,7 @@ RAG y activación del agente los gestiona el equipo interno.
 ### Lo que ya está construido
 
 - Multi-tenancy con RLS + `tenant_scope` GUC
-- Grafo LangGraph 11 nodos + ReAct loop
+- Grafo LangGraph 12 nodos + ReAct loop
 - Skills L1/L2/L3 con permission gate (11 Shopify)
 - AOPs versionados con workspaces staging/production + eval gate 80%
 - Supervisor Sonnet/Opus por tier

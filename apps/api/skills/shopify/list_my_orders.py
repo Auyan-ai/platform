@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from apps.api.integrations.shopify import ShopifyAdapter
-from apps.api.services.identity import check_order_ownership, normalize_phone
+from apps.api.services.identity import normalize_phone
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._models import OrderSummary, map_order_summary
@@ -44,6 +44,8 @@ class ListMyOrders(Skill):
     input_schema = ListMyOrdersInput
     output_schema = ListMyOrdersOutput
     default_threshold = 0.70
+    identity_scope = "own_orders"
+    min_level = "verified"
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, ListMyOrdersInput)
@@ -61,17 +63,9 @@ class ListMyOrders(Skill):
             return ListMyOrdersOutput(
                 verified_sender=False, orders=[], total_found=0, note=NO_VERIFIED_SENDER_NOTE
             )
-        # La búsqueda de Shopify no es la garantía: cada pedido pasa el mismo gate que
-        # get_order_status y las L3.
+        # La búsqueda de Shopify no es la garantía: cada pedido pasa por los claims.
         own_orders = [
-            map_order_summary(order)
-            for order in raw_orders
-            if check_order_ownership(
-                order,
-                customer_email=ctx.customer_email,
-                customer_phone=phone,
-                default_region=ctx.phone_region,
-            ).owner
+            map_order_summary(order) for order in raw_orders if ctx.level_for(order) == "verified"
         ]
         return ListMyOrdersOutput(
             verified_sender=True, orders=own_orders, total_found=len(own_orders)
