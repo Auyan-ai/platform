@@ -7,7 +7,8 @@ Activa cuando:
 El supervisor ve la misma evidencia que vio `reason` (su system prompt, el bloque volátil
 del turno, el historial y la salida de las herramientas) y la decisión propuesta. Lo
 literal lo decide el código: un email o teléfono de la respuesta que no aparece en esa
-evidencia se rechaza sin llamar al LLM. El resto lo juzga el LLM con una tool forzada:
+evidencia, o un importe que no aparece en ella con la misma moneda, se rechaza sin llamar
+al LLM. El resto lo juzga el LLM con una tool forzada:
   - approve → continúa al destino (respond | escalate)
   - reject + tactical → el agente puede arreglar reintentando (una sola vez)
   - reject + structural → el AOP no aplica / falta capability → escala directo
@@ -35,6 +36,7 @@ from apps.api.agents.nodes.reason import agent_system_blocks
 from apps.api.agents.state import AgentState
 from apps.api.integrations.anthropic_client import call_claude_with_tools
 from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
+from apps.api.services.amount_grounding import AmountProblem, unbacked_amounts
 from apps.api.services.contact_grounding import Contact, unbacked_contacts
 from apps.api.services.identity import default_phone_region
 from apps.api.skills.registry import SkillRegistry
@@ -100,8 +102,9 @@ historial y la salida de las herramientas. Un dato que aparece en cualquiera de 
 fuentes tiene respaldo. Usar un dato ya verificado en un turno anterior sin volver a \
 consultar la herramienta es correcto.
 
-Los emails y teléfonos de la respuesta al cliente ya los comprobó el código contra esa \
-evidencia: no rechaces un contacto por falta de respaldo.
+Los emails, los teléfonos y los importes con moneda de la respuesta al cliente ya los \
+comprobó el código contra esa evidencia: no rechaces un contacto ni un importe con moneda \
+por falta de respaldo.
 
 Rechaza únicamente si encuentras uno de estos problemas materiales:
 1. La decisión viola una regla NO negociable (guardrail) del AOP.
@@ -200,26 +203,22 @@ def _build_supervisor_prompt(state: AgentState, turn_context: str) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-# Lo que dijo antes la propia IA no respalda un contacto; lo que dijo el cliente o una
-# persona del equipo, sí. Tampoco el feedback del supervisor, que puede citar el
-# contacto inventado.
-_CONTACT_SOURCE_ROLES = frozenset({"customer", "agent_human"})
+# Lo que dijo antes la propia IA no respalda un contacto ni un importe; lo que dijo el
+# cliente o una persona del equipo, sí. Tampoco el feedback del supervisor, que puede
+# citar el dato inventado.
+_EVIDENCE_ROLES = frozenset({"customer", "agent_human"})
 
 
-def _unbacked_contacts(state: AgentState) -> list[Contact]:
-    response = state.get("agent_response")
-    if not state.get("decision") or not response:
-        return []
+def _literal_evidence(state: AgentState) -> str:
     agent_blocks = agent_system_blocks({**state, "supervisor_feedback": None})
     evidence = [b["text"] for b in agent_blocks]
     evidence += [
         str(m.get("content", ""))
         for m in state.get("conversation_history") or []
-        if m.get("role") in _CONTACT_SOURCE_ROLES
+        if m.get("role") in _EVIDENCE_ROLES
     ]
     evidence += [_tool_output(tr) for tr in state.get("tool_results") or []]
-    region = default_phone_region(state.get("tenant_config"), state.get("tenant_facts"))
-    return unbacked_contacts(response, "\n".join(evidence), region)
+    return "\n".join(evidence)
 
 
 @dataclass(frozen=True)
@@ -230,16 +229,54 @@ class _Verdict:
     guardrails_violated: list[str] = field(default_factory=list)
 
 
-def _unbacked_contact_verdict(unbacked: list[Contact]) -> _Verdict:
+def _contacts_reason(unbacked: list[Contact]) -> str:
     contacts = ", ".join(c.masked() for c in unbacked)
+    return (
+        f"La respuesta da un contacto sin respaldo ({contacts}): no aparece en los datos "
+        "de la tienda, la base de conocimiento, las herramientas ni en lo que escribió el "
+        "cliente. Quítalo; si el cliente necesita un contacto y no hay uno respaldado, escala."
+    )
+
+
+def _amount_problem(problem: AmountProblem) -> str:
+    if problem.evidence_currencies:
+        currencies = ", ".join(sorted(problem.evidence_currencies))
+        return f"{problem.written} (la evidencia lo da en {currencies})"
+    return f"{problem.written} (no aparece en la evidencia)"
+
+
+def _amounts_reason(problems: list[AmountProblem]) -> str:
+    amounts = "; ".join(_amount_problem(p) for p in problems)
+    return (
+        f"La respuesta da importes sin respaldo con esa moneda: {amounts}. Da cada importe "
+        "con la moneda en que lo dan la herramienta o los datos de la tienda, sin convertirla "
+        "ni deducirla; si un importe no aparece en la evidencia, no lo des."
+    )
+
+
+def _literal_verdict(state: AgentState) -> _Verdict | None:
+    """Rechazo tactical sin LLM si la respuesta da un contacto o un importe que la evidencia
+    no respalda literalmente (#327, #332)."""
+    response = state.get("agent_response")
+    if not state.get("decision") or not response:
+        return None
+    evidence = _literal_evidence(state)
+    region = default_phone_region(state.get("tenant_config"), state.get("tenant_facts"))
+    reasons: list[str] = []
+    violated: list[str] = []
+    if contacts := unbacked_contacts(response, evidence, region):
+        reasons.append(_contacts_reason(contacts))
+        violated.append("contact_grounding")
+    if amounts := unbacked_amounts(response, evidence):
+        reasons.append(_amounts_reason(amounts))
+        violated.append("amount_grounding")
+    if not reasons:
+        return None
     return _Verdict(
         verdict="reject",
         reject_kind="tactical",
-        reason=(
-            f"La respuesta da un contacto sin respaldo ({contacts}): no aparece en los datos "
-            "de la tienda, la base de conocimiento, las herramientas ni en lo que escribió el "
-            "cliente. Quítalo; si el cliente necesita un contacto y no hay uno respaldado, escala."
-        ),
+        reason=" ".join(reasons),
+        guardrails_violated=violated,
     )
 
 
@@ -300,10 +337,10 @@ def make_supervise_node(
         this_in = this_out = 0
         sup_cost = 0.0
 
-        unbacked = _unbacked_contacts(state)
-        if unbacked:
+        literal = _literal_verdict(state)
+        if literal is not None:
             model = "code"
-            verdict = _unbacked_contact_verdict(unbacked)
+            verdict = literal
         else:
             model = _select_supervisor_model(state)
             if conv_id and tenant_id:
