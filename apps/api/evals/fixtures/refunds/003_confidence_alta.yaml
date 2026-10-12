@@ -1,0 +1,7 @@
+name: "Confidence threshold alto para movimiento de dinero"
+description: >
+  refund_partial genera transacciones financieras. Requiere confianza >= 0.75
+  para reducir el riesgo de reembolsos accidentales.
+assertions:
+  - kind: confidence_threshold_between
+    expected: [0.75, 1.0]

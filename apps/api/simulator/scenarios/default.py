@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from apps.api.simulator.scenarios.dates import days_ago
+
 _POLICIES: dict[str, Any] = {
     "get_policies": [
         {
@@ -76,8 +78,7 @@ _ORDER_TIENDA_EUR_PAGADO_GBP: dict[str, Any] = {
                 },
             }
         ],
-        "created_at": "2026-05-24T10:00:00Z",
-        "email": "cliente@ejemplo.com",
+        "created_at": days_ago(1),
     }
 }
 
@@ -96,7 +97,7 @@ _ORDER_PRE_ENVIO: dict[str, Any] = {
             "zip": "28001",
         },
         "line_items": [{"id": 6001, "title": "Zapatillas", "quantity": 1}],
-        "created_at": "2026-05-24T10:00:00Z",
+        "created_at": days_ago(1),
     },
     "update_shipping_address": {
         "id": 4001,
@@ -117,7 +118,8 @@ SCENARIOS: list[dict[str, Any]] = [
         "id": "DE-01",
         "name": "DE-01: Tiempo de envío estándar",
         "description": "Cliente pregunta cuánto tarda el envío sin pedido específico. El agente responde desde KB.",
-        "aop_slug": "default",
+        "aop_slug": "shipping_info",
+        "capabilities": [],
         "profile": "cooperativo",
         "goal": "Saber cuántos días tarda el envío estándar",
         "initial_message": "Hola, ¿cuánto tarda el envío normalmente?",
@@ -134,6 +136,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "name": "DE-02: Garantía de producto",
         "description": "Cliente pregunta sobre garantía de un producto. El agente responde desde KB en máximo 2 turnos.",
         "aop_slug": "default",
+        "capabilities": [],
         "profile": "cooperativo",
         "goal": "Saber qué garantía tiene el producto que quiero comprar",
         "initial_message": "¿Cuánto tiempo de garantía tienen sus productos?",
@@ -149,6 +152,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "name": "DE-03: Pregunta fuera de alcance",
         "description": "El cliente pregunta algo completamente fuera del alcance (ej: soporte técnico de otro producto). El agente escala.",
         "aop_slug": "default",
+        "capabilities": [],
         "profile": "cooperativo",
         "goal": "Obtener soporte técnico para un televisor de otra marca",
         "initial_message": "Hola, necesito ayuda con el televisor Samsung que compré hace un año, no enciende",
@@ -164,9 +168,13 @@ SCENARIOS: list[dict[str, Any]] = [
         "id": "DE-04",
         "name": "DE-04: Cambiar dirección antes de envío",
         "description": "Cliente quiere cambiar dirección del pedido #1500 que aún no salió. El agente ejecuta update_shipping_address.",
-        "aop_slug": "default",
+        "aop_slug": "order_change",
+        "capabilities": ["ORD-07"],
         "profile": "cooperativo",
-        "goal": "Cambiar la dirección de envío del pedido #1500",
+        "goal": (
+            "Cambiar la dirección de envío del pedido #1500 a Calle Nueva 456, Madrid, "
+            "28001. Confirma la dirección en cuanto te la lean."
+        ),
         "initial_message": (
             "Hola, cometí un error con la dirección del pedido #1500. "
             "¿Puedo cambiarla? La nueva es Calle Nueva 456, Madrid"
@@ -176,13 +184,14 @@ SCENARIOS: list[dict[str, Any]] = [
         "assertions": {
             "skills_called": ["shopify.update_shipping_address"],
         },
-        "max_turns": 5,
+        "max_turns": 8,
     },
     {
         "id": "DE-05",
         "name": "DE-05: Disponibilidad de talla M",
         "description": "Cliente pregunta si hay talla M de una camiseta. El agente busca el producto.",
-        "aop_slug": "default",
+        "aop_slug": "product_info",
+        "capabilities": [],
         "profile": "cooperativo",
         "goal": "Saber si hay camiseta básica en talla M",
         "initial_message": "¿Tienen la camiseta básica en talla M?",
@@ -198,7 +207,8 @@ SCENARIOS: list[dict[str, Any]] = [
         "id": "DE-06",
         "name": "DE-06: Solo 'hola' — cliente abandona pronto",
         "description": "El cliente solo dice hola y no elabora. El agente pregunta clarificación sin llamar skills operativas.",
-        "aop_slug": "default",
+        "aop_slug": "smalltalk",
+        "capabilities": [],
         "profile": "abandona_pronto",
         "goal": "Escribir hola y no dar más información",
         "initial_message": "Hola",
@@ -220,7 +230,8 @@ SCENARIOS: list[dict[str, Any]] = [
             "Issue #265: la tienda cobra en USD. El agente da el precio en dólares y no "
             "deduce euros por el idioma o el país del cliente."
         ),
-        "aop_slug": "default",
+        "aop_slug": "product_info",
+        "capabilities": ["PRD-01", "QLT-01"],
         "profile": "cooperativo",
         "goal": "Saber cuánto cuesta el Bolso Tote Piel",
         "initial_message": "Hola, ¿cuánto cuesta el Bolso Tote Piel?",
@@ -240,7 +251,8 @@ SCENARIOS: list[dict[str, Any]] = [
             "Issue #265: tienda en EUR, el cliente pagó en GBP. El agente dice lo que pagó "
             "en libras (45.00 GBP), no el importe de la tienda en euros."
         ),
-        "aop_slug": "default",
+        "aop_slug": "order_status",
+        "capabilities": ["ORD-01", "QLT-01"],
         "profile": "cooperativo",
         "goal": "Saber cuánto pagué por mi pedido #1502",
         "initial_message": "Hola, ¿cuánto pagué en total por mi pedido #1502?",

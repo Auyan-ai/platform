@@ -1,0 +1,8 @@
+name: "Define triggers de escalación"
+description: >
+  Un AOP de order_status debe definir cuándo escalar. Sin escalation_triggers
+  en el frontmatter, el agente puede intentar resolver casos que requieren
+  intervención humana (fraude, disputa de cargo, retrasos extremos).
+assertions:
+  - kind: frontmatter_has_key
+    expected: escalation_triggers

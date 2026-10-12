@@ -139,3 +139,72 @@ def test_summarize_all_critical_passed() -> None:
     assert total == 2
     assert passed == 1
     assert all_critical is True  # la única crítica (skills_called) pasó
+
+
+def test_response_must_contain_is_critical_and_checks_the_fixed_text() -> None:
+    ok = _check(
+        {"response_must_contain": ["No he podido verificar esos datos"]},
+        last_agent_message="Hola. No he podido verificar esos datos. Revisa el pedido.",
+    )
+    assert ok[0].passed and ok[0].is_critical
+    bad = _check({"response_must_contain": ["No he podido verificar"]}, last_agent_message="Claro")
+    assert bad[0].passed is False
+
+
+def test_skills_not_succeeded_accepts_a_gate_rejection_but_not_an_approval() -> None:
+    rejected = [
+        _FakeAudit(
+            "shopify.update_shipping_address",
+            status="rejected_by_permissions",
+            error_message="verified_required",
+        )
+    ]
+    assert _check({"skills_not_succeeded": ["shopify.update_shipping_address"]}, skill_log=rejected)[
+        0
+    ].passed
+    awaiting = [
+        _FakeAudit(
+            "shopify.update_shipping_address",
+            status="rejected_by_permissions",
+            error_message="awaiting_human_approval",
+        )
+    ]
+    assert not _check(
+        {"skills_not_succeeded": ["shopify.update_shipping_address"]}, skill_log=awaiting
+    )[0].passed
+    done = [_FakeAudit("shopify.update_shipping_address")]
+    assert not _check(
+        {"skills_not_succeeded": ["shopify.update_shipping_address"]}, skill_log=done
+    )[0].passed
+
+
+def test_escalation_reason_present_needs_a_non_blank_reason() -> None:
+    assert _check({"escalation_reason_present": True}, escalation_reason="no puede cambiarla")[
+        0
+    ].passed
+    assert not _check({"escalation_reason_present": True}, escalation_reason="  ")[0].passed
+    assert not _check({"escalation_reason_present": True})[0].passed
+
+
+def test_pending_approval_inputs_compares_the_stored_fields() -> None:
+    expected = {"pending_approval_inputs": {"shopify.cancel_order": {"refund_mode": "manual"}}}
+    stored = {"shopify.cancel_order": {"order_id": 4001, "refund_mode": "manual"}}
+    assert _check(expected, pending_approval_inputs=stored)[0].passed
+    wrong = {"shopify.cancel_order": {"refund_mode": "automatic"}}
+    result = _check(expected, pending_approval_inputs=wrong)[0]
+    assert not result.passed
+    assert "automatic" in result.evidence
+    assert not _check(expected, pending_approval_inputs={})[0].passed
+
+
+def test_identity_attempts_compares_the_count_including_zero() -> None:
+    assert _check({"identity_attempts": 0}, identity_attempts=0)[0].passed
+    assert not _check({"identity_attempts": 0}, identity_attempts=1)[0].passed
+    assert not _check({"identity_attempts": 1}, identity_attempts=None)[0].passed
+
+
+def test_contacts_grounded_fails_listing_only_masked_contacts() -> None:
+    assert _check({"contacts_grounded": True}, unbacked_contacts=[])[0].passed
+    result = _check({"contacts_grounded": True}, unbacked_contacts=["s***@tienda.com"])[0]
+    assert not result.passed
+    assert "s***@tienda.com" in result.evidence

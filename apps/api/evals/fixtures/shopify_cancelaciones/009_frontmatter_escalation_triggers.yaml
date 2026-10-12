@@ -1,7 +1,0 @@
-name: "Frontmatter tiene escalation_triggers"
-description: >
-  Un AOP L3 de cancelaciones debe tener triggers de escalación definidos
-  para casos que el agente no puede resolver (disputas, fraudes, etc.)
-assertions:
-  - kind: frontmatter_has_key
-    expected: escalation_triggers

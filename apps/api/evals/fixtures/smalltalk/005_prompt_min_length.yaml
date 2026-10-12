@@ -1,0 +1,5 @@
+name: Prompt con cuerpo suficiente
+description: El procedimiento no puede quedar vacío.
+assertions:
+- kind: prompt_min_length
+  expected: 200

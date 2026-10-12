@@ -110,8 +110,12 @@ def make_resolve_identity_node(
         guest_grants: tuple[Grant, ...] = ()
         round_ = GuestRound()
         guest_error: str | None = None
-        pairs = [] if state.get("simulation_mode") else candidate_pairs(provided)
-        if conversation_id is not None and not state.get("simulation_mode"):
+        # El simulador solo corre `guest` cuando el escenario lo pide (identidad "chat").
+        guest_enabled = (
+            not state.get("simulation_mode") or state.get("simulation_identity") == "chat"
+        )
+        pairs = candidate_pairs(provided) if guest_enabled else []
+        if conversation_id is not None and guest_enabled:
             ctx = build_skill_context({**state, "claim_salt": salt})  # type: ignore[typeddict-item]
             try:
                 # Transacción propia: si `identity_checks` falla, el remitente no se ve afectado.

@@ -181,6 +181,10 @@ class AgentState(TypedDict, total=False):
     # {"shopify": {"get_order_by_name": {...}, "search_orders_by_email": [...]}}.
     simulation_mode: bool
     simulation_fixtures: dict
+    # simulation_identity: "sender" (default) el cliente simulado escribe desde el email de
+    # la compra y es `verified`. "chat" no aporta remitente: solo cuenta lo que teclea
+    # (email o teléfono + número de pedido), como el visitante de un chat, y corre `guest`.
+    simulation_identity: str
     # forced_aop_slug: si está presente en modo simulación, select_aop carga ese AOP
     # directamente sin llamar al intent classifier. Permite que los scenarios controlen
     # qué AOP usa el grafo, aislando el test del clasificador de intent.

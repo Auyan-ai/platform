@@ -1,7 +1,0 @@
-name: "max_iterations >= 3"
-description: >
-  El agente necesita al menos 3 iteraciones: pedir confirmación, verificar el pedido,
-  solicitar aprobación humana.
-assertions:
-  - kind: max_iterations_gte
-    expected: 3

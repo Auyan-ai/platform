@@ -1,0 +1,9 @@
+name: Sin skills L3
+description: Contiene y escala; no resuelve con escrituras destructivas.
+assertions:
+- kind: skills_not_include
+  expected:
+  - shopify.cancel_order
+  - shopify.refund_partial
+  - shopify.start_return
+  - shopify.update_shipping_address

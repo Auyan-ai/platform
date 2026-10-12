@@ -196,6 +196,23 @@ async def test_simulator_turns_do_not_touch_identity_checks(
     assert store.rows == []
 
 
+async def test_simulator_chat_identity_runs_guest_and_has_no_sender(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    """El escenario con identidad "chat" se comporta como el visitante de un chat: el email
+    del perfil sintético no vale como remitente y el par número + email corre `guest`."""
+    _commerce(monkeypatch)
+    state = _turn("pedido 1001 ana@tienda.com")
+    state.update(
+        simulation_mode=True,
+        simulation_identity="chat",
+        end_customer={"email": "sim@simulator.auyan.internal"},
+    )
+    out = await make_resolve_identity_node(fake_deps)(state)
+    assert [(g.level, g.method) for g in _grants(out)] == [("guest", "order_contact")]
+    assert len(store.rows) == 1
+
+
 @pytest.mark.parametrize("failing", ["load", "write"])
 async def test_identity_checks_failure_keeps_the_verified_sender_and_grants_no_guest(
     fake_deps,

@@ -1,0 +1,6 @@
+name: Prompt prohíbe inventar
+description: Specs, stock y precios solo de la ficha.
+assertions:
+- kind: prompt_contains
+  expected:
+  - get_product_info

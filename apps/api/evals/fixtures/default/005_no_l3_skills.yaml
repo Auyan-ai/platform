@@ -7,5 +7,6 @@ assertions:
   - kind: skills_not_include
     expected:
       - shopify.cancel_order
-      - shopify.refund_order
-      - shopify.update_order
+      - shopify.refund_partial
+      - shopify.start_return
+      - shopify.update_shipping_address

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from apps.api.simulator.scenarios.dates import days_ago
+
 _ORDER_IN_WINDOW: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
@@ -18,7 +20,7 @@ _ORDER_IN_WINDOW: dict[str, Any] = {
                 "tracking_company": "UPS",
             }
         ],
-        "created_at": "2026-05-10T10:00:00Z",
+        "created_at": days_ago(15),
         "line_items": [
             {"id": 5001, "title": "Camiseta azul L", "quantity": 1, "price": "29.99"}
         ],
@@ -40,7 +42,7 @@ _ORDER_OUT_OF_WINDOW: dict[str, Any] = {
         "financial_status": "paid",
         "fulfillment_status": "fulfilled",
         "fulfillments": [{"tracking_number": "1Z999AA", "tracking_url": "https://"}],
-        "created_at": "2026-04-01T10:00:00Z",  # >30 días atrás
+        "created_at": days_ago(55),  # >30 días atrás
         "line_items": [
             {"id": 5001, "title": "Camiseta azul L", "quantity": 1, "price": "29.99"}
         ],
@@ -60,7 +62,7 @@ _ORDER_BROKEN_PRODUCT: dict[str, Any] = {
         "order_number": "#1234",
         "financial_status": "paid",
         "fulfillment_status": "fulfilled",
-        "created_at": "2026-05-15T10:00:00Z",
+        "created_at": days_ago(10),
         "total_price": "49.99",
         "currency": "EUR",
         "line_items": [
@@ -78,7 +80,7 @@ _ORDER_DIGITAL: dict[str, Any] = {
         "order_number": "#1235",
         "financial_status": "paid",
         "fulfillment_status": "fulfilled",
-        "created_at": "2026-05-20T10:00:00Z",
+        "created_at": days_ago(5),
         "line_items": [
             {"id": 5002, "title": "Plantilla digital Notion", "quantity": 1, "price": "12.00"}
         ],
@@ -101,6 +103,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "name": "RE-01: Devolución en plazo",
         "description": "Cliente cooperativo quiere devolver pedido dentro del plazo de 30 días por talla/preferencia, sin defecto ni reembolso inmediato.",
         "aop_slug": "returns",
+        "capabilities": [],
         "profile": "cooperativo",
         "goal": "Iniciar una devolución estándar del pedido #1234 porque la talla no me queda bien; no pedir reembolso inmediato ni cambio por defecto.",
         "initial_message": "Hola, quiero devolver mi pedido #1234 porque la talla no me queda bien",
@@ -118,6 +121,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "name": "RE-02: Devolución fuera de plazo",
         "description": "Cliente quiere devolver pedido de hace más de 30 días. El agente informa la política sin iniciar devolución.",
         "aop_slug": "returns",
+        "capabilities": [],
         "profile": "cooperativo",
         "goal": "Devolver pedido #1234 de hace 55 días",
         "initial_message": "Quiero devolver mi pedido #1234, lo compré hace un par de meses",
@@ -132,16 +136,21 @@ SCENARIOS: list[dict[str, Any]] = [
     {
         "id": "RE-03",
         "name": "RE-03: Reembolso por producto roto (L3)",
-        "description": "Cliente reporta producto roto. El agente inicia reembolso parcial L3 que queda pendiente de aprobación.",
-        "aop_slug": "returns",
+        "description": (
+            "Cliente reporta producto roto. `refund_partial` está apagada por defecto en todos "
+            "los tenants (s84): el agente no la tiene, no promete el reembolso y escala."
+        ),
+        "aop_slug": "refunds",
+        "capabilities": [],
         "profile": "cooperativo",
         "goal": "Obtener reembolso por lámpara que llegó rota",
         "initial_message": "Me llegó la lámpara del pedido #1234 completamente rota",
-        "expected_outcome": "El agente solicita aprobación de reembolso parcial L3.",
+        "expected_outcome": "El agente pasa el caso al equipo sin prometer ni tramitar el reembolso.",
         "mock_fixtures": {"shopify": _ORDER_BROKEN_PRODUCT},
         "assertions": {
-            "skills_called": ["shopify.refund_partial"],
-            "must_have_pending_approval": True,
+            "skills_not_called": ["shopify.refund_partial"],
+            "must_escalate": True,
+            "escalation_reason_present": True,
         },
         "max_turns": 6,
     },
@@ -150,6 +159,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "name": "RE-04: Devolver sin número de pedido",
         "description": "Cliente vago no da número de pedido. El agente busca alternativas.",
         "aop_slug": "returns",
+        "capabilities": [],
         "profile": "vago",
         "goal": "Devolver algo que compré pero no sé el número de pedido",
         "initial_message": "Quiero devolver algo, no sé bien el número",
@@ -163,6 +173,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "name": "RE-05: Devolver producto digital",
         "description": "Cliente quiere devolver un producto digital. El agente informa que no aplica devolución.",
         "aop_slug": "returns",
+        "capabilities": [],
         "profile": "cooperativo",
         "goal": "Devolver plantilla digital que no me sirve",
         "initial_message": "Quiero devolver la plantilla digital que compré, pedido #1235",
@@ -178,7 +189,8 @@ SCENARIOS: list[dict[str, Any]] = [
         "id": "RE-06",
         "name": "RE-06: Cliente agresivo exige reembolso",
         "description": "Cliente impaciente y agresivo exige reembolso inmediato. El agente debe mantener tono profesional y escalar.",
-        "aop_slug": "returns",
+        "aop_slug": "complaint",
+        "capabilities": [],
         "profile": "impaciente",
         "goal": "Exigir reembolso inmediato por producto defectuoso",
         "initial_message": "¡Esto es una estafa! Quiero mi dinero ya, el producto está roto",
@@ -194,6 +206,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "name": "RE-07: Inicia devolución, se arrepiente en turno 3",
         "description": "Cliente inicia proceso de devolución y luego decide no devolver.",
         "aop_slug": "returns",
+        "capabilities": [],
         "profile": "cooperativo",
         "goal": "Iniciar devolución, luego cancelarla porque decidí quedarme con el producto",
         "initial_message": "Hola, quiero devolver el pedido #1234",

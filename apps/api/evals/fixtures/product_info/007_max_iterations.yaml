@@ -1,0 +1,5 @@
+name: max_iterations >= 1
+description: Al menos una iteración de herramientas.
+assertions:
+- kind: max_iterations_gte
+  expected: 1

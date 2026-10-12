@@ -1,0 +1,6 @@
+name: Reclasifica ante una consulta real
+description: Si el cliente pide un dato, escala para reclasificar.
+assertions:
+- kind: prompt_contains
+  expected:
+  - escala

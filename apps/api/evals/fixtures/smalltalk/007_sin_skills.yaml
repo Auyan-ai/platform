@@ -1,0 +1,13 @@
+name: Sin skills
+description: 'Charla social: no consulta la tienda.'
+assertions:
+- kind: skills_not_include
+  expected:
+  - shopify.get_order_status
+  - shopify.list_my_orders
+  - shopify.get_product_info
+  - shopify.get_shop_policies
+  - shopify.cancel_order
+  - shopify.refund_partial
+  - shopify.start_return
+  - shopify.update_shipping_address

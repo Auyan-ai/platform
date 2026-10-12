@@ -1,0 +1,7 @@
+name: Distingue preparación y tránsito
+description: El plazo de envío no es el de preparación.
+assertions:
+- kind: prompt_contains
+  expected:
+  - preparación
+  - tránsito

@@ -1,0 +1,6 @@
+name: Prompt prohíbe inventar plazos
+description: Plazos y costes salen de la KB o de la política.
+assertions:
+- kind: prompt_contains
+  expected:
+  - no inventes

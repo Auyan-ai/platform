@@ -1,9 +1,0 @@
-name: "Tiene skills de lectura de Shopify"
-description: >
-  Un AOP de consulta_envio debe poder listar los pedidos del remitente y su estado.
-  Sin estas skills, el agente no puede responder preguntas de tracking.
-assertions:
-  - kind: skills_include
-    expected:
-      - shopify.list_my_orders
-      - shopify.get_order_status

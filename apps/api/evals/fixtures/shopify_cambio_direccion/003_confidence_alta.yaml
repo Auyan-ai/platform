@@ -1,7 +1,0 @@
-name: "Confidence threshold alto para modificación de pedido"
-description: >
-  update_shipping_address modifica un pedido activo — puede causar envíos a
-  domicilios incorrectos. Requiere confianza >= 0.90.
-assertions:
-  - kind: confidence_threshold_between
-    expected: [0.90, 1.0]

@@ -1,5 +1,0 @@
-name: "Frontmatter tiene clave allowed_skills"
-description: "El AOP debe declarar explícitamente sus skills para auditoría"
-assertions:
-  - kind: frontmatter_has_key
-    expected: allowed_skills

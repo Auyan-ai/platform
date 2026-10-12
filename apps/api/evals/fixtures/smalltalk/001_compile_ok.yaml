@@ -1,0 +1,4 @@
+name: El AOP compila
+description: El AOP canónico debe compilar sin excepción.
+assertions:
+- kind: compile_ok
