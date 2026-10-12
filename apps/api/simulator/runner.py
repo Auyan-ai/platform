@@ -45,7 +45,6 @@ from apps.api.simulator.assertions import check_assertions, summarize
 from apps.api.simulator.judge import (
     DEFAULT_JUDGE_MODEL,
     JUDGE_TIMEOUT_SECONDS,
-    OPUS_JUDGE_MODEL,
     JudgeModelAlias,
     SimulatorJudgeVerdict,
     judge_simulation,
@@ -67,15 +66,6 @@ logger = logging.getLogger(__name__)
 
 # 10 simulaciones concurrentes como máximo en todo el proceso.
 _GLOBAL_SIM_SEMAPHORE = asyncio.Semaphore(10)
-
-# Costo estimado en centavos por token (aproximaciones de Haiku+Sonnet+Opus).
-# Se usa para estimar cost_cents del run. No afecta lógica de negocio.
-_HAIKU_IN_CENTS_PER_1K = 0.025
-_HAIKU_OUT_CENTS_PER_1K = 0.125
-_SONNET_IN_CENTS_PER_1K = 0.3
-_SONNET_OUT_CENTS_PER_1K = 1.5
-_OPUS_IN_CENTS_PER_1K = 1.5
-_OPUS_OUT_CENTS_PER_1K = 7.5
 
 LOOP_DETECTION_WINDOW = 200  # primeros chars del mensaje del agente para detectar loops
 
@@ -99,6 +89,7 @@ class _RunAccumulator:
     tokens_agent_out: int = 0
     tokens_judge_in: int = 0
     tokens_judge_out: int = 0
+    cost_usd: float = 0.0
     judge_model: str = DEFAULT_JUDGE_MODEL
     last_agent_messages: list[str] = field(default_factory=list)
 
@@ -306,6 +297,7 @@ async def _run_simulation_inner(
             )
             acc.tokens_judge_in = judge_verdict.input_tokens
             acc.tokens_judge_out = judge_verdict.output_tokens
+            acc.cost_usd += judge_verdict.cost_usd
         except TimeoutError:
             logger.warning("sim_judge_timeout run_id=%s", run_id)
         except Exception:
@@ -320,7 +312,7 @@ async def _run_simulation_inner(
         judge_required=not skip_judge,
     )
 
-    cost_cents = _estimate_cost_cents(acc)
+    cost_cents = round(acc.cost_usd * 100, 4)
 
     await _finalize(
         tenant_id=tenant_id,
@@ -454,6 +446,7 @@ async def _execute_loop(
 
         acc.tokens_agent_in += final_state.get("tokens_in", 0)
         acc.tokens_agent_out += final_state.get("tokens_out", 0)
+        acc.cost_usd += final_state.get("cost_usd", 0.0)
 
         await _persist_agent_message(tenant_id, acc.conversation_id, agent_response)
         acc.transcript.turns.append(
@@ -488,6 +481,7 @@ async def _execute_loop(
         )
         acc.tokens_simulator_in += sim_turn.input_tokens
         acc.tokens_simulator_out += sim_turn.output_tokens
+        acc.cost_usd += sim_turn.cost_usd
 
         # El modelo a veces devuelve mensaje vacío de forma transitoria (sin flag de
         # cierre). Reintentamos una vez antes de tratarlo como fin de conversación.
@@ -498,6 +492,7 @@ async def _execute_loop(
             )
             acc.tokens_simulator_in += sim_turn.input_tokens
             acc.tokens_simulator_out += sim_turn.output_tokens
+            acc.cost_usd += sim_turn.cost_usd
 
         # Mensaje vacío persistente = el cliente dejó de responder. No lo persistimos
         # (rompería el embed del grafo y la API de Anthropic con content vacío) y
@@ -655,28 +650,3 @@ def _compute_status(
         return "partial"
     return "failed"
 
-
-def _estimate_cost_cents(acc: _RunAccumulator) -> float:
-    sim_cost = (
-        acc.tokens_simulator_in / 1000 * _HAIKU_IN_CENTS_PER_1K
-        + acc.tokens_simulator_out / 1000 * _HAIKU_OUT_CENTS_PER_1K
-    )
-    agent_cost = (
-        acc.tokens_agent_in / 1000 * _SONNET_IN_CENTS_PER_1K
-        + acc.tokens_agent_out / 1000 * _SONNET_OUT_CENTS_PER_1K
-    )
-    judge_in_rate = (
-        _OPUS_IN_CENTS_PER_1K
-        if acc.judge_model == OPUS_JUDGE_MODEL
-        else _SONNET_IN_CENTS_PER_1K
-    )
-    judge_out_rate = (
-        _OPUS_OUT_CENTS_PER_1K
-        if acc.judge_model == OPUS_JUDGE_MODEL
-        else _SONNET_OUT_CENTS_PER_1K
-    )
-    judge_cost = (
-        acc.tokens_judge_in / 1000 * judge_in_rate
-        + acc.tokens_judge_out / 1000 * judge_out_rate
-    )
-    return round(sim_cost + agent_cost + judge_cost, 4)

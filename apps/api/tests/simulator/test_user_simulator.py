@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from apps.api.integrations.pricing import LLMUsage
 from apps.api.simulator.user_simulator import (
     UserSimulator,
     _build_messages,
@@ -102,7 +103,7 @@ class TestBuildMessages:
 class TestParseTurn:
     def test_valid_json(self):
         raw = '{"message": "Hola", "goal_achieved": false, "give_up": false, "internal_reasoning": "ok"}'
-        turn = _parse_turn(raw, 100, 50)
+        turn = _parse_turn(raw, LLMUsage(input_tokens=100, output_tokens=50))
         assert turn.message == "Hola"
         assert not turn.goal_achieved
         assert not turn.give_up
@@ -111,17 +112,17 @@ class TestParseTurn:
 
     def test_goal_achieved(self):
         raw = '{"message": "ok gracias", "goal_achieved": true, "give_up": false, "internal_reasoning": "done"}'
-        turn = _parse_turn(raw, 0, 0)
+        turn = _parse_turn(raw, LLMUsage())
         assert turn.goal_achieved
 
     def test_json_embedded_in_text(self):
         raw = 'Sure: {"message": "hola", "goal_achieved": false, "give_up": false, "internal_reasoning": "x"}'
-        turn = _parse_turn(raw, 0, 0)
+        turn = _parse_turn(raw, LLMUsage())
         assert turn.message == "hola"
 
     def test_fallback_on_invalid_json(self):
         raw = "esto no es json"
-        turn = _parse_turn(raw, 10, 5)
+        turn = _parse_turn(raw, LLMUsage(input_tokens=10, output_tokens=5))
         assert turn.message == "esto no es json"
         assert turn.internal_reasoning == "parse_error"
         assert not turn.goal_achieved

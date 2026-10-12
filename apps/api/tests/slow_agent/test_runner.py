@@ -4,42 +4,19 @@ from __future__ import annotations
 
 import json
 import uuid
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from apps.api.db.models import Conversation, SlowAgentRun
-from apps.api.slow_agent.runner import RunStats, _estimate_cost
+from apps.api.slow_agent.judge import OPUS_JUDGE_MODEL, SONNET_JUDGE_MODEL
+from apps.api.slow_agent.runner import RunStats
 
 TENANT = uuid.uuid4()
 RUN_ID = uuid.uuid4()
 NOW = datetime(2026, 5, 19, 12, 0, 0)
-
-
-# ─── _estimate_cost ───────────────────────────────────────────────────────────
-
-
-def test_estimate_cost_zero():
-    assert _estimate_cost(0, 0, 0, 0) == 0.0
-
-
-def test_estimate_cost_sonnet_only():
-    # 1M input Sonnet = $3, 1M output = $15
-    cost = _estimate_cost(1_000_000, 0, 0, 0)
-    assert abs(cost - 3.0) < 0.001
-
-
-def test_estimate_cost_opus_only():
-    # 1M input Opus = $15
-    cost = _estimate_cost(0, 0, 1_000_000, 0)
-    assert abs(cost - 15.0) < 0.001
-
-
-def test_estimate_cost_mixed():
-    # 500k Sonnet input + 500k Opus output
-    cost = _estimate_cost(500_000, 0, 0, 500_000)
-    expected = 500_000 * 3.0 / 1_000_000 + 500_000 * 75.0 / 1_000_000
-    assert abs(cost - expected) < 0.001
 
 
 # ─── RunStats ─────────────────────────────────────────────────────────────────
@@ -224,3 +201,56 @@ async def test_run_slow_agent_respects_max_conversations(monkeypatch):
 
     assert stats.conversations_evaluated == 5
     assert len(judged_calls) == 5
+
+
+@pytest.mark.asyncio
+async def test_run_cost_counts_sonnet_and_opus_calls_at_current_rates(monkeypatch):
+    """Sonnet duda y escala a Opus: el run cobra las dos llamadas con la tarifa vigente."""
+    from apps.api.slow_agent import runner
+
+    responses = {
+        SONNET_JUDGE_MODEL: (
+            {"should_propose": False, "confidence": 0.5},
+            SimpleNamespace(input_tokens=4000, output_tokens=300),
+        ),
+        OPUS_JUDGE_MODEL: (
+            {"should_propose": False, "confidence": 0.9},
+            SimpleNamespace(input_tokens=4000, output_tokens=500),
+        ),
+    }
+
+    async def create(**kwargs):
+        payload, usage = responses[kwargs["model"]]
+        return SimpleNamespace(content=[SimpleNamespace(text=json.dumps(payload))], usage=usage)
+
+    anthropic = MagicMock()
+    anthropic.messages.create = AsyncMock(side_effect=create)
+
+    @asynccontextmanager
+    async def fake_scope(_tenant_id):
+        yield AsyncMock()
+
+    update_run = AsyncMock()
+    for name, value in {
+        "tenant_scope": fake_scope,
+        "insert_slow_agent_run": AsyncMock(return_value=_fake_run()),
+        "list_judged_conversation_ids": AsyncMock(return_value=set()),
+        "list_conversations": AsyncMock(return_value=[_fake_conv("escalated")]),
+        "get_tenant_pii_salt": AsyncMock(return_value="salt"),
+        "get_tenant_configuration": AsyncMock(return_value=MagicMock()),
+        "get_messages_for_conversation": AsyncMock(return_value=[]),
+        "list_skill_audit_log": AsyncMock(return_value=[]),
+        "get_last_intent_for_conversation": AsyncMock(return_value=None),
+        "get_open_escalation_for_conversation": AsyncMock(return_value=None),
+        "insert_conversation_judgment": AsyncMock(),
+        "update_slow_agent_run": update_run,
+    }.items():
+        monkeypatch.setattr(runner, name, value)
+
+    await runner.run_slow_agent_for_tenant(anthropic=anthropic, tenant_id=TENANT)
+
+    # Sonnet: 4000*$3 + 300*$15 = $0.0165. Opus 4.7: 4000*$5 + 500*$25 = $0.0325.
+    kwargs = update_run.call_args.kwargs
+    assert kwargs["cost_usd"] == pytest.approx(0.049)
+    assert kwargs["sonnet_tokens"] == 4300
+    assert kwargs["opus_tokens"] == 4500
