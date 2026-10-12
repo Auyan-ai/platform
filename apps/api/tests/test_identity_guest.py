@@ -113,6 +113,13 @@ def _pair(order: str, email: str) -> Pair:
         ("+34 600 111 222 y pedido #20345", ["20345"], [("phone", "+34600111222")]),
         ("ana1234@tienda.com", [], [("email", "ana1234@tienda.com")]),
         ("hola, ¿dónde está mi pedido?", [], []),
+        ("Nací en 1985, mi email es ana@tienda.com", [], [("email", "ana@tienda.com")]),
+        ("código postal 28001, ana@tienda.com", [], [("email", "ana@tienda.com")]),
+        ("talla 4000 ana@tienda.com", [], [("email", "ana@tienda.com")]),
+        ("pedido 1431 ana@tienda.com", ["1431"], [("email", "ana@tienda.com")]),
+        ("Nº 20345, ana@tienda.com", ["20345"], [("email", "ana@tienda.com")]),
+        ("mi compra número 5521 fue ayer", ["5521"], []),
+        ("pedido 1001 y el #1002", ["1001", "1002"], []),
         ("pedido 12", [], []),
     ],
 )
@@ -132,7 +139,9 @@ def test_phone_digits_are_not_taken_as_an_order_number() -> None:
 def test_tenant_order_pattern_and_bad_pattern_fallback() -> None:
     custom = extract_provided(["pedido AB-77"], order_pattern=r"AB-\d+")
     assert custom.order_refs == ("AB-77",)
-    broken = extract_provided(["pedido 1001"], order_pattern="(")
+    bare = extract_provided(["AB-77 y 2024"], order_pattern=r"AB-\d+")
+    assert bare.order_refs == ("AB-77",)
+    broken = extract_provided(["pedido 1001", "año 2024"], order_pattern="(")
     assert broken.order_refs == ("1001",)
 
 

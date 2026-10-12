@@ -359,6 +359,9 @@ La identidad unificada de la memoria cross-canal sirve para **recordar**, no par
   `verified`.
 - `identity.check_order_contact` es una skill `core`: la ofrece el código a todo tenant con
   commerce, sin AOP ni fila en `tenant_tool_permissions`.
+- Sin patrón propio del tenant, un número es referencia de pedido solo con `#` o junto a una palabra clave (pedido, orden, order, compra, nº, número). Un año, un código postal o una talla no son un intento; lo ambiguo lo recoge la skill de respaldo.
+- `identity.check_order_contact` se ofrece solo si el AOP tiene alguna skill de pedido y el turno aún no tiene ningún grant.
+- Si `identity_checks` falla (lectura o escritura), el turno sigue: guest no se concede, el remitente `verified` queda intacto y el error se loguea, se traza y va al audit log.
 - Un error del adapter de commerce al comprobar un par no se registra ni cuenta como fallo.
 - Con un remitente `verified`, un par fallido no cierra el turno con texto fijo (cuenta para los
   límites). El simulador no usa `guest`.

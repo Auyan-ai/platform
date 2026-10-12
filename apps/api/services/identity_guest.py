@@ -41,7 +41,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_ORDER_PATTERN = r"#?\d{4,}"
+# Sin patrón propio del tenant, un número es un pedido solo si va con `#` o con una palabra
+# clave cerca. Un año, un código postal o una talla no son un intento.
+_HASH_ORDER_RE = re.compile(r"#\s?(\d{4,})")
+_KEYWORD_ORDER_RE = re.compile(
+    r"\b(?:pedidos?|[oó]rdenes|orden|orders?|compras?|n[º°]|n\.º|n[uú]mero|numero|num)"
+    r"[^\d\n]{0,25}?(\d{4,})",
+    re.IGNORECASE,
+)
 MAX_ITEMS_PER_KIND = 10
 PROVIDED_CONTACT_KEY = "provided_contact"
 
@@ -105,13 +112,24 @@ def normalize_order_ref(value: str) -> str:
     return value.strip().lstrip("#").strip()
 
 
-def _compile_order_pattern(pattern: str | None) -> re.Pattern[str]:
-    if pattern:
-        try:
-            return re.compile(pattern)
-        except re.error:
-            logger.warning("order_name_pattern_invalid: se usa el patrón por defecto")
-    return re.compile(DEFAULT_ORDER_PATTERN)
+def _compile_tenant_pattern(pattern: str | None) -> re.Pattern[str] | None:
+    if not pattern:
+        return None
+    try:
+        return re.compile(pattern)
+    except re.error:
+        logger.warning("order_name_pattern_invalid: se usa la detección por defecto")
+        return None
+
+
+def _order_refs(text: str, tenant_pattern: re.Pattern[str] | None) -> list[str]:
+    """Referencias de pedido del texto, en orden de aparición."""
+    if tenant_pattern is not None:
+        found = [(m.start(), m.group(0)) for m in tenant_pattern.finditer(text)]
+    else:
+        found = [(m.start(1), m.group(1)) for m in _HASH_ORDER_RE.finditer(text)]
+        found += [(m.start(1), m.group(1)) for m in _KEYWORD_ORDER_RE.finditer(text)]
+    return [ref for _, raw in sorted(found) if (ref := normalize_order_ref(raw))]
 
 
 def _unique(items: Iterable[Any]) -> list[Any]:
@@ -127,10 +145,11 @@ def extract_provided(
 ) -> ProvidedData:
     """Pedidos, emails y teléfonos de los textos del cliente (el más reciente primero).
 
-    Regex para emails, `phonenumbers` para teléfonos y el patrón del tenant para pedidos.
-    Los dígitos que ya son parte de un email o un teléfono no cuentan como pedido.
+    Regex para emails, `phonenumbers` para teléfonos y, para pedidos, el patrón del tenant o
+    (sin él) un número con `#` o junto a una palabra clave. Lo ambiguo no es un intento: lo
+    recoge la skill de respaldo. Los dígitos de un email o teléfono no cuentan como pedido.
     """
-    pattern = _compile_order_pattern(order_pattern)
+    pattern = _compile_tenant_pattern(order_pattern)
     orders: list[str] = []
     contacts: list[Contact] = []
     for text in texts:
@@ -147,10 +166,7 @@ def extract_provided(
         remaining = list(text)
         for start, end in spans:
             remaining[start:end] = " " * (end - start)
-        for match in pattern.finditer("".join(remaining)):
-            ref = normalize_order_ref(match.group(0))
-            if ref:
-                orders.append(ref)
+        orders.extend(_order_refs("".join(remaining), pattern))
     contacts.extend(Contact("email", e.strip().casefold()) for e in extra_emails if e.strip())
     return ProvidedData(
         order_refs=tuple(_unique(orders)[:MAX_ITEMS_PER_KIND]),

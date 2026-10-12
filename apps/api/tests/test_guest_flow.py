@@ -12,7 +12,12 @@ from apps.api.agents.nodes import execute_skill
 from apps.api.agents.nodes.execute_skill import make_execute_skill_node
 from apps.api.agents.nodes.resolve_identity import make_resolve_identity_node
 from apps.api.integrations.base import IntegrationContext
-from apps.api.services.identity import Grant, IdentityContext
+from apps.api.services.identity import (
+    Grant,
+    IdentityContext,
+    IdentityEvidence,
+    sender_identity,
+)
 from apps.api.services.identity_messages import DEFAULT_MESSAGES
 from apps.api.services.skill_access import visible_skills
 from apps.api.skills.base import SkillContext
@@ -20,6 +25,7 @@ from apps.api.skills.identity.check_order_contact import CheckOrderContact
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify.cancel_order import CancelOrder
 from apps.api.skills.shopify.get_order_status import GetOrderStatus
+from apps.api.skills.shopify.get_product_info import GetProductInfo
 from apps.api.skills.shopify.list_my_orders import ListMyOrders
 from apps.api.skills.shopify.tag_order import TagOrder
 from apps.api.skills.shopify.update_shipping_address import UpdateShippingAddress
@@ -41,7 +47,8 @@ def _db(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _registry() -> None:
     """Otros tests vacían el registry (`_reset`); aquí hace falta la skill de respaldo."""
-    SkillRegistry.register(CheckOrderContact)
+    for skill in (CheckOrderContact, GetOrderStatus, CancelOrder, GetProductInfo):
+        SkillRegistry.register(skill)
 
 
 @pytest.fixture
@@ -188,6 +195,45 @@ async def test_simulator_turns_do_not_touch_identity_checks(
     assert store.rows == []
 
 
+@pytest.mark.parametrize("failing", ["load", "write"])
+async def test_identity_checks_failure_keeps_the_verified_sender_and_grants_no_guest(
+    fake_deps,
+    monkeypatch: pytest.MonkeyPatch,
+    store: Store,
+    caplog: pytest.LogCaptureFixture,
+    failing: str,
+) -> None:
+    _commerce(monkeypatch)
+    boom = AsyncMock(side_effect=RuntimeError("relation identity_checks does not exist"))
+    if failing == "load":
+        monkeypatch.setattr(f"{NODE}.load_guest_grants", boom)
+    else:
+        monkeypatch.setattr("apps.api.services.identity_guest.insert_guest_check", boom)
+    state = _turn("pedido 1001 ana@tienda.com", email="luis@tienda.com", channel="email")
+    with caplog.at_level("ERROR"):
+        out = await make_resolve_identity_node(fake_deps)(state)
+    assert "error" not in out
+    assert out["identity_summary"] == {"level": "verified", "methods": ["sender_email"]}
+    assert [g.level for g in _grants(out)] == ["verified"]
+    assert out["identity_error"] == "RuntimeError"
+    assert "agent_response" not in out
+    assert any(r.message == "guest_identity_failed" for r in caplog.records)
+
+
+async def test_identity_checks_failure_never_grants_guest_to_an_anonymous_chat(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    _commerce(monkeypatch)
+    monkeypatch.setattr(
+        "apps.api.services.identity_guest.insert_guest_check",
+        AsyncMock(side_effect=TimeoutError("db")),
+    )
+    out = await make_resolve_identity_node(fake_deps)(_turn("pedido 1001 ana@tienda.com"))
+    assert _grants(out) == ()
+    assert out["identity_summary"]["level"] is None
+    assert "agent_response" not in out
+
+
 def test_routing_after_resolve_identity() -> None:
     assert route_after_resolve_identity({}) == "select_aop"
     assert route_after_resolve_identity({"error": "x"}) == "handle_error"
@@ -265,11 +311,30 @@ def skill_db(monkeypatch: pytest.MonkeyPatch, store: Store) -> None:
     )
 
 
-async def test_the_fallback_skill_is_offered_by_code_to_commerce_tenants() -> None:
+ORDER_SLUGS = ["shopify.get_order_status", "shopify.cancel_order"]
+ENABLED = {slug: {"is_enabled": True} for slug in [*ORDER_SLUGS, "shopify.get_product_info"]}
+
+
+async def test_the_fallback_skill_is_offered_only_on_order_aops_without_a_grant() -> None:
     assert SkillRegistry.is_core(CHECK)
     assert not SkillRegistry.is_core("shopify.get_order_status")
-    assert CHECK in visible_skills([], {}, IdentityContext(), commerce=True)
-    assert CHECK not in visible_skills([], {}, IdentityContext(), commerce=False)
+    none = IdentityContext()
+
+    def offered(slugs: list[str], identity: IdentityContext, commerce: bool = True) -> bool:
+        return CHECK in visible_skills(slugs, ENABLED, identity, commerce=commerce)
+
+    assert offered(ORDER_SLUGS, none)
+    assert not offered(ORDER_SLUGS, none, commerce=False)
+    assert not offered(["shopify.get_product_info"], none)
+    assert not offered([], none)
+    assert not offered(ORDER_SLUGS, IdentityContext((Grant("guest", "order_contact", order_id=1),)))
+    assert not offered(ORDER_SLUGS, sender_identity(IdentityEvidence(email="a@x.com"), salt=SALT))
+
+
+async def test_non_order_aops_keep_the_cheap_model_path() -> None:
+    only_product = ["shopify.get_product_info"]
+    assert visible_skills(only_product, ENABLED, IdentityContext(), commerce=True) == only_product
+    assert visible_skills([], ENABLED, IdentityContext(), commerce=True) == []
 
 
 async def test_the_fallback_skill_grants_guest_and_updates_the_turn(

@@ -54,6 +54,8 @@ class AgentState(TypedDict, total=False):
     identity_note: str
     # Qué falta para tocar pedidos: ["order_number", "contact"], ["contact"], ["order_number"] o [].
     identity_missing: list[str]
+    # Clase del error si falló `identity_checks`: guest no se concede, el remitente sigue.
+    identity_error: str
     # Sal del tenant para hashear los claims de los pedidos. No se traza.
     claim_salt: str
 

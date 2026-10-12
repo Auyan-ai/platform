@@ -21,6 +21,7 @@ Salidas al estado:
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID
@@ -32,6 +33,7 @@ from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import get_tenant_pii_salt
 from apps.api.services.identity import (
+    Grant,
     IdentityContext,
     default_phone_region,
     evidence_from_state,
@@ -50,6 +52,42 @@ from apps.api.services.identity_guest import (
 )
 from apps.api.skills.shopify.get_order_status import map_order_detail
 
+logger = logging.getLogger(__name__)
+
+
+def _report_guest_failure(deps: AgentDependencies, state: AgentState, exc: Exception) -> None:
+    """Un fallo de `identity_checks` no tumba el turno: guest queda sin conceder (fail-closed)
+    y el error se loguea, se traza y queda en el audit log."""
+    tenant_id, conversation_id = state["tenant_id"], state.get("conversation_id")
+    error = f"guest_identity_failed: {type(exc).__name__}"
+    logger.error(
+        "guest_identity_failed",
+        exc_info=exc,
+        extra={"tenant_id": tenant_id, "conversation_id": conversation_id},
+    )
+    if conversation_id:
+        deps.reasoning_tracker.emit(
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            phase="decision",
+            event_type="tool_result",
+            label="identity.guest_check",
+            detail={"error": error},
+            status="error",
+        )
+        deps.audit_logger.log(
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            aop_slug=state.get("aop_slug") or "unknown",
+            aop_version=state.get("aop_version") or 0,
+            skill_slug="identity.guest_check",
+            skill_tier="L1",
+            inputs_raw={},
+            status="failed",
+            error_message=error,
+            langfuse_trace_id=state.get("langfuse_trace_id"),
+        )
+
 
 def make_resolve_identity_node(
     deps: AgentDependencies,
@@ -65,27 +103,34 @@ def make_resolve_identity_node(
             region=region,
             order_pattern=(state.get("tenant_facts") or {}).get("order_name_pattern"),
         )
-        round_ = GuestRound()
         async with tenant_scope(tenant_id) as conn:
             salt = await get_tenant_pii_salt(conn, tenant_id)
-            sender = sender_identity(evidence_from_state(state), salt=salt, region=region)
-            guest_grants = (
-                await load_guest_grants(conn, tenant_id, conversation_id)
-                if conversation_id is not None and not state.get("simulation_mode")
-                else ()
-            )
-            identity = IdentityContext((*sender.grants, *guest_grants))
-            pairs = [] if state.get("simulation_mode") else candidate_pairs(provided)
-            ctx = build_skill_context({**state, "claim_salt": salt})  # type: ignore[typeddict-item]
-            if pairs and conversation_id is not None and can_lookup_orders(ctx):
-                round_ = await run_guest_checks(
-                    conn,
-                    ctx,
-                    pairs,
-                    policy=ctx.guest_policy,
-                    tenant_facts=ctx.tenant_facts,
-                )
+        sender = sender_identity(evidence_from_state(state), salt=salt, region=region)
 
+        guest_grants: tuple[Grant, ...] = ()
+        round_ = GuestRound()
+        guest_error: str | None = None
+        pairs = [] if state.get("simulation_mode") else candidate_pairs(provided)
+        if conversation_id is not None and not state.get("simulation_mode"):
+            ctx = build_skill_context({**state, "claim_salt": salt})  # type: ignore[typeddict-item]
+            try:
+                # Transacción propia: si `identity_checks` falla, el remitente no se ve afectado.
+                async with tenant_scope(tenant_id) as conn:
+                    guest_grants = await load_guest_grants(conn, tenant_id, conversation_id)
+                    if pairs and can_lookup_orders(ctx):
+                        round_ = await run_guest_checks(
+                            conn,
+                            ctx,
+                            pairs,
+                            policy=ctx.guest_policy,
+                            tenant_facts=ctx.tenant_facts,
+                        )
+            except Exception as exc:
+                guest_grants, round_ = (), GuestRound()
+                guest_error = type(exc).__name__
+                _report_guest_failure(deps, state, exc)
+
+        identity = IdentityContext((*sender.grants, *guest_grants))
         identity = IdentityContext((*identity.grants, *round_.grants))
         missing = [] if identity.has_grant() else missing_data(provided)
         out: dict[str, Any] = {
@@ -95,6 +140,8 @@ def make_resolve_identity_node(
             "identity_note": identity_note(identity, missing),
             "identity_missing": missing,
         }
+        if guest_error is not None:
+            out["identity_error"] = guest_error
         if round_.orders:
             details = [map_order_detail(o).model_dump(mode="json") for o in round_.orders]
             out["known_facts"] = guest_facts(state.get("known_facts"), details)
