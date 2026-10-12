@@ -241,6 +241,17 @@ def test_render_global_rules_pins_the_currency_returned_by_the_skill() -> None:
     assert "nunca conviertas a otra" in result
 
 
+def test_render_global_rules_limits_contacts_to_facts_and_tools() -> None:
+    """Issue #322: un contacto solo sale de los datos de la tienda, de la KB o de una
+    herramienta. En staging el agente dio de memoria el teléfono de un transportista."""
+    result = _render_global_rules([])
+    assert "Contacto: los únicos emails, teléfonos y URLs de contacto" in result
+    assert "los de la base de conocimiento" in result
+    assert "nunca des de memoria el de un tercero" in result
+    assert "es suyo, no de la tienda" in result
+    assert "Si no tienes un contacto respaldado" in result
+
+
 def test_render_global_rules_includes_escalation_triggers() -> None:
     result = _render_global_rules(["El pedido no aparece", "Cliente enojado"])
     assert "El pedido no aparece" in result
