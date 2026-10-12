@@ -34,7 +34,7 @@ from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.nodes.reason import agent_system_blocks
 from apps.api.agents.state import AgentState
 from apps.api.integrations.anthropic_client import call_claude_with_tools
-from apps.api.integrations.pricing import compute_llm_cost
+from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.services.contact_grounding import Contact, unbacked_contacts
 from apps.api.services.identity import default_phone_region
 from apps.api.skills.registry import SkillRegistry
@@ -345,9 +345,10 @@ def make_supervise_node(
                 reason=inp.get("reason", ""),
                 guardrails_violated=inp.get("guardrails_violated", []),
             )
-            this_in = response.usage.input_tokens
-            this_out = response.usage.output_tokens
-            sup_cost = compute_llm_cost(model, this_in, this_out)
+            usage = LLMUsage.from_anthropic(response.usage)
+            this_in = usage.prompt_tokens
+            this_out = usage.output_tokens
+            sup_cost = compute_llm_cost(model, usage)
 
         if conv_id and tenant_id:
             tracker.emit(

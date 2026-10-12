@@ -367,7 +367,7 @@ async def test_trace_label_survives_missing_cache_fields(caplog) -> None:
     client = MagicMock()
     resp = MagicMock()
     resp.content = []
-    # usage sólo con input/output; sin atributos de cache → _usage_int devuelve 0.
+    # usage sólo con input/output; sin atributos de cache → cuentan 0.
     resp.usage = MagicMock(spec=["input_tokens", "output_tokens"])
     resp.usage.input_tokens = 30
     resp.usage.output_tokens = 4

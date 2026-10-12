@@ -78,8 +78,12 @@ class AgentState(TypedDict, total=False):
     # + billing + cierre del ticket (services.agent_resolution).
     resolves_on_delivery: bool
 
-    # --- Telemetría del LLM (acumulada en reason) ---
+    # --- Telemetría del LLM (acumulada en reason; supervise suma su coste) ---
+    # tokens_in es el prompt completo, cacheado o no. tokens_cache_write y
+    # tokens_cache_read son la parte de tokens_in escrita o leída de la caché.
     tokens_in: int
+    tokens_cache_write: int
+    tokens_cache_read: int
     tokens_out: int
     cost_usd: float
 
@@ -195,5 +199,5 @@ class AgentState(TypedDict, total=False):
     # rompería el prefijo cacheado (#211) y el retry pagaría todo el input sin caché.
     supervisor_feedback: str | None
     supervisor_model_used: str                         # qué modelo fue el supervisor
-    supervisor_tokens_in: int                          # tokens del supervisor
+    supervisor_tokens_in: int                          # prompt completo, incl. caché
     supervisor_tokens_out: int                         # tokens del supervisor

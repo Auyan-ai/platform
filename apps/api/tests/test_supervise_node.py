@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from anthropic.types import Usage
 
 # ──────────────────────────────────────────────────────────
 # needs_supervision
@@ -407,6 +408,29 @@ class TestSuperviseNode:
 
         assert result["supervisor_tokens_in"] == 300   # 100 prev + 200 mock
         assert result["supervisor_tokens_out"] == 120  # 40 prev + 80 mock
+
+    @pytest.mark.asyncio
+    async def test_cached_prefix_counts_in_tokens_and_cost(self, fake_deps: Any) -> None:
+        """Caso medido en #331: el prefijo leído de caché entra en tokens y coste."""
+        from apps.api.agents.nodes.supervise import make_supervise_node
+
+        response = _make_supervisor_response("approve")
+        response.usage = Usage.model_validate(
+            {
+                "input_tokens": 1684,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 3426,
+                "output_tokens": 166,
+            }
+        )
+        fake_deps.anthropic.messages.create = AsyncMock(return_value=response)
+
+        result = await make_supervise_node(fake_deps)(self._base_state())
+
+        assert result["supervisor_model_used"] == "claude-sonnet-4-6"
+        assert result["supervisor_tokens_in"] == 1684 + 3426
+        # 0.01 previo + 1684 @ $3 + 3426 @ $0.30 + 166 @ $15 = $0.0185698
+        assert result["cost_usd"] == pytest.approx(0.0185698)
 
     @pytest.mark.asyncio
     async def test_emits_reasoning_events(self, fake_deps: Any) -> None:
