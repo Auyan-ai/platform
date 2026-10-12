@@ -22,11 +22,10 @@ import pytest
 
 EXPECTED_SHOPIFY_SKILLS: tuple[str, ...] = (
     # L1 — read-only
-    "shopify.get_customer_history",
-    "shopify.get_order_by_email",
     "shopify.get_order_status",
     "shopify.get_product_info",
     "shopify.get_shop_policies",
+    "shopify.list_my_orders",
     # L2 — write bajo riesgo
     "shopify.add_order_note",
     "shopify.tag_order",

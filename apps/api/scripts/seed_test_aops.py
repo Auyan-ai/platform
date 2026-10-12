@@ -47,11 +47,11 @@ AOPS: list[dict] = [
                     "entrega de un pedido que ya hizo."
                 )
             },
-            "allowed_skills": ["shopify.get_order_status", "shopify.get_order_by_email"],
+            "allowed_skills": ["shopify.get_order_status", "shopify.list_my_orders"],
             "required_data": [],
             "guardrails": [
                 "NUNCA inventes un número de tracking ni una fecha de entrega.",
-                "Si no encuentras el pedido, dilo claramente y pide el número o el email.",
+                "Si no encuentras el pedido, dilo claramente y pide el número de pedido.",
                 "NUNCA escales únicamente porque el pedido está en preparación (unfulfilled/sin tracking). "
                 "En ese caso, informa al cliente que está siendo preparado y que recibirá el tracking "
                 "cuando se envíe. Solo escala si el cliente reporta un problema real (daño, no recibido).",
@@ -75,7 +75,7 @@ AOPS: list[dict] = [
             "## Cómo manejas una consulta de envío\n\n"
             "1. Si el cliente da el número de pedido (ej: #1234), usa "
             "`shopify.get_order_status` para buscarlo.\n"
-            "2. Si solo da su email, usa `shopify.get_order_by_email`. Si hay varios "
+            "2. Si no da el número, usa `shopify.list_my_orders`. Si hay varios "
             "pedidos, pregunta cuál quiere consultar.\n"
             "3. Cuando tengas el pedido, comparte el estado y, si hay fulfillment, el "
             "número de tracking y el link de seguimiento.\n"
@@ -101,7 +101,7 @@ AOPS: list[dict] = [
             },
             "allowed_skills": [
                 "shopify.get_order_status",
-                "shopify.get_order_by_email",
+                "shopify.list_my_orders",
                 "shopify.get_shop_policies",
                 "shopify.start_return",
                 "shopify.refund_partial",
@@ -125,7 +125,7 @@ AOPS: list[dict] = [
         "body": (
             "## Cómo manejas una devolución\n\n"
             "1. Identifica el pedido: usa `shopify.get_order_status` (si dan número) o "
-            "`shopify.get_order_by_email`.\n"
+            "`shopify.list_my_orders`.\n"
             "2. Consulta la política con `shopify.get_shop_policies` para confirmar el "
             "plazo de 30 días.\n"
             "3. Compara la fecha del pedido (`created_at`) con el plazo:\n"

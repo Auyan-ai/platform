@@ -1,4 +1,4 @@
-"""Tests unitarios para las 5 skills L1 de Shopify.
+"""Tests unitarios para las skills L1 de Shopify.
 
 Como ShopifyAdapter._client() crea un ShopifyClient internamente, el patch
 de ShopifyClient sigue capturando la llamada HTTP — sin cambios al mock setup.
@@ -13,17 +13,8 @@ import pytest
 from apps.api.integrations.base import IntegrationContext
 from apps.api.skills.base import SkillContext
 from apps.api.skills.shopify._models import Money, OrderSummary
-from apps.api.skills.shopify.get_customer_history import (
-    GetCustomerHistory,
-    GetCustomerHistoryInput,
-    GetCustomerHistoryOutput,
-)
-from apps.api.skills.shopify.get_order_by_email import (
-    GetOrderByEmail,
-    GetOrderByEmailInput,
-    GetOrderByEmailOutput,
-)
 from apps.api.skills.shopify.get_order_status import (
+    NOT_FOUND_NOTE,
     GetOrderStatus,
     GetOrderStatusInput,
     OrderDetail,
@@ -38,6 +29,12 @@ from apps.api.skills.shopify.get_shop_policies import (
     GetShopPoliciesInput,
     GetShopPoliciesOutput,
 )
+from apps.api.skills.shopify.list_my_orders import (
+    NO_VERIFIED_SENDER_NOTE,
+    ListMyOrders,
+    ListMyOrdersInput,
+    ListMyOrdersOutput,
+)
 
 # ----------------------------------------------------------------
 # Fixtures
@@ -48,10 +45,38 @@ _SHOPIFY_INTEGRATION_CTX = IntegrationContext(
     credentials={"domain": "myshop.myshopify.com", "token": "shpat_test"},
 )
 
+OWNER_EMAIL = "cliente@example.com"
+
+# Remitente verificado: el dueño de los pedidos de prueba escribe desde su email.
 CTX = SkillContext(
     tenant_id="11111111-1111-1111-1111-111111111111",
     conversation_id="22222222-2222-2222-2222-222222222222",
     integration_ctx=_SHOPIFY_INTEGRATION_CTX,
+    customer_email=OWNER_EMAIL,
+)
+
+# Otro remitente verificado: no es dueño de ningún pedido de prueba.
+CTX_OTHER_SENDER = SkillContext(
+    tenant_id="11111111-1111-1111-1111-111111111111",
+    conversation_id="22222222-2222-2222-2222-222222222222",
+    integration_ctx=_SHOPIFY_INTEGRATION_CTX,
+    customer_email="ajeno@example.com",
+)
+
+# Sin remitente verificado (ticket de chat): build_skill_context no pasa contacto.
+CTX_NO_SENDER = SkillContext(
+    tenant_id="11111111-1111-1111-1111-111111111111",
+    conversation_id="22222222-2222-2222-2222-222222222222",
+    integration_ctx=_SHOPIFY_INTEGRATION_CTX,
+    channel="zendesk",
+)
+
+CTX_PHONE_SENDER = SkillContext(
+    tenant_id="11111111-1111-1111-1111-111111111111",
+    conversation_id="22222222-2222-2222-2222-222222222222",
+    integration_ctx=_SHOPIFY_INTEGRATION_CTX,
+    customer_phone="+34600111222",
+    channel="whatsapp",
 )
 
 CTX_NO_SHOPIFY = SkillContext(
@@ -62,6 +87,7 @@ CTX_NO_SHOPIFY = SkillContext(
 _RAW_ORDER = {
     "id": 1001,
     "name": "#1001",
+    "email": OWNER_EMAIL,
     "financial_status": "paid",
     "fulfillment_status": "fulfilled",
     "total_price": "29.99",
@@ -83,6 +109,7 @@ _RAW_ORDER = {
 _RAW_ORDER_EUR_SHOP_PAID_GBP = {
     "id": 1002,
     "name": "#1002",
+    "email": OWNER_EMAIL,
     "financial_status": "paid",
     "fulfillment_status": None,
     "total_price": "52.00",
@@ -120,14 +147,14 @@ _RAW_PRODUCT = {
     ],
 }
 
-_RAW_CUSTOMER = {
-    "id": 3001,
-    "email": "cliente@example.com",
-    "first_name": "Ana",
-    "last_name": "García",
-    "orders_count": 3,
-    "total_spent": "89.97",
+_RAW_ORDER_OTHER_CUSTOMER = {
+    **_RAW_ORDER,
+    "id": 1003,
+    "name": "#1003",
+    "email": "ajeno@example.com",
 }
+
+_RAW_CUSTOMER = {"id": 3001, "email": OWNER_EMAIL, "phone": "+34600111222"}
 
 _RAW_POLICY = {
     "title": "Política de devolución",
@@ -145,59 +172,99 @@ def _mock_shopify(**method_results: object) -> AsyncMock:
 
 
 # ----------------------------------------------------------------
-# get_order_by_email
+# list_my_orders
 # ----------------------------------------------------------------
 
 
-class TestGetOrderByEmail:
-    async def test_returns_mapped_orders(self) -> None:
+class TestListMyOrders:
+    async def test_lists_the_verified_sender_orders(self) -> None:
         mock_client = _mock_shopify(get_orders_by_email=[_RAW_ORDER])
-        with patch(
-            "apps.api.integrations.shopify.ShopifyClient",
-            return_value=mock_client,
-        ):
-            result = await GetOrderByEmail().execute(CTX, GetOrderByEmailInput(email="a@b.com"))
-        assert isinstance(result, GetOrderByEmailOutput)
+        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
+            result = await ListMyOrders().execute(CTX, ListMyOrdersInput())
+        assert isinstance(result, ListMyOrdersOutput)
+        assert result.verified_sender is True
         assert result.total_found == 1
         assert isinstance(result.orders[0], OrderSummary)
         assert result.orders[0].order_number == "#1001"
         assert result.orders[0].financial_status == "paid"
+        mock_client.get_orders_by_email.assert_awaited_once_with(OWNER_EMAIL, limit=10)
+
+    async def test_ignores_an_email_the_llm_sends(self) -> None:
+        mock_client = _mock_shopify(get_orders_by_email=[_RAW_ORDER])
+        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
+            await ListMyOrders().execute(
+                CTX, ListMyOrdersInput.model_validate({"email": "ajeno@example.com"})
+            )
+        mock_client.get_orders_by_email.assert_awaited_once_with(OWNER_EMAIL, limit=10)
+
+    async def test_drops_orders_of_another_customer(self) -> None:
+        mock_client = _mock_shopify(get_orders_by_email=[_RAW_ORDER, _RAW_ORDER_OTHER_CUSTOMER])
+        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
+            result = await ListMyOrders().execute(CTX, ListMyOrdersInput())
+        assert [o.order_number for o in result.orders] == ["#1001"]
+        assert result.total_found == 1
+
+    async def test_chat_origin_gets_nothing(self) -> None:
+        mock_client = _mock_shopify(get_orders_by_email=[_RAW_ORDER])
+        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
+            result = await ListMyOrders().execute(CTX_NO_SENDER, ListMyOrdersInput())
+        assert result == ListMyOrdersOutput(
+            verified_sender=False, orders=[], total_found=0, note=NO_VERIFIED_SENDER_NOTE
+        )
+        mock_client.get_orders_by_email.assert_not_awaited()
+
+    async def test_whatsapp_sender_lists_orders_by_phone(self) -> None:
+        own = {**_RAW_ORDER, "email": None, "phone": "+34 600 11 12 22"}
+        other = {**_RAW_ORDER_OTHER_CUSTOMER, "phone": "+34699999999"}
+        mock_client = _mock_shopify(
+            get_customer_by_phone=_RAW_CUSTOMER, get_orders_by_customer_id=[own, other]
+        )
+        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
+            result = await ListMyOrders().execute(CTX_PHONE_SENDER, ListMyOrdersInput())
+        assert [o.order_number for o in result.orders] == ["#1001"]
+        mock_client.get_customer_by_phone.assert_awaited_once_with("+34600111222")
+        mock_client.get_orders_by_customer_id.assert_awaited_once_with(3001, limit=10)
+
+    async def test_whatsapp_sender_without_shopify_customer_gets_empty_list(self) -> None:
+        mock_client = _mock_shopify(get_customer_by_phone=None)
+        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
+            result = await ListMyOrders().execute(CTX_PHONE_SENDER, ListMyOrdersInput())
+        assert (result.verified_sender, result.orders) == (True, [])
+        mock_client.get_orders_by_customer_id.assert_not_awaited()
 
     async def test_eur_shop_order_paid_in_gbp_exposes_gbp(self) -> None:
         mock_client = _mock_shopify(get_orders_by_email=[_RAW_ORDER_EUR_SHOP_PAID_GBP])
         with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
-            result = await GetOrderByEmail().execute(CTX, GetOrderByEmailInput(email="a@b.com"))
+            result = await ListMyOrders().execute(CTX, ListMyOrdersInput())
         assert result.orders[0].total == Money(amount="45.00", currency="GBP")
         assert result.orders[0].total_in_shop_currency == Money(amount="52.00", currency="EUR")
 
-    async def test_empty_result(self) -> None:
-        mock_client = _mock_shopify(get_orders_by_email=[])
-        with patch(
-            "apps.api.integrations.shopify.ShopifyClient",
-            return_value=mock_client,
-        ):
-            result = await GetOrderByEmail().execute(CTX, GetOrderByEmailInput(email="new@x.com"))
-        assert isinstance(result, GetOrderByEmailOutput)
-        assert result.total_found == 0
-        assert result.orders == []
-
     async def test_raises_when_shopify_not_configured(self) -> None:
         with pytest.raises(ValueError, match="shopify_not_configured"):
-            await GetOrderByEmail().execute(CTX_NO_SHOPIFY, GetOrderByEmailInput(email="a@b.com"))
-
-    async def test_passes_email_to_client(self) -> None:
-        mock_client = _mock_shopify(get_orders_by_email=[])
-        with patch(
-            "apps.api.integrations.shopify.ShopifyClient",
-            return_value=mock_client,
-        ):
-            await GetOrderByEmail().execute(CTX, GetOrderByEmailInput(email="test@example.com"))
-        mock_client.get_orders_by_email.assert_awaited_once_with("test@example.com", limit=10)
+            await ListMyOrders().execute(CTX_NO_SHOPIFY, ListMyOrdersInput())
 
 
 # ----------------------------------------------------------------
 # get_order_status
 # ----------------------------------------------------------------
+
+
+_NOT_FOUND_DUMP = {
+    "found": False,
+    "order_id": None,
+    "order_number": None,
+    "financial_status": None,
+    "fulfillment_status": None,
+    "total": None,
+    "total_in_shop_currency": None,
+    "created_at": None,
+    "fulfilled_at": None,
+    "delivered_at": None,
+    "fulfillments": [],
+    "line_items": [],
+    "shipping_address": None,
+    "note": NOT_FOUND_NOTE,
+}
 
 
 class TestGetOrderStatus:
@@ -245,10 +312,20 @@ class TestGetOrderStatus:
             result = await GetOrderStatus().execute(
                 CTX, GetOrderStatusInput(order_identifier="#9999")
             )
-        assert isinstance(result, OrderDetail)
-        assert result.found is False
-        assert result.order_id is None
-        assert result.fulfillments == []
+        assert result.model_dump() == _NOT_FOUND_DUMP
+
+    @pytest.mark.parametrize(
+        "ctx", [CTX_OTHER_SENDER, CTX_NO_SENDER], ids=["email_ajeno", "origen_chat"]
+    )
+    async def test_someone_elses_order_looks_exactly_like_a_missing_one(
+        self, ctx: SkillContext
+    ) -> None:
+        mock_client = _mock_shopify(get_order_by_name=_RAW_ORDER)
+        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
+            result = await GetOrderStatus().execute(
+                ctx, GetOrderStatusInput(order_identifier="#1001")
+            )
+        assert result.model_dump() == _NOT_FOUND_DUMP
 
     async def test_raises_when_shopify_not_configured(self) -> None:
         with pytest.raises(ValueError, match="shopify_not_configured"):
@@ -376,67 +453,6 @@ class TestGetProductInfo:
 
 
 # ----------------------------------------------------------------
-# get_customer_history
-# ----------------------------------------------------------------
-
-
-class TestGetCustomerHistory:
-    async def test_returns_customer_and_orders(self) -> None:
-        mock_client = _mock_shopify(
-            get_customer_by_email=_RAW_CUSTOMER,
-            get_orders_by_customer_id=[_RAW_ORDER],
-        )
-        with patch(
-            "apps.api.integrations.shopify.ShopifyClient",
-            return_value=mock_client,
-        ):
-            result = await GetCustomerHistory().execute(
-                CTX, GetCustomerHistoryInput(email="cliente@example.com")
-            )
-        assert isinstance(result, GetCustomerHistoryOutput)
-        assert result.customer is not None
-        assert result.customer.first_name == "Ana"
-        assert result.customer.orders_count == 3
-        assert result.customer.total_spent == Money(amount="89.97", currency="USD")
-        assert len(result.orders) == 1
-
-    async def test_history_shows_each_order_in_the_currency_the_customer_paid(self) -> None:
-        mock_client = _mock_shopify(
-            get_customer_by_email=_RAW_CUSTOMER,
-            get_orders_by_customer_id=[_RAW_ORDER_EUR_SHOP_PAID_GBP],
-        )
-        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
-            result = await GetCustomerHistory().execute(
-                CTX, GetCustomerHistoryInput(email="cliente@example.com")
-            )
-        assert result.customer is not None
-        assert result.customer.total_spent == Money(amount="89.97", currency="EUR")
-        assert result.orders[0].total == Money(amount="45.00", currency="GBP")
-        assert result.orders[0].total_in_shop_currency == Money(amount="52.00", currency="EUR")
-
-    async def test_customer_not_found_returns_empty(self) -> None:
-        mock_client = _mock_shopify(get_customer_by_email=None)
-        with patch(
-            "apps.api.integrations.shopify.ShopifyClient",
-            return_value=mock_client,
-        ):
-            result = await GetCustomerHistory().execute(
-                CTX, GetCustomerHistoryInput(email="ghost@x.com")
-            )
-        assert isinstance(result, GetCustomerHistoryOutput)
-        assert result.customer is None
-        assert result.orders == []
-        # No se llama a get_orders_by_customer_id si el customer no existe
-        mock_client.get_orders_by_customer_id.assert_not_awaited()
-
-    async def test_raises_when_shopify_not_configured(self) -> None:
-        with pytest.raises(ValueError, match="shopify_not_configured"):
-            await GetCustomerHistory().execute(
-                CTX_NO_SHOPIFY, GetCustomerHistoryInput(email="x@y.com")
-            )
-
-
-# ----------------------------------------------------------------
 # get_shop_policies
 # ----------------------------------------------------------------
 
@@ -504,39 +520,36 @@ class TestSkillsRegistered:
         from apps.api.skills.registry import SkillRegistry
 
         for cls in [
-            GetOrderByEmail,
+            ListMyOrders,
             GetOrderStatus,
             GetProductInfo,
-            GetCustomerHistory,
             GetShopPolicies,
         ]:
             SkillRegistry.register(cls)
 
-    def test_all_five_skills_registered(self) -> None:
+    def test_all_read_skills_registered(self) -> None:
         from apps.api.skills.registry import SkillRegistry
 
         slugs = {
-            "shopify.get_order_by_email",
+            "shopify.list_my_orders",
             "shopify.get_order_status",
             "shopify.get_product_info",
-            "shopify.get_customer_history",
             "shopify.get_shop_policies",
         }
         for slug in slugs:
             assert SkillRegistry.get(slug) is not None, f"Missing: {slug}"
 
     def test_correct_slugs(self) -> None:
-        assert GetOrderByEmail.slug == "shopify.get_order_by_email"
+        assert ListMyOrders.slug == "shopify.list_my_orders"
         assert GetOrderStatus.slug == "shopify.get_order_status"
         assert GetProductInfo.slug == "shopify.get_product_info"
-        assert GetCustomerHistory.slug == "shopify.get_customer_history"
         assert GetShopPolicies.slug == "shopify.get_shop_policies"
 
     def test_list_for_aop_with_shopify_skills(self) -> None:
         from apps.api.skills.registry import SkillRegistry
 
         skills = SkillRegistry.list_for_aop([
-            "shopify.get_order_by_email",
+            "shopify.list_my_orders",
             "shopify.get_order_status",
         ])
         assert len(skills) == 2

@@ -11,7 +11,7 @@ porque una skill puede hacer varias llamadas y el mock opera a nivel de método:
     {
         "get_order_by_name": {"found": true, "order_number": "#1234", ...},
         "search_orders_by_email": [{...}, {...}],
-        "get_customer_by_email": {"_error": "NOT_FOUND"},
+        "search_orders_by_phone": {"_error": "SHOPIFY_API_UNAVAILABLE"},
         "get_policies": [{...}]
     }
 
@@ -87,10 +87,10 @@ class MockShopifyAdapter:
     ) -> list[dict[str, Any]]:
         return self._resolve("search_orders_by_email", [])
 
-    async def get_customer_by_email(
-        self, ctx: Any, email: str
-    ) -> dict[str, Any] | None:
-        return self._resolve("get_customer_by_email", None)
+    async def search_orders_by_phone(
+        self, ctx: Any, phone: str, *, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        return self._resolve("search_orders_by_phone", [])
 
     # ── Métodos extendidos usados por las skills ───────────────────────────────
 

@@ -37,7 +37,7 @@ SAMPLE_FRONTMATTER = {
     "name": "Consulta de envío",
     "slug": "consulta_envio",
     "workspace": "production",
-    "allowed_skills": ["shopify.get_order_by_email", "shopify.get_order_status"],
+    "allowed_skills": ["shopify.list_my_orders", "shopify.get_order_status"],
     "required_data": ["customer_email"],
     "guardrails": [
         "NUNCA inventes un número de tracking.",
@@ -340,7 +340,7 @@ def test_compile_aop_require_supervision_true() -> None:
 def test_compile_aop_resolves_skill_tools() -> None:
     aop = _make_aop()
     config = make_tenant_configuration()
-    mock_skill_class = _mock_skill("shopify.get_order_by_email")
+    mock_skill_class = _mock_skill("shopify.list_my_orders")
     with patch.object(SkillRegistry, "get", return_value=mock_skill_class):
         result = compile_aop(aop, config)
     assert len(result.tool_definitions) == len(SAMPLE_FRONTMATTER["allowed_skills"])
@@ -351,7 +351,7 @@ def test_compile_aop_skips_unknown_skills_gracefully() -> None:
     config = make_tenant_configuration()
 
     def _get(slug: str) -> object:
-        if slug == "shopify.get_order_by_email":
+        if slug == "shopify.list_my_orders":
             return _mock_skill(slug)
         raise ValueError(f"unknown_skill: {slug}")
 
@@ -359,7 +359,7 @@ def test_compile_aop_skips_unknown_skills_gracefully() -> None:
         result = compile_aop(aop, config)
 
     assert len(result.tool_definitions) == 1
-    assert result.tool_definitions[0]["name"] == "shopify_get_order_by_email"
+    assert result.tool_definitions[0]["name"] == "shopify_list_my_orders"
 
 
 def test_compile_aop_no_skills_in_frontmatter() -> None:

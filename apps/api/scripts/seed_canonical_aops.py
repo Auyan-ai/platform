@@ -15,6 +15,10 @@ Uso:
 
 Idempotente: sin --update, los AOPs que ya existen se saltan (no pisa personalizaciones
 del tenant). Con --update, crea una versión nueva con el contenido canónico.
+
+Permisos (tenant_tool_permissions): solo se crean los que faltan; una fila existente
+nunca se pisa, tampoco con --update. --reset-permissions los devuelve TODOS a los valores
+canónicos (revierte, p. ej., una L3 graduada a automática o una skill apagada a mano).
 """
 
 from __future__ import annotations
@@ -37,7 +41,9 @@ logging.basicConfig(
 logger = logging.getLogger("seed_canonical_aops")
 
 
-async def main(*, tenant_id: uuid.UUID | None, all_tenants: bool, update: bool) -> int:
+async def main(
+    *, tenant_id: uuid.UUID | None, all_tenants: bool, update: bool, reset_permissions: bool
+) -> int:
     from apps.api.aops.canonical import provision_canonical_aops
     from apps.api.core.config import get_settings
     from apps.api.db.client import (
@@ -62,26 +68,28 @@ async def main(*, tenant_id: uuid.UUID | None, all_tenants: bool, update: bool) 
             assert tenant_id is not None
             tenant_ids = [tenant_id]
 
-        totals = {"created": 0, "updated": 0, "skipped": 0}
+        totals = {"created": 0, "updated": 0, "skipped": 0, "permissions_written": 0}
         for tid in tenant_ids:
             # tenant_scope abre transacción + setea app.tenant_id → atómico por tenant.
             async with tenant_scope(tid) as conn:
                 result = await provision_canonical_aops(
-                    conn, tid, update_existing=update
+                    conn, tid, update_existing=update, reset_permissions=reset_permissions
                 )
             for key in totals:
                 totals[key] += result[key]
             logger.info(
-                "tenant=%s creados=%d actualizados=%d saltados=%d",
+                "tenant=%s creados=%d actualizados=%d saltados=%d permisos_escritos=%d",
                 tid,
                 result["created"],
                 result["updated"],
                 result["skipped"],
+                result["permissions_written"],
             )
 
         print(
             f"\nListo: {totals['created']} creados, {totals['updated']} actualizados, "
-            f"{totals['skipped']} saltados, en {len(tenant_ids)} tenant(s)."
+            f"{totals['skipped']} saltados, {totals['permissions_written']} permisos "
+            f"escritos, en {len(tenant_ids)} tenant(s)."
         )
         return 0
     finally:
@@ -104,6 +112,14 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Crea una versión nueva de los AOPs que ya existen (propaga mejoras del canon).",
     )
+    parser.add_argument(
+        "--reset-permissions",
+        action="store_true",
+        help=(
+            "Devuelve TODOS los permisos canónicos a sus valores por defecto, pisando los "
+            "cambios hechos a mano. Sin este flag solo se crean los que faltan."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -119,6 +135,11 @@ if __name__ == "__main__":
 
     sys.exit(
         asyncio.run(
-            main(tenant_id=parsed_tenant, all_tenants=args.all, update=args.update)
+            main(
+                tenant_id=parsed_tenant,
+                all_tenants=args.all,
+                update=args.update,
+                reset_permissions=args.reset_permissions,
+            )
         )
     )

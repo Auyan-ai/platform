@@ -8,7 +8,7 @@ que hereda cada tenant:
   - los permisos cubren todas las skills usadas; L3 con approval, L1/L2 sin él
   - raw_source round-trippea con el parser del editor del dashboard
   - cada AOP compila
-  - provision_canonical_aops: crea 8 + 11 permisos, idempotente, y propaga con --update
+  - provision_canonical_aops: crea 8 + 10 permisos, idempotente, y propaga con --update
 """
 
 from __future__ import annotations
@@ -31,6 +31,57 @@ from apps.api.aops.canonical import (
 from apps.api.aops.compiler import compile_aop
 from apps.api.db.models import AopWithContent, TenantConfiguration
 from apps.api.skills.registry import SkillRegistry
+
+
+class _FakePermissionTable:
+    """tenant_tool_permissions en memoria, con la semántica de las dos queries reales:
+    `upsert_tool_permission` pisa la fila y `insert_tool_permission_if_missing` no."""
+
+    def __init__(self, rows: dict[str, tuple[bool, bool]] | None = None) -> None:
+        self.rows: dict[str, tuple[bool, bool]] = dict(rows or {})
+
+    async def insert_if_missing(
+        self, conn, *, tenant_id, skill_slug, is_enabled, human_approval_required=False,
+        enabled_by=None,
+    ) -> bool:
+        if skill_slug in self.rows:
+            return False
+        self.rows[skill_slug] = (is_enabled, human_approval_required)
+        return True
+
+    async def upsert(
+        self, conn, *, tenant_id, skill_slug, is_enabled, human_approval_required=False,
+        threshold_override=None, enabled_by=None,
+    ) -> SimpleNamespace:
+        self.rows[skill_slug] = (is_enabled, human_approval_required)
+        return SimpleNamespace()
+
+    def install(self, monkeypatch) -> None:
+        monkeypatch.setattr(canonical, "insert_tool_permission_if_missing", self.insert_if_missing)
+        monkeypatch.setattr(canonical, "upsert_tool_permission", self.upsert)
+
+
+_CANONICAL_ROWS = {
+    p["skill_slug"]: (p["is_enabled"], p["human_approval_required"])
+    for p in CANONICAL_TOOL_PERMISSIONS
+}
+
+
+async def _missing_aop(conn, tenant_id, slug, workspace):
+    return None
+
+
+async def _existing_aop(conn, tenant_id, slug, workspace):
+    return SimpleNamespace(id=uuid4())
+
+
+async def _save_ok(*args, **kwargs):
+    return SimpleNamespace()
+
+
+async def _never(*args, **kwargs):
+    raise AssertionError("no debe llamarse")
+
 
 EXPECTED_SLUGS = {
     "order_status",
@@ -57,11 +108,10 @@ def _ensure_shopify_skills_registered():
     for name in (
         "add_order_note",
         "cancel_order",
-        "get_customer_history",
-        "get_order_by_email",
         "get_order_status",
         "get_product_info",
         "get_shop_policies",
+        "list_my_orders",
         "refund_partial",
         "start_return",
         "tag_order",
@@ -117,7 +167,7 @@ def test_order_change_never_promises_on_unverified_orders():
     retenida, pero el gate L3 bloquea siempre ese caso → el agente prometía en falso."""
     order_change = next(a for a in CANONICAL_AOPS if a["slug"] == "order_change")
     guardrails = " ".join(order_change["frontmatter"]["guardrails"])
-    assert "ownership_verified: false" in guardrails
+    assert "found: false" in guardrails
     assert "NO ofrezcas ni prometas" in guardrails
     assert "Puedes seguir con el cambio" not in guardrails
 
@@ -168,10 +218,12 @@ def test_tool_permissions_cover_every_used_skill():
 
 
 def test_permission_posture_l3_requires_approval():
-    """L1/L2 autónomos (sin approval); L3 enabled pero con human_approval_required."""
+    """L1/L2 autónomos (sin approval); L3 con human_approval_required. Todas nacen
+    enabled salvo refund_partial, apagada por defecto (decisión de Kenny, s84)."""
     for p in CANONICAL_TOOL_PERMISSIONS:
         tier = SkillRegistry.get(p["skill_slug"]).tier
-        assert p["is_enabled"] is True, f"{p['skill_slug']} debería nacer enabled"
+        expected_enabled = p["skill_slug"] != "shopify.refund_partial"
+        assert p["is_enabled"] is expected_enabled, f"{p['skill_slug']}: is_enabled"
         if tier == "L3":
             assert p["human_approval_required"] is True, (
                 f"{p['skill_slug']} es L3 y debe requerir approval por defecto"
@@ -378,7 +430,6 @@ def test_returns_prompt_measures_window_from_delivery():
 @pytest.mark.asyncio
 async def test_provision_creates_eight_aops_and_all_permissions(monkeypatch):
     created_slugs: list[str] = []
-    perms: list[tuple[str, bool, bool]] = []
 
     async def fake_get(conn, tenant_id, slug, workspace):
         return None  # ninguno existe
@@ -390,14 +441,11 @@ async def test_provision_creates_eight_aops_and_all_permissions(monkeypatch):
     async def fake_save(*args, **kwargs):
         raise AssertionError("no debe actualizar cuando el AOP no existe")
 
-    async def fake_upsert(conn, *, tenant_id, skill_slug, is_enabled, human_approval_required=False, threshold_override=None, enabled_by=None):
-        perms.append((skill_slug, is_enabled, human_approval_required))
-        return SimpleNamespace()
-
+    table = _FakePermissionTable()
+    table.install(monkeypatch)
     monkeypatch.setattr(canonical, "get_aop_by_slug", fake_get)
     monkeypatch.setattr(canonical, "create_aop", fake_create)
     monkeypatch.setattr(canonical, "save_aop_version", fake_save)
-    monkeypatch.setattr(canonical, "upsert_tool_permission", fake_upsert)
 
     result = await provision_canonical_aops(AsyncMock(), uuid4())
 
@@ -405,7 +453,61 @@ async def test_provision_creates_eight_aops_and_all_permissions(monkeypatch):
     assert result["updated"] == 0
     assert result["skipped"] == 0
     assert set(created_slugs) == EXPECTED_SLUGS
-    assert len(perms) == len(CANONICAL_TOOL_PERMISSIONS) == 11
+    assert result["permissions_written"] == len(CANONICAL_TOOL_PERMISSIONS) == 10
+    assert table.rows == _CANONICAL_ROWS
+
+
+@pytest.mark.asyncio
+async def test_new_tenant_is_born_with_refund_partial_off(monkeypatch):
+    table = _FakePermissionTable()
+    table.install(monkeypatch)
+    monkeypatch.setattr(canonical, "get_aop_by_slug", _missing_aop)
+    monkeypatch.setattr(canonical, "create_aop", _save_ok)
+
+    await provision_canonical_aops(AsyncMock(), uuid4())
+
+    assert table.rows["shopify.refund_partial"] == (False, True)
+    assert table.rows["shopify.cancel_order"] == (True, True)
+
+
+@pytest.mark.asyncio
+async def test_reseed_with_update_keeps_permissions_changed_by_hand(monkeypatch):
+    """La resiembra (`--update`) no revierte permisos: refund encendido y autónomo, una L3
+    graduada a automática y una L1 apagada siguen igual. Solo crea la fila que falta."""
+    by_hand = {
+        **_CANONICAL_ROWS,
+        "shopify.refund_partial": (True, False),
+        "shopify.cancel_order": (True, False),
+        "shopify.get_order_status": (False, False),
+    }
+    del by_hand["shopify.list_my_orders"]
+    table = _FakePermissionTable(by_hand)
+    table.install(monkeypatch)
+    monkeypatch.setattr(canonical, "get_aop_by_slug", _existing_aop)
+    monkeypatch.setattr(canonical, "create_aop", _never)
+    monkeypatch.setattr(canonical, "save_aop_version", _save_ok)
+
+    result = await provision_canonical_aops(AsyncMock(), uuid4(), update_existing=True)
+
+    assert result["updated"] == 9
+    assert result["permissions_written"] == 1
+    assert table.rows == {**by_hand, "shopify.list_my_orders": (True, False)}
+
+
+@pytest.mark.asyncio
+async def test_reset_permissions_restores_the_canonical_values(monkeypatch):
+    table = _FakePermissionTable(
+        {**_CANONICAL_ROWS, "shopify.refund_partial": (True, False), "shopify.tag_order": (False, False)}
+    )
+    table.install(monkeypatch)
+    monkeypatch.setattr(canonical, "get_aop_by_slug", _existing_aop)
+    monkeypatch.setattr(canonical, "create_aop", _never)
+    monkeypatch.setattr(canonical, "save_aop_version", _never)
+
+    result = await provision_canonical_aops(AsyncMock(), uuid4(), reset_permissions=True)
+
+    assert result["permissions_written"] == 10
+    assert table.rows == _CANONICAL_ROWS
 
 
 @pytest.mark.asyncio
@@ -419,20 +521,16 @@ async def test_provision_idempotent_skips_existing(monkeypatch):
     async def fake_save(*args, **kwargs):
         raise AssertionError("no debe actualizar sin update_existing")
 
-    async def fake_upsert(*args, **kwargs):
-        return SimpleNamespace()
-
+    _FakePermissionTable(_CANONICAL_ROWS).install(monkeypatch)
     monkeypatch.setattr(canonical, "get_aop_by_slug", fake_get)
     monkeypatch.setattr(canonical, "create_aop", fake_create)
     monkeypatch.setattr(canonical, "save_aop_version", fake_save)
-    monkeypatch.setattr(canonical, "upsert_tool_permission", fake_upsert)
 
     result = await provision_canonical_aops(AsyncMock(), uuid4())
 
     assert result["created"] == 0
     assert result["skipped"] == 9
-    # los permisos se hacen upsert igual (idempotente)
-    assert result["tool_permissions"] == 11
+    assert result["permissions_written"] == 0
 
 
 @pytest.mark.asyncio
@@ -449,13 +547,10 @@ async def test_provision_update_existing_creates_new_versions(monkeypatch):
         saved_slugs.append(yaml_frontmatter["slug"])
         return SimpleNamespace()
 
-    async def fake_upsert(*args, **kwargs):
-        return SimpleNamespace()
-
+    _FakePermissionTable(_CANONICAL_ROWS).install(monkeypatch)
     monkeypatch.setattr(canonical, "get_aop_by_slug", fake_get)
     monkeypatch.setattr(canonical, "create_aop", fake_create)
     monkeypatch.setattr(canonical, "save_aop_version", fake_save)
-    monkeypatch.setattr(canonical, "upsert_tool_permission", fake_upsert)
 
     result = await provision_canonical_aops(AsyncMock(), uuid4(), update_existing=True)
 

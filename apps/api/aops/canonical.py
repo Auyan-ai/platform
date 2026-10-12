@@ -11,8 +11,9 @@ editable de forma aislada desde el dashboard interno sin afectar a otros tenants
 - `raw_source` se genera en formato '---\\nYAML\\n---\\nbody' para que el editor del
   dashboard (routers/aops.py::_parse_raw_source) pueda round-tripear y editarlos.
 
-Postura de autonomía (tool_permissions default): L1/L2 autónomos; los 4 L3 nacen
-`enabled` + `human_approval_required=true`. super_admin gradúa por cliente.
+Postura de autonomía (tool_permissions default): L1/L2 autónomos; las L3 nacen
+`enabled` + `human_approval_required=true`, salvo `refund_partial`, que nace apagada.
+super_admin gradúa por cliente. La siembra solo crea los permisos que faltan.
 
 Diseño completo, fronteras y razones: docs/archive/aop-canonical-design.md (histórico).
 """
@@ -28,6 +29,7 @@ import yaml
 from apps.api.db.queries import (
     create_aop,
     get_aop_by_slug,
+    insert_tool_permission_if_missing,
     save_aop_version,
     upsert_tool_permission,
 )
@@ -64,10 +66,10 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             },
             "allowed_skills": [
                 "shopify.get_order_status",
-                "shopify.get_order_by_email",
+                "shopify.list_my_orders",
             ],
             "required_data": [
-                "Identificador del pedido: nº de pedido O el email de la compra",
+                "Nº de pedido, o que el cliente escriba desde el email o teléfono de la compra",
             ],
             "guardrails": [
                 "Nunca inventes tracking, transportista ni fecha de entrega: solo lo que devuelva la skill.",
@@ -87,9 +89,9 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
         "body": (
             "## Procedimiento: estado de pedido\n"
             "Objetivo: decirle al cliente dónde está su pedido con datos reales, sin inventar.\n\n"
-            "1. Si dio nº de pedido (#1234) → `shopify.get_order_status`. Si dio solo email → `shopify.get_order_by_email`.\n"
-            "2. Si no dio ninguno → pídele el nº de pedido o el email de la compra antes de consultar.\n"
-            "3. Si el email tiene varios pedidos → pregúntale cuál (menciónalos por fecha y nº).\n"
+            "1. Si dio nº de pedido (#1234) → `shopify.get_order_status`. Si no → `shopify.list_my_orders` (busca con el email o teléfono desde el que escribe; no recibe parámetros).\n"
+            "2. Si `get_order_status` devuelve `found: false` o `list_my_orders` devuelve `verified_sender: false` → sigue su `note`, sin decir si el pedido existe. Si `list_my_orders` no trae pedidos → dile que no hay pedidos asociados al email o teléfono desde el que escribe.\n"
+            "3. Si tiene varios pedidos → pregúntale cuál (menciónalos por fecha y nº).\n"
             "4. Con el pedido:\n"
             "   - Con tracking → comparte estado + transportista + nº de tracking + link de seguimiento.\n"
             "   - Sin tracking (en preparación): calcula los días desde `created_at` y compáralos con el\n"
@@ -166,12 +168,12 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             },
             "allowed_skills": [
                 "shopify.get_order_status",
-                "shopify.get_order_by_email",
+                "shopify.list_my_orders",
                 "shopify.get_shop_policies",
                 "shopify.start_return",
             ],
             "required_data": [
-                "Identificador del pedido (nº o email)",
+                "Nº de pedido, o que el cliente escriba desde el email o teléfono de la compra",
                 "Qué artículo(s) quiere devolver y el motivo",
             ],
             "guardrails": [
@@ -192,7 +194,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
         "body": (
             "## Procedimiento: devolución\n"
             "Objetivo: ayudar a devolver un producto elegible, según la política real de la tienda.\n\n"
-            "1. Identifica el pedido: nº → get_order_status; email → get_order_by_email.\n"
+            "1. Identifica el pedido: nº → get_order_status; sin nº → list_my_orders.\n"
             "2. ANTES de afirmar nada sobre plazos: determina plazo, condiciones y exclusiones desde la\n"
             "   política REAL, en este orden de fuentes: el contexto de la KB inyectado (si lo hay),\n"
             "   `tenant_facts` (p.ej. plazo de devolución) y `get_shop_policies`. Si el dato ya viene en la\n"
@@ -234,12 +236,12 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             },
             "allowed_skills": [
                 "shopify.get_order_status",
-                "shopify.get_order_by_email",
+                "shopify.list_my_orders",
                 "shopify.get_shop_policies",
                 "shopify.refund_partial",
             ],
             "required_data": [
-                "Identificador del pedido (nº o email)",
+                "Nº de pedido, o que el cliente escriba desde el email o teléfono de la compra",
                 "Motivo del reembolso y artículo/importe afectado",
             ],
             "guardrails": [
@@ -353,7 +355,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
                 "Antes de update_shipping_address, lee al cliente la dirección completa parseada (calle, ciudad, provincia, país, código postal) y espera su confirmación: un error de transcripción no debe llegar a aprobación sin validarlo con el cliente.",
                 "En update_shipping_address, `address1` es solo la calle y el número; el piso, la puerta, el portal o la escalera van en `address2`.",
                 "La dirección de envío actual (`shipping_address` de get_order_status) menciónala SOLO si el cliente la pide o para comparar con la nueva al confirmar el cambio; nunca la ofrezcas sin que venga al caso.",
-                "Si get_order_status devuelve `ownership_verified: false`, no puedes verificar que el pedido sea de quien escribe: sigue `ownership_note`. NO ofrezcas ni prometas cambiar ni cancelar ese pedido (el sistema lo bloquearía) ni menciones su dirección (`shipping_address_withheld: true`); explícalo con amabilidad y ofrece pasar el caso a una persona del equipo.",
+                "Si get_order_status devuelve `found: false`, sigue su `note`: no digas si el pedido existe, NO ofrezcas ni prometas cambiar ni cancelar ese pedido (el sistema lo bloquearía) ni que el equipo lo hará.",
                 "Cambio y cancelación quedan pendientes de aprobación; informa que está en proceso.",
                 "No canceles ni modifiques sin petición explícita del cliente.",
                 "Una vez que el cambio o la cancelación ya quedó en aprobación o se aplicó en esta conversación, NO vuelvas a llamar la skill ante agradecimientos, confirmaciones o mensajes de cortesía del cliente: responde con cordialidad y cierra. Ejecuta de nuevo solo si el cliente pide explícitamente una acción nueva o distinta.",
@@ -398,7 +400,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             },
             "allowed_skills": [
                 "shopify.get_order_status",
-                "shopify.get_customer_history",
+                "shopify.list_my_orders",
                 "shopify.tag_order",
                 "shopify.add_order_note",
             ],
@@ -420,7 +422,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             "## Procedimiento: queja / incidencia\n"
             "Objetivo: contener con empatía y escalar a una persona con contexto. NO resolver tú.\n\n"
             "1. Reconoce el problema con empatía, sin prometer soluciones concretas.\n"
-            "2. Recoge contexto: get_order_status (si hay pedido) y get_customer_history.\n"
+            "2. Recoge contexto: get_order_status si dio nº de pedido; si no, list_my_orders.\n"
             "3. Marca el pedido como incidencia con tag_order y deja un add_order_note con el resumen para el equipo.\n"
             "4. Dile al cliente que lo estás escalando a una persona que lo revisará en breve.\n"
             "5. Escala con resumen: pedido, naturaleza de la incidencia y contexto relevante."
@@ -447,7 +449,7 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
                 "shopify.get_shop_policies",
                 "shopify.get_product_info",
                 "shopify.get_order_status",
-                "shopify.get_customer_history",
+                "shopify.list_my_orders",
             ],
             "required_data": [],
             "guardrails": [
@@ -527,22 +529,22 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
 
 # ─── Permisos de herramientas por defecto ──────────────────────────────────────
 # execute_skill rechaza CUALQUIER skill sin row is_enabled=True (incluidas L1).
-# Postura canónica: L1/L2 autónomos; L3 enabled + human_approval_required=True.
+# Postura canónica: L1/L2 autónomos; L3 enabled + human_approval_required=True, salvo
+# refund_partial, apagada por defecto (decisión de Kenny, s84).
 # super_admin gradúa un L3 a automático (human_approval_required=False) por cliente.
 
 CANONICAL_TOOL_PERMISSIONS: list[dict[str, Any]] = [
     # L1 — lectura, autónomas
     {"skill_slug": "shopify.get_order_status", "is_enabled": True, "human_approval_required": False},
-    {"skill_slug": "shopify.get_order_by_email", "is_enabled": True, "human_approval_required": False},
+    {"skill_slug": "shopify.list_my_orders", "is_enabled": True, "human_approval_required": False},
     {"skill_slug": "shopify.get_product_info", "is_enabled": True, "human_approval_required": False},
     {"skill_slug": "shopify.get_shop_policies", "is_enabled": True, "human_approval_required": False},
-    {"skill_slug": "shopify.get_customer_history", "is_enabled": True, "human_approval_required": False},
     # L2 — escritura reversible, autónomas
     {"skill_slug": "shopify.add_order_note", "is_enabled": True, "human_approval_required": False},
     {"skill_slug": "shopify.tag_order", "is_enabled": True, "human_approval_required": False},
-    # L3 — destructivas, enabled pero con aprobación humana por defecto
+    # L3 — destructivas, con aprobación humana por defecto
     {"skill_slug": "shopify.start_return", "is_enabled": True, "human_approval_required": True},
-    {"skill_slug": "shopify.refund_partial", "is_enabled": True, "human_approval_required": True},
+    {"skill_slug": "shopify.refund_partial", "is_enabled": False, "human_approval_required": True},
     {"skill_slug": "shopify.cancel_order", "is_enabled": True, "human_approval_required": True},
     {"skill_slug": "shopify.update_shipping_address", "is_enabled": True, "human_approval_required": True},
 ]
@@ -566,6 +568,7 @@ async def provision_canonical_aops(
     *,
     created_by: UUID | None = None,
     update_existing: bool = False,
+    reset_permissions: bool = False,
 ) -> dict[str, int]:
     """Siembra los 9 AOPs canónicos + permisos default para `tenant_id`. Idempotente.
 
@@ -574,7 +577,9 @@ async def provision_canonical_aops(
     (bootstrap_connection) o ser el tenant_scope del propio tenant.
 
     - AOP existente (mismo slug) → se salta, salvo `update_existing=True` (crea versión nueva).
-    - Permisos siempre se hacen upsert (idempotente).
+    - Permisos: solo se crean los que el tenant no tiene; nunca se pisa una fila
+      existente, ni con `update_existing`. `reset_permissions=True` los fuerza a los
+      valores canónicos.
     """
     created = updated = skipped = 0
     for aop in CANONICAL_AOPS:
@@ -616,27 +621,41 @@ async def provision_canonical_aops(
             # Carrera: otro proceso lo creó entre el SELECT y el INSERT.
             skipped += 1
 
+    permissions_written = 0
     for perm in CANONICAL_TOOL_PERMISSIONS:
-        await upsert_tool_permission(
+        if reset_permissions:
+            await upsert_tool_permission(
+                conn,
+                tenant_id=tenant_id,
+                skill_slug=perm["skill_slug"],
+                is_enabled=perm["is_enabled"],
+                human_approval_required=perm["human_approval_required"],
+                enabled_by=created_by,
+            )
+            permissions_written += 1
+        elif await insert_tool_permission_if_missing(
             conn,
             tenant_id=tenant_id,
             skill_slug=perm["skill_slug"],
             is_enabled=perm["is_enabled"],
             human_approval_required=perm["human_approval_required"],
             enabled_by=created_by,
-        )
+        ):
+            permissions_written += 1
 
     logger.info(
-        "provision_canonical_aops tenant=%s created=%d updated=%d skipped=%d perms=%d",
+        "provision_canonical_aops tenant=%s created=%d updated=%d skipped=%d "
+        "permissions_written=%d reset_permissions=%s",
         tenant_id,
         created,
         updated,
         skipped,
-        len(CANONICAL_TOOL_PERMISSIONS),
+        permissions_written,
+        reset_permissions,
     )
     return {
         "created": created,
         "updated": updated,
         "skipped": skipped,
-        "tool_permissions": len(CANONICAL_TOOL_PERMISSIONS),
+        "permissions_written": permissions_written,
     }

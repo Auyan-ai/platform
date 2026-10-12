@@ -1,4 +1,4 @@
-"""Identidad del comprador por teléfono: normalización a E.164 y comparación.
+"""Identidad del comprador: remitente verificado, teléfono en E.164 y dueño de un pedido.
 
 Determinista (regla dura del Sprint 2): el teléfono decide identidad y ownership L3,
 así que nunca se compara texto libre. Todo teléfono pasa por `normalize_phone` y se
@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import phonenumbers
+from apps.api.services.writing_surface import HELPDESK_CHANNELS, normalize_source
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,49 @@ def check_order_ownership(
     if customer_phone:
         return OwnershipCheck(False, "no_customer_phone")
     return OwnershipCheck(False, "no_customer_identity")
+
+
+# ─── Remitente verificado (ADR 0013 §1) ───────────────────────────────────────
+
+SenderOrigin = Literal["email", "phone"]
+
+# Orígenes de ticket de helpdesk en los que el email del remitente cuenta como
+# verificado: correo y formulario web. Chat, messaging, API o desconocido no cuentan:
+# ahí el email lo teclea el visitante y nadie lo comprueba.
+_EMAIL_SENDER_SOURCES = frozenset({"email", "web", "webform", "contactform", "helpcenter"})
+
+
+def sender_origin(channel: str | None, source_channel: str | None) -> SenderOrigin | None:
+    """Qué contacto del remitente está verificado en este mensaje, según su origen.
+
+    WhatsApp verifica el teléfono; el canal `email` y los tickets de helpdesk de origen
+    correo o formulario web verifican el email. El resto no verifica nada.
+    """
+    if channel == "whatsapp":
+        return "phone"
+    if channel == "email":
+        return "email"
+    if channel in HELPDESK_CHANNELS and source_channel:
+        if normalize_source(source_channel) in _EMAIL_SENDER_SOURCES:
+            return "email"
+    return None
+
+
+def inbound_source_channel(
+    history: list[dict[str, Any]] | None, inbound_message_id: str | None
+) -> str | None:
+    """`metadata.source_channel` del mensaje entrante del turno.
+
+    Con `inbound_message_id`, el de ese mensaje (o None si no está en el historial);
+    sin él, el del último mensaje del cliente.
+    """
+    customer_messages = [m for m in history or [] if m.get("role") == "customer"]
+    if inbound_message_id is not None:
+        message = next((m for m in customer_messages if m.get("id") == inbound_message_id), None)
+    else:
+        message = customer_messages[-1] if customer_messages else None
+    source = ((message or {}).get("metadata") or {}).get("source_channel")
+    return str(source) if source else None
 
 
 def default_phone_region(

@@ -289,13 +289,13 @@ class ShopifyClient:
     # Customers
     # ----------------------------------------------------------------
 
-    async def get_customer_by_email(self, email: str) -> dict[str, Any] | None:
-        """Busca un customer por email. Devuelve None si no existe."""
+    async def get_customer_by_phone(self, phone: str) -> dict[str, Any] | None:
+        """Busca un customer por teléfono E.164. Devuelve None si no existe."""
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{self._base_url}/customers/search.json",
                 headers=self._headers(),
-                params={"query": f"email:{email}", "limit": 1},
+                params={"query": f"phone:{phone}", "limit": 1},
                 timeout=10,
             )
             response.raise_for_status()
@@ -959,10 +959,18 @@ class ShopifyAdapter:
     ) -> list[dict[str, Any]]:
         return await self._client(ctx).get_orders_by_email(email, limit=limit)
 
-    async def get_customer_by_email(
-        self, ctx: IntegrationContext, email: str
-    ) -> dict[str, Any] | None:
-        return await self._client(ctx).get_customer_by_email(email)
+    async def search_orders_by_phone(
+        self, ctx: IntegrationContext, phone: str, *, limit: int = 10
+    ) -> list[dict[str, Any]]:
+        """Pedidos del customer de Shopify con ese teléfono E.164 ([] si no hay customer).
+
+        Shopify no filtra pedidos por teléfono: se busca el customer y se leen los suyos.
+        """
+        client = self._client(ctx)
+        customer = await client.get_customer_by_phone(phone)
+        if customer is None:
+            return []
+        return await client.get_orders_by_customer_id(customer["id"], limit=limit)
 
     # ── Métodos extendidos usados por las skills ───────────────────────────────
 

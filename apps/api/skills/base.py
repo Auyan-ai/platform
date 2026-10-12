@@ -52,13 +52,13 @@ class SkillContext:
     # Tipo Any porque las skills llaman métodos fuera del protocolo CommerceProvider
     # (get_order_by_name, get_policies, etc.) y solo existe un provider commerce.
     commerce_mock: Any = field(default=None)
-    # Email del cliente final de la conversación (end_customer). Las skills que
-    # exponen datos personales del pedido (p. ej. la dirección) lo comparan con
-    # el email del pedido: solo el dueño ve esos datos.
+    # Contacto VERIFICADO del remitente del mensaje (ADR 0013): el email solo si el
+    # mensaje llega por correo o formulario web, el teléfono E.164 solo por WhatsApp.
+    # Nunca lo que teclee el cliente o el LLM. Decide qué pedidos puede ver y tocar
+    # (`services.identity.check_order_ownership`).
     customer_email: str | None = field(default=None)
-    # Teléfono E.164 del cliente (WhatsApp) y canal de la conversación: el ownership de
-    # un pedido pasa por email O teléfono (`services.identity.check_order_ownership`).
     customer_phone: str | None = field(default=None)
+    # Canal de la conversación: en mensajería el gate L3 ofrece pasar el caso a una persona.
     channel: str | None = field(default=None)
     # Región por defecto para teléfonos sin prefijo (tenant_config/tenant_facts, "ES").
     phone_region: str = field(default="ES")

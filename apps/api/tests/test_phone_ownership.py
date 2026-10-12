@@ -195,9 +195,9 @@ async def _order_status(customer_email: str | None, customer_phone: str | None) 
 
 async def test_order_status_reveals_address_to_phone_owner() -> None:
     out = await _order_status(None, "+34611223344")
-    assert out.shipping_address is not None and out.shipping_address_withheld is False
+    assert out.found is True and out.shipping_address is not None
 
 
-async def test_order_status_withholds_address_from_other_phone() -> None:
+async def test_order_status_hides_the_order_from_other_phone() -> None:
     out = await _order_status(None, "+34699999999")
-    assert out.shipping_address is None and out.shipping_address_withheld is True
+    assert (out.found, out.order_id, out.shipping_address) == (False, None, None)

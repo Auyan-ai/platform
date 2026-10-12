@@ -110,18 +110,27 @@ def sim_customer_email(run_id: object) -> str:
 
 
 _ORDER_FIXTURE_KEYS = ("get_order_by_name", "get_order")
+_ORDER_LIST_FIXTURE_KEYS = ("search_orders_by_email",)
+
+
+def _owned_by(order: Any, email: str) -> Any:
+    if isinstance(order, dict) and "_error" not in order and not order.get("email"):
+        return {**order, "email": email}
+    return order
 
 
 def assign_mock_orders_to_customer(fixtures: dict[str, Any], email: str) -> dict[str, Any]:
     """Los pedidos mock pertenecen al cliente simulado (mismo email), para que el
-    gate de ownership L3 (email cliente == email pedido) se comporte como con un
+    gate de ownership (email remitente == email pedido) se comporte como con un
     cliente real escribiendo desde su email. Un escenario que fije `email` en el
     pedido (p. ej. para probar "no es el dueño") se respeta. No muta el original."""
     shopify = dict((fixtures or {}).get("shopify") or {})
     for key in _ORDER_FIXTURE_KEYS:
-        order = shopify.get(key)
-        if isinstance(order, dict) and "_error" not in order and not order.get("email"):
-            shopify[key] = {**order, "email": email}
+        if key in shopify:
+            shopify[key] = _owned_by(shopify[key], email)
+    for key in _ORDER_LIST_FIXTURE_KEYS:
+        if isinstance(shopify.get(key), list):
+            shopify[key] = [_owned_by(order, email) for order in shopify[key]]
     return {**(fixtures or {}), "shopify": shopify}
 
 async def run_simulation(

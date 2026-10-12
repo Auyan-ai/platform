@@ -120,18 +120,18 @@ SCENARIOS: list[dict[str, Any]] = [
     },
     {
         "id": "CE-03",
-        "name": "CE-03: Estado con email, cliente vago",
-        "description": "El cliente no da número de pedido, solo el email. El agente busca por email.",
+        "name": "CE-03: Estado sin número de pedido, cliente vago",
+        "description": (
+            "El cliente no da número de pedido. El agente lista los pedidos del remitente."
+        ),
         "aop_slug": "consulta_envio",
         "profile": "vago",
-        "goal": "Saber el estado de mi pedido reciente usando mi email cliente@ejemplo.com",
-        "initial_message": (
-            "Hola, quiero saber cómo está mi pedido. Mi email es cliente@ejemplo.com"
-        ),
-        "expected_outcome": "El agente pide el email o número de pedido y localiza el pedido.",
+        "goal": "Saber el estado de mi pedido reciente sin dar el número",
+        "initial_message": "Hola, quiero saber cómo está mi pedido.",
+        "expected_outcome": "El agente lista los pedidos del remitente y localiza el pedido.",
         "mock_fixtures": {"shopify": _ORDER_BY_EMAIL},
         "assertions": {
-            "skills_called": ["shopify.get_order_by_email"],
+            "skills_called": ["shopify.list_my_orders"],
             "max_turns": 3,
         },
         "max_turns": 6,
@@ -178,7 +178,7 @@ SCENARIOS: list[dict[str, Any]] = [
         "expected_outcome": "El agente detecta que hay 2 pedidos y pide al cliente que especifique cuál.",
         "mock_fixtures": {"shopify": _TWO_ORDERS},
         "assertions": {
-            "skills_called": ["shopify.get_order_by_email"],
+            "skills_called": ["shopify.list_my_orders"],
         },
         "max_turns": 6,
     },

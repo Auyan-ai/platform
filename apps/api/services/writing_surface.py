@@ -51,7 +51,7 @@ _CHAT_SOURCES = frozenset(
 )
 
 
-def _normalize_source(raw: str) -> str:
+def normalize_source(raw: str) -> str:
     token = raw.strip().lower().removeprefix("channel::")
     return "".join(ch for ch in token if ch not in "-_ ")
 
@@ -60,7 +60,7 @@ def surface_for_source(raw: str | None) -> Surface:
     """Superficie de un origen de ticket del helpdesk. Desconocido → `email`."""
     if not raw:
         return "email"
-    token = _normalize_source(raw)
+    token = normalize_source(raw)
     if token in _CHAT_SOURCES:
         return "chat"
     return "email"
