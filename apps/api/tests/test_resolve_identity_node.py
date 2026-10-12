@@ -51,7 +51,7 @@ async def test_the_linked_profile_never_grants_anything(fake_deps) -> None:
     state["end_customer"] = {"email": "ana@x.com", "phone": "+34600111222"}
     out = await make_resolve_identity_node(fake_deps)(state)  # type: ignore[arg-type]
     assert out["identity_summary"] == {"level": None, "methods": []}
-    assert "no verificada" in out["identity_note"]
+    assert "todavía no puedes consultar ni modificar pedidos" in out["identity_note"]
 
 
 async def test_state_and_summary_carry_hashes_only(fake_deps) -> None:

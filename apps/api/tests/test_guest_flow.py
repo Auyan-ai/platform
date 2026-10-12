@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -234,6 +235,41 @@ async def test_identity_checks_failure_never_grants_guest_to_an_anonymous_chat(
     assert "agent_response" not in out
 
 
+INTERNAL_IDENTITY_TERMS = re.compile(
+    r"invitad|\bguest\b|\bverified\b|\bgrants?\b|\bnivel|verific", re.I
+)
+
+
+def _identity_part_of_the_prompt(out: dict[str, Any]) -> str:
+    """Lo que la identidad aporta al bloque volátil, sin las cabeceras fijas del builder."""
+    return "\n".join(part for part in (out["identity_note"], out.get("known_facts")) if part)
+
+
+async def test_what_the_llm_reads_about_a_guest_has_no_internal_jargon(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    """#334: con un grant guest el agente le dijo al cliente "como accediste como invitado".
+    Ni la nota de identidad ni el bloque de datos nombran niveles ni el proceso: dicen qué
+    puede hacer el cliente para cambiar la dirección."""
+    _commerce(monkeypatch)
+    resolve = make_resolve_identity_node(fake_deps)
+    granting_turn = await resolve(_turn("Hola, ¿dónde está mi pedido #1001?", "Ana@Tienda.com"))
+    assert [g.level for g in _grants(granting_turn)] == ["guest"]
+
+    stored = (Grant("guest", "order_contact", order_id=9001, valid_until=None),)
+    monkeypatch.setattr(f"{NODE}.load_guest_grants", AsyncMock(return_value=stored))
+    next_turn = await resolve(
+        _turn("Quiero cambiar la dirección de envío del pedido #1001 a Calle Mayor 5")
+    )
+    assert next_turn["identity_summary"]["level"] == "guest"
+
+    for out in (granting_turn, next_turn):
+        prompt = _identity_part_of_the_prompt(out)
+        assert INTERNAL_IDENTITY_TERMS.findall(prompt) == []
+        assert "desde el email o el teléfono de la compra" in prompt
+        assert "no le expliques al cliente cómo se ha comprobado quién es" in prompt
+
+
 def test_routing_after_resolve_identity() -> None:
     assert route_after_resolve_identity({}) == "select_aop"
     assert route_after_resolve_identity({"error": "x"}) == "handle_error"
@@ -345,7 +381,7 @@ async def test_the_fallback_skill_grants_guest_and_updates_the_turn(
     assert out["tool_results"][0]["output"]["verified"] is True
     assert [g.level for g in _grants(out)] == ["guest"]
     assert out["identity_summary"]["level"] == "guest"
-    assert "invitado" in out["identity_note"]
+    assert "cambiar la dirección de envío" in out["identity_note"]
     assert "#1001" in out["known_facts"]
     assert "decision" not in out
 
