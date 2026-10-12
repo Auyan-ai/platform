@@ -15,3 +15,11 @@ def test_upsert_tool_permission_casts_enabled_by_to_uuid() -> None:
     sql = inspect.getsource(queries.upsert_tool_permission)
     assert "$6," not in sql.replace("$6::uuid,", "")
     assert "THEN $6::uuid ELSE NULL" in sql
+
+
+def test_insert_tool_permission_if_missing_never_overwrites() -> None:
+    """La siembra de permisos canónicos no pisa filas existentes (ni con --update)."""
+    sql = inspect.getsource(queries.insert_tool_permission_if_missing)
+    assert "ON CONFLICT (tenant_id, skill_slug) DO NOTHING" in sql
+    assert "DO UPDATE" not in sql
+    assert "$5::uuid)" in sql

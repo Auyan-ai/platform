@@ -202,8 +202,9 @@ async def provision_tenant(
         await ensure_tenant_config_and_prompt(conn, tenant_id, company_name=request.company_name)
 
         # Copy-on-create: cada tenant nace con su propia copia de los 8 AOPs canónicos
-        # + permisos default (L1/L2 auto, L3 approval). Dentro de la misma transacción
-        # → atómico: si algo falla, no queda un tenant a medio provisionar.
+        # + permisos default (L1/L2 auto, L3 approval, refund_partial apagada). Dentro de
+        # la misma transacción → atómico: si algo falla, no queda un tenant a medio
+        # provisionar.
         # created_by=None: el creador es un internal_user, y aop_versions.created_by
         # referencia users(id); None evita una violación de FK.
         await provision_canonical_aops(conn, tenant_id, created_by=None)

@@ -2527,6 +2527,37 @@ async def upsert_tool_permission(
     return TenantToolPermission(**dict(row))
 
 
+async def insert_tool_permission_if_missing(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    skill_slug: str,
+    is_enabled: bool,
+    human_approval_required: bool = False,
+    enabled_by: UUID | None = None,
+) -> bool:
+    """Crea el permiso de una skill solo si el tenant aún no tiene fila para ella.
+
+    Una fila existente (también soft-deleted) no se toca: así la siembra de defaults no
+    revierte lo que se cambió a mano por tenant. Devuelve True si la creó.
+    """
+    row = await conn.fetchrow(
+        """
+        INSERT INTO tenant_tool_permissions
+            (tenant_id, skill_slug, is_enabled, human_approval_required, enabled_at, enabled_by)
+        VALUES ($1, $2, $3, $4, CASE WHEN $3 THEN NOW() ELSE NULL END, $5::uuid)
+        ON CONFLICT (tenant_id, skill_slug) DO NOTHING
+        RETURNING id
+        """,
+        tenant_id,
+        skill_slug,
+        is_enabled,
+        human_approval_required,
+        enabled_by,
+    )
+    return row is not None
+
+
 async def list_tool_permissions(
     conn: asyncpg.Connection,
     tenant_id: UUID,

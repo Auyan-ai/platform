@@ -11,8 +11,9 @@ editable de forma aislada desde el dashboard interno sin afectar a otros tenants
 - `raw_source` se genera en formato '---\\nYAML\\n---\\nbody' para que el editor del
   dashboard (routers/aops.py::_parse_raw_source) pueda round-tripear y editarlos.
 
-Postura de autonomía (tool_permissions default): L1/L2 autónomos; los 4 L3 nacen
-`enabled` + `human_approval_required=true`. super_admin gradúa por cliente.
+Postura de autonomía (tool_permissions default): L1/L2 autónomos; las L3 nacen
+`enabled` + `human_approval_required=true`, salvo `refund_partial`, que nace apagada.
+super_admin gradúa por cliente. La siembra solo crea los permisos que faltan.
 
 Diseño completo, fronteras y razones: docs/archive/aop-canonical-design.md (histórico).
 """
@@ -28,6 +29,7 @@ import yaml
 from apps.api.db.queries import (
     create_aop,
     get_aop_by_slug,
+    insert_tool_permission_if_missing,
     save_aop_version,
     upsert_tool_permission,
 )
@@ -527,7 +529,8 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
 
 # ─── Permisos de herramientas por defecto ──────────────────────────────────────
 # execute_skill rechaza CUALQUIER skill sin row is_enabled=True (incluidas L1).
-# Postura canónica: L1/L2 autónomos; L3 enabled + human_approval_required=True.
+# Postura canónica: L1/L2 autónomos; L3 enabled + human_approval_required=True, salvo
+# refund_partial, apagada por defecto (decisión de Kenny, s84).
 # super_admin gradúa un L3 a automático (human_approval_required=False) por cliente.
 
 CANONICAL_TOOL_PERMISSIONS: list[dict[str, Any]] = [
@@ -539,9 +542,9 @@ CANONICAL_TOOL_PERMISSIONS: list[dict[str, Any]] = [
     # L2 — escritura reversible, autónomas
     {"skill_slug": "shopify.add_order_note", "is_enabled": True, "human_approval_required": False},
     {"skill_slug": "shopify.tag_order", "is_enabled": True, "human_approval_required": False},
-    # L3 — destructivas, enabled pero con aprobación humana por defecto
+    # L3 — destructivas, con aprobación humana por defecto
     {"skill_slug": "shopify.start_return", "is_enabled": True, "human_approval_required": True},
-    {"skill_slug": "shopify.refund_partial", "is_enabled": True, "human_approval_required": True},
+    {"skill_slug": "shopify.refund_partial", "is_enabled": False, "human_approval_required": True},
     {"skill_slug": "shopify.cancel_order", "is_enabled": True, "human_approval_required": True},
     {"skill_slug": "shopify.update_shipping_address", "is_enabled": True, "human_approval_required": True},
 ]
@@ -565,6 +568,7 @@ async def provision_canonical_aops(
     *,
     created_by: UUID | None = None,
     update_existing: bool = False,
+    reset_permissions: bool = False,
 ) -> dict[str, int]:
     """Siembra los 9 AOPs canónicos + permisos default para `tenant_id`. Idempotente.
 
@@ -573,7 +577,9 @@ async def provision_canonical_aops(
     (bootstrap_connection) o ser el tenant_scope del propio tenant.
 
     - AOP existente (mismo slug) → se salta, salvo `update_existing=True` (crea versión nueva).
-    - Permisos siempre se hacen upsert (idempotente).
+    - Permisos: solo se crean los que el tenant no tiene; nunca se pisa una fila
+      existente, ni con `update_existing`. `reset_permissions=True` los fuerza a los
+      valores canónicos.
     """
     created = updated = skipped = 0
     for aop in CANONICAL_AOPS:
@@ -615,27 +621,41 @@ async def provision_canonical_aops(
             # Carrera: otro proceso lo creó entre el SELECT y el INSERT.
             skipped += 1
 
+    permissions_written = 0
     for perm in CANONICAL_TOOL_PERMISSIONS:
-        await upsert_tool_permission(
+        if reset_permissions:
+            await upsert_tool_permission(
+                conn,
+                tenant_id=tenant_id,
+                skill_slug=perm["skill_slug"],
+                is_enabled=perm["is_enabled"],
+                human_approval_required=perm["human_approval_required"],
+                enabled_by=created_by,
+            )
+            permissions_written += 1
+        elif await insert_tool_permission_if_missing(
             conn,
             tenant_id=tenant_id,
             skill_slug=perm["skill_slug"],
             is_enabled=perm["is_enabled"],
             human_approval_required=perm["human_approval_required"],
             enabled_by=created_by,
-        )
+        ):
+            permissions_written += 1
 
     logger.info(
-        "provision_canonical_aops tenant=%s created=%d updated=%d skipped=%d perms=%d",
+        "provision_canonical_aops tenant=%s created=%d updated=%d skipped=%d "
+        "permissions_written=%d reset_permissions=%s",
         tenant_id,
         created,
         updated,
         skipped,
-        len(CANONICAL_TOOL_PERMISSIONS),
+        permissions_written,
+        reset_permissions,
     )
     return {
         "created": created,
         "updated": updated,
         "skipped": skipped,
-        "tool_permissions": len(CANONICAL_TOOL_PERMISSIONS),
+        "permissions_written": permissions_written,
     }
