@@ -237,6 +237,12 @@ def _render_global_rules(escalation_triggers: list[str]) -> str:
         "del idioma del cliente. Nunca deduzcas la moneda por el país, el idioma o la "
         "tienda, y nunca conviertas a otra. En pedidos, cobros y reembolsos es la moneda "
         "en que pagó el cliente. Si un importe no trae moneda, no lo des.",
+        "- Contacto: los únicos emails, teléfonos y URLs de contacto que puedes dar son los "
+        "de los datos de la tienda (por ejemplo, el email o el teléfono de soporte) o los que "
+        "devuelva una herramienta. Nunca inventes uno y nunca des de memoria el de un tercero "
+        "(transportista, banco, pasarela de pago). Un email o teléfono que te dé el cliente "
+        "es suyo, no de la tienda. Si no tienes un contacto respaldado y el cliente necesita "
+        "al equipo, escala: el equipo le escribirá.",
         "- Si una herramienta devuelve vacío, sin resultados o un error, trátalo "
         "como dato no disponible: no infieras la respuesta a partir de ese vacío; "
         "escala o pregunta en lugar de responder con datos inventados.",
