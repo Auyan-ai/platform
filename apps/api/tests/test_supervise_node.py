@@ -637,6 +637,22 @@ async def test_contact_said_only_by_the_ai_earlier_is_not_evidence(fake_deps: An
 
 
 @pytest.mark.asyncio
+async def test_contact_quoted_in_supervisor_feedback_is_not_evidence(fake_deps: Any) -> None:
+    from apps.api.agents.nodes.supervise import make_supervise_node
+
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_supervisor_response("approve")
+    )
+    state = _store_state("Llámanos al 911 222 333.")
+    state["supervisor_feedback"] = "El teléfono 911 222 333 no tiene respaldo."
+    state["supervisor_retried"] = True
+    result = await make_supervise_node(fake_deps)(state)
+
+    assert result["supervisor_verdict"] == "reject"
+    assert result["escalation_reason"].startswith("supervisor_rejected (tactical)")
+
+
+@pytest.mark.asyncio
 async def test_supervisor_sees_whole_history_and_every_tool_output(fake_deps: Any) -> None:
     """Antes veía 3 mensajes (300 caracteres) y 3 herramientas (1500 caracteres)."""
     from apps.api.agents.nodes.supervise import make_supervise_node

@@ -78,6 +78,25 @@ def _tenant_now_str(tenant_facts: dict | None) -> str:
     return f"{now.strftime('%Y-%m-%d %H:%M')} ({tz_name})"
 
 
+def agent_system_blocks(state: AgentState) -> list[dict[str, Any]]:
+    """El system de `reason`: prompt compilado (cacheado) + bloque volátil del turno.
+
+    El supervisor lo lee como evidencia: si viera menos que el agente, rechazaría como
+    inventado lo que el agente sacó de ahí (#261, #327)."""
+    return build_system_blocks(
+        state["system_prompt"],
+        state.get("retrieved_chunks", []),
+        current_date=_tenant_now_str(state.get("tenant_facts")),
+        known_facts=state.get("known_facts"),
+        supervisor_feedback=state.get("supervisor_feedback"),
+        conversation_context=conversation_context_block(
+            state.get("conversation_history") or [], state.get("end_customer")
+        ),
+        writing_surface=surface_of(state),
+        identity_note=state.get("identity_note"),
+    )
+
+
 def _append_tool_result_blocks(
     messages: list[dict[str, Any]],
     tool_results: list[dict[str, Any]],
@@ -256,18 +275,7 @@ def make_reason_node(
                 status="done",
             )
 
-        system_blocks = build_system_blocks(
-            state["system_prompt"],
-            state.get("retrieved_chunks", []),
-            current_date=_tenant_now_str(state.get("tenant_facts")),
-            known_facts=state.get("known_facts"),
-            supervisor_feedback=state.get("supervisor_feedback"),
-            conversation_context=conversation_context_block(
-                state["conversation_history"], state.get("end_customer")
-            ),
-            writing_surface=surface_of(state),
-            identity_note=state.get("identity_note"),
-        )
+        system_blocks = agent_system_blocks(state)
         messages = build_message_history(state["conversation_history"])
         messages = _append_tool_result_blocks(messages, state.get("tool_results", []))
 

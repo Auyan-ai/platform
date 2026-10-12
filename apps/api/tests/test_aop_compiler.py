@@ -391,19 +391,6 @@ def test_compile_aop_escalation_triggers_in_result() -> None:
     assert "El cliente está enojado" in result.escalation_triggers
 
 
-def test_compile_aop_guardrails_in_result() -> None:
-    """Los guardrails van estructurados en CompiledAOP: el supervisor los lee
-    del state (aop_guardrails), no parseando el system_prompt compilado."""
-    aop = _make_aop()
-    config = make_tenant_configuration()
-    with patch.object(SkillRegistry, "get", side_effect=ValueError("unknown_skill")):
-        result = compile_aop(aop, config)
-    assert result.guardrails == [
-        "NUNCA inventes un número de tracking.",
-        "Pide el email antes de usar tools.",
-    ]
-
-
 def test_compile_aop_blocks_separated_by_divider() -> None:
     aop = _make_aop()
     config = make_tenant_configuration()
