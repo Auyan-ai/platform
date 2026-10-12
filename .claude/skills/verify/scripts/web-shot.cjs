@@ -1,8 +1,9 @@
 // Usage: node web-shot.cjs <path> <name> [selector-to-wait-for]
 //   e.g. node web-shot.cjs /tenants/<tenantId>/conversations conversations 'a[href*="/conversations/"]'
 // Headless, reuses the saved login. Writes evidence/<ts>-<name>.png and <ts>-<name>.txt (visible text).
-// Exits 3 if the dashboard bounced to /login (session expired → human re-runs web-login.cjs).
+// Exits 3 if the dashboard bounced to /login (web-session.cjs renewal failed too).
 const { EVID, WEB, fs, path, openCtx, saveState } = require('./_pw.cjs');
+const { renewAndRerun } = require('./_renew.cjs');
 const [route, name, waitFor] = process.argv.slice(2);
 if (!route || !name) { console.error('uso: web-shot.cjs <ruta> <nombre> [selector]'); process.exit(2); }
 (async () => {
@@ -17,7 +18,7 @@ if (!route || !name) { console.error('uso: web-shot.cjs <ruta> <nombre> [selecto
   await page.goto(WEB + route, { waitUntil: 'domcontentloaded', timeout: 60000 });
   if (waitFor) await page.waitForSelector(waitFor, { timeout: 30000 });
   else await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-  if (new URL(page.url()).pathname.startsWith('/login')) { console.error('sesión expirada: /login'); await ctx.close(); process.exit(3); }
+  if (new URL(page.url()).pathname.startsWith('/login')) { await ctx.close(); renewAndRerun(); console.error('sesión expirada: /login'); process.exit(3); }
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
   const out = path.join(EVID, `${stamp}-${name}`);
   await page.screenshot({ path: out + '.png', fullPage: true });

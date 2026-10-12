@@ -4,6 +4,7 @@
 // afterwards with a soft delete of its knowledge_base_documents row. reject indexes nothing.
 // Guard: it refuses to act unless exactly one pending item carries that title.
 const { EVID, WEB, fs, path, openCtx, saveState } = require('./_pw.cjs');
+const { renewAndRerun } = require('./_renew.cjs');
 const [tenantId, title, action] = process.argv.slice(2);
 if (!tenantId || !title || !['approve', 'reject'].includes(action)) { console.error('uso: web-kb-review.cjs <tenantId> "<título>" approve|reject'); process.exit(2); }
 (async () => {
@@ -12,7 +13,7 @@ if (!tenantId || !title || !['approve', 'reject'].includes(action)) { console.er
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
   const shot = (n) => page.screenshot({ path: path.join(EVID, `${stamp}-kb-review-${n}.png`), fullPage: true });
   await page.goto(`${WEB}/tenants/${tenantId}/knowledge`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  if (new URL(page.url()).pathname.startsWith('/login')) { console.error('sesión expirada: /login'); await ctx.close(); process.exit(3); }
+  if (new URL(page.url()).pathname.startsWith('/login')) { await ctx.close(); renewAndRerun(); console.error('sesión expirada: /login'); process.exit(3); }
   await page.getByRole('heading', { name: 'KB pending review' }).waitFor({ timeout: 30000 });
   await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
   const items = page.getByRole('button').filter({ hasText: title });

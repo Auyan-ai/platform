@@ -2,6 +2,7 @@
 // Sends a knowledge submission from the client view (tenant_admin). It lands as "En revisión" and touches
 // nothing the agent reads until a super_admin approves it (web-kb-review.cjs).
 const { EVID, WEB, fs, path, openCtx, saveState } = require('./_pw.cjs');
+const { renewAndRerun } = require('./_renew.cjs');
 const [tenantId, title, content] = process.argv.slice(2);
 if (!tenantId || !title || !content) { console.error('uso: web-kb-submit.cjs <tenantId> "<título>" "<contenido>"'); process.exit(2); }
 (async () => {
@@ -9,7 +10,7 @@ if (!tenantId || !title || !content) { console.error('uso: web-kb-submit.cjs <te
   const page = ctx.pages()[0] || await ctx.newPage();
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
   await page.goto(`${WEB}/clients/${tenantId}/knowledge`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  if (new URL(page.url()).pathname.startsWith('/login')) { console.error('sesión expirada: /login'); await ctx.close(); process.exit(3); }
+  if (new URL(page.url()).pathname.startsWith('/login')) { await ctx.close(); renewAndRerun(); console.error('sesión expirada: /login'); process.exit(3); }
   await page.locator('#kb-title').waitFor({ timeout: 30000 });
   await page.locator('#kb-title').fill(title);
   await page.locator('#kb-content').fill(content);

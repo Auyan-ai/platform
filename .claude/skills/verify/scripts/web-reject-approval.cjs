@@ -4,6 +4,7 @@
 // irreversible action on the store, which needs Kenny's explicit OK and is not automated here.
 // Guard: it refuses to act unless exactly one pending approval is on screen.
 const { EVID, WEB, fs, path, openCtx, saveState } = require('./_pw.cjs');
+const { renewAndRerun } = require('./_renew.cjs');
 const [tenantId, reason] = process.argv.slice(2);
 if (!tenantId || !reason) { console.error('uso: web-reject-approval.cjs <tenantId> "<motivo>"'); process.exit(2); }
 (async () => {
@@ -12,7 +13,7 @@ if (!tenantId || !reason) { console.error('uso: web-reject-approval.cjs <tenantI
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
   const shot = (n) => page.screenshot({ path: path.join(EVID, `${stamp}-approval-reject-${n}.png`), fullPage: true });
   await page.goto(`${WEB}/tenants/${tenantId}/approvals`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  if (new URL(page.url()).pathname.startsWith('/login')) { console.error('sesión expirada: /login'); await ctx.close(); process.exit(3); }
+  if (new URL(page.url()).pathname.startsWith('/login')) { await ctx.close(); renewAndRerun(); console.error('sesión expirada: /login'); process.exit(3); }
   await page.getByRole('heading', { name: 'Aprobaciones' }).waitFor({ timeout: 30000 });
   const rejectBtns = page.getByRole('button', { name: 'Rechazar', exact: true });
   await rejectBtns.first().waitFor({ timeout: 30000 });
