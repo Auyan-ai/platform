@@ -97,6 +97,9 @@ def _make_app(
         yield AsyncMock()
 
     monkeypatch.setattr("apps.api.routers.approvals.tenant_scope", _fake_scope)
+    monkeypatch.setattr(
+        "apps.api.routers.approvals.is_simulation_conversation", AsyncMock(return_value=False)
+    )
     # Defaults del cierre post-aprobación; los tests que lo verifican los sobrescriben.
     monkeypatch.setattr(
         "apps.api.routers.approvals.release_approval_escalation", AsyncMock(return_value=True)

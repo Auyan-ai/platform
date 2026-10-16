@@ -14,19 +14,20 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from apps.api.core.config import get_settings
 from apps.api.core.errors import ForbiddenError, NotFoundError
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
 from apps.api.db.client import tenant_scope
-from apps.api.db.models import PendingApprovalStatus
+from apps.api.db.models import PendingApproval, PendingApprovalStatus
 from apps.api.db.queries import (
     get_conversation,
     get_pending_approval,
     get_tenant_configuration,
     insert_message,
+    is_simulation_conversation,
     list_pending_approvals,
     resolve_pending_approval,
     update_conversation_last_message,
@@ -47,6 +48,9 @@ from apps.api.skills.base import SkillContext
 from apps.api.skills.registry import SkillRegistry
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    import asyncpg
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +134,27 @@ async def get_approval(
     return ApprovalOut.model_validate(approval.model_dump(mode="json"))
 
 
+async def _reviewable_approval(
+    conn: asyncpg.Connection, tenant_id: UUID, approval_id: UUID
+) -> PendingApproval:
+    """La aprobación que el operador puede aprobar o rechazar, o el error de dominio."""
+    approval = await get_pending_approval(conn, tenant_id, approval_id)
+    if not approval:
+        raise NotFoundError(f"approval {approval_id} not found", code="approval_not_found")
+    if approval.status != "pending":
+        raise ForbiddenError(
+            f"La aprobación ya fue resuelta con status={approval.status}",
+            code="approval_not_pending",
+        )
+    # Lo que nace en el simulador nunca toca la tienda ni el helpdesk del cliente (#348).
+    if await is_simulation_conversation(conn, tenant_id, approval.conversation_id):
+        raise ForbiddenError(
+            "La aprobación viene de una simulación: no se ejecuta ni se resuelve",
+            code="simulated_approval",
+        )
+    return approval
+
+
 # ----------------------------------------------------------------
 # POST /approvals/{id}/approve
 # ----------------------------------------------------------------
@@ -145,14 +170,7 @@ async def approve_action(
 ) -> dict:
     """Aprueba la pending_approval, ejecuta la skill y añade el resultado a la conversación."""
     async with tenant_scope(tenant_id) as conn:
-        approval = await get_pending_approval(conn, tenant_id, approval_id)
-        if not approval:
-            raise NotFoundError(f"approval {approval_id} not found", code="approval_not_found")
-        if approval.status != "pending":
-            raise ForbiddenError(
-                f"La aprobación ya fue resuelta con status={approval.status}",
-                code="approval_not_pending",
-            )
+        approval = await _reviewable_approval(conn, tenant_id, approval_id)
 
         tenant_config = await get_tenant_configuration(conn, tenant_id)
         extra = (tenant_config.extra if tenant_config else None) or {}
@@ -354,14 +372,7 @@ async def reject_action(
     auth: AuthDep,
 ) -> dict:
     async with tenant_scope(tenant_id) as conn:
-        approval = await get_pending_approval(conn, tenant_id, approval_id)
-        if not approval:
-            raise NotFoundError(f"approval {approval_id} not found", code="approval_not_found")
-        if approval.status != "pending":
-            raise ForbiddenError(
-                f"La aprobación ya fue resuelta con status={approval.status}",
-                code="approval_not_pending",
-            )
+        approval = await _reviewable_approval(conn, tenant_id, approval_id)
 
         await resolve_pending_approval(
             conn,
