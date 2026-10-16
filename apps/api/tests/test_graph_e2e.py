@@ -277,6 +277,56 @@ async def test_threshold_override_path(fake_deps, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_reply_empty_after_normalizing_escalates_as_empty_reply(
+    fake_deps, monkeypatch, caplog
+) -> None:
+    """#350: una respuesta que el normalizador deja vacía nunca sale; se escala y se loguea."""
+    _patch_all_db_and_llm(
+        monkeypatch,
+        llm_response=FakeAnthropicResponse(
+            {"decision": "respond", "confidence": 0.92, "response_text": "😊"}
+        ),
+    )
+    graph = build_graph(fake_deps)
+
+    with caplog.at_level("ERROR"):
+        final = await graph.ainvoke(_initial_state())
+
+    assert final["decision"] == "escalate"
+    assert final["escalation_reason"] == "empty_reply"
+    assert final["escalation_id"] == str(ESCALATION_ID)
+    assert final.get("agent_response") is None
+    assert final.get("error") is None
+    assert "output_message_id" not in final
+    assert [r.getMessage() for r in caplog.records if r.levelname == "ERROR"] == ["empty_reply"]
+
+
+@pytest.mark.asyncio
+async def test_escalation_text_empty_after_normalizing_is_not_delivered_raw(
+    fake_deps, monkeypatch
+) -> None:
+    """El borrador crudo no sobrevive en el state si el normalizador lo vació."""
+    _patch_all_db_and_llm(
+        monkeypatch,
+        llm_response=FakeAnthropicResponse(
+            {
+                "decision": "escalate",
+                "confidence": 0.95,
+                "response_text": "🙏",
+                "escalation_reason": "customer_requested_human",
+            }
+        ),
+    )
+    graph = build_graph(fake_deps)
+
+    final = await graph.ainvoke(_initial_state())
+
+    assert final["decision"] == "escalate"
+    assert final["escalation_reason"] == "customer_requested_human"
+    assert final.get("agent_response") is None
+
+
+@pytest.mark.asyncio
 async def test_tenant_not_found_routes_to_handle_error(fake_deps, monkeypatch) -> None:
     """load_tenant_context falla → handle_error → escalation con prefijo agent_error."""
     _patch_all_db_and_llm(
