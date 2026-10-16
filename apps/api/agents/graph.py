@@ -25,6 +25,7 @@ Diagrama actual (Sprint 8 — AOPs + ReAct loop + Supervisor):
     ─→ reason    reject+structural→ escalate
     | escalate   reject+tactical → reason (una vez)
 
+      respond ── texto vacío tras normalizar ──→ escalate (empty_reply)
       respond / escalate / handle_error
                   ↓
             finalize_trace
@@ -245,6 +246,14 @@ def route_after_execute_skill(state: AgentState) -> str:
     return "reason"
 
 
+def route_after_respond(state: AgentState) -> str:
+    """Routing tras `respond`: si el texto quedó vacío al normalizarlo, `respond` no lo
+    entrega y pide escalar con `empty_reply`."""
+    if state.get("decision") == "escalate":
+        return "escalate"
+    return "finalize_trace"
+
+
 def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
     """Construye y compila el grafo. Llamar UNA vez en startup; reusar la instancia."""
     graph: StateGraph = StateGraph(AgentState)
@@ -314,7 +323,11 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
         },
     )
 
-    graph.add_edge("respond", "finalize_trace")
+    graph.add_conditional_edges(
+        "respond",
+        route_after_respond,
+        {"escalate": "escalate", "finalize_trace": "finalize_trace"},
+    )
     graph.add_edge("escalate", "finalize_trace")
     graph.add_edge("handle_error", "finalize_trace")
     graph.add_edge("finalize_trace", END)

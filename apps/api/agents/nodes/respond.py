@@ -8,15 +8,18 @@ si llegó, marca `resolved` + billing + cierre (`services.agent_resolution`).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
-from apps.api.agents.nodes._reply import finalize_agent_reply
+from apps.api.agents.nodes._reply import EMPTY_REPLY, finalize_agent_reply
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import insert_message, update_conversation_last_message
+
+logger = logging.getLogger(__name__)
 
 
 def make_respond_node(
@@ -31,9 +34,21 @@ def make_respond_node(
         content, surface = finalize_agent_reply(state, state.get("agent_response") or "")
 
         if not content.strip():
-            # Defensa: reason debería haber validado esto. Si llegamos sin texto,
-            # algo se rompió — escalamos via error.
-            return {"error": "respond_without_text"}
+            # El normalizador puede vaciar un texto válido (p. ej. solo emojis): nunca se
+            # entrega en blanco. El grafo sigue a `escalate` con esta razón.
+            logger.error(
+                EMPTY_REPLY,
+                extra={
+                    "tenant_id": state["tenant_id"],
+                    "conversation_id": state["conversation_id"],
+                    "raw_chars": len(state.get("agent_response") or ""),
+                },
+            )
+            return {
+                "decision": "escalate",
+                "escalation_reason": EMPTY_REPLY,
+                "agent_response": None,
+            }
 
         metadata = {
             # Enlaza la respuesta con el inbound que la originó: el worker lo usa para

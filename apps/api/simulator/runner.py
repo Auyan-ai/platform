@@ -47,6 +47,7 @@ from apps.api.db.queries import (
     soft_delete_conversation,
     update_conversation_last_message,
 )
+from apps.api.services.inbound_media import chat_escalation_ack
 from apps.api.simulator.assertions import check_assertions, summarize
 from apps.api.simulator.judge import (
     DEFAULT_JUDGE_ALIAS,
@@ -488,7 +489,7 @@ async def _execute_loop(
             return "error"
         _finalize_trace(observability, trace, final_state)
 
-        agent_response = final_state.get("agent_response") or ""
+        agent_response = simulated_chat_reply(final_state)
         decision = final_state.get("decision", "respond")
 
         acc.tokens_agent_in += final_state.get("tokens_in", 0)
@@ -500,6 +501,16 @@ async def _execute_loop(
         acc.unbacked_contacts += _unbacked_contacts(final_state, agent_response)
         if primary_trace is not None:
             acc.trace_run_ids.append(str(primary_trace.run_id))
+
+        if not agent_response.strip():
+            logger.error(
+                "sim_turn_without_reply run_id=%s turn=%d decision=%s error=%s",
+                acc.run_id,
+                turn_number,
+                final_state.get("decision"),
+                final_state.get("error"),
+            )
+            return "error"
 
         await _persist_agent_message(tenant_id, acc.conversation_id, agent_response)
         acc.transcript.turns.append(
@@ -668,6 +679,17 @@ async def _finalize(
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def simulated_chat_reply(final_state: AgentState) -> str:
+    """Lo que recibe el cliente en el chat tras el turno, igual que en `POST
+    /webhooks/inbound`: el texto del agente o el acuse fijo de escalado, y nada si el
+    turno acabó en error."""
+    if final_state.get("error"):
+        return ""
+    text = final_state.get("agent_response") or ""
+    reason = final_state.get("escalation_reason")
+    return chat_escalation_ack(final_state.get("decision"), text, reason) or text
 
 
 def _last_agent_message(transcript: SimulatorTranscript) -> str:
