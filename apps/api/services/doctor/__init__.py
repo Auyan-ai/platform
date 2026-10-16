@@ -25,7 +25,12 @@ from apps.api.services.doctor.checks import (
     schema_check,
     whatsapp_config_checks,
 )
-from apps.api.services.doctor.live import ZendeskClientFactory, describe_error, run_live_checks
+from apps.api.services.doctor.live import (
+    ZendeskClientFactory,
+    describe_error,
+    llm_provider_check,
+    run_live_checks,
+)
 from apps.api.services.doctor.report import (
     DoctorCheck,
     DoctorReport,
@@ -53,6 +58,8 @@ __all__ = [
     "DoctorReport",
     "TenantNotFoundError",
     "build_report",
+    "default_llm_provider_check",
+    "llm_provider_check",
     "platform_checks",
     "run_tenant_doctor",
 ]
@@ -92,6 +99,16 @@ async def platform_checks(
         ]
     migrations, objects = expected_objects(migrations_dir)
     return [schema_check(migrations, objects, live)]
+
+
+async def default_llm_provider_check() -> DoctorCheck:
+    """El check de Anthropic con la key y el modelo del clasificador de la configuración."""
+    from apps.api.core.config import get_models, get_settings
+    from apps.api.integrations.anthropic_client import build_anthropic_client
+
+    settings = get_settings()
+    client = build_anthropic_client(settings.anthropic_api_key.get_secret_value())
+    return await llm_provider_check(client, get_models().intent_classifier_model)
 
 
 async def build_report(
@@ -145,6 +162,7 @@ async def run_tenant_doctor(
     started = time.monotonic()
     async with bootstrap_connection() as conn:
         platform = await platform_checks(conn)
+    platform.append(await default_llm_provider_check())
     async with tenant_scope(tenant_id) as conn:
         snapshot = await load_tenant_snapshot(conn, tenant_id, crypto_key)
     return await build_report(snapshot, platform, api_base_url=api_base_url, started=started)

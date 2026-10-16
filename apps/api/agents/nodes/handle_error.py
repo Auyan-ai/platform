@@ -22,6 +22,7 @@ from apps.api.db.queries import (
     insert_escalation,
     update_conversation_status,
 )
+from apps.api.integrations.anthropic_client import PROVIDER_UNAVAILABLE_CATEGORY
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,14 @@ def make_handle_error_node(
             else None
         )
 
+        # Caída del proveedor LLM: razón propia (no "agent_error: …") para que el equipo CX
+        # del cliente y el dashboard la distingan de un fallo puntual.
+        reason = (
+            error_msg
+            if error_msg.startswith(PROVIDER_UNAVAILABLE_CATEGORY)
+            else f"agent_error: {error_msg}"
+        )
+
         metadata = {
             "error": error_msg,
             "langfuse_trace_id": state.get("langfuse_trace_id"),
@@ -68,7 +77,7 @@ def make_handle_error_node(
                         conn,
                         tenant_id=tenant_id,
                         conversation_id=conversation_id,
-                        reason=f"agent_error: {error_msg}",
+                        reason=reason,
                         triggered_by_message_id=inbound_id,
                         metadata=metadata,
                     )
@@ -85,7 +94,7 @@ def make_handle_error_node(
                 "escalation_created": existing is None,
                 # La nota interna del helpdesk usa outcome.escalation_reason; sin
                 # esto llegaría como "unspecified_escalation".
-                "escalation_reason": f"agent_error: {error_msg}",
+                "escalation_reason": reason,
             }
         except Exception:
             # No tenemos otra capa donde caer. Log y seguir — el trace ya quedó.

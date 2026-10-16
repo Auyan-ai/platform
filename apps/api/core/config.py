@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     # Dirección y nombre del remitente. El dominio debe estar verificado en Postmark.
     postmark_from_email: str = "noreply@auyan.ai"
     postmark_from_name: str = "Auyan"
+    # Destinatario de las alertas operativas (p. ej. caída del proveedor LLM). Sin valor,
+    # la alerta solo queda en logs (error) y se avisa de que no hay a quién mandarla.
+    alert_email_to: str | None = None
 
     # Clave maestra AES-256-GCM para credentials de tenant_integrations.
     # Generar con: python -c "import secrets; print(secrets.token_hex(32))"

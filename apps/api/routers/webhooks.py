@@ -336,7 +336,11 @@ async def inbound(
     ack_message_id: str | None = None
     if (
         payload.channel == "chat"
-        and outcome.decision == "escalate"
+        and (
+            outcome.decision == "escalate"
+            # Fallo del sistema ya escalado (p. ej. llm_provider_unavailable): tampoco queda mudo.
+            or (outcome.decision == "error" and outcome.escalation_id)
+        )
         and not outcome.response_text
         and not is_approval_gate(outcome.escalation_reason)
     ):
