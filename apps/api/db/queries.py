@@ -4211,6 +4211,22 @@ async def insert_simulation_run(
     return SimulationRun(**dict(row))
 
 
+async def set_simulation_run_trace_id(
+    conn: asyncpg.Connection, run_id: UUID, tenant_id: UUID, trace_id: UUID
+) -> None:
+    """Guarda el id de la traza de LangSmith de la corrida (`langsmith_trace_id`)."""
+    await conn.execute(
+        """
+        UPDATE simulation_runs
+           SET langsmith_trace_id = $3, updated_at = NOW()
+         WHERE id = $1 AND tenant_id = $2
+        """,
+        run_id,
+        tenant_id,
+        trace_id,
+    )
+
+
 async def finalize_simulation_run(
     conn: asyncpg.Connection,
     run_id: UUID,

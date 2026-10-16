@@ -719,6 +719,7 @@ class SimulationRun(_BaseModel):
     tokens_agent: int = 0
     tokens_judge: int = 0
     cost_cents: float | None = None
+    langsmith_trace_id: UUID | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
