@@ -31,7 +31,7 @@ from apps.api.skills.base import SkillContext
 from apps.api.tests.conftest import CONVERSATION_ID, TENANT_ID
 
 SALT = "salt"
-NOW = datetime(2026, 10, 12, 12, 0, tzinfo=UTC)
+NOW = datetime.now(UTC).replace(microsecond=0)
 ORDERS = {
     "1001": {"id": 9001, "name": "#1001", "email": "ana@tienda.com", "phone": "+34600111222"},
     "1002": {"id": 9002, "name": "#1002", "email": "luis@tienda.com", "phone": "+34600333444"},

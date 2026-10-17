@@ -33,7 +33,12 @@ from apps.api.scripts.configure_staging_integrations import (
     _require_env,
 )
 from apps.api.scripts.onboard_whatsapp import _resolve_tenant_id
-from apps.api.services.doctor import DoctorReport, build_report, platform_checks
+from apps.api.services.doctor import (
+    DoctorReport,
+    build_report,
+    default_llm_provider_check,
+    platform_checks,
+)
 from apps.api.services.doctor.snapshot import load_tenant_snapshot
 
 ICONS = {"ok": "✅", "warn": "⚠️ ", "fail": "❌", "skip": "⏭️ "}
@@ -91,6 +96,7 @@ async def run(args: argparse.Namespace) -> int:
     try:
         tenant_id = await _resolve_tenant_id(conn, args.tenant)
         platform = await platform_checks(conn)
+        platform.append(await default_llm_provider_check())
         async with conn.transaction():
             await conn.execute("SELECT set_config('app.tenant_id', $1, true)", str(tenant_id))
             snapshot = await load_tenant_snapshot(conn, tenant_id, key)

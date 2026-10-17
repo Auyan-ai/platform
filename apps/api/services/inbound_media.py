@@ -94,11 +94,18 @@ def fallback_message(kind: FallbackKind, config: dict[str, Any] | None) -> str:
 
 
 def chat_escalation_ack(
-    decision: str | None, response_text: str | None, escalation_reason: str | None
+    decision: str | None,
+    response_text: str | None,
+    escalation_reason: str | None,
+    *,
+    escalated: bool,
 ) -> str | None:
     """Acuse fijo del chat cuando el turno escaló sin texto para el cliente (p. ej.
-    low_confidence). La puerta L3 no lo lleva: la IA sigue atendiendo y ya respondió."""
-    if decision != "escalate" or response_text or is_approval_gate(escalation_reason):
+    low_confidence, empty_reply, o un fallo del sistema ya escalado como
+    llm_provider_unavailable). La puerta L3 no lo lleva: la IA sigue atendiendo y ya
+    respondió."""
+    escalated_turn = decision == "escalate" or (decision == "error" and escalated)
+    if not escalated_turn or response_text or is_approval_gate(escalation_reason):
         return None
     return fallback_message("escalation_ack", None)
 

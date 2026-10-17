@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -44,6 +45,7 @@ from apps.api.db.queries import (
     insert_simulation_run,
     list_pending_approval_inputs,
     list_skill_audit_log,
+    set_simulation_run_trace_id,
     soft_delete_conversation,
     update_conversation_last_message,
 )
@@ -67,6 +69,7 @@ from apps.api.simulator.user_simulator import UserSimulator
 
 if TYPE_CHECKING:
     from anthropic import AsyncAnthropic
+    from apps.api.integrations.langsmith_client import LangSmithTrace
     from apps.api.integrations.observability import ObservabilityClient
     from langgraph.graph.state import CompiledStateGraph
 
@@ -105,6 +108,11 @@ class _RunAccumulator:
     escalation_reason: str | None = None
     unbacked_contacts: list[str] = field(default_factory=list)
     trace_run_ids: list[str] = field(default_factory=list)
+    # Fila de `simulation_runs` y raíz de LangSmith de la corrida; de ellas cuelgan los
+    # turnos del agente, el cliente simulado y el judge.
+    db_run_id: UUID | None = None
+    root_trace: LangSmithTrace | None = None
+    sim_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 
@@ -257,6 +265,9 @@ async def _run_simulation_inner(
     termination_reason = "error"
     judge_verdict: SimulatorJudgeVerdict | None = None
 
+    acc.db_run_id = run_db_id
+    await _start_run_trace(acc, observability, tenant_id=tenant_id, scenario=scenario)
+
     try:
         termination_reason = await asyncio.wait_for(
             _execute_loop(
@@ -312,6 +323,7 @@ async def _run_simulation_inner(
     if skip_judge:
         logger.info("sim_judge_skipped run_id=%s (skip_judge=True)", run_id)
     else:
+        judge_started = datetime.now(UTC)
         try:
             judge_verdict = await asyncio.wait_for(
                 judge_simulation(
@@ -325,6 +337,17 @@ async def _run_simulation_inner(
             acc.tokens_judge_in = judge_verdict.input_tokens
             acc.tokens_judge_out = judge_verdict.output_tokens
             acc.cost_usd += judge_verdict.cost_usd
+            if observability is not None:
+                observability.record_llm_run(
+                    acc.root_trace,
+                    name="simulation_judge",
+                    model=judge_verdict.model_used,
+                    usage=judge_verdict.usage,
+                    cost_usd=judge_verdict.cost_usd,
+                    start_time=judge_started,
+                    end_time=datetime.now(UTC),
+                    outputs={"verdict": str(judge_verdict.verdict)},
+                )
         except TimeoutError:
             logger.warning("sim_judge_timeout run_id=%s", run_id)
         except Exception:
@@ -355,7 +378,32 @@ async def _run_simulation_inner(
         cost_cents=cost_cents,
     )
 
-    logger.info("sim_trace_ids run_id=%s langsmith=%s", run_id, ",".join(acc.trace_run_ids))
+    if observability is not None and acc.root_trace is not None:
+        observability.finalize_simulation_trace(
+            acc.root_trace,
+            outputs={
+                "status": status,
+                "termination_reason": termination_reason,
+                "assertions_passed": passed,
+                "assertions_total": total,
+            },
+            metadata={
+                "status": status,
+                "termination_reason": termination_reason,
+                "turns": len(acc.transcript.turns),
+                "cost_usd": acc.cost_usd,
+                "tokens_agent": acc.tokens_agent_in + acc.tokens_agent_out,
+                "tokens_simulator": acc.tokens_simulator_in + acc.tokens_simulator_out,
+                "tokens_judge": acc.tokens_judge_in + acc.tokens_judge_out,
+            },
+            error=None if termination_reason != "error" else "simulation_error",
+        )
+    logger.info(
+        "sim_trace_ids run_id=%s langsmith_root=%s turns=%s",
+        run_id,
+        acc.root_trace.run_id if acc.root_trace else None,
+        ",".join(acc.trace_run_ids),
+    )
     logger.info(
         "sim_run_complete run_id=%s scenario=%s status=%s turns=%d",
         run_id,
@@ -455,6 +503,9 @@ async def _execute_loop(
                 end_customer_id=str(acc.end_customer_id),
                 channel="chat",
                 input_text=last_customer_msg,
+                parent=acc.root_trace,
+                extra_metadata=acc.sim_metadata,
+                extra_tags=["simulation"],
             )
             if observability is not None
             else None
@@ -542,24 +593,16 @@ async def _execute_loop(
 
         # ── Siguiente turno del simulador ──────────────────────────────────────
         history = [{"role": t.role, "content": t.content} for t in acc.transcript.turns]
-        sim_turn = await sim.next_turn(
-            conversation_history=history,
-            turn_number=turn_number,
+        sim_turn = await _next_simulator_turn(
+            sim, history, turn_number, acc=acc, observability=observability
         )
-        acc.tokens_simulator_in += sim_turn.input_tokens
-        acc.tokens_simulator_out += sim_turn.output_tokens
-        acc.cost_usd += sim_turn.cost_usd
 
         # El modelo a veces devuelve mensaje vacío de forma transitoria (sin flag de
         # cierre). Reintentamos una vez antes de tratarlo como fin de conversación.
         if not sim_turn.message.strip() and not sim_turn.goal_achieved and not sim_turn.give_up:
-            sim_turn = await sim.next_turn(
-                conversation_history=history,
-                turn_number=turn_number,
+            sim_turn = await _next_simulator_turn(
+                sim, history, turn_number, acc=acc, observability=observability
             )
-            acc.tokens_simulator_in += sim_turn.input_tokens
-            acc.tokens_simulator_out += sim_turn.output_tokens
-            acc.cost_usd += sim_turn.cost_usd
 
         # Mensaje vacío persistente = el cliente dejó de responder. No lo persistimos
         # (rompería el embed del grafo y la API de Anthropic con content vacío) y
@@ -590,6 +633,80 @@ async def _execute_loop(
             return "give_up"
 
     return "max_turns"
+
+
+async def _start_run_trace(
+    acc: _RunAccumulator,
+    observability: ObservabilityClient | None,
+    *,
+    tenant_id: UUID,
+    scenario: SimulationScenario,
+) -> None:
+    """Abre la raíz de LangSmith de la corrida y guarda su id en `simulation_runs`.
+
+    Sin `observability` no hace nada. Un fallo al guardar el id no tumba la corrida:
+    la traza sigue en LangSmith y el id sale en el log `sim_trace_ids`."""
+    if observability is None or acc.db_run_id is None:
+        return
+    from apps.api.simulator.scenarios import capabilities_by_name
+
+    acc.sim_metadata = {
+        "simulation": True,
+        "simulation_run_id": str(acc.db_run_id),
+        "scenario_id": str(scenario.id),
+        "scenario_name": scenario.name,
+        "capabilities": capabilities_by_name().get(scenario.name, []),
+    }
+    first_message = acc.transcript.turns[0].content if acc.transcript.turns else ""
+    acc.root_trace = observability.start_simulation_trace(
+        tenant_id=str(tenant_id),
+        conversation_id=str(acc.conversation_id),
+        metadata=acc.sim_metadata,
+        tags=["simulation", f"scenario:{scenario.id}"],
+        input_text=first_message or scenario.name,
+    )
+    if acc.root_trace is None:
+        return
+    try:
+        async with tenant_scope(tenant_id) as conn:
+            await set_simulation_run_trace_id(
+                conn, acc.db_run_id, tenant_id, acc.root_trace.run_id
+            )
+    except Exception:
+        logger.exception("sim_trace_id_save_failed run_id=%s", acc.run_id)
+
+
+async def _next_simulator_turn(
+    sim: UserSimulator,
+    history: list[dict],
+    turn_number: int,
+    *,
+    acc: _RunAccumulator,
+    observability: ObservabilityClient | None,
+) -> Any:
+    """Llama al cliente simulado, suma su uso a la corrida y lo traza como run hijo."""
+    started = datetime.now(UTC)
+    sim_turn = await sim.next_turn(conversation_history=history, turn_number=turn_number)
+    acc.tokens_simulator_in += sim_turn.input_tokens
+    acc.tokens_simulator_out += sim_turn.output_tokens
+    acc.cost_usd += sim_turn.cost_usd
+    if observability is not None:
+        observability.record_llm_run(
+            acc.root_trace,
+            name="customer_simulator",
+            model=get_models().simulator_model,
+            usage=sim_turn.usage,
+            cost_usd=sim_turn.cost_usd,
+            start_time=started,
+            end_time=datetime.now(UTC),
+            outputs={
+                "turn": turn_number,
+                "message": sim_turn.message,
+                "goal_achieved": sim_turn.goal_achieved,
+                "give_up": sim_turn.give_up,
+            },
+        )
+    return sim_turn
 
 
 async def _persist_customer_message(
@@ -683,13 +800,17 @@ async def _finalize(
 
 def simulated_chat_reply(final_state: AgentState) -> str:
     """Lo que recibe el cliente en el chat tras el turno, igual que en `POST
-    /webhooks/inbound`: el texto del agente o el acuse fijo de escalado, y nada si el
-    turno acabó en error."""
-    if final_state.get("error"):
-        return ""
-    text = final_state.get("agent_response") or ""
-    reason = final_state.get("escalation_reason")
-    return chat_escalation_ack(final_state.get("decision"), text, reason) or text
+    /webhooks/inbound`: el texto del agente o el acuse fijo de escalado. Un turno con
+    error nunca entrega el borrador (`AgentService`)."""
+    error = final_state.get("error")
+    text = None if error else final_state.get("agent_response")
+    ack = chat_escalation_ack(
+        "error" if error else final_state.get("decision"),
+        text,
+        final_state.get("escalation_reason"),
+        escalated=final_state.get("escalation_id") is not None,
+    )
+    return ack or text or ""
 
 
 def _last_agent_message(transcript: SimulatorTranscript) -> str:

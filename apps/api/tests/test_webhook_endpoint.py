@@ -301,6 +301,27 @@ class TestInboundEndpoint:
         assert outbound[0]["role"] == "agent_ai"
         assert outbound[0]["metadata"] == {"fixed_message": "escalation_ack"}
 
+    def test_chat_provider_outage_escalation_gets_ack(self, monkeypatch) -> None:
+        reason = "llm_provider_unavailable: credit_balance_exhausted (node reason)"
+        outcome = dataclasses.replace(
+            _outcome_escalate(), decision="error", escalation_reason=reason, error=reason
+        )
+        r, insert = self._post_chat(monkeypatch, outcome)
+
+        body = r.json()
+        assert body["decision"] == "error"
+        assert body["escalation_reason"] == reason
+        assert body["response_text"] == fallback_message("escalation_ack", None)
+        assert body["output_message_id"] == str(OUTBOUND_MSG_ID)
+
+    def test_chat_error_without_escalation_gets_no_ack(self, monkeypatch) -> None:
+        outcome = dataclasses.replace(
+            _outcome_escalate(), decision="error", escalation_id=None, error="boom"
+        )
+        r, _ = self._post_chat(monkeypatch, outcome)
+
+        assert r.json()["response_text"] is None
+
     def test_chat_approval_gate_escalation_gets_no_ack(self, monkeypatch) -> None:
         outcome = dataclasses.replace(
             _outcome_escalate(), escalation_reason=f"{APPROVAL_GATE_PREFIX}refund"

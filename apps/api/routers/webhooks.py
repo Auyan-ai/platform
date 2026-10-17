@@ -332,7 +332,12 @@ async def inbound(
     # Chat: si el turno escaló y no le llegó texto al cliente (p. ej. low_confidence),
     # el body lleva el acuse fijo `escalation_ack` y queda guardado como mensaje outbound.
     ack_text = (
-        chat_escalation_ack(outcome.decision, outcome.response_text, outcome.escalation_reason)
+        chat_escalation_ack(
+            outcome.decision,
+            outcome.response_text,
+            outcome.escalation_reason,
+            escalated=outcome.escalation_id is not None,
+        )
         if payload.channel == "chat"
         else None
     )

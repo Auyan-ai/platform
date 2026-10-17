@@ -106,3 +106,16 @@ class TestSimulatedChatReply:
 
         state: Any = {"decision": "respond", "agent_response": "borrador", "error": "reason: boom"}
         assert simulated_chat_reply(state) == ""
+
+    def test_errored_turn_already_escalated_gets_the_chat_ack(self) -> None:
+        from apps.api.simulator.runner import simulated_chat_reply
+
+        state: Any = {
+            "agent_response": "borrador",
+            "error": "llm_provider_unavailable",
+            "escalation_id": "esc-1",
+            "escalation_reason": "llm_provider_unavailable",
+        }
+        assert simulated_chat_reply(state) == (
+            "Le hemos pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
+        )

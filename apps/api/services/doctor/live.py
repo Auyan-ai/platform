@@ -14,6 +14,10 @@ from typing import Any
 
 import httpx
 from apps.api.core.errors import ExternalIntegrationError
+from apps.api.integrations.anthropic_client import (
+    LLMProviderUnavailable,
+    call_claude_with_tools,
+)
 from apps.api.integrations.chatwoot import ChatwootClient
 from apps.api.integrations.shopify import ShopifyClient, ensure_shopify_access_token
 from apps.api.integrations.zendesk import ZendeskClient
@@ -502,3 +506,47 @@ async def run_live_checks(
 
     results = await asyncio.gather(*tasks)
     return [check for group in results for check in group] + skipped
+
+
+async def llm_provider_check(client: Any, model: str) -> DoctorCheck:
+    """Una llamada mínima (1 token de salida, el modelo más barato) a Anthropic.
+
+    Detecta saldo agotado, key inválida o sin permisos antes de que lo note un cliente.
+    """
+    title = "Anthropic: credencial y saldo"
+    try:
+        await call_claude_with_tools(
+            client=client,
+            model=model,
+            system="ping",
+            messages=[{"role": "user", "content": "ping"}],
+            tools=[],
+            max_tokens=1,
+            max_retries=1,
+            timeout_seconds=LIVE_TIMEOUT_S,
+        )
+    except LLMProviderUnavailable as exc:
+        return DoctorCheck(
+            id="platform.llm_provider",
+            group="platform",
+            title=title,
+            status="fail",
+            detail=f"Anthropic rechaza las llamadas ({exc.reason}, HTTP {exc.status_code}).",
+            hint="Recargar saldo en console.anthropic.com o rotar ANTHROPIC_API_KEY.",
+        )
+    except Exception as exc:
+        logger.warning("doctor_llm_provider_check_failed", exc_info=True)
+        return DoctorCheck(
+            id="platform.llm_provider",
+            group="platform",
+            title=title,
+            status="warn",
+            detail=f"No se pudo comprobar: {describe_error(exc)}.",
+        )
+    return DoctorCheck(
+        id="platform.llm_provider",
+        group="platform",
+        title=title,
+        status="ok",
+        detail=f"Llamada mínima aceptada ({model}).",
+    )
