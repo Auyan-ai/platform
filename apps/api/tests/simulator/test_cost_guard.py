@@ -9,6 +9,17 @@ import pytest
 from fastapi import HTTPException
 
 
+@pytest.fixture(autouse=True)
+def _caps(monkeypatch: pytest.MonkeyPatch) -> None:
+    # CI no tiene .env: los topes salen de un Settings falso con los valores por defecto.
+    from types import SimpleNamespace
+
+    from apps.api.simulator import cost_guard
+
+    caps = SimpleNamespace(simulator_daily_cap_usd_tenant=2.0, simulator_daily_cap_usd_global=5.0)
+    monkeypatch.setattr(cost_guard, "get_settings", lambda: caps)
+
+
 class TestCheckTenantCostCap:
     @pytest.mark.asyncio
     async def test_passes_under_cap(self):
