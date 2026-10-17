@@ -69,7 +69,7 @@ DEFAULT_FALLBACK_MESSAGES: dict[str, str] = {
     ),
     "unsupported": "¿En qué te podemos ayudar? Escríbenos tu consulta, por favor.",
     "escalation_ack": (
-        "Le hemos pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
+        "He pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
     ),
 }
 _DOWNLOADABLE = frozenset({"image", "audio", "video", "file"})

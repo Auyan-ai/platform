@@ -80,7 +80,7 @@ class TestRunnerEvidenceHelpers:
         assert both == ({"shopify.cancel_order": {"refund_mode": "manual"}}, 2)
 
 
-_ACK = "Le hemos pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
+_ACK = "He pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
 
 
 async def test_each_agent_turn_leaves_exactly_one_outbound_message(monkeypatch: Any) -> None:
@@ -177,7 +177,7 @@ class TestSimulatedChatReply:
             "escalation_reason": "low_confidence: 0.50 < threshold 0.65",
         }
         assert simulated_chat_reply(state) == (
-            "Le hemos pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
+            "He pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
         )
 
     def test_agent_text_is_the_reply(self) -> None:
@@ -202,5 +202,5 @@ class TestSimulatedChatReply:
             "escalation_reason": "llm_provider_unavailable",
         }
         assert simulated_chat_reply(state) == (
-            "Le hemos pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
+            "He pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
         )
