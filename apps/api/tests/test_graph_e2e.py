@@ -581,3 +581,25 @@ async def test_react_loop_max_iterations_escalates(fake_deps, monkeypatch) -> No
     assert final["tool_iterations"] == 2
     assert "escalation_id" in final
     assert "max_tool_iterations_exceeded" in (final.get("escalation_reason") or "")
+
+
+@pytest.mark.asyncio
+async def test_respond_exception_escalates_with_reason(fake_deps, monkeypatch) -> None:
+    """#362: si respond lanza, el turno escala con razón explícita (no termina en silencio)."""
+    _patch_all_db_and_llm(
+        monkeypatch,
+        llm_response=FakeAnthropicResponse(
+            {"decision": "respond", "confidence": 0.92, "response_text": "Envíos en 3-5 días."}
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.respond.insert_message",
+        AsyncMock(side_effect=RuntimeError("db_write_failed")),
+    )
+    graph = build_graph(fake_deps)
+
+    final = await graph.ainvoke(_initial_state())
+
+    assert final["error"] == "respond: RuntimeError: db_write_failed"
+    assert final["escalation_id"] == str(ESCALATION_ID)
+    assert final["escalation_reason"] == "agent_error: respond: RuntimeError: db_write_failed"
