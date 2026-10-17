@@ -12,7 +12,8 @@ from enum import StrEnum
 from typing import Literal
 
 from apps.api.integrations.shopify import OrderSnapshot, RefundRoute
-from apps.api.skills.base import SkillRefusal
+from apps.api.services.fixed_texts import fixed_text
+from apps.api.skills.base import SkillContext, SkillRefusal
 
 OrderAction = Literal["address", "cancel"]
 
@@ -42,34 +43,19 @@ class Verdict:
     detail: str | None = None
 
 
-_CUSTOMER_REFUSAL: dict[tuple[str, OrderAction], str] = {
-    ("order_shipped", "address"): (
-        "Tu pedido ya ha salido del almacén, así que no puedo cambiar la dirección "
-        "desde aquí. Paso tu caso a mi equipo para que revise qué se puede hacer con "
-        "el envío y te escriba."
-    ),
-    ("order_shipped", "cancel"): (
-        "Tu pedido ya ha salido del almacén, así que no puedo cancelarlo desde aquí. "
-        "Paso tu caso a mi equipo para que te indique cómo seguir."
-    ),
-    ("order_cancelled", "address"): (
-        "Tu pedido figura como cancelado, así que no puedo cambiar su dirección. "
-        "Paso tu caso a mi equipo para que lo revise y te escriba."
-    ),
-    ("order_cancelled", "cancel"): (
-        "Tu pedido ya figura como cancelado. Paso tu caso a mi equipo para que "
-        "revise el estado del reembolso y te escriba."
-    ),
-}
-
 _ACTION_LABEL: dict[OrderAction, str] = {
     "address": "cambiar la dirección de envío del pedido",
     "cancel": "cancelar el pedido",
 }
 
 
-def ensure_order_changeable(snapshot: OrderSnapshot, action: OrderAction) -> None:
-    """Lanza `SkillRefusal` si el pedido está cancelado o ya salió."""
+def ensure_order_changeable(
+    snapshot: OrderSnapshot, action: OrderAction, ctx: SkillContext
+) -> None:
+    """Lanza `SkillRefusal` si el pedido está cancelado o ya salió.
+
+    El texto al cliente sale en el idioma de la conversación; `team_reason` va en español.
+    """
     if snapshot.cancelled:
         code = "order_cancelled"
         why = "Shopify ya lo tiene cancelado"
@@ -87,7 +73,9 @@ def ensure_order_changeable(snapshot: OrderSnapshot, action: OrderAction) -> Non
     order = snapshot.name or snapshot.order_id
     raise SkillRefusal(
         code,
-        customer_message=_CUSTOMER_REFUSAL[(code, action)],
+        customer_message=fixed_text(
+            f"refusal.{code}.{action}", ctx.language, tenant_default=ctx.default_language
+        ),
         team_reason=(
             f"El cliente pidió {_ACTION_LABEL[action]} {order}, pero {why}. "
             f"No se pidió aprobación: {next_step}."

@@ -83,6 +83,18 @@ def _clear_cache() -> None:
     reset_user_cache()
 
 
+@pytest.fixture(autouse=True)
+def _default_tenant_language(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Idioma de la conversación y config del tenant por defecto; cada test puede pisarlos."""
+    monkeypatch.setattr(
+        "apps.api.routers.approvals.get_tenant_configuration", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        "apps.api.routers.approvals.conversation_text_languages",
+        AsyncMock(return_value=("es", "es")),
+    )
+
+
 def _make_app(
     monkeypatch: pytest.MonkeyPatch,
     router_under_test=None,
@@ -522,6 +534,52 @@ class TestRejectAction:
             deliver_mock.await_args.kwargs["content"]
             == insert_message_mock.await_args.kwargs["content"]
         )
+
+
+class TestApprovalRepliesSpeakTheConversationLanguage:
+    def _wire(self, monkeypatch, language: str):
+        class _FakeMsg:
+            id = UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.get_pending_approval",
+            AsyncMock(return_value=_sample_approval()),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.resolve_pending_approval", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.conversation_text_languages",
+            AsyncMock(return_value=(language, "es")),
+        )
+        insert_message_mock = AsyncMock(return_value=_FakeMsg())
+        monkeypatch.setattr("apps.api.routers.approvals.insert_message", insert_message_mock)
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.update_conversation_last_message",
+            AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.get_conversation", AsyncMock(return_value=MagicMock())
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.deliver_message_to_helpdesk", AsyncMock(return_value=True)
+        )
+        return insert_message_mock
+
+    def test_rejection_is_written_in_the_conversation_language(self, monkeypatch) -> None:
+        insert_message_mock = self._wire(monkeypatch, "en")
+        _, client = _make_app(monkeypatch, approvals_router)
+
+        resp = client.post(
+            f"/approvals/{APPROVAL_ID}/reject",
+            json={"comment": "No procede"},
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 200
+        content = insert_message_mock.await_args.kwargs["content"]
+        assert content.startswith("We've reviewed your request")
+        assert content.endswith("No procede")
 
 
 class TestSimulatedApproval:

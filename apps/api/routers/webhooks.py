@@ -46,6 +46,7 @@ from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_sa
 from apps.api.services.identity import EVIDENCE_KEY, build_identity_evidence
 from apps.api.services.identity_guest import PROVIDED_CONTACT_KEY, build_provided_contact
 from apps.api.services.inbound_media import chat_escalation_ack
+from apps.api.services.language import conversation_text_languages
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
 from apps.api.services.usage import UsageRecorder, check_tenant_budget
@@ -331,16 +332,23 @@ async def inbound(
 
     # Chat: si el turno escaló y no le llegó texto al cliente (p. ej. low_confidence),
     # el body lleva el acuse fijo `escalation_ack` y queda guardado como mensaje outbound.
-    ack_text = (
-        chat_escalation_ack(
+    ack_text = None
+    if payload.channel == "chat":
+        async with tenant_scope(tenant.id) as conn:
+            ack_language, ack_default = await conversation_text_languages(
+                conn,
+                tenant.id,
+                conversation.id,
+                tenant_config.extra if tenant_config else None,
+            )
+        ack_text = chat_escalation_ack(
             outcome.decision,
             outcome.response_text,
             outcome.escalation_reason,
             escalated=outcome.escalated,
+            language=ack_language,
+            tenant_default=ack_default,
         )
-        if payload.channel == "chat"
-        else None
-    )
     ack_message_id: str | None = None
     if ack_text is not None:
         try:

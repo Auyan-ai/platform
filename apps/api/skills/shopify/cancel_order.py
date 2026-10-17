@@ -73,7 +73,7 @@ class CancelOrder(Skill):
             raise ValueError("shopify_not_configured")
         adapter = ctx.commerce_mock or ShopifyAdapter()
         snapshot = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
-        ensure_order_changeable(snapshot, "cancel")
+        ensure_order_changeable(snapshot, "cancel", ctx)
         route = snapshot.refund_route
         return {
             **inputs.model_dump(),
@@ -88,7 +88,7 @@ class CancelOrder(Skill):
         adapter = ctx.commerce_mock or ShopifyAdapter()
         # La aprobación puede llevar horas en cola: el pedido pudo salir entretanto.
         before = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
-        ensure_order_changeable(before, "cancel")
+        ensure_order_changeable(before, "cancel", ctx)
         await adapter.cancel_order(
             ctx.integration_ctx,
             before.order_id,

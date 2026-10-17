@@ -29,6 +29,7 @@ from apps.api.services.approval_reply import (
     gate_message,
     waiting_message,
 )
+from apps.api.services.language import state_languages
 
 logger = logging.getLogger(__name__)
 
@@ -57,13 +58,14 @@ def make_escalate_node(
         pending_approval_id = state.get("pending_approval_id")
         if pending_approval_id and not state.get("agent_response"):
             skill_slug = state.get("pending_approval_skill_slug")
+            language, tenant_default = state_languages(state)
             if state.get("pending_approval_is_repeat"):
                 if state.get("pending_approval_reused_status") == "approved":
-                    agent_response = done_followup_message(skill_slug)
+                    agent_response = done_followup_message(skill_slug, language, tenant_default)
                 else:
-                    agent_response = waiting_message(skill_slug)
+                    agent_response = waiting_message(skill_slug, language, tenant_default)
             else:
-                agent_response = gate_message(skill_slug)
+                agent_response = gate_message(skill_slug, language, tenant_default)
         else:
             agent_response = state.get("agent_response") or ""
         draft = agent_response

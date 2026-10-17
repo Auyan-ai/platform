@@ -51,6 +51,7 @@ from apps.api.services.channel_routing import is_messaging_channel, load_deliver
 from apps.api.services.handoff import close_handoff, forward_customer_message, is_approval_gate
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
 from apps.api.services.inbound_media import fallback_message, process_inbound_media
+from apps.api.services.language import conversation_text_languages
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.usage import UsageRecorder
 
@@ -235,7 +236,19 @@ async def _send_fixed_message(
             integration = await get_active_integration(
                 conn, tenant_id=job.tenant_id, kind="channel", provider="zernio"
             )
-            content = fallback_message(kind, integration.config if integration else None)
+            tenant_config = await get_tenant_configuration(conn, job.tenant_id)
+            language, tenant_default = await conversation_text_languages(
+                conn,
+                job.tenant_id,
+                conversation.id,
+                tenant_config.extra if tenant_config else None,
+            )
+            content = fallback_message(
+                kind,
+                integration.config if integration else None,
+                language=language,
+                tenant_default=tenant_default,
+            )
             message = await insert_message(
                 conn,
                 tenant_id=job.tenant_id,

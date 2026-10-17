@@ -33,7 +33,7 @@ from apps.api.services.identity import (
     email_claim,
     phone_claim,
 )
-from apps.api.services.identity_messages import identity_message
+from apps.api.services.identity_messages import MessageKey, identity_message
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 if TYPE_CHECKING:
@@ -249,15 +249,20 @@ def commerce_unavailable_reason(error: str) -> str:
     return f"{COMMERCE_UNAVAILABLE}: la tienda no respondió al consultar el pedido ({error})"
 
 
-def commerce_unavailable_refusal(
-    error: str, tenant_facts: Mapping[str, Any] | None
-) -> SkillRefusal:
+def _say(ctx: SkillContext, key: MessageKey, tenant_facts: Mapping[str, Any] | None) -> str:
+    """Texto fijo de identidad en el idioma de la conversación."""
+    return identity_message(
+        key, tenant_facts, language=ctx.language, tenant_default=ctx.default_language
+    )
+
+
+def commerce_unavailable_refusal(error: str, ctx: SkillContext) -> SkillRefusal:
     """La tienda caída no es un fallo de identidad: texto fijo al cliente y escalado."""
     from apps.api.skills.base import SkillRefusal
 
     return SkillRefusal(
         COMMERCE_UNAVAILABLE,
-        customer_message=identity_message(COMMERCE_UNAVAILABLE, tenant_facts),
+        customer_message=_say(ctx, COMMERCE_UNAVAILABLE, ctx.tenant_facts),
         team_reason=commerce_unavailable_reason(error),
     )
 
@@ -389,7 +394,7 @@ async def run_guest_checks(
             "guest_locked",
             extra={"tenant_id": ctx.tenant_id, "conversation_id": ctx.conversation_id},
         )
-        return GuestRound("locked", reply=identity_message("guest_locked", tenant_facts))
+        return GuestRound("locked", reply=_say(ctx, "guest_locked", tenant_facts))
     tenant_failures, latest = await tenant_failure_stats(
         conn, tenant_id, moment - timedelta(hours=1)
     )
@@ -400,7 +405,7 @@ async def run_guest_checks(
         and latest > moment - pause
     ):
         logger.warning("guest_paused", extra={"tenant_id": ctx.tenant_id})
-        return GuestRound("paused", reply=identity_message("guest_paused", tenant_facts))
+        return GuestRound("paused", reply=_say(ctx, "guest_paused", tenant_facts))
 
     grants: list[Grant] = []
     orders: list[dict[str, Any]] = []
@@ -460,9 +465,9 @@ async def run_guest_checks(
     if lookup_error is not None:
         return GuestRound(
             "unavailable",
-            reply=identity_message(COMMERCE_UNAVAILABLE, tenant_facts),
+            reply=_say(ctx, COMMERCE_UNAVAILABLE, tenant_facts),
             error=lookup_error,
         )
     if failed:
-        return GuestRound("failed", reply=identity_message("guest_not_verified", tenant_facts))
+        return GuestRound("failed", reply=_say(ctx, "guest_not_verified", tenant_facts))
     return GuestRound()

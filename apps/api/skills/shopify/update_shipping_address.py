@@ -78,7 +78,7 @@ class UpdateShippingAddress(Skill):
             raise ValueError("shopify_not_configured")
         adapter = ctx.commerce_mock or ShopifyAdapter()
         snapshot = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
-        ensure_order_changeable(snapshot, "address")
+        ensure_order_changeable(snapshot, "address", ctx)
         return raw_input
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
@@ -88,7 +88,7 @@ class UpdateShippingAddress(Skill):
         adapter = ctx.commerce_mock or ShopifyAdapter()
         # La aprobación puede llevar horas en cola: el pedido pudo salir entretanto.
         before = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
-        ensure_order_changeable(before, "address")
+        ensure_order_changeable(before, "address", ctx)
         await adapter.update_shipping_address(
             ctx.integration_ctx,
             before.order_id,

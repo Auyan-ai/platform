@@ -17,8 +17,9 @@ from apps.api.integrations.base import StoredAttachment
 from apps.api.integrations.transcription import Transcript, get_transcriber, ogg_duration_seconds
 from apps.api.integrations.transcription.openai_transcriber import OpenAITranscriber
 from apps.api.services import media_storage
+from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.inbound_media import (
-    DEFAULT_FALLBACK_MESSAGES,
+    chat_escalation_ack,
     fallback_message,
     process_inbound_media,
     unseen_media_marker,
@@ -250,10 +251,54 @@ def test_marker_wording() -> None:
 def test_fallback_messages_are_configurable() -> None:
     assert (
         fallback_message("audio_unavailable", None)
-        == DEFAULT_FALLBACK_MESSAGES["audio_unavailable"]
+        == fixed_text("audio_unavailable", "es")
     )
     cfg = {"media_fallback_messages": {"audio_unavailable": "Escríbenos, porfa"}}
     assert fallback_message("audio_unavailable", cfg) == "Escríbenos, porfa"
+
+
+def test_fallback_messages_speak_the_conversation_language() -> None:
+    assert fallback_message("audio_unavailable", None, language="en") == (
+        "We couldn't listen to your voice note. Could you write your question for us, please?"
+    )
+    assert fallback_message("media_without_text", None, language="ca").startswith("Gràcies!")
+    assert fallback_message("download_failed", None, language="fr").startswith("Nous n'avons pas")
+    # Un tipo desconocido cae al texto genérico, también traducido.
+    assert fallback_message("whatever", None, language="en") == fixed_text("unsupported", "en")
+
+
+def test_fallback_overrides_are_per_language() -> None:
+    cfg = {
+        "media_fallback_messages": {
+            "audio_unavailable": {"en": "Please type it, thanks"},
+            "unsupported": "Escríbenos, porfa",
+        }
+    }
+    assert fallback_message("audio_unavailable", cfg, language="en") == "Please type it, thanks"
+    assert fallback_message("audio_unavailable", cfg, language="fr").startswith("Nous n'avons pas")
+    assert fallback_message("unsupported", cfg, language="es") == "Escríbenos, porfa"
+    assert fallback_message("unsupported", cfg, language="en").startswith("How can we help")
+    assert fallback_message("unsupported", cfg, language="en", tenant_default="en") == (
+        "Escríbenos, porfa"
+    )
+
+
+def test_chat_escalation_ack_speaks_the_conversation_language() -> None:
+    ack = chat_escalation_ack("escalate", None, "low_confidence", escalated=True, language="en")
+    assert ack == "I've passed your question to our team. They'll reply here as soon as possible."
+
+
+async def test_worker_fixed_message_uses_the_conversation_language(
+    worker: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "apps.api.services.inbound_worker.conversation_text_languages",
+        AsyncMock(return_value=("en", "es")),
+    )
+    assert await _run(worker) == "media_fallback"
+    assert worker["insert_message"].await_args.kwargs["content"] == fixed_text(
+        "media_without_text", "en"
+    )
 
 
 def test_ogg_duration() -> None:
@@ -442,7 +487,7 @@ async def test_image_only_sends_fixed_message_without_graph(worker: dict[str, An
     assert await _run(worker) == "media_fallback"
     worker["agent"].process_inbound.assert_not_awaited()
     msg = worker["insert_message"].await_args.kwargs
-    assert msg["content"] == DEFAULT_FALLBACK_MESSAGES["media_without_text"]
+    assert msg["content"] == fixed_text("media_without_text", "es")
     assert msg["metadata"] == {"fixed_message": "media_without_text"}
     assert worker["deliver_to_customer"].await_args.kwargs["message_id"] == UUID(int=5)
 

@@ -24,7 +24,8 @@ from apps.api.agents.graph import GRAPH_RECURSION_LIMIT, TURN_NODES, build_graph
 from apps.api.agents.nodes.handle_error import make_handle_error_node
 from apps.api.agents.service import AgentService
 from apps.api.db.models import TenantToolPermission
-from apps.api.services.inbound_media import DEFAULT_FALLBACK_MESSAGES, chat_escalation_ack
+from apps.api.services.fixed_texts import fixed_text
+from apps.api.services.inbound_media import chat_escalation_ack
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 
@@ -222,7 +223,7 @@ async def test_node_exception_escalates_acks_logs_and_traces(
         outcome.escalation_reason,
         escalated=outcome.escalated,
     )
-    assert ack == DEFAULT_FALLBACK_MESSAGES["escalation_ack"]
+    assert ack == fixed_text("escalation_ack", "es")
     spans = {c.kwargs["node_name"]: c.kwargs for c in turn["obs"].record_node_run.call_args_list}
     assert spans[node]["error"] == f"forced_{node}"
     assert spans["handle_error"]["error"] is None

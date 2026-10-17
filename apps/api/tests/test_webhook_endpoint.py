@@ -301,6 +301,26 @@ class TestInboundEndpoint:
         assert outbound[0]["role"] == "agent_ai"
         assert outbound[0]["metadata"] == {"fixed_message": "escalation_ack"}
 
+    def test_chat_ack_speaks_the_conversation_language(self, monkeypatch) -> None:
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.conversation_text_languages",
+            AsyncMock(return_value=("en", "es")),
+        )
+        outcome = dataclasses.replace(
+            _outcome_escalate(),
+            escalation_reason="low_confidence: 0.50 < threshold 0.60",
+            confidence=0.5,
+        )
+        r, insert = self._post_chat(monkeypatch, outcome)
+
+        ack = fallback_message("escalation_ack", None, language="en")
+        assert ack.startswith("I've passed your question")
+        assert r.json()["response_text"] == ack
+        outbound = [
+            c.kwargs for c in insert.await_args_list if c.kwargs.get("direction") == "outbound"
+        ]
+        assert outbound[0]["content"] == ack
+
     def test_chat_provider_outage_escalation_gets_ack(self, monkeypatch) -> None:
         reason = "llm_provider_unavailable: credit_balance_exhausted (node reason)"
         outcome = dataclasses.replace(

@@ -180,6 +180,19 @@ class TestSimulatedChatReply:
             "He pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
         )
 
+    def test_the_chat_ack_speaks_the_conversation_language(self) -> None:
+        from apps.api.simulator.runner import simulated_chat_reply
+
+        state: Any = {
+            "decision": "escalate",
+            "agent_response": None,
+            "escalation_reason": "low_confidence: 0.50 < threshold 0.65",
+            "response_language": "en",
+        }
+        assert simulated_chat_reply(state) == (
+            "I've passed your question to our team. They'll reply here as soon as possible."
+        )
+
     def test_agent_text_is_the_reply(self) -> None:
         from apps.api.simulator.runner import simulated_chat_reply
 

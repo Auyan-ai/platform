@@ -13,13 +13,13 @@ from apps.api.agents.nodes import execute_skill
 from apps.api.agents.nodes.execute_skill import make_execute_skill_node
 from apps.api.agents.nodes.resolve_identity import make_resolve_identity_node
 from apps.api.integrations.base import IntegrationContext
+from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.identity import (
     Grant,
     IdentityContext,
     IdentityEvidence,
     sender_identity,
 )
-from apps.api.services.identity_messages import DEFAULT_MESSAGES
 from apps.api.services.skill_access import visible_skills
 from apps.api.skills.base import SkillContext
 from apps.api.skills.identity.check_order_contact import CheckOrderContact
@@ -140,7 +140,7 @@ async def test_store_down_while_checking_escalates_instead_of_blaming_the_custom
     out = await make_resolve_identity_node(fake_deps)(_turn("pedido 1001 ana@tienda.com"))
     assert _grants(out) == ()
     assert out["decision"] == "escalate"
-    assert out["agent_response"] == DEFAULT_MESSAGES["commerce_unavailable"]
+    assert out["agent_response"] == fixed_text("commerce_unavailable", "es")
     assert out["escalation_reason"].startswith("commerce_unavailable:")
     assert route_after_resolve_identity({**out, "error": None}) == "escalate"
 
@@ -166,7 +166,7 @@ async def test_a_correct_email_with_another_customers_order_ends_with_the_fixed_
     out = await make_resolve_identity_node(fake_deps)(_turn("pedido 1002 ana@tienda.com"))
     assert _grants(out) == ()
     assert out["decision"] == "respond"
-    assert out["agent_response"] == DEFAULT_MESSAGES["guest_not_verified"]
+    assert out["agent_response"] == fixed_text("guest_not_verified", "es")
     assert out["awaiting_customer_reply"] is True
     assert route_after_resolve_identity({**out, "error": None}) == "respond"
 
@@ -422,7 +422,7 @@ async def test_the_fallback_skill_escalates_when_the_store_is_down(
     _commerce(monkeypatch, _adapter(fail=True))
     out = await _skill_node(fake_deps)(_call("1001", "ana@tienda.com", identity_state()))
     assert out["decision"] == "escalate"
-    assert out["agent_response"] == DEFAULT_MESSAGES["commerce_unavailable"]
+    assert out["agent_response"] == fixed_text("commerce_unavailable", "es")
     assert out["escalation_reason"].startswith("commerce_unavailable:")
 
 async def test_the_fallback_skill_failure_ends_with_the_same_fixed_text(
@@ -431,7 +431,7 @@ async def test_the_fallback_skill_failure_ends_with_the_same_fixed_text(
     _commerce(monkeypatch)
     out = await _skill_node(fake_deps)(_call("1002", "ana@tienda.com", identity_state()))
     assert out["decision"] == "respond"
-    assert out["agent_response"] == DEFAULT_MESSAGES["guest_not_verified"]
+    assert out["agent_response"] == fixed_text("guest_not_verified", "es")
     assert out["tool_results"][0]["output"]["order"] is None
     assert route_after_execute_skill({**out, "error": None}) == "respond"
 
@@ -444,7 +444,7 @@ async def test_the_fallback_skill_obeys_the_same_limit(
     for i in range(5):
         await node(_call(str(8000 + i), "ana@tienda.com", identity_state()))
     out = await node(_call("1001", "ana@tienda.com", identity_state()))
-    assert out["agent_response"] == DEFAULT_MESSAGES["guest_locked"]
+    assert out["agent_response"] == fixed_text("guest_locked", "es")
     assert len(store.rows) == 5
 
 

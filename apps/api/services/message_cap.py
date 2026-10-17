@@ -26,6 +26,8 @@ from apps.api.db.queries import (
     insert_message,
     update_conversation_status,
 )
+from apps.api.services.fixed_texts import fixed_text
+from apps.api.services.language import conversation_text_languages
 
 if TYPE_CHECKING:
     import asyncpg
@@ -33,12 +35,6 @@ if TYPE_CHECKING:
     from apps.api.db.models import TenantConfiguration
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_CAP_MESSAGE = (
-    "Hemos recibido muchos mensajes en esta conversación y la hemos asignado "
-    "a un agente humano para darte la mejor atención posible. "
-    "Un miembro del equipo estará contigo en breve."
-)
 
 _CAP_REASON = "message_cap_exceeded"
 
@@ -106,13 +102,24 @@ async def enforce_message_cap(
             error=None,
         )
 
+    language, tenant_default = await conversation_text_languages(
+        conn, tenant_id, conversation_id, tenant_config.extra if tenant_config else None
+    )
+    cap_message = fixed_text(
+        "message_cap",
+        language,
+        tenant_default=tenant_default,
+        overrides={"message_cap": tenant_config.extra.get("cap_message")}
+        if tenant_config
+        else None,
+    )
     courtesy_msg = await insert_message(
         conn,
         tenant_id=tenant_id,
         conversation_id=conversation_id,
         role="agent_ai",
         direction="outbound",
-        content=_DEFAULT_CAP_MESSAGE,
+        content=cap_message,
         metadata={"reason": _CAP_REASON},
     )
 
@@ -128,7 +135,7 @@ async def enforce_message_cap(
 
     return AgentOutcome(
         decision="escalate",
-        response_text=_DEFAULT_CAP_MESSAGE,
+        response_text=cap_message,
         escalation_reason=_CAP_REASON,
         output_message_id=str(courtesy_msg.id),
         escalation_id=str(escalation.id),

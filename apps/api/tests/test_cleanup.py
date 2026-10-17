@@ -9,7 +9,6 @@ from uuid import UUID, uuid4
 import pytest
 from apps.api.services.cleanup import (
     DEFAULT_NUDGE_BEFORE_SECONDS,
-    DEFAULT_NUDGE_MESSAGE,
     DEFAULT_TIMEOUTS,
     _build_cutoffs,
     _build_nudge_cutoffs,
@@ -17,6 +16,7 @@ from apps.api.services.cleanup import (
     _nudge_for_tenant,
     run_abandoned_cleanup,
 )
+from apps.api.services.fixed_texts import fixed_text
 from apps.api.tests.conftest import (
     make_conversation,
     make_tenant,
@@ -175,6 +175,7 @@ async def test_nudge_delivers_to_helpdesk() -> None:
         patch("apps.api.services.cleanup.get_nudge_candidates", return_value=candidates),
         patch("apps.api.services.cleanup.insert_message", return_value=MagicMock()),
         patch("apps.api.services.cleanup.get_conversation", AsyncMock(return_value=conv)),
+        patch("apps.api.services.cleanup.get_conversation_language", AsyncMock(return_value=None)),
         patch("apps.api.services.cleanup.deliver_message_to_helpdesk", deliver_mock),
         patch("apps.api.services.cleanup.mark_conversations_nudged", return_value=1),
         patch("apps.api.services.cleanup.datetime") as mock_dt,
@@ -252,6 +253,7 @@ async def test_close_abandoned_tenant_override_timeout() -> None:
         patch("apps.api.services.cleanup.get_stale_conversations", return_value=candidates),
         patch("apps.api.services.cleanup.mark_conversations_abandoned", return_value=1) as mock_mark,
         patch("apps.api.services.cleanup.get_conversation", AsyncMock(return_value=None)),
+        patch("apps.api.services.cleanup.get_conversation_language", AsyncMock(return_value=None)),
         patch("apps.api.services.cleanup.datetime") as mock_dt,
     ):
         mock_dt.now.return_value = NOW
@@ -438,6 +440,7 @@ async def test_nudge_for_tenant_sends_message_and_marks_nudged() -> None:
         patch("apps.api.services.cleanup.get_nudge_candidates", return_value=candidates),
         patch("apps.api.services.cleanup.insert_message", return_value=MagicMock()) as mock_insert,
         patch("apps.api.services.cleanup.get_conversation", AsyncMock(return_value=None)),
+        patch("apps.api.services.cleanup.get_conversation_language", AsyncMock(return_value=None)),
         patch("apps.api.services.cleanup.mark_conversations_nudged", return_value=1) as mock_mark,
         patch("apps.api.services.cleanup.datetime") as mock_dt,
     ):
@@ -450,7 +453,7 @@ async def test_nudge_for_tenant_sends_message_and_marks_nudged() -> None:
     assert result == 1
     mock_insert.assert_called_once()
     assert mock_insert.call_args.kwargs["conversation_id"] == CONV_A
-    assert mock_insert.call_args.kwargs["content"] == DEFAULT_NUDGE_MESSAGE
+    assert mock_insert.call_args.kwargs["content"] == fixed_text("nudge", "es")
     mock_mark.assert_called_once()
 
 
@@ -497,6 +500,7 @@ async def test_nudge_for_tenant_uses_custom_message() -> None:
         patch("apps.api.services.cleanup.get_nudge_candidates", return_value=candidates),
         patch("apps.api.services.cleanup.insert_message", return_value=MagicMock()) as mock_insert,
         patch("apps.api.services.cleanup.get_conversation", AsyncMock(return_value=None)),
+        patch("apps.api.services.cleanup.get_conversation_language", AsyncMock(return_value=None)),
         patch("apps.api.services.cleanup.mark_conversations_nudged", return_value=1),
         patch("apps.api.services.cleanup.datetime") as mock_dt,
     ):
@@ -538,3 +542,45 @@ async def test_run_abandoned_cleanup_calls_nudge_before_close() -> None:
         await run_abandoned_cleanup()
 
     assert call_order == ["nudge", "close"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("language", "extra", "expected"),
+    [
+        ("en", {}, fixed_text("nudge", "en")),
+        ("fr", {}, fixed_text("nudge", "fr")),
+        (None, {"languages": {"default": "ca", "supported": ["ca", "es"]}}, fixed_text("nudge", "ca")),
+        ("en", {"nudge_message": "Hola, ¿seguimos?"}, fixed_text("nudge", "en")),
+        ("es", {"nudge_message": "Hola, ¿seguimos?"}, "Hola, ¿seguimos?"),
+        ("en", {"nudge_message": {"en": "Still there?"}}, "Still there?"),
+    ],
+)
+async def test_nudge_goes_out_in_the_conversation_language(
+    language: str | None, extra: dict, expected: str
+) -> None:
+    config = make_tenant_configuration(extra={"nudge_enabled": True, **extra})
+    activity = (NOW - timedelta(hours=23)).replace(tzinfo=None)
+
+    with (
+        patch("apps.api.services.cleanup.tenant_scope") as mock_scope,
+        patch(
+            "apps.api.services.cleanup.get_nudge_candidates",
+            return_value=[(CONV_A, "chat", activity)],
+        ),
+        patch("apps.api.services.cleanup.insert_message", return_value=MagicMock()) as mock_insert,
+        patch("apps.api.services.cleanup.get_conversation", AsyncMock(return_value=None)),
+        patch(
+            "apps.api.services.cleanup.get_conversation_language",
+            AsyncMock(return_value=language),
+        ),
+        patch("apps.api.services.cleanup.mark_conversations_nudged", return_value=1),
+        patch("apps.api.services.cleanup.datetime") as mock_dt,
+    ):
+        mock_dt.now.return_value = NOW
+        mock_scope.return_value.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        await _nudge_for_tenant(TENANT_ID, config)
+
+    assert mock_insert.call_args.kwargs["content"] == expected

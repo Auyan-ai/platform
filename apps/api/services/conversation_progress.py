@@ -14,11 +14,6 @@ from apps.api.skills.registry import SkillRegistry
 
 NO_PROGRESS_AGENT_REPLIES = 3
 
-NO_PROGRESS_MESSAGE = (
-    "Para no hacerte perder más tiempo, paso tu caso a una persona del equipo, que lo "
-    "revisará y te responderá por aquí."
-)
-
 _ORDER_SCOPES = frozenset({"order", "own_orders"})
 
 

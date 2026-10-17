@@ -77,6 +77,10 @@ class SkillContext:
     # Límites del nivel `guest` y textos fijos del tenant (ADR 0013 §4 y §10).
     guest_policy: GuestPolicy = field(default_factory=GuestPolicy)
     tenant_facts: dict[str, Any] = field(default_factory=dict, repr=False)
+    # Idioma de la conversación y defecto del tenant: los textos fijos al cliente
+    # (`services/fixed_texts.py`) salen en este idioma.
+    language: str = field(default="es")
+    default_language: str = field(default="es")
 
     def order_claims(self, order: dict[str, Any]) -> frozenset[ClaimHash]:
         return order_claims(order, salt=self.claim_salt, region=self.phone_region)
