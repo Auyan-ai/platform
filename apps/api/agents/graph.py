@@ -32,6 +32,10 @@ Diagrama actual (Sprint 8 — AOPs + ReAct loop + Supervisor):
                   ↓
                  END
 
+Fallos: cada nodo de `TURN_NODES` corre bajo `guarded` y, tras cada uno, un `error`
+en el state (excepción capturada o error de negocio) lleva a `handle_error`, que
+escala con razón explícita. No hay arista que lo salte.
+
 Supervisor: se activa cuando el AOP tiene require_supervision=true o la
 tool pendiente es L2/L3. Usa Sonnet para L1/L2, Opus para L3.
 """
@@ -44,6 +48,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from apps.api.agents.dependencies import AgentDependencies
+from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.nodes.escalate import make_escalate_node
 from apps.api.agents.nodes.execute_skill import make_execute_skill_node
 from apps.api.agents.nodes.finalize_trace import make_finalize_trace_node
@@ -138,6 +143,7 @@ def _traced(
         result: dict[str, Any] = {}
         try:
             result = await node_fn(state)
+            error_msg = result.get("error")
             return result
         except Exception as exc:
             error_msg = str(exc)
@@ -165,8 +171,6 @@ def _traced(
 
 def route_after_resolve_identity(state: AgentState) -> str:
     """Routing tras `resolve_identity`: un texto fijo de identidad cierra el turno sin LLM."""
-    if state.get("error"):
-        return "handle_error"
     if state.get("decision") == "respond" and state.get("agent_response"):
         return "respond"
     return "select_aop"
@@ -174,8 +178,6 @@ def route_after_resolve_identity(state: AgentState) -> str:
 
 def route_after_reason(state: AgentState) -> str:
     """Routing tras `reason`. Cinco destinos posibles (incluye supervise)."""
-    if state.get("error"):
-        return "handle_error"
     if state.get("pending_tool_call"):
         # Skill pendiente — ¿necesita supervisión antes de ejecutar?
         if needs_supervision(state):
@@ -203,9 +205,6 @@ def route_after_supervise(state: AgentState) -> str:
     El nodo `supervise` setea `escalation_reason` cuando no hay reintento posible
     (structural o segundo rechazo tactical). Usamos su presencia como señal.
     """
-    if state.get("error"):
-        return "handle_error"
-
     verdict = state.get("supervisor_verdict")
 
     if verdict == "approve":
@@ -230,14 +229,11 @@ def route_after_execute_skill(state: AgentState) -> str:
     - pending_approval_id → skill L3 esperando aprobación humana → escalate.
     - decision 'escalate' → la skill se negó por una regla en código (`SkillRefusal`)
       y dejó mensaje y motivo fijos → escalate sin pasar por el LLM.
-    - error de sistema → handle_error.
     - resto → volver a reason. Si se agotaron las iteraciones, `reason` hace un
       último turno forzado a decidir (respond/escalate) con lo ya obtenido: antes se
       escalaba en seco y el cliente se quedaba sin respuesta (E2E A4, queja que usa
       sus 4 tools previstas). El loop sigue acotado: ese turno no puede pedir skills.
     """
-    if state.get("error"):
-        return "handle_error"
     if state.get("pending_approval_id") or state.get("decision") == "escalate":
         return "escalate"
     if state.get("decision") == "respond" and state.get("agent_response"):
@@ -254,81 +250,51 @@ def route_after_respond(state: AgentState) -> str:
     return "finalize_trace"
 
 
+NodeFn = Callable[[AgentState], Awaitable[dict[str, Any]]]
+NodeFactory = Callable[[AgentDependencies], NodeFn]
+Route = str | Callable[[AgentState], str]
+
+# Nodos del turno: nombre → (factory, siguiente nodo o router). `build_graph` los envuelve
+# todos con `guarded` y antepone a su salida el desvío a `handle_error`; un nodo añadido
+# fuera de esta tabla rompe test_graph_failures.
+TURN_NODES: dict[str, tuple[NodeFactory, Route]] = {
+    "load_tenant_context": (make_load_tenant_context_node, "load_conversation"),
+    "load_conversation": (make_load_conversation_node, "resolve_identity"),
+    "resolve_identity": (make_resolve_identity_node, route_after_resolve_identity),
+    "select_aop": (make_select_aop_node, "retrieve_knowledge"),
+    "retrieve_knowledge": (make_retrieve_knowledge_node, "reason"),
+    "reason": (make_reason_node, route_after_reason),
+    "execute_skill": (make_execute_skill_node, route_after_execute_skill),
+    "supervise": (make_supervise_node, route_after_supervise),
+    "respond": (make_respond_node, route_after_respond),
+    "escalate": (make_escalate_node, "finalize_trace"),
+}
+
+
+def _or_handle_error(route: Route) -> Callable[[AgentState], str]:
+    def next_node(state: AgentState) -> str:
+        if state.get("error"):
+            return "handle_error"
+        return route if isinstance(route, str) else route(state)
+
+    return next_node
+
+
 def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
     """Construye y compila el grafo. Llamar UNA vez en startup; reusar la instancia."""
     graph: StateGraph = StateGraph(AgentState)
 
-    NodeFn = Callable[[AgentState], Awaitable[dict[str, Any]]]
-
-    def traced(name: str, factory: Callable[[AgentDependencies], NodeFn]) -> NodeFn:
-        return _traced(name, factory(deps), deps)
-
-    _ltc = traced("load_tenant_context", make_load_tenant_context_node)
-    graph.add_node("load_tenant_context", _ltc)
-    graph.add_node("load_conversation", traced("load_conversation", make_load_conversation_node))
-    graph.add_node("resolve_identity", traced("resolve_identity", make_resolve_identity_node))
-    graph.add_node("select_aop", traced("select_aop", make_select_aop_node))
-    graph.add_node("retrieve_knowledge", traced("retrieve_knowledge", make_retrieve_knowledge_node))
-    graph.add_node("reason", traced("reason", make_reason_node))
-    graph.add_node("execute_skill", traced("execute_skill", make_execute_skill_node))
-    graph.add_node("supervise", traced("supervise", make_supervise_node))
-    graph.add_node("respond", traced("respond", make_respond_node))
-    graph.add_node("escalate", traced("escalate", make_escalate_node))
-    graph.add_node("handle_error", traced("handle_error", make_handle_error_node))
-    graph.add_node("finalize_trace", traced("finalize_trace", make_finalize_trace_node))
+    for name, (factory, route) in TURN_NODES.items():
+        # `guarded` por fuera de `_traced`: el span del nodo registra la excepción.
+        graph.add_node(name, guarded(name)(_traced(name, factory(deps), deps)))
+        graph.add_conditional_edges(name, _or_handle_error(route))
+    for name, factory in (
+        ("handle_error", make_handle_error_node),
+        ("finalize_trace", make_finalize_trace_node),
+    ):
+        graph.add_node(name, _traced(name, factory(deps), deps))
 
     graph.add_edge(START, "load_tenant_context")
-    graph.add_edge("load_tenant_context", "load_conversation")
-    graph.add_edge("load_conversation", "resolve_identity")
-    graph.add_conditional_edges(
-        "resolve_identity",
-        route_after_resolve_identity,
-        {"select_aop": "select_aop", "respond": "respond", "handle_error": "handle_error"},
-    )
-    graph.add_edge("select_aop", "retrieve_knowledge")
-    graph.add_edge("retrieve_knowledge", "reason")
-
-    graph.add_conditional_edges(
-        "reason",
-        route_after_reason,
-        {
-            "execute_skill": "execute_skill",
-            "supervise": "supervise",
-            "respond": "respond",
-            "escalate": "escalate",
-            "handle_error": "handle_error",
-        },
-    )
-
-    graph.add_conditional_edges(
-        "supervise",
-        route_after_supervise,
-        {
-            "execute_skill": "execute_skill",
-            "respond": "respond",
-            "escalate": "escalate",
-            "reason": "reason",
-            "handle_error": "handle_error",
-        },
-    )
-
-    graph.add_conditional_edges(
-        "execute_skill",
-        route_after_execute_skill,
-        {
-            "reason": "reason",
-            "respond": "respond",
-            "escalate": "escalate",
-            "handle_error": "handle_error",
-        },
-    )
-
-    graph.add_conditional_edges(
-        "respond",
-        route_after_respond,
-        {"escalate": "escalate", "finalize_trace": "finalize_trace"},
-    )
-    graph.add_edge("escalate", "finalize_trace")
     graph.add_edge("handle_error", "finalize_trace")
     graph.add_edge("finalize_trace", END)
 

@@ -10,7 +10,7 @@ input mal formado, skill que lanza — NO rompen el grafo. Se registran como
 entry con `is_error=True` y el LLM decide qué hacer (reintentar con otros
 inputs, escalar, etc.).
 
-Errores realmente inesperados sí se atrapan por `@guarded` y rutean a
+Errores realmente inesperados los atrapa `guarded` (build_graph) y rutean a
 `handle_error`.
 """
 
@@ -23,7 +23,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from apps.api.agents.dependencies import AgentDependencies
-from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import create_pending_approval, get_recent_approval_for_skill
@@ -309,7 +308,6 @@ def make_execute_skill_node(
     tracker = deps.reasoning_tracker
     auditor = deps.audit_logger
 
-    @guarded(name="execute_skill")
     async def _node(state: AgentState) -> dict[str, Any]:
         pending = state.get("pending_tool_call")
         if not pending:
@@ -518,43 +516,39 @@ def make_execute_skill_node(
                 # mensaje al cliente depende de él — "sigue en revisión" si está
                 # pendiente, "ya quedó aplicado" si ya se aprobó/ejecutó.
                 reused_status: str | None = None
-                try:
-                    # Obtener salt para redactar PII — usamos tenant_scope directamente.
-                    from apps.api.db.queries import get_tenant_pii_salt
+                # Obtener salt para redactar PII — usamos tenant_scope directamente.
+                from apps.api.db.queries import get_tenant_pii_salt
 
-                    async with tenant_scope(tenant_id_uuid) as conn:
-                        # Idempotencia del gate L3: si ya hay una aprobación reciente
-                        # (pending o approved) para esta misma acción, la reusamos y
-                        # no creamos un duplicado huérfano. order_id se compara
-                        # resolviendo visible ↔ interno (mismo pedido, formas distintas).
-                        existing = await get_recent_approval_for_skill(
-                            conn, tenant_id_uuid, conv_id_uuid, slug
+                async with tenant_scope(tenant_id_uuid) as conn:
+                    # Idempotencia del gate L3: si ya hay una aprobación reciente
+                    # (pending o approved) para esta misma acción, la reusamos y
+                    # no creamos un duplicado huérfano. order_id se compara
+                    # resolviendo visible ↔ interno (mismo pedido, formas distintas).
+                    existing = await get_recent_approval_for_skill(
+                        conn, tenant_id_uuid, conv_id_uuid, slug
+                    )
+                    if existing is not None and await _same_order_action(
+                        state, existing.inputs_raw, raw_input
+                    ):
+                        approval_id = existing.id
+                        is_repeat = True
+                        reused_status = existing.status
+                    else:
+                        salt = await get_tenant_pii_salt(conn, tenant_id_uuid)
+                        inputs_redacted = redact_inputs(raw_input, salt)
+                        await create_pending_approval(
+                            conn,
+                            approval_id=approval_id,
+                            tenant_id=tenant_id_uuid,
+                            conversation_id=conv_id_uuid,
+                            skill_slug=slug,
+                            skill_tier=skill_cls.tier,
+                            inputs_raw=raw_input,
+                            inputs_redacted=inputs_redacted,
+                            aop_slug=state.get("aop_slug") or "unknown",
+                            aop_version=state.get("aop_version") or 0,
+                            langfuse_trace_id=state.get("langfuse_trace_id"),
                         )
-                        if existing is not None and await _same_order_action(
-                            state, existing.inputs_raw, raw_input
-                        ):
-                            approval_id = existing.id
-                            is_repeat = True
-                            reused_status = existing.status
-                        else:
-                            salt = await get_tenant_pii_salt(conn, tenant_id_uuid)
-                            inputs_redacted = redact_inputs(raw_input, salt)
-                            await create_pending_approval(
-                                conn,
-                                approval_id=approval_id,
-                                tenant_id=tenant_id_uuid,
-                                conversation_id=conv_id_uuid,
-                                skill_slug=slug,
-                                skill_tier=skill_cls.tier,
-                                inputs_raw=raw_input,
-                                inputs_redacted=inputs_redacted,
-                                aop_slug=state.get("aop_slug") or "unknown",
-                                aop_version=state.get("aop_version") or 0,
-                                langfuse_trace_id=state.get("langfuse_trace_id"),
-                            )
-                except Exception:
-                    logger.exception("pending_approval_create_failed slug=%s", slug)
-                    # Si falla la creación del pending_approval, escalamos igual.
 
                 auditor.log(
                     tenant_id=state["tenant_id"],

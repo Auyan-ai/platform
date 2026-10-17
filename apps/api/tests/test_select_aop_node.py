@@ -533,12 +533,3 @@ async def test_select_aop_no_pending_intent_when_alt_low_confidence(fake_deps: A
 
     assert "pending_intent" not in result
 
-
-@pytest.mark.asyncio
-async def test_select_aop_passthrough_on_prior_error(fake_deps: Any) -> None:
-    """@guarded: si hay error previo, el nodo no hace nada."""
-    node = make_select_aop_node(fake_deps)
-    state = {**BASE_STATE, "error": "load_conversation: some_error"}
-    result = await node(state)
-    assert result == {}
-    fake_deps.anthropic.messages.create.assert_not_called()

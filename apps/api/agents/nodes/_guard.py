@@ -1,11 +1,7 @@
-"""Decorador que envuelve cada nodo del grafo.
+"""Decorador que `build_graph` aplica a cada nodo del turno (`TURN_NODES`).
 
-Garantiza dos propiedades:
-1. Short-circuit: si `state['error']` ya está poblado por un nodo anterior,
-   el nodo wrapped no hace nada (passthrough). Esto mantiene el diagrama del
-   grafo limpio — no necesitamos una conditional edge después de cada nodo.
-2. Captura de excepciones: si el nodo lanza, capturamos, logueamos con stack
-   y seteamos `error` para que el grafo termine en `handle_error`.
+Si el nodo lanza, captura, loguea con stack y setea `error`; la arista de salida
+del nodo lleva entonces a `handle_error`, que escala con razón explícita.
 """
 
 from __future__ import annotations
@@ -32,9 +28,6 @@ def guarded(name: str) -> Callable[[NodeFn], NodeFn]:
     def decorator(node_fn: NodeFn) -> NodeFn:
         @functools.wraps(node_fn)
         async def wrapped(state: AgentState) -> dict:
-            if state.get("error"):
-                logger.debug("node %s skipped (prior error=%s)", name, state.get("error"))
-                return {}
             try:
                 return await node_fn(state)
             except LLMProviderUnavailable as exc:

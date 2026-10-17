@@ -27,7 +27,6 @@ from typing import Any
 from uuid import UUID
 
 from apps.api.agents.dependencies import AgentDependencies
-from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.nodes.execute_skill import build_skill_context
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
@@ -92,7 +91,6 @@ def _report_guest_failure(deps: AgentDependencies, state: AgentState, exc: Excep
 def make_resolve_identity_node(
     deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict]]:
-    @guarded(name="resolve_identity")
     async def _node(state: AgentState) -> dict:
         tenant_id = UUID(state["tenant_id"])
         conversation_id = UUID(state["conversation_id"]) if state.get("conversation_id") else None

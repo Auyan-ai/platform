@@ -305,6 +305,7 @@ async def test_whatsapp_escalation_retries_handoff_when_escalation_existed(
         decision="escalate",
         response_text=None,
         resolves_on_delivery=False,
+        escalation_id="esc-1",
         escalation_created=False,
         escalation_reason="customer_requested_human",
     )
@@ -313,6 +314,29 @@ async def test_whatsapp_escalation_retries_handoff_when_escalation_existed(
     )
     kwargs = turn_mocks["push_escalation_to_helpdesk_safe"].await_args.kwargs
     assert kwargs["reason"] == "customer_requested_human"
+    assert send_fixed.await_args.args[2] == "escalation_ack"
+
+
+async def test_whatsapp_failed_turn_already_escalated_retries_handoff_and_acks(
+    turn_mocks: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#362: un turno que falla con la escalación ya abierta se trata igual que un escalado:
+    se reintenta el handoff y el cliente recibe el acuse (antes no recibía nada)."""
+    send_fixed = _whatsapp_escalation(turn_mocks, monkeypatch, delivered="delivered")
+    outcome = _outcome(
+        decision="error",
+        response_text=None,
+        resolves_on_delivery=False,
+        escalation_id="esc-1",
+        escalation_created=False,
+        escalation_reason="agent_error: respond: RuntimeError: boom",
+        error="respond: RuntimeError: boom",
+    )
+    await run_inbound_turn(
+        _job(channel="whatsapp"), agent_service=_agent(outcome), settings=FakeSettings()
+    )
+    kwargs = turn_mocks["push_escalation_to_helpdesk_safe"].await_args.kwargs
+    assert kwargs["reason"] == "agent_error: respond: RuntimeError: boom"
     assert send_fixed.await_args.args[2] == "escalation_ack"
 
 

@@ -12,7 +12,6 @@ from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from apps.api.agents.dependencies import AgentDependencies
-from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.models import Message
@@ -84,7 +83,6 @@ def _format_known_facts(
 def make_load_conversation_node(
     deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict]]:
-    @guarded(name="load_conversation")
     async def _node(state: AgentState) -> dict:
         tenant_id = UUID(state["tenant_id"])
         conversation_id = UUID(state["conversation_id"])
