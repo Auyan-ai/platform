@@ -114,6 +114,7 @@ Corre escenarios del simulador (`apps/api/simulator/`) desde el working tree con
 ```bash
 .claude/skills/verify/scripts/simulate.sh 683246c2-10ce-4f6c-a299-5053f32f8c01 --ids CE-06,RE-01 --show-replies
 .claude/skills/verify/scripts/sim-dump.sh <simulation_run_id>...   # lo llama simulate.sh; a mano para corridas viejas
+node .claude/skills/verify/scripts/sim-api-run.cjs <tenant_uuid> <scenario_uuid>   # el camino del panel: POST /simulations/runs (up.sh api + web-session.sh)
 ```
 `simulate.sh` guarda la salida de `run_simulator` en `evidence/<ts>-simulator.txt` y, por cada `Run:` que imprime, llama a `sim-dump.sh`. Ese script guarda la fila de `simulation_runs` (estado, judge, coste, `langsmith_trace_id`, mensajes inbound/outbound), los mensajes, las skills y las escalaciones de la conversación simulada, y la traza raíz con `trace.sh`.
 Antes de cada corrida, desde aquí o desde el panel (`POST /simulations/runs`), el runner deja el escenario base igual que en el código (`sync_scenario_from_code`): las fechas de los fixtures son relativas al día de la siembra. Lo simulado no sale en la cola ni en las métricas del cliente.
