@@ -71,6 +71,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_TOOL_ITERATIONS = 5
+# El 25 por defecto de LangGraph se queda corto: un turno con 5 tools L2 supervisadas,
+# supervisión final y un rechazo táctico ronda 26 pasos. Los bucles los frena
+# max_tool_iterations; esto solo evita cortar un turno legítimo.
+GRAPH_RECURSION_LIMIT = 50
 
 # Allowlist de keys que cada nodo puede emitir a LangSmith. Allowlist, NO denylist:
 # un nodo sin entrada aquí emite `{}` (solo el span con timing). Esto evita filtrar
@@ -298,4 +302,4 @@ def build_graph(deps: AgentDependencies) -> CompiledStateGraph:
     graph.add_edge("handle_error", "finalize_trace")
     graph.add_edge("finalize_trace", END)
 
-    return graph.compile()
+    return graph.compile().with_config(recursion_limit=GRAPH_RECURSION_LIMIT)

@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from apps.api.agents import graph as graph_module
-from apps.api.agents.graph import TURN_NODES, build_graph
+from apps.api.agents.graph import GRAPH_RECURSION_LIMIT, TURN_NODES, build_graph
 from apps.api.agents.nodes.handle_error import make_handle_error_node
 from apps.api.agents.service import AgentService
 from apps.api.db.models import TenantToolPermission
@@ -143,9 +143,7 @@ def turn(fake_deps, monkeypatch) -> dict[str, Any]:
         AsyncMock(return_value=[_permission("test.read"), _permission("test.write")]),
     )
     insert_escalation = AsyncMock(return_value=make_escalation())
-    monkeypatch.setattr(
-        "apps.api.agents.nodes.handle_error.insert_escalation", insert_escalation
-    )
+    monkeypatch.setattr("apps.api.agents.nodes.handle_error.insert_escalation", insert_escalation)
     obs = _observability()
     return {
         "deps": dataclasses.replace(fake_deps, observability=obs),
@@ -171,6 +169,12 @@ async def _run_turn(deps: Any, obs: MagicMock) -> Any:
 def test_every_graph_node_is_a_turn_node_or_the_failure_tail(fake_deps) -> None:
     nodes = set(build_graph(fake_deps).get_graph().nodes) - {"__start__", "__end__"}
     assert nodes == set(TURN_NODES) | {"handle_error", "finalize_trace"}
+
+
+def test_graph_runs_with_room_for_a_full_supervised_turn(fake_deps) -> None:
+    # 5 tools L2 supervisadas + supervisión final + rechazo táctico ≈ 26 pasos: el 25
+    # por defecto de LangGraph cortaría un turno legítimo.
+    assert build_graph(fake_deps).config["recursion_limit"] == GRAPH_RECURSION_LIMIT >= 50
 
 
 def test_every_turn_node_has_a_failure_scenario() -> None:
