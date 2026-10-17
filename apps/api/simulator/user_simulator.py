@@ -73,7 +73,8 @@ class UserSimulator:
         response = await self._anthropic.messages.create(
             model=get_models().simulator_model,
             max_tokens=SIMULATOR_MAX_TOKENS,
-            temperature=SIMULATOR_TEMPERATURE,
+            # El SDK 1.x ya no tiene `temperature` en la firma; Haiku 4.5 lo acepta.
+            extra_body={"temperature": SIMULATOR_TEMPERATURE},
             system=[
                 {
                     "type": "text",
