@@ -54,6 +54,7 @@ from apps.api.db.queries import (
 from apps.api.services.inbound_media import chat_escalation_ack
 from apps.api.services.language import state_languages
 from apps.api.simulator.assertions import check_assertions, summarize
+from apps.api.simulator.cost_guard import ensure_simulation_budget
 from apps.api.simulator.judge import (
     DEFAULT_JUDGE_ALIAS,
     JUDGE_TIMEOUT_SECONDS,
@@ -231,6 +232,8 @@ async def _run_simulation_inner(
     judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_ALIAS,
     observability: ObservabilityClient | None = None,
 ) -> UUID:
+    # Antes de gastar nada: el tope diario vale para el panel y para el CLI.
+    await ensure_simulation_budget(tenant_id)
     async with tenant_scope(tenant_id) as conn:
         scenario = await get_simulation_scenario(conn, tenant_id, scenario_id)
         if scenario is None:

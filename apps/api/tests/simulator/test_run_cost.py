@@ -97,6 +97,7 @@ def finalize(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 
     finalize_mock = AsyncMock()
     monkeypatch.setattr(runner, "tenant_scope", fake_scope)
+    monkeypatch.setattr(runner, "ensure_simulation_budget", AsyncMock())
     monkeypatch.setattr(runner, "get_simulation_scenario", AsyncMock(return_value=scenario))
     monkeypatch.setattr(runner, "get_user_profile", AsyncMock(return_value=profile))
     monkeypatch.setattr(
