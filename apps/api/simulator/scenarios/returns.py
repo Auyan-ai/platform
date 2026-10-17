@@ -107,12 +107,15 @@ SCENARIOS: list[dict[str, Any]] = [
         "profile": "cooperativo",
         "goal": "Iniciar una devolución estándar del pedido #1234 porque la talla no me queda bien; no pedir reembolso inmediato ni cambio por defecto.",
         "initial_message": "Hola, quiero devolver mi pedido #1234 porque la talla no me queda bien",
-        "expected_outcome": "El agente inicia la devolución y confirma el proceso.",
+        "expected_outcome": (
+            "El agente pide la devolución (L3), que queda pendiente de aprobación humana, y le "
+            "explica al cliente que el equipo la confirmará."
+        ),
         "mock_fixtures": {"shopify": _ORDER_IN_WINDOW},
         "assertions": {
             "skills_called": ["shopify.start_return"],
             "skills_not_called": ["shopify.refund_partial"],
-            "outcome_is": "resolved",
+            "must_have_pending_approval": True,
         },
         "max_turns": 6,
     },

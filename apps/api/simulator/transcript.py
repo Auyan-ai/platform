@@ -68,9 +68,7 @@ def format_for_sim_judge(transcript: SimulatorTranscript) -> str:
         lines.append("")
         lines.append("## Skills ejecutadas")
         for entry in transcript.skill_log:
-            lines.append(
-                f"- `{entry.skill_slug}` ({entry.skill_tier}) → {entry.status}"
-            )
+            lines.append(f"- `{entry.skill_slug}` ({entry.skill_tier}) → {_skill_outcome(entry)}")
             if entry.inputs_redacted:
                 lines.append(f"  inputs: {entry.inputs_redacted}")
             if entry.outputs_redacted:
@@ -82,6 +80,15 @@ def format_for_sim_judge(transcript: SimulatorTranscript) -> str:
         lines.append(transcript.aop_compiled_prompt)
 
     return "\n".join(lines)
+
+
+def _skill_outcome(entry: SkillAuditLog) -> str:
+    """Estado de la skill con su motivo: sin él, el judge toma la puerta L3 por un rechazo."""
+    if entry.error_message == "awaiting_human_approval":
+        return "pendiente de aprobación humana: la puerta L3 del producto, no un rechazo"
+    if entry.error_message:
+        return f"{entry.status}: {entry.error_message}"
+    return str(entry.status)
 
 
 def transcript_to_list(transcript: SimulatorTranscript) -> list[dict]:

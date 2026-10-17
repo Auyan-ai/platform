@@ -167,7 +167,7 @@ SCENARIOS: list[dict[str, Any]] = [
     {
         "id": "DE-04",
         "name": "DE-04: Cambiar dirección antes de envío",
-        "description": "Cliente quiere cambiar dirección del pedido #1500 que aún no salió. El agente ejecuta update_shipping_address.",
+        "description": "Cliente quiere cambiar dirección del pedido #1500 que aún no salió. El agente pide update_shipping_address (L3).",
         "aop_slug": "order_change",
         "capabilities": ["ORD-07"],
         "profile": "cooperativo",
@@ -179,10 +179,14 @@ SCENARIOS: list[dict[str, Any]] = [
             "Hola, cometí un error con la dirección del pedido #1500. "
             "¿Puedo cambiarla? La nueva es Calle Nueva 456, Madrid"
         ),
-        "expected_outcome": "El agente actualiza la dirección de envío del pedido.",
+        "expected_outcome": (
+            "El agente confirma la nueva dirección y pide el cambio (L3), que queda pendiente "
+            "de aprobación humana."
+        ),
         "mock_fixtures": {"shopify": _ORDER_PRE_ENVIO},
         "assertions": {
             "skills_called": ["shopify.update_shipping_address"],
+            "must_have_pending_approval": True,
         },
         "max_turns": 8,
     },
