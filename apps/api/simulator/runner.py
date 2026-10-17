@@ -190,6 +190,7 @@ async def run_batch(
     graph: CompiledStateGraph,
     triggered_by: UUID | None = None,
     judge_model: JudgeModelAlias | str = DEFAULT_JUDGE_ALIAS,
+    observability: ObservabilityClient | None = None,
 ) -> UUID:
     """Corre múltiples scenarios en paralelo (limitado por el semáforo global).
     Retorna un batch_id compartido por todos los runs del batch.
@@ -205,6 +206,7 @@ async def run_batch(
                 triggered_by=triggered_by,
                 batch_id=batch_id,
                 judge_model=judge_model,
+                observability=observability,
             )
         )
         for sid in scenario_ids
