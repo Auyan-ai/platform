@@ -24,6 +24,10 @@ def _fake_observability(trace_id: str = "trace-abc") -> MagicMock:
     return obs
 
 
+async def _unused_handle_error(state: dict) -> dict:
+    raise AssertionError("handle_error solo corre si el grafo lanza")
+
+
 def _kwargs() -> dict:
     return {
         "tenant_id": TENANT_ID,
@@ -52,7 +56,7 @@ class TestProcessInbound:
             }
         )
         obs = _fake_observability()
-        service = AgentService(graph=graph, observability=obs)
+        service = AgentService(graph=graph, observability=obs, handle_error=_unused_handle_error)
 
         outcome = await service.process_inbound(**_kwargs())
 
@@ -80,7 +84,7 @@ class TestProcessInbound:
                 "cost_usd": 0.0003,
             }
         )
-        service = AgentService(graph=graph, observability=_fake_observability())
+        service = AgentService(graph=graph, observability=_fake_observability(), handle_error=_unused_handle_error)
 
         outcome = await service.process_inbound(**_kwargs())
 
@@ -98,7 +102,7 @@ class TestProcessInbound:
                 "escalation_id": "esc-fallback",
             }
         )
-        service = AgentService(graph=graph, observability=_fake_observability())
+        service = AgentService(graph=graph, observability=_fake_observability(), handle_error=_unused_handle_error)
 
         outcome = await service.process_inbound(**_kwargs())
 
@@ -121,7 +125,7 @@ class TestProcessInbound:
                 "escalation_created": True,
             }
         )
-        service = AgentService(graph=graph, observability=_fake_observability())
+        service = AgentService(graph=graph, observability=_fake_observability(), handle_error=_unused_handle_error)
 
         outcome = await service.process_inbound(**_kwargs())
 
@@ -130,27 +134,62 @@ class TestProcessInbound:
         assert outcome.resolves_on_delivery is False
 
     @pytest.mark.asyncio
-    async def test_unhandled_graph_exception_yields_error_outcome(self) -> None:
-        """Si el grafo lanza (no debería, los nodos están guarded), igual recuperamos."""
+    async def test_unhandled_graph_exception_escalates_via_handle_error(self) -> None:
+        """#362: si el grafo entero lanza, el turno escala igual con razón explícita."""
         graph = AsyncMock()
-        graph.ainvoke = AsyncMock(side_effect=RuntimeError("graph_internal_error"))
+        graph.ainvoke = AsyncMock(side_effect=RuntimeError("Recursion limit of 25 reached"))
         obs = _fake_observability()
-        service = AgentService(graph=graph, observability=obs)
+        handle_error = AsyncMock(
+            return_value={
+                "escalation_id": "esc-graph",
+                "escalation_created": True,
+                "escalation_reason": (
+                    "agent_error: unhandled_graph_exception: RuntimeError: "
+                    "Recursion limit of 25 reached"
+                ),
+            }
+        )
+        service = AgentService(graph=graph, observability=obs, handle_error=handle_error)
 
         outcome = await service.process_inbound(**_kwargs())
 
+        state = handle_error.await_args.args[0]
+        assert state["error"] == (
+            "unhandled_graph_exception: RuntimeError: Recursion limit of 25 reached"
+        )
+        assert state["conversation_id"] == str(CONVERSATION_ID)
         assert outcome.decision == "error"
-        assert outcome.error is not None
-        assert "graph_internal_error" in outcome.error
-        # finalize_trace siempre se llama, incluso ante excepción
-        obs.finalize_trace.assert_called_once()
+        assert outcome.escalation_id == "esc-graph"
+        assert outcome.escalated is True
+        assert outcome.escalation_created is True
+        assert outcome.escalation_reason == (
+            "agent_error: unhandled_graph_exception: RuntimeError: Recursion limit of 25 reached"
+        )
+        assert obs.finalize_trace.call_args.kwargs["error"] == state["error"]
+
+    @pytest.mark.asyncio
+    async def test_graph_failure_without_escalation_reraises(self) -> None:
+        """Si ni siquiera se puede escalar (DB caída), el turno no se da por cerrado: se
+        re-lanza para que el worker reintente o el webhook responda 500."""
+        graph = AsyncMock()
+        graph.ainvoke = AsyncMock(side_effect=RuntimeError("db down"))
+        obs = _fake_observability()
+        handle_error = AsyncMock(side_effect=OSError("db down"))
+        service = AgentService(graph=graph, observability=obs, handle_error=handle_error)
+
+        with pytest.raises(OSError, match="db down"):
+            await service.process_inbound(**_kwargs())
+
+        assert obs.finalize_trace.call_args.kwargs["error"] == (
+            "unhandled_graph_exception: RuntimeError: db down"
+        )
 
     @pytest.mark.asyncio
     async def test_initial_state_carries_all_ids(self) -> None:
         """Verifica que el state inicial pasado al grafo tiene los IDs correctos."""
         graph = AsyncMock()
         graph.ainvoke = AsyncMock(return_value={"decision": "respond", "agent_response": "x"})
-        service = AgentService(graph=graph, observability=_fake_observability())
+        service = AgentService(graph=graph, observability=_fake_observability(), handle_error=_unused_handle_error)
 
         await service.process_inbound(**_kwargs())
 
@@ -169,7 +208,7 @@ class TestProcessInbound:
             return_value={"error": "boom", "decision": None}
         )
         obs = _fake_observability()
-        service = AgentService(graph=graph, observability=obs)
+        service = AgentService(graph=graph, observability=obs, handle_error=_unused_handle_error)
 
         await service.process_inbound(**_kwargs())
 
@@ -188,7 +227,7 @@ class TestProcessInbound:
         graph.ainvoke = AsyncMock(
             return_value={"decision": "respond", "agent_response": "ok"}
         )
-        service = AgentService(graph=graph, observability=obs)
+        service = AgentService(graph=graph, observability=obs, handle_error=_unused_handle_error)
 
         outcome = await service.process_inbound(**_kwargs())
 

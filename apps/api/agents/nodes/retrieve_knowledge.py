@@ -14,7 +14,6 @@ from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from apps.api.agents.dependencies import AgentDependencies
-from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.models import KnowledgeChunk, ReasoningStatus
@@ -71,14 +70,13 @@ def _emit_retrieval_event(
 def make_retrieve_knowledge_node(
     deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict]]:
-    @guarded(name="retrieve_knowledge")
     async def _node(state: AgentState) -> dict:
         tenant_id = UUID(state["tenant_id"])
         query = state["inbound_message_content"]
 
         # OpenAI embeddings caído NO tumba el turno: el RAG es contexto opcional
         # por diseño (KB vacía ya devuelve []), así que se degrada a chunks=[]
-        # en vez de propagar a @guarded → handle_error → escalar todo.
+        # en vez de propagar a guarded → handle_error → escalar todo.
         try:
             embedding = await get_query_embedding(
                 deps.openai,

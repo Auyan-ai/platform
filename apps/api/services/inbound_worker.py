@@ -325,11 +325,12 @@ async def _deliver_outcome(
                 exc_info=True,
             )
 
-    # Escalado: nota interna + asignación al equipo CX, solo al crear la escalación. En
-    # mensajería también si ya existía: si el turno llegó al grafo es que NO hay handoff
-    # activo (si lo hubiera, el mensaje se habría reenviado al ticket), así que se reintenta
-    # abrirlo (s81: un handoff fallido dejaba la escalación huérfana y nadie la atendía).
-    retry_handoff = is_messaging_channel(conversation.channel) and outcome.decision == "escalate"
+    # Escalado (también un fallo que handle_error ya escaló): nota interna + asignación al
+    # equipo CX, solo al crear la escalación. En mensajería también si ya existía: si el
+    # turno llegó al grafo es que NO hay handoff activo (si lo hubiera, el mensaje se habría
+    # reenviado al ticket), así que se reintenta abrirlo (s81: un handoff fallido dejaba la
+    # escalación huérfana y nadie la atendía).
+    retry_handoff = is_messaging_channel(conversation.channel) and outcome.escalated
     if outcome.escalation_created or retry_handoff:
         reason = outcome.escalation_reason or "unspecified_escalation"
         await push_escalation_to_helpdesk_safe(

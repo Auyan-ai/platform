@@ -10,7 +10,6 @@ from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from apps.api.agents.dependencies import AgentDependencies
-from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import (
@@ -27,7 +26,6 @@ from apps.api.services.commerce_context import build_commerce_integration_ctx
 def make_load_tenant_context_node(
     deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict]]:
-    @guarded(name="load_tenant_context")
     async def _node(state: AgentState) -> dict:
         tenant_id = UUID(state["tenant_id"])
         async with tenant_scope(tenant_id) as conn:

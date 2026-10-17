@@ -336,7 +336,7 @@ async def inbound(
             outcome.decision,
             outcome.response_text,
             outcome.escalation_reason,
-            escalated=outcome.escalation_id is not None,
+            escalated=outcome.escalated,
         )
         if payload.channel == "chat"
         else None

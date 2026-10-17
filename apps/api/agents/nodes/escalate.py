@@ -14,7 +14,6 @@ from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from apps.api.agents.dependencies import AgentDependencies
-from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.nodes._reply import EMPTY_REPLY, finalize_agent_reply
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
@@ -39,7 +38,6 @@ def make_escalate_node(
 ) -> Callable[[AgentState], Awaitable[dict]]:
     tracker = deps.reasoning_tracker
 
-    @guarded(name="escalate")
     async def _node(state: AgentState) -> dict:
         tenant_id = UUID(state["tenant_id"])
         conversation_id = UUID(state["conversation_id"])

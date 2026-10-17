@@ -504,10 +504,6 @@ class TestRouteAfterSupervise:
             "escalation_reason": "supervisor_rejected (structural): AOP incorrecto",
         }) == "escalate"
 
-    def test_error_goes_to_handle_error(self):
-        assert self._route({"error": "something_failed"}) == "handle_error"
-
-
 # ──────────────────────────────────────────────────────────
 # El supervisor ve la misma evidencia que reason (#261, #327)
 # ──────────────────────────────────────────────────────────

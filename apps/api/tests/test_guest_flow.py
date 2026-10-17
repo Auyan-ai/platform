@@ -289,7 +289,6 @@ async def test_what_the_llm_reads_about_a_guest_has_no_internal_jargon(
 
 def test_routing_after_resolve_identity() -> None:
     assert route_after_resolve_identity({}) == "select_aop"
-    assert route_after_resolve_identity({"error": "x"}) == "handle_error"
     assert (
         route_after_resolve_identity({"decision": "respond", "agent_response": "t"}) == "respond"
     )

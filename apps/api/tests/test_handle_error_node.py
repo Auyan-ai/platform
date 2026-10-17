@@ -113,8 +113,9 @@ async def test_no_context_just_logs(fake_deps, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_resilient_to_persistence_failure(fake_deps, monkeypatch) -> None:
-    """Si la persistencia de la escalación falla, NO propaga — el trace ya quedó."""
+async def test_persistence_failure_propagates(fake_deps, monkeypatch) -> None:
+    """Si no se puede escalar, el fallo se propaga: AgentService lo re-lanza para que
+    el turno se reintente en vez de cerrarse sin escalación."""
     insert_mock = AsyncMock(side_effect=RuntimeError("db is down"))
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
     monkeypatch.setattr(
@@ -124,9 +125,8 @@ async def test_resilient_to_persistence_failure(fake_deps, monkeypatch) -> None:
     monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
     node = make_handle_error_node(fake_deps)
 
-    out = await node(_state())
-
-    assert out == {}
+    with pytest.raises(RuntimeError, match="db is down"):
+        await node(_state())
 
 
 @pytest.mark.asyncio

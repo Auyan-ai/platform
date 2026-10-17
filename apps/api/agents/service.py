@@ -6,13 +6,15 @@ Responsabilidades:
 - Invocar el grafo compilado (`ainvoke`).
 - Mapear el final state a `AgentOutcome` para el caller.
 
-El service NO toca DB ni canales externos — los datos ya vienen persistidos
-por el router antes de llamar a `process_inbound`.
+El service NO toca canales externos y solo toca DB en un caso: si el grafo entero
+lanza, escala con el mismo nodo `handle_error`. Los datos del turno ya vienen
+persistidos por el router antes de llamar a `process_inbound`.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -49,11 +51,25 @@ class AgentOutcome:
     # caller empuja la nota interna + asignación al helpdesk solo en ese caso.
     escalation_created: bool = False
 
+    @property
+    def escalated(self) -> bool:
+        """El turno dejó una escalación activa: `escalate` o un fallo ya escalado."""
+        return self.escalation_id is not None
+
 
 class AgentService:
-    def __init__(self, *, graph: CompiledStateGraph, observability: ObservabilityClient) -> None:
+    def __init__(
+        self,
+        *,
+        graph: CompiledStateGraph,
+        observability: ObservabilityClient,
+        handle_error: Callable[[AgentState], Awaitable[dict]],
+    ) -> None:
         self._graph = graph
         self._observability = observability
+        # El mismo nodo `handle_error` del grafo: si el grafo entero lanza (límite de
+        # recursión, o el propio handle_error no pudo persistir), el turno escala igual.
+        self._handle_error = handle_error
 
     @property
     def observability(self) -> ObservabilityClient:
@@ -104,41 +120,38 @@ class AgentService:
         try:
             final_state: AgentState = await self._graph.ainvoke(initial_state)
         except Exception as exc:
-            # Esto sólo ocurre si algo se rompe en LangGraph mismo (no en nodos —
-            # esos están guarded). Logueamos y devolvemos outcome de error.
             logger.exception(
                 "graph_invocation_failed",
                 extra={"tenant_id": str(tenant_id), "conversation_id": str(conversation_id)},
             )
-            self._observability.finalize_trace(
-                trace,
-                decision=None,
-                confidence=None,
-                response_text=None,
-                escalation_reason=None,
-                tokens_in=0,
-                tokens_cache_write=0,
-                tokens_cache_read=0,
-                tokens_out=0,
-                cost_usd=0.0,
-                model=None,
-                error=f"unhandled_graph_exception: {exc!s}",
-            )
-            return AgentOutcome(
-                decision="error",
-                response_text=None,
-                escalation_reason=None,
-                output_message_id=None,
-                escalation_id=None,
-                resolves_on_delivery=False,
-                trace_id=trace_id,
-                confidence=None,
-                tokens_in=0,
-                tokens_out=0,
-                cost_usd=0.0,
-                model_used=None,
-                error=f"unhandled_graph_exception: {exc!s}",
-            )
+            final_state = {
+                **initial_state,
+                "error": f"unhandled_graph_exception: {type(exc).__name__}: {exc!s}",
+            }
+            try:
+                final_state.update(await self._handle_error(final_state))
+            except Exception:
+                # Sin escalación no hay turno cerrado: se re-lanza para que el worker
+                # reintente el job o el webhook de chat responda 500.
+                logger.exception(
+                    "graph_failure_escalation_failed",
+                    extra={"tenant_id": str(tenant_id), "conversation_id": str(conversation_id)},
+                )
+                self._observability.finalize_trace(
+                    trace,
+                    decision="error",
+                    confidence=None,
+                    response_text=None,
+                    escalation_reason=None,
+                    tokens_in=0,
+                    tokens_cache_write=0,
+                    tokens_cache_read=0,
+                    tokens_out=0,
+                    cost_usd=0.0,
+                    model=None,
+                    error=final_state["error"],
+                )
+                raise
 
         error = final_state.get("error")
         decision = "error" if error else final_state.get("decision", "error")

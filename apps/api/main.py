@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 import apps.api.skills  # noqa: F401
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.graph import build_graph
+from apps.api.agents.nodes.handle_error import make_handle_error_node
 from apps.api.agents.service import AgentService
 from apps.api.core.config import get_models, get_settings
 from apps.api.core.errors import UnhandledExceptionMiddleware, register_exception_handlers
@@ -122,7 +123,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         observability=observability,
     )
     graph = build_graph(deps)
-    service = AgentService(graph=graph, observability=observability)
+    service = AgentService(
+        graph=graph,
+        observability=observability,
+        handle_error=make_handle_error_node(deps),
+    )
 
     app.state.agent_service = service
     app.state.agent_deps = deps

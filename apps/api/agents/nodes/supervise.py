@@ -28,7 +28,6 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from apps.api.agents.dependencies import AgentDependencies
-from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.nodes.reason import agent_system_blocks
 from apps.api.agents.state import AgentState
 from apps.api.core.config import get_models
@@ -324,7 +323,6 @@ def make_supervise_node(
 ) -> Callable[[AgentState], Awaitable[dict[str, Any]]]:
     tracker = deps.reasoning_tracker
 
-    @guarded(name="supervise")
     async def _node(state: AgentState) -> dict[str, Any]:
         conv_id = state.get("conversation_id")
         tenant_id = state.get("tenant_id")

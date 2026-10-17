@@ -126,7 +126,7 @@ async def test_embedding_failure_degrades_to_no_chunks(fake_deps, monkeypatch) -
 @pytest.mark.asyncio
 async def test_search_failure_still_raises_to_guard(fake_deps, monkeypatch) -> None:
     """Un fallo de la búsqueda en Postgres NO se degrada: si la DB está caída,
-    el resto del turno también va a fallar — mejor fail-fast vía @guarded."""
+    el resto del turno también va a fallar — mejor fail-fast vía guarded."""
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
     monkeypatch.setattr(
         f"{MODULE}.get_query_embedding", AsyncMock(return_value=[0.0] * 1536)
@@ -137,10 +137,8 @@ async def test_search_failure_still_raises_to_guard(fake_deps, monkeypatch) -> N
     )
     node = make_retrieve_knowledge_node(fake_deps)
 
-    out = await node(_state())
-
-    # @guarded atrapa y marca el error para rutear a handle_error.
-    assert out.get("error")
+    with pytest.raises(RuntimeError, match="db_down"):
+        await node(_state())
 
 
 @pytest.mark.asyncio

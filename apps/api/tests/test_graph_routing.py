@@ -6,10 +6,6 @@ from apps.api.agents.graph import route_after_execute_skill, route_after_reason
 
 
 class TestRouteAfterReason:
-    def test_error_routes_to_handle_error(self) -> None:
-        state = {"error": "something_broke", "decision": "respond"}
-        assert route_after_reason(state) == "handle_error"  # type: ignore[arg-type]
-
     def test_respond_decision(self) -> None:
         state = {"decision": "respond", "agent_response": "hola"}
         assert route_after_reason(state) == "respond"  # type: ignore[arg-type]
@@ -27,11 +23,6 @@ class TestRouteAfterReason:
         state = {"decision": "weird_value"}
         assert route_after_reason(state) == "handle_error"  # type: ignore[arg-type]
 
-    def test_error_takes_priority_over_decision(self) -> None:
-        """Si hubo error en algún paso, descartamos cualquier decision parcial."""
-        state = {"error": "load_failed", "decision": "respond"}
-        assert route_after_reason(state) == "handle_error"  # type: ignore[arg-type]
-
     def test_pending_tool_call_routes_to_execute_skill(self) -> None:
         """Si reason emitió un pending_tool_call, vamos al loop ReAct."""
         state = {"pending_tool_call": {"id": "toolu_x", "slug": "shopify.get_order", "input": {}}}
@@ -45,14 +36,6 @@ class TestRouteAfterReason:
         }
         assert route_after_reason(state) == "execute_skill"  # type: ignore[arg-type]
 
-    def test_error_beats_pending_tool_call(self) -> None:
-        state = {
-            "error": "boom",
-            "pending_tool_call": {"id": "toolu_x", "slug": "x.y", "input": {}},
-        }
-        assert route_after_reason(state) == "handle_error"  # type: ignore[arg-type]
-
-
 class TestRouteAfterExecuteSkill:
     def test_default_routes_back_to_reason(self) -> None:
         """Sin haber alcanzado max_iter, el loop continúa."""
@@ -64,10 +47,6 @@ class TestRouteAfterExecuteSkill:
         escala en seco: el cliente se quedaba sin respuesta)."""
         state = {"tool_iterations": 5, "max_tool_iterations": 5}
         assert route_after_execute_skill(state) == "reason"  # type: ignore[arg-type]
-
-    def test_error_routes_to_handle_error(self) -> None:
-        state = {"error": "unexpected", "tool_iterations": 1, "max_tool_iterations": 5}
-        assert route_after_execute_skill(state) == "handle_error"  # type: ignore[arg-type]
 
     def test_pending_approval_escalates(self) -> None:
         state = {"pending_approval_id": "a-1", "tool_iterations": 1, "max_tool_iterations": 5}

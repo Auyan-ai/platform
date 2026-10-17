@@ -28,7 +28,6 @@ from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from apps.api.agents.dependencies import AgentDependencies
-from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.state import AgentState
 from apps.api.aops.compiler import compile_aop, load_active_aops, load_aop
 from apps.api.core.config import get_models
@@ -194,7 +193,6 @@ def _turn_number(state: AgentState) -> int:
 def make_select_aop_node(
     deps: AgentDependencies,
 ) -> Callable[[AgentState], Awaitable[dict]]:
-    @guarded(name="select_aop")
     async def _node(state: AgentState) -> dict:
         tenant_id = UUID(state["tenant_id"])
 

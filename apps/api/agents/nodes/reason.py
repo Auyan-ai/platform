@@ -23,7 +23,6 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apps.api.agents.dependencies import AgentDependencies
-from apps.api.agents.nodes._guard import guarded
 from apps.api.agents.nodes._reply import surface_of
 from apps.api.agents.prompts.builder import (
     build_message_history,
@@ -250,7 +249,6 @@ def make_reason_node(
 ) -> Callable[[AgentState], Awaitable[dict[str, Any]]]:
     tracker = deps.reasoning_tracker
 
-    @guarded(name="reason")
     async def _node(state: AgentState) -> dict[str, Any]:
         conv_id = state.get("conversation_id")
         tenant_id = state.get("tenant_id")

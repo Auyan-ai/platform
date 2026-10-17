@@ -136,21 +136,6 @@ async def test_empty_system_prompt_treated_as_missing(fake_deps, monkeypatch) ->
     assert out["error"] == "no_active_system_prompt"
 
 
-@pytest.mark.asyncio
-async def test_passthrough_if_prior_error(fake_deps, monkeypatch) -> None:
-    """Si el state ya tiene error, el nodo no ejecuta queries."""
-    get_tenant_mock = AsyncMock()
-    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
-    monkeypatch.setattr(f"{MODULE}.get_tenant_by_id", get_tenant_mock)
-
-    node = make_load_tenant_context_node(fake_deps)
-
-    out = await node({"tenant_id": str(TENANT_ID), "error": "prior_failure"})
-
-    assert out == {}
-    get_tenant_mock.assert_not_called()
-
-
 # ---------------------------------------------------------------------------
 # commerce_integration_ctx — el nodo delega en build_commerce_integration_ctx
 # y serializa el IntegrationContext resultante al state. La lógica de cripto

@@ -8,21 +8,6 @@ from apps.api.agents.nodes._guard import guarded
 
 class TestGuarded:
     @pytest.mark.asyncio
-    async def test_passes_through_when_prior_error(self) -> None:
-        """Si state ya tiene error, el nodo no se ejecuta y retorna {}."""
-        called = False
-
-        @guarded(name="test_node")
-        async def node(state):  # type: ignore[no-untyped-def]
-            nonlocal called
-            called = True
-            return {"result": "ok"}
-
-        out = await node({"error": "prior_failure"})
-        assert out == {}
-        assert called is False
-
-    @pytest.mark.asyncio
     async def test_happy_path_returns_node_output(self) -> None:
         @guarded(name="test_node")
         async def node(state):  # type: ignore[no-untyped-def]

@@ -332,18 +332,12 @@ class TestBuildSkillContext:
 # ----------------------------------------------------------------
 
 
-class TestGuardShortCircuit:
-    async def test_prior_error_skips_node(self, deps: AgentDependencies) -> None:
-        node = make_execute_skill_node(deps)
-        state = _base_state(pending_tool_call=_pending(), error="upstream_failure")
-        result = await node(state)
-        # @guarded retorna dict vacío cuando hay error previo
-        assert result == {}
-
-    async def test_unexpected_exception_is_caught_by_guarded(
+class TestUnexpectedErrors:
+    async def test_unexpected_exception_propagates_to_guarded(
         self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Si algo del nodo (no la skill misma) lanza inesperadamente, @guarded lo captura."""
+        """Si algo del nodo (no la skill misma) lanza inesperadamente, se propaga a
+        `guarded` (lo aplica build_graph), que lo convierte en escalado."""
 
         # Hacemos que SkillRegistry.get lance un tipo no-ValueError.
         def _boom(slug: str) -> type:
@@ -353,9 +347,8 @@ class TestGuardShortCircuit:
 
         node = make_execute_skill_node(deps)
         state = _base_state(pending_tool_call=_pending())
-        result = await node(state)
-        assert "error" in result
-        assert "execute_skill" in result["error"]
+        with pytest.raises(KeyError, match="registry_broken"):
+            await node(state)
 
 
 # ----------------------------------------------------------------
@@ -577,6 +570,46 @@ class TestPermissionGate:
         # NO se ejecutó la skill: se creó un pending_approval (rama segura).
         assert result.get("pending_approval_id") is not None
         assert "awaiting_human_approval" in result.get("escalation_reason", "")
+
+    async def test_approval_create_failure_propagates(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """#362: si no se pudo crear el pending_approval, el nodo NO escala como
+        `awaiting_human_approval:<id>` de una aprobación que no existe (el equipo CX no
+        tendría qué aprobar y al cliente se le diría "en revisión"): el fallo llega a
+        `guarded` y handle_error escala con la razón real."""
+        import unittest.mock as mock
+
+        mock_scope = mock.MagicMock()
+        mock_scope.__aenter__ = mock.AsyncMock(return_value=mock.AsyncMock(
+            fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}),
+        ))
+        mock_scope.__aexit__ = mock.AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.tenant_scope", lambda *a, **kw: mock_scope
+        )
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.create_pending_approval",
+            mock.AsyncMock(side_effect=RuntimeError("approvals_insert_failed")),
+        )
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
+            mock.AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.redact_inputs", lambda i, s: i
+        )
+
+        node = make_execute_skill_node(deps)
+        state = _base_state(
+            pending_tool_call=_pending(slug="test.dangerous"),
+            allowed_skills=["test.dangerous"],
+            tool_permissions={
+                "test.dangerous": _perm(is_enabled=True, human_approval_required=True),
+            },
+        )
+        with pytest.raises(RuntimeError, match="approvals_insert_failed"):
+            await node(state)
 
     async def test_l3_with_acknowledged_optout_executes(self, deps: AgentDependencies) -> None:
         """L3 con opt-out explícito y reconocido (l3_autonomy_acknowledged=True) ejecuta.
@@ -1112,7 +1145,8 @@ class TestAuditLog:
         node = make_execute_skill_node(deps)
         state = _base_state(pending_tool_call=_pending())
         del state["tenant_id"]
-        await node(state)
+        with pytest.raises(KeyError, match="tenant_id"):
+            await node(state)
         assert deps.audit_logger.entries == []  # type: ignore[attr-defined]
 
     async def test_latency_ms_esta_presente_en_audit(

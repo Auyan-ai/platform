@@ -76,6 +76,12 @@ Decisiones vigentes del routing (evolucionadas post-diseño, con PR):
   el ticket externo, reabre si el cliente vuelve — [#196](https://github.com/Auyan-ai/platform/pull/196).
   Esto alimenta `resolution_events` (billing).
 - **handle_error también escala al helpdesk** (reusa la escalación abierta) — [#215](https://github.com/Auyan-ai/platform/pull/215).
+- **Ningún fallo cierra el turno sin escalar** (#362): los nodos del turno viven en la tabla
+  `TURN_NODES` de `graph.py`; `build_graph` envuelve cada uno con `guarded` y desvía su salida a
+  `handle_error` si hay `error`. Si el grafo entero lanza (límite de recursión, `handle_error` sin
+  DB), `AgentService` escala con el mismo `handle_error` y, si tampoco puede, re-lanza para que el
+  worker reintente o el webhook de chat dé 500. `tests/test_graph_failures.py` fuerza la excepción
+  en cada nodo de la tabla y falla si aparece un nodo nuevo sin escenario.
 
 ## 4. Skills framework
 
