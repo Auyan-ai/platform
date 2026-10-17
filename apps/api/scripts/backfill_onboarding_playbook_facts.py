@@ -61,7 +61,6 @@ async def backfill(tenant_id: UUID | None, dry_run: bool) -> None:
                 "business_hours": step3.get("business_hours"),
                 "support_email": step3.get("support_email"),
                 "support_phone": step3.get("support_phone"),
-                "return_window_days": step3.get("return_window_days"),
             }
             facts_data = {k: v for k, v in facts_candidates.items() if v is not None}
 

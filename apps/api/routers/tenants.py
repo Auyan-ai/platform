@@ -1225,7 +1225,6 @@ async def submit_my_tenant_onboarding(
             "business_hours": step3.get("business_hours"),
             "support_email": step3.get("support_email"),
             "support_phone": step3.get("support_phone"),
-            "return_window_days": step3.get("return_window_days"),
         }
         facts_data = {k: v for k, v in _facts_candidates.items() if v is not None}
         if facts_data:

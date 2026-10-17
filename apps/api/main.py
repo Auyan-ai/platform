@@ -52,6 +52,7 @@ from apps.api.routers.oauth_gorgias import router as oauth_gorgias_router
 from apps.api.routers.oauth_zendesk import router as oauth_zendesk_router
 from apps.api.routers.proposals import router as proposals_router
 from apps.api.routers.reasoning import router as reasoning_router
+from apps.api.routers.returns_policy import router as returns_policy_router
 from apps.api.routers.simulations import router as simulations_router
 from apps.api.routers.tenants import router as tenants_router
 from apps.api.routers.tool_permissions import router as tool_permissions_router
@@ -216,6 +217,7 @@ app.include_router(proposals_router)
 app.include_router(reasoning_router)
 app.include_router(approvals_router)
 app.include_router(tool_permissions_router)
+app.include_router(returns_policy_router)
 app.include_router(simulations_router)
 app.include_router(billing_router)
 
