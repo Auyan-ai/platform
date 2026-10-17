@@ -37,6 +37,7 @@ from apps.api.services.identity import (
 )
 from apps.api.services.identity_guest import (
     OrderLookupError,
+    commerce_unavailable_refusal,
     guest_facts,
     guest_policy,
     lookup_order,
@@ -196,12 +197,19 @@ _VERIFIED_REQUIRED_ERROR = (
 
 
 async def _resolve_order(ctx: SkillContext, order_ref: str) -> dict[str, Any] | None:
-    """El pedido de la referencia vía el adapter de commerce, o None (fail-closed)."""
+    """El pedido de la referencia vía el adapter de commerce, o None si no existe.
+
+    Si la tienda falla, `SkillRefusal`: no se sabe de quién es el pedido, pero tampoco es
+    un fallo de identidad del cliente, y pedirle más datos no lo arregla.
+    """
     try:
         return await lookup_order(ctx, order_ref)
-    except OrderLookupError:
-        logger.warning("identity_gate_order_resolution_failed ref=%s", order_ref)
-        return None
+    except OrderLookupError as exc:
+        logger.error(
+            "identity_gate_order_resolution_failed",
+            extra={"tenant_id": ctx.tenant_id, "error": str(exc)},
+        )
+        raise commerce_unavailable_refusal(str(exc), ctx.tenant_facts) from exc
 
 
 async def _identity_gate(
@@ -438,7 +446,10 @@ def make_execute_skill_node(
             )
 
         # Identidad en código: el pedido que toca la skill tiene que ser de quien escribe.
-        blocked = await _identity_gate(state, skill_cls, raw_input)
+        try:
+            blocked = await _identity_gate(state, skill_cls, raw_input)
+        except SkillRefusal as refusal:
+            return _escalate_refusal(refusal, skill_cls, raw_input)
         if blocked is not None:
             verdict, identity_error = blocked
             if state.get("conversation_id") and state.get("tenant_id"):

@@ -131,6 +131,19 @@ async def test_the_email_typed_in_a_chat_alone_is_never_a_sender(
     assert "agent_response" not in out
 
 
+
+async def test_store_down_while_checking_escalates_instead_of_blaming_the_customer(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, store: Store
+) -> None:
+    # EX-01: con la tienda caída, pedirle otro email al cliente no arregla nada.
+    _commerce(monkeypatch, _adapter(fail=True))
+    out = await make_resolve_identity_node(fake_deps)(_turn("pedido 1001 ana@tienda.com"))
+    assert _grants(out) == ()
+    assert out["decision"] == "escalate"
+    assert out["agent_response"] == DEFAULT_MESSAGES["commerce_unavailable"]
+    assert out["escalation_reason"].startswith("commerce_unavailable:")
+    assert route_after_resolve_identity({**out, "error": None}) == "escalate"
+
 @pytest.mark.parametrize(
     ("messages", "missing"),
     [
@@ -401,6 +414,16 @@ async def test_the_fallback_skill_grants_guest_and_updates_the_turn(
     assert "#1001" in out["known_facts"]
     assert "decision" not in out
 
+
+
+async def test_the_fallback_skill_escalates_when_the_store_is_down(
+    fake_deps, monkeypatch: pytest.MonkeyPatch, skill_db: None
+) -> None:
+    _commerce(monkeypatch, _adapter(fail=True))
+    out = await _skill_node(fake_deps)(_call("1001", "ana@tienda.com", identity_state()))
+    assert out["decision"] == "escalate"
+    assert out["agent_response"] == DEFAULT_MESSAGES["commerce_unavailable"]
+    assert out["escalation_reason"].startswith("commerce_unavailable:")
 
 async def test_the_fallback_skill_failure_ends_with_the_same_fixed_text(
     fake_deps, monkeypatch: pytest.MonkeyPatch, skill_db: None

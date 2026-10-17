@@ -6,6 +6,7 @@ de cada turno (tokens, reasoning del simulador) además del texto de mensajes.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -35,6 +36,10 @@ class SimulatorTranscript:
     termination_reason: str | None = None
     skill_log: list[SkillAuditLog] = field(default_factory=list)
     aop_compiled_prompt: str | None = None
+    # Lo que el agente tenía como fuente: sin esto el judge toma por inventado lo que
+    # venía de `tenant_facts` o de la base de conocimiento (OR-03, CE-08).
+    tenant_facts: dict | None = None
+    knowledge: dict[str, str] = field(default_factory=dict)
 
 
 def format_for_sim_judge(transcript: SimulatorTranscript) -> str:
@@ -73,6 +78,17 @@ def format_for_sim_judge(transcript: SimulatorTranscript) -> str:
                 lines.append(f"  inputs: {entry.inputs_redacted}")
             if entry.outputs_redacted:
                 lines.append(f"  outputs: {entry.outputs_redacted}")
+
+    if transcript.tenant_facts:
+        lines.append("")
+        lines.append("## Datos de la tienda que el agente tenía (tenant_facts, fuente válida)")
+        lines.append(json.dumps(transcript.tenant_facts, ensure_ascii=False))
+
+    if transcript.knowledge:
+        lines.append("")
+        lines.append("## Base de conocimiento que el agente recibió (fuente válida)")
+        for title, content in transcript.knowledge.items():
+            lines.append(f"- {title}: {content}")
 
     if transcript.aop_compiled_prompt:
         lines.append("")

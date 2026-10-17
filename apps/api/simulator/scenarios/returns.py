@@ -28,6 +28,7 @@ _ORDER_IN_WINDOW: dict[str, Any] = {
     "get_policies": [
         {
             "title": "Política de devolución",
+            "url": "https://tienda-sim.myshopify.com/policies/refund-policy",
             "body": "Tienes 30 días desde la fecha de compra para devolver tu pedido.",
         }
     ],
@@ -50,6 +51,7 @@ _ORDER_OUT_OF_WINDOW: dict[str, Any] = {
     "get_policies": [
         {
             "title": "Política de devolución",
+            "url": "https://tienda-sim.myshopify.com/policies/refund-policy",
             "body": "Tienes 30 días desde la fecha de compra para devolver tu pedido.",
         }
     ],
@@ -89,6 +91,7 @@ _ORDER_DIGITAL: dict[str, Any] = {
     "get_policies": [
         {
             "title": "Política de devolución",
+            "url": "https://tienda-sim.myshopify.com/policies/refund-policy",
             "body": (
                 "Los productos digitales no son elegibles para devolución una vez descargados."
             ),

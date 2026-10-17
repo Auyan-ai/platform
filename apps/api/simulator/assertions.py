@@ -8,8 +8,10 @@ Las assertions vienen del JSONB `simulation_scenarios.assertions`. Tipos:
 
     skills_called:        list[str]  — cada slug debe aparecer con status='success'   (crítica)
     skills_not_called:    list[str]  — ningún slug debe aparecer                        (crítica)
-    response_contains:    list[str]  — substrings en el último msg del agente           (no crítica)
-    response_not_contains: list[str] — substrings ausentes del msg final     (crítica)
+    response_contains:    list[str]  — substrings en algún msg del agente (el último suele
+                                       ser la despedida)                        (no crítica)
+    response_not_contains: list[str] — substrings ausentes de todos los msgs del agente
+                                                                              (crítica)
     outcome_is:           str        — resolved|escalated|abandoned|errored   (crítica)
     max_turns:            int        — turns_count <= N                       (no crítica)
     must_escalate:        bool       — True: debe escalar; False: NO debe escalar (crítica)
@@ -63,6 +65,7 @@ def check_assertions(
     skill_log: list[SkillAuditLog],
     last_agent_message: str,
     termination_reason: str | None,
+    agent_messages: Sequence[str] | None = None,
     turns_count: int,
     pending_approval_present: bool,
     escalation_reason: str | None = None,
@@ -82,6 +85,8 @@ def check_assertions(
     }
     all_called_slugs = {e.skill_slug for e in skill_log}
     msg_lower = last_agent_message.lower()
+    # Todo lo que dijo el agente: en varios turnos, la respuesta útil no es la última.
+    said_lower = "\n".join(agent_messages or (last_agent_message,)).lower()
 
     for slug in assertions.get("skills_called", []):
         ok = slug in successful_slugs
@@ -106,18 +111,18 @@ def check_assertions(
         )
 
     for needle in assertions.get("response_contains", []):
-        ok = needle.lower() in msg_lower
+        ok = needle.lower() in said_lower
         results.append(
             AssertionResult(
                 key=f"response_contains.{needle}",
                 passed=ok,
-                evidence=("presente" if ok else "ausente del mensaje final"),
+                evidence=("presente" if ok else "ausente de los mensajes del agente"),
                 is_critical=False,
             )
         )
 
     for needle in assertions.get("response_not_contains", []):
-        ok = needle.lower() not in msg_lower
+        ok = needle.lower() not in said_lower
         results.append(
             AssertionResult(
                 key=f"response_not_contains.{needle}",

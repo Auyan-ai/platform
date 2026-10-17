@@ -22,6 +22,7 @@ from apps.api.db.queries import (
     get_recent_messages,
     get_recent_read_outputs_for_conversation,
 )
+from apps.api.services.conversation_progress import order_found_in
 
 
 def _json_compact(obj: dict) -> str:
@@ -119,6 +120,7 @@ def make_load_conversation_node(
             ],
             "end_customer": customer.model_dump(mode="json"),
             "known_facts": _format_known_facts(read_outputs, approved_actions),
+            "order_in_context": order_found_in(read_outputs),
         }
 
     return _node

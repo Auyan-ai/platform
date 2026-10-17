@@ -315,6 +315,7 @@ async def _run_simulation_inner(
 
     assertion_results = check_assertions(
         assertions=scenario.assertions,
+        agent_messages=[t.content for t in acc.transcript.turns if t.role == "agent"],
         skill_log=skill_log,
         last_agent_message=last_agent_msg,
         termination_reason=termination_reason,
@@ -583,6 +584,11 @@ async def _execute_loop(
         # Capturar aop_version si el grafo la setea
         if final_state.get("aop_version") and not hasattr(acc, "_aop_version"):
             acc.transcript.aop_compiled_prompt = final_state.get("aop_workspace")
+        acc.transcript.tenant_facts = final_state.get("tenant_facts") or acc.transcript.tenant_facts
+        for chunk in final_state.get("retrieved_chunks") or []:
+            acc.transcript.knowledge.setdefault(
+                str(chunk.get("document_title", "")), str(chunk.get("content", ""))[:1500]
+            )
 
         if decision == "escalate":
             return "escalated_by_agent"

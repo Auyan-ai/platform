@@ -43,6 +43,7 @@ from apps.api.services.identity_guest import (
     GuestRound,
     can_lookup_orders,
     candidate_pairs,
+    commerce_unavailable_reason,
     guest_facts,
     load_guest_grants,
     missing_data,
@@ -141,13 +142,21 @@ def make_resolve_identity_node(
             "identity_summary": identity.summary(),
             "identity_note": identity_note(identity, missing),
             "identity_missing": missing,
+            "order_refs_given": bool(provided.order_refs),
         }
         if guest_error is not None:
             out["identity_error"] = guest_error
         if round_.orders:
+            out["order_in_context"] = True
             details = [map_order_detail(o).model_dump(mode="json") for o in round_.orders]
             out["known_facts"] = guest_facts(state.get("known_facts"), details)
-        if round_.reply is not None and not identity.has_grant("verified"):
+        if round_.status == "unavailable" and not identity.has_grant("verified"):
+            out.update(
+                decision="escalate",
+                agent_response=round_.reply,
+                escalation_reason=commerce_unavailable_reason(round_.error or ""),
+            )
+        elif round_.reply is not None and not identity.has_grant("verified"):
             out.update(
                 decision="respond",
                 agent_response=round_.reply,

@@ -75,6 +75,18 @@ class TestFormatForSimJudge:
         text = format_for_sim_judge(t)
         assert "Sé amable" in text
 
+    def test_the_judge_sees_the_agent_sources(self):
+        # Sin las fuentes, el judge tomaba por inventado el contacto de tenant_facts (OR-03).
+        t = SimulatorTranscript(
+            scenario=_make_scenario(),
+            profile_name="cooperativo",
+            tenant_facts={"support_email": "hola@tienda.es"},
+            knowledge={"Envíos": "Península 24-48 h."},
+        )
+        text = format_for_sim_judge(t)
+        assert "hola@tienda.es" in text
+        assert "Envíos: Península 24-48 h." in text
+
     def test_the_judge_sees_why_a_skill_did_not_run(self):
         """RE-01: el judge leía `rejected_by_permissions` sin motivo y tomaba la puerta L3
         (aprobación humana pendiente) por una devolución rechazada."""

@@ -17,9 +17,8 @@ SCENARIOS: list[dict[str, Any]] = [
         "goal": "Saber el tracking del pedido #1234 cuando Shopify falla",
         "initial_message": "Hola, ¿cómo va el pedido #1234?",
         "expected_outcome": (
-            "El agente no expone el error y acaba pasando el caso al equipo. Con la identidad "
-            "por niveles, el fallo de Shopify al resolver el pedido se ve como pedido no "
-            "verificable: no se prueba el mensaje de error de la integración."
+            "El agente no expone el error ni le pide más datos al cliente: con la tienda "
+            "caída, el código escala (`commerce_unavailable`) con el texto fijo."
         ),
         "mock_fixtures": {
             "shopify": {
@@ -29,6 +28,7 @@ SCENARIOS: list[dict[str, Any]] = [
         },
         "assertions": {
             "response_not_contains": ["error interno", "exception", "traceback"],
+            "response_contains": ["no puedo consultar los pedidos"],
             "must_escalate": True,
         },
         "max_turns": 4,

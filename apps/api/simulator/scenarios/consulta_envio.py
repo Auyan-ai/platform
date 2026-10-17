@@ -34,7 +34,9 @@ _ORDER_1234_NO_TRACKING: dict[str, Any] = {
         "financial_status": "paid",
         "fulfillment_status": "unfulfilled",
         "fulfillments": [],
-        "created_at": days_ago(2),
+        # De hoy: dentro del plazo de preparación de la tienda. Con días de retraso el
+        # agente escala con razón (y eso es correcto), que no es lo que mide CE-02.
+        "created_at": days_ago(0),
         "customer": {"email": "cliente@ejemplo.com", "first_name": "Ana"},
     }
 }
@@ -80,7 +82,7 @@ _TWO_ORDERS: dict[str, Any] = {
             "financial_status": "paid",
             "fulfillment_status": "unfulfilled",
             "fulfillments": [],
-            "created_at": days_ago(3),
+            "created_at": days_ago(0),
         },
     ]
 }
@@ -188,16 +190,27 @@ SCENARIOS: list[dict[str, Any]] = [
     {
         "id": "CE-06",
         "name": "CE-06: Cliente con 2 órdenes recientes",
-        "description": "El cliente tiene 2 pedidos recientes. El agente debe preguntar cuál quiere consultar.",
+        "description": (
+            "El cliente tiene 2 pedidos recientes (uno enviado, otro de hoy en preparación). "
+            "Con `list_my_orders` el agente da el estado de los dos sin preguntar cuál."
+        ),
         "aop_slug": "order_status",
         "capabilities": ["ORD-01"],
         "profile": "impaciente",
-        "goal": "Saber el estado de mis pedidos (tengo dos recientes)",
+        "goal": (
+            "Saber el estado de mis pedidos (tengo dos recientes). Quedo satisfecho cuando "
+            "sé en qué estado está cada uno. No me invento problemas con el tracking."
+        ),
         "initial_message": "Hola, necesito saber de mis pedidos urgente",
-        "expected_outcome": "El agente detecta que hay 2 pedidos y pide al cliente que especifique cuál.",
+        "expected_outcome": (
+            "El agente lista los 2 pedidos con su estado (#1234 enviado con tracking, #1235 "
+            "en preparación) sin escalar."
+        ),
         "mock_fixtures": {"shopify": _TWO_ORDERS},
         "assertions": {
             "skills_called": ["shopify.list_my_orders"],
+            "response_contains": ["#1234", "#1235"],
+            "must_escalate": False,
         },
         "max_turns": 6,
     },

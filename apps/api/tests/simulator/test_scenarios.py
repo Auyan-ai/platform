@@ -164,6 +164,14 @@ async def test_every_listed_order_has_its_shopify_name_and_resolves_by_it(sc):
 
 
 @pytest.mark.parametrize("sc", ALL, ids=lambda sc: sc["id"])
+def test_every_policy_fixture_has_its_shopify_url(sc):
+    """Shopify da el tipo de política en el URL y la skill filtra por él: sin URL, el
+    filtro dejaba la lista vacía y el agente decía que la tienda no tenía política."""
+    for policy in sc["mock_fixtures"].get("shopify", {}).get("get_policies") or []:
+        assert "/policies/" in policy.get("url", ""), f"{sc['id']}: {policy.get('title')}"
+
+
+@pytest.mark.parametrize("sc", ALL, ids=lambda sc: sc["id"])
 def test_a_scenario_that_expects_an_l3_skill_expects_its_human_approval(sc):
     """RE-01 y DE-04 esperaban la devolución o el cambio de dirección ya hechos, pero
     `start_return` y `update_shipping_address` son L3: quedan pendientes de aprobación."""

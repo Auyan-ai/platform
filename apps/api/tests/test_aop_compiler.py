@@ -208,6 +208,17 @@ def test_render_global_rules_always_has_base_rules() -> None:
     assert "No inventes" in result or "nunca inventes" in result.lower()
 
 
+def test_render_global_rules_forbids_promising_an_order_action() -> None:
+    # EX-05: el agente prometió "podemos cancelarlo sin problema" y el pedido ya había salido.
+    result = _render_global_rules([])
+    assert "no lo prometas" in result
+
+
+def test_render_global_rules_language_beats_brand_voice() -> None:
+    # CE-07: una voz "con acento de España" hacía responder en español a quien escribe en inglés.
+    assert "nunca la voz de la marca" in _render_global_rules([])
+
+
 def test_render_global_rules_includes_conciseness_rule() -> None:
     """Hallazgo 8: el agente no debe repetir info ya dada ni re-anunciar
     reverificaciones internas — regla global, aplica a todos los AOPs."""

@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Literal
 
-MessageKey = Literal["guest_not_verified", "guest_locked", "guest_paused"]
+MessageKey = Literal["guest_not_verified", "guest_locked", "guest_paused", "commerce_unavailable"]
 
 DEFAULT_MESSAGES: dict[MessageKey, str] = {
     "guest_not_verified": (
@@ -23,6 +23,11 @@ DEFAULT_MESSAGES: dict[MessageKey, str] = {
     "guest_paused": (
         "Ahora mismo no puedo verificar pedidos. Inténtalo de nuevo en unos minutos o dime "
         "si prefieres que pase tu caso a una persona del equipo."
+    ),
+    # La tienda no responde: no es un fallo de identidad del cliente.
+    "commerce_unavailable": (
+        "Ahora mismo no puedo consultar los pedidos de la tienda. Paso tu caso a una persona "
+        "del equipo para que lo revise y te responda."
     ),
 }
 

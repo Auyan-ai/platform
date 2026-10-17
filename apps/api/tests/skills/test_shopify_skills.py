@@ -30,6 +30,7 @@ from apps.api.skills.shopify.get_shop_policies import (
     GetShopPoliciesOutput,
 )
 from apps.api.skills.shopify.list_my_orders import (
+    NO_ORDERS_FOR_SENDER_NOTE,
     NO_VERIFIED_SENDER_NOTE,
     ListMyOrders,
     ListMyOrdersInput,
@@ -185,6 +186,14 @@ class TestListMyOrders:
             result = await ListMyOrders().execute(CTX, ListMyOrdersInput())
         assert [o.order_number for o in result.orders] == ["#1001"]
         assert result.total_found == 1
+
+    async def test_a_sender_without_orders_is_asked_for_the_purchase_data(self) -> None:
+        # RE-04: sin la nota, el agente escalaba a quien compró con otro email.
+        mock_client = _mock_shopify(get_orders_by_email=[])
+        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
+            result = await ListMyOrders().execute(CTX, ListMyOrdersInput())
+        assert result.total_found == 0
+        assert result.note == NO_ORDERS_FOR_SENDER_NOTE
 
     async def test_chat_origin_gets_nothing(self) -> None:
         mock_client = _mock_shopify(get_orders_by_email=[_RAW_ORDER])
@@ -456,6 +465,18 @@ class TestGetShopPolicies:
             )
         assert len(result.policies) == 1
         assert result.policies[0].title == "Política de envío"
+
+    async def test_unknown_policy_type_returns_every_policy(self) -> None:
+        # Un tipo que no está en ningún URL no deja al agente sin políticas (DE-01).
+        mock_client = _mock_shopify(get_policies=[_RAW_POLICY])
+        with patch(
+            "apps.api.integrations.shopify.ShopifyClient",
+            return_value=mock_client,
+        ):
+            result = await GetShopPolicies().execute(
+                CTX, GetShopPoliciesInput(policy_type="envios")
+            )
+        assert [p.title for p in result.policies] == [_RAW_POLICY["title"]]
 
     async def test_empty_policies(self) -> None:
         mock_client = _mock_shopify(get_policies=[])

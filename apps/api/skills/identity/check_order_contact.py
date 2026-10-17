@@ -16,6 +16,7 @@ from apps.api.db.client import tenant_scope
 from apps.api.services.identity_guest import (
     Pair,
     can_lookup_orders,
+    commerce_unavailable_refusal,
     extract_provided,
     normalize_order_ref,
     run_guest_checks,
@@ -79,6 +80,8 @@ class CheckOrderContact(Skill):
                 policy=ctx.guest_policy,
                 tenant_facts=ctx.tenant_facts,
             )
+        if result.status == "unavailable":
+            raise commerce_unavailable_refusal(result.error or "", ctx.tenant_facts)
         if result.status == "granted":
             grant = result.grants[0]
             return CheckOrderContactOutput(
