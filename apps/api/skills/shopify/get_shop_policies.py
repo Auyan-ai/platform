@@ -36,17 +36,15 @@ class GetShopPolicies(Skill):
         adapter = ctx.commerce_mock or ShopifyAdapter()
         raw_policies = await adapter.get_policies(ctx.integration_ctx)
 
-        policies: list[PolicyInfo] = []
-        for raw in raw_policies:
-            url: str = raw.get("url", "")
-            # Filtra por tipo si se especificó (extrae tipo del URL)
-            if inputs.policy_type and inputs.policy_type not in url:
-                continue
-            policies.append(
-                PolicyInfo(
-                    title=raw.get("title", ""),
-                    body=strip_html(raw.get("body") or "")[:2000],
-                    url=url,
-                )
+        policies = [
+            PolicyInfo(
+                title=raw.get("title", ""),
+                body=strip_html(raw.get("body") or "")[:2000],
+                url=raw.get("url", ""),
             )
-        return GetShopPoliciesOutput(policies=policies)
+            for raw in raw_policies
+        ]
+        # Filtra por tipo (va en el URL de Shopify: .../policies/refund-policy). Si el tipo
+        # no coincide con ninguna, devuelve todas: mejor de más que un "no hay política".
+        wanted = [p for p in policies if inputs.policy_type and inputs.policy_type in p.url]
+        return GetShopPoliciesOutput(policies=wanted or policies)

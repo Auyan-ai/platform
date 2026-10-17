@@ -457,6 +457,18 @@ class TestGetShopPolicies:
         assert len(result.policies) == 1
         assert result.policies[0].title == "Política de envío"
 
+    async def test_unknown_policy_type_returns_every_policy(self) -> None:
+        # Un tipo que no está en ningún URL no deja al agente sin políticas (DE-01).
+        mock_client = _mock_shopify(get_policies=[_RAW_POLICY])
+        with patch(
+            "apps.api.integrations.shopify.ShopifyClient",
+            return_value=mock_client,
+        ):
+            result = await GetShopPolicies().execute(
+                CTX, GetShopPoliciesInput(policy_type="envios")
+            )
+        assert [p.title for p in result.policies] == [_RAW_POLICY["title"]]
+
     async def test_empty_policies(self) -> None:
         mock_client = _mock_shopify(get_policies=[])
         with patch(

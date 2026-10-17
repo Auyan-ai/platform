@@ -10,6 +10,7 @@ _POLICIES: dict[str, Any] = {
     "get_policies": [
         {
             "title": "Política de envío",
+            "url": "https://tienda-sim.myshopify.com/policies/shipping-policy",
             "body": (
                 "Envíos estándar: 3-5 días hábiles. "
                 "Envíos express: 1-2 días hábiles. "
@@ -18,6 +19,7 @@ _POLICIES: dict[str, Any] = {
         },
         {
             "title": "Política de devolución",
+            "url": "https://tienda-sim.myshopify.com/policies/refund-policy",
             "body": "30 días desde la fecha de compra para devoluciones sin preguntas.",
         },
     ]
