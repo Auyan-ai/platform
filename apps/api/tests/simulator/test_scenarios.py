@@ -163,6 +163,20 @@ async def test_every_listed_order_has_its_shopify_name_and_resolves_by_it(sc):
             assert found is not None and found["id"] == order["id"], sc["id"]
 
 
+@pytest.mark.parametrize("sc", ALL, ids=lambda sc: sc["id"])
+def test_a_scenario_that_expects_an_l3_skill_expects_its_human_approval(sc):
+    """RE-01 y DE-04 esperaban la devolución o el cambio de dirección ya hechos, pero
+    `start_return` y `update_shipping_address` son L3: quedan pendientes de aprobación."""
+    import apps.api.skills  # noqa: F401
+    from apps.api.skills.registry import SkillRegistry
+
+    assertions = sc.get("assertions", {})
+    l3 = [s for s in assertions.get("skills_called", []) if SkillRegistry.get(s).tier == "L3"]
+    if l3:
+        assert assertions.get("must_have_pending_approval") is True, f"{sc['id']}: {l3}"
+        assert assertions.get("outcome_is") in (None, "escalated"), sc["id"]
+
+
 async def test_seed_brings_an_existing_scenario_back_to_the_code(monkeypatch):
     """#358: CE-06 corría con el fixture guardado en staging, anterior al del código."""
     from types import SimpleNamespace

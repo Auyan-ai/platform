@@ -74,3 +74,30 @@ class TestFormatForSimJudge:
         )
         text = format_for_sim_judge(t)
         assert "Sé amable" in text
+
+    def test_the_judge_sees_why_a_skill_did_not_run(self):
+        """RE-01: el judge leía `rejected_by_permissions` sin motivo y tomaba la puerta L3
+        (aprobación humana pendiente) por una devolución rechazada."""
+        from datetime import UTC, datetime
+
+        from apps.api.db.models import SkillAuditLog
+
+        def entry(slug: str, tier: str, error: str) -> SkillAuditLog:
+            return SkillAuditLog(
+                id=uuid4(), tenant_id=uuid4(), conversation_id=uuid4(), aop_slug="returns",
+                aop_version=1, skill_slug=slug, skill_tier=tier, inputs_redacted={},
+                inputs_hash="h", status="rejected_by_permissions", error_message=error,
+                created_at=datetime.now(UTC),
+            )
+
+        t = SimulatorTranscript(scenario=_make_scenario(), profile_name="cooperativo")
+        t.skill_log = [
+            entry("shopify.start_return", "L3", "awaiting_human_approval"),
+            entry("shopify.get_order_status", "L1", "identity_required"),
+        ]
+        lines = format_for_sim_judge(t).splitlines()
+        assert (
+            "- `shopify.start_return` (L3) → pendiente de aprobación humana: la puerta L3 "
+            "del producto, no un rechazo"
+        ) in lines
+        assert "- `shopify.get_order_status` (L1) → rejected_by_permissions: identity_required" in lines
