@@ -116,8 +116,8 @@ async def test_message_metadata_includes_telemetry(fake_deps, monkeypatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_empty_response_sets_error(fake_deps, monkeypatch) -> None:
-    """reason debió validar esto; defense-in-depth en respond."""
+async def test_blank_response_escalates_as_empty_reply(fake_deps, monkeypatch) -> None:
+    """reason debió validar esto; respond nunca persiste ni entrega un texto en blanco."""
     insert_mock = AsyncMock()
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
     monkeypatch.setattr(f"{MODULE}.insert_message", insert_mock)
@@ -126,7 +126,7 @@ async def test_empty_response_sets_error(fake_deps, monkeypatch) -> None:
 
     out = await node(_state(agent_response="   "))
 
-    assert out["error"] == "respond_without_text"
+    assert out == {"decision": "escalate", "escalation_reason": "empty_reply", "agent_response": None}
     insert_mock.assert_not_called()
 
 
@@ -285,5 +285,5 @@ async def test_reply_that_is_only_emoji_is_treated_as_empty(fake_deps, monkeypat
         fake_deps, monkeypatch, _state(channel="chat", agent_response="😊")
     )
 
-    assert out["error"] == "respond_without_text"
+    assert out == {"decision": "escalate", "escalation_reason": "empty_reply", "agent_response": None}
     insert_mock.assert_not_called()

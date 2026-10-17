@@ -78,3 +78,44 @@ class TestRunnerEvidenceHelpers:
             {"pending_approval_inputs": {"shopify.cancel_order": {}}, "identity_attempts": 2},
         )
         assert both == ({"shopify.cancel_order": {"refund_mode": "manual"}}, 2)
+
+
+class TestSimulatedChatReply:
+    """#350: el simulador registra lo que recibe el cliente del chat, nunca un texto vacío."""
+
+    def test_low_confidence_escalation_gets_the_chat_ack(self) -> None:
+        from apps.api.simulator.runner import simulated_chat_reply
+
+        state: Any = {
+            "decision": "escalate",
+            "agent_response": None,
+            "escalation_reason": "low_confidence: 0.50 < threshold 0.65",
+        }
+        assert simulated_chat_reply(state) == (
+            "Le hemos pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
+        )
+
+    def test_agent_text_is_the_reply(self) -> None:
+        from apps.api.simulator.runner import simulated_chat_reply
+
+        state: Any = {"decision": "respond", "agent_response": "Tu pedido sale hoy."}
+        assert simulated_chat_reply(state) == "Tu pedido sale hoy."
+
+    def test_errored_turn_has_no_reply_even_with_a_draft(self) -> None:
+        from apps.api.simulator.runner import simulated_chat_reply
+
+        state: Any = {"decision": "respond", "agent_response": "borrador", "error": "reason: boom"}
+        assert simulated_chat_reply(state) == ""
+
+    def test_errored_turn_already_escalated_gets_the_chat_ack(self) -> None:
+        from apps.api.simulator.runner import simulated_chat_reply
+
+        state: Any = {
+            "agent_response": "borrador",
+            "error": "llm_provider_unavailable",
+            "escalation_id": "esc-1",
+            "escalation_reason": "llm_provider_unavailable",
+        }
+        assert simulated_chat_reply(state) == (
+            "Le hemos pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
+        )

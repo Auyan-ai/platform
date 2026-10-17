@@ -9,12 +9,13 @@ crea una nueva — devuelve la existente y persiste igualmente el mensaje del ag
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._guard import guarded
-from apps.api.agents.nodes._reply import finalize_agent_reply
+from apps.api.agents.nodes._reply import EMPTY_REPLY, finalize_agent_reply
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import (
@@ -29,6 +30,8 @@ from apps.api.services.approval_reply import (
     gate_message,
     waiting_message,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def make_escalate_node(
@@ -65,7 +68,17 @@ def make_escalate_node(
                 agent_response = gate_message(skill_slug)
         else:
             agent_response = state.get("agent_response") or ""
-        agent_response, surface = finalize_agent_reply(state, agent_response)
+        draft = agent_response
+        agent_response, surface = finalize_agent_reply(state, draft)
+        if draft.strip() and not agent_response.strip():
+            logger.error(
+                EMPTY_REPLY,
+                extra={
+                    "tenant_id": state["tenant_id"],
+                    "conversation_id": state["conversation_id"],
+                    "escalation_reason": reason,
+                },
+            )
 
         metadata: dict = {
             "confidence": state.get("confidence"),
@@ -98,6 +111,9 @@ def make_escalate_node(
             result: dict = {
                 "escalation_id": str(esc.id),
                 "decision": "escalate",
+                # Pisa el borrador crudo: lo que el caller entrega es el texto
+                # normalizado que se guardó, o nada.
+                "agent_response": None,
                 # Solo al crear: el caller empuja la nota + asignación al helpdesk
                 # una única vez (no en cada re-escalado de la misma conversación).
                 "escalation_created": existing is None,

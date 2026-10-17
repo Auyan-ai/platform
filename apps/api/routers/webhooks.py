@@ -42,11 +42,10 @@ from apps.api.db.queries import (
 )
 from apps.api.services.agent_resolution import finalize_agent_resolution
 from apps.api.services.conversations import reopen_if_resolved
-from apps.api.services.handoff import is_approval_gate
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
 from apps.api.services.identity import EVIDENCE_KEY, build_identity_evidence
 from apps.api.services.identity_guest import PROVIDED_CONTACT_KEY, build_provided_contact
-from apps.api.services.inbound_media import fallback_message
+from apps.api.services.inbound_media import chat_escalation_ack
 from apps.api.services.message_cap import enforce_message_cap
 from apps.api.services.rate_limit import enforce_rate_limit
 from apps.api.services.usage import UsageRecorder, check_tenant_budget
@@ -332,19 +331,18 @@ async def inbound(
 
     # Chat: si el turno escaló y no le llegó texto al cliente (p. ej. low_confidence),
     # el body lleva el acuse fijo `escalation_ack` y queda guardado como mensaje outbound.
-    ack_text: str | None = None
-    ack_message_id: str | None = None
-    if (
-        payload.channel == "chat"
-        and (
-            outcome.decision == "escalate"
-            # Fallo del sistema ya escalado (p. ej. llm_provider_unavailable): tampoco queda mudo.
-            or (outcome.decision == "error" and outcome.escalation_id)
+    ack_text = (
+        chat_escalation_ack(
+            outcome.decision,
+            outcome.response_text,
+            outcome.escalation_reason,
+            escalated=outcome.escalation_id is not None,
         )
-        and not outcome.response_text
-        and not is_approval_gate(outcome.escalation_reason)
-    ):
-        ack_text = fallback_message("escalation_ack", None)
+        if payload.channel == "chat"
+        else None
+    )
+    ack_message_id: str | None = None
+    if ack_text is not None:
         try:
             async with tenant_scope(tenant.id) as conn:
                 ack_msg = await insert_message(

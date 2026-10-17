@@ -30,6 +30,7 @@ from apps.api.db.inbound_jobs import get_inbound_messages, update_inbound_messag
 from apps.api.integrations.base import StoredAttachment
 from apps.api.integrations.transcription import get_transcriber, ogg_duration_seconds
 from apps.api.services.channel_routing import load_delivery_client
+from apps.api.services.handoff import is_approval_gate
 from apps.api.services.media_storage import store_attachment
 
 if TYPE_CHECKING:
@@ -90,6 +91,23 @@ def fallback_message(kind: FallbackKind, config: dict[str, Any] | None) -> str:
     if isinstance(custom, str) and custom.strip():
         return custom.strip()
     return DEFAULT_FALLBACK_MESSAGES.get(kind, DEFAULT_FALLBACK_MESSAGES["unsupported"])
+
+
+def chat_escalation_ack(
+    decision: str | None,
+    response_text: str | None,
+    escalation_reason: str | None,
+    *,
+    escalated: bool,
+) -> str | None:
+    """Acuse fijo del chat cuando el turno escaló sin texto para el cliente (p. ej.
+    low_confidence, empty_reply, o un fallo del sistema ya escalado como
+    llm_provider_unavailable). La puerta L3 no lo lleva: la IA sigue atendiendo y ya
+    respondió."""
+    escalated_turn = decision == "escalate" or (decision == "error" and escalated)
+    if not escalated_turn or response_text or is_approval_gate(escalation_reason):
+        return None
+    return fallback_message("escalation_ack", None)
 
 
 def unseen_media_marker(images: int, files: int) -> str:

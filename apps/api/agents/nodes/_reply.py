@@ -11,6 +11,9 @@ from apps.api.agents.state import AgentState
 from apps.api.services.reply_format import email_signature, finalize_reply
 from apps.api.services.writing_surface import Surface, resolve_surface
 
+# Razón de escalado y evento de log cuando el texto queda vacío al normalizarlo (#350).
+EMPTY_REPLY = "empty_reply"
+
 
 def surface_of(state: AgentState) -> Surface:
     return resolve_surface(state.get("channel") or "chat", state.get("conversation_history"))
