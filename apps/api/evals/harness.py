@@ -38,6 +38,25 @@ logger = logging.getLogger(__name__)
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 PASS_RATE_GATE = 0.80
 
+# Tipos de aserción deterministas: no llaman al LLM ni a la red. Es la lista explícita
+# que decide qué fixtures entran en la capa estática (`python -m apps.api.evals.run
+# --static`, bloqueante en CI). Un tipo nuevo que necesite el LLM NO se añade aquí; un
+# fixture con un tipo fuera de esta lista hace fallar la corrida estática en alto.
+STATIC_ASSERTION_KINDS: frozenset[str] = frozenset(
+    {
+        "compile_ok",
+        "prompt_contains",
+        "prompt_not_contains",
+        "prompt_min_length",
+        "skills_include",
+        "skills_not_include",
+        "max_iterations_gte",
+        "confidence_threshold_between",
+        "tool_count_matches_skills",
+        "frontmatter_has_key",
+    }
+)
+
 
 # ─── Modelos de datos ─────────────────────────────────────────────────────────
 
@@ -53,6 +72,11 @@ class EvalFixture:
     name: str
     description: str = ""
     assertions: list[Assertion] = field(default_factory=list)
+
+
+def non_static_kinds(fixture: EvalFixture) -> list[str]:
+    """Tipos de aserción del fixture que no están declarados como estáticos."""
+    return sorted({a.kind for a in fixture.assertions} - STATIC_ASSERTION_KINDS)
 
 
 @dataclass
