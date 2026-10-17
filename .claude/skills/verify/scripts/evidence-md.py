@@ -147,7 +147,7 @@ def compose_simulation(run_ids: list[str]) -> str:
     runs = [sim_run(r) for r in run_ids]
     tenants = sorted({info["tenant"] for info, _ in runs})
     out = [f"**Staging, tenant `{', '.join(tenants)}`, commit `{git('rev-parse', '--short', 'HEAD')}`.** "
-           "Corridas de `run_simulator` (conversaciones `is_simulation`), sin clientes reales.", "",
+           "Corridas del simulador (conversaciones `is_simulation`), sin clientes reales.", "",
            "| Escenario | Estado | Judge | Terminación | Turnos | Mensajes in/out | Coste | Traza LangSmith |",
            "|---|---|---|---|---|---|---|---|"]
     details = []
