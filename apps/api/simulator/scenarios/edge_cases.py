@@ -85,7 +85,7 @@ SCENARIOS: list[dict[str, Any]] = [
                 "get_order_by_name": {
                     "found": True,
                     "id": 4001,
-                    "order_number": "#1500",
+                    "name": "#1500",
                     "financial_status": "paid",
                     "fulfillment_status": "unfulfilled",
                     "created_at": days_ago(1),
@@ -122,7 +122,7 @@ SCENARIOS: list[dict[str, Any]] = [
                 "get_order_by_name": {
                     "found": True,
                     "id": 4001,
-                    "order_number": "#1500",
+                    "name": "#1500",
                     "financial_status": "paid",
                     "fulfillment_status": "unfulfilled",
                     "created_at": days_ago(1),

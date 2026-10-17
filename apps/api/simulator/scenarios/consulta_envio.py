@@ -11,7 +11,7 @@ _ORDER_1234_WITH_TRACKING: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
         "id": 1001,
-        "order_number": "#1234",
+        "name": "#1234",
         "financial_status": "paid",
         "fulfillment_status": "fulfilled",
         "fulfillments": [
@@ -30,7 +30,7 @@ _ORDER_1234_NO_TRACKING: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
         "id": 1001,
-        "order_number": "#1234",
+        "name": "#1234",
         "financial_status": "paid",
         "fulfillment_status": "unfulfilled",
         "fulfillments": [],
@@ -43,7 +43,7 @@ _ORDER_BY_EMAIL: dict[str, Any] = {
     "search_orders_by_email": [
         {
             "id": 1001,
-            "order_number": "#1234",
+            "name": "#1234",
             "fulfillment_status": "fulfilled",
             "created_at": days_ago(5),
         }
@@ -51,7 +51,7 @@ _ORDER_BY_EMAIL: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
         "id": 1001,
-        "order_number": "#1234",
+        "name": "#1234",
         "fulfillment_status": "fulfilled",
         "fulfillments": [
             {
@@ -63,18 +63,23 @@ _ORDER_BY_EMAIL: dict[str, Any] = {
     },
 }
 
+# Shopify devuelve en la lista el pedido completo: el enviado lleva su tracking.
 _TWO_ORDERS: dict[str, Any] = {
     "search_orders_by_email": [
         {
             "id": 1001,
-            "order_number": "#1234",
+            "name": "#1234",
+            "financial_status": "paid",
             "fulfillment_status": "fulfilled",
+            "fulfillments": _ORDER_1234_WITH_TRACKING["get_order_by_name"]["fulfillments"],
             "created_at": days_ago(5),
         },
         {
             "id": 1002,
-            "order_number": "#1235",
+            "name": "#1235",
+            "financial_status": "paid",
             "fulfillment_status": "unfulfilled",
+            "fulfillments": [],
             "created_at": days_ago(3),
         },
     ]

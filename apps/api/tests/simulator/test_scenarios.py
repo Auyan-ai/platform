@@ -161,3 +161,28 @@ async def test_every_listed_order_has_its_shopify_name_and_resolves_by_it(sc):
             assert str(order.get("name", "")).startswith("#"), f"{sc['id']}: {order}"
             found = await mock.get_order_by_name(None, order["name"])
             assert found is not None and found["id"] == order["id"], sc["id"]
+
+
+async def test_seed_brings_an_existing_scenario_back_to_the_code(monkeypatch):
+    """#358: CE-06 corría con el fixture guardado en staging, anterior al del código."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid4
+
+    from apps.api.simulator import scenarios
+
+    ce06 = next(sc for sc in ALL if sc["id"] == "CE-06")
+    stale = SimpleNamespace(id=uuid4(), user_profile_id=uuid4())
+    conn = MagicMock()
+    conn.fetch = AsyncMock(return_value=[{"name": sc["name"]} for sc in ALL])
+    update = AsyncMock()
+    monkeypatch.setattr(scenarios, "get_user_profile_by_name", AsyncMock(return_value=stale))
+    monkeypatch.setattr(scenarios, "get_scenario_by_name", AsyncMock(return_value=stale))
+    monkeypatch.setattr(scenarios, "update_user_profile", AsyncMock())
+    monkeypatch.setattr(scenarios, "update_simulation_scenario", update)
+
+    result = await scenarios.seed_scenarios(conn, uuid4())
+
+    assert result == {"profiles": 0, "scenarios": 0, "updated": len(ALL)}
+    fixtures = [c.kwargs["mock_fixtures"] for c in update.await_args_list]
+    assert ce06["mock_fixtures"] in fixtures

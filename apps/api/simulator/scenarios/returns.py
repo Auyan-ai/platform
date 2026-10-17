@@ -10,7 +10,7 @@ _ORDER_IN_WINDOW: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
         "id": 2001,
-        "order_number": "#1234",
+        "name": "#1234",
         "financial_status": "paid",
         "fulfillment_status": "fulfilled",
         "fulfillments": [
@@ -38,7 +38,7 @@ _ORDER_OUT_OF_WINDOW: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
         "id": 2001,
-        "order_number": "#1234",
+        "name": "#1234",
         "financial_status": "paid",
         "fulfillment_status": "fulfilled",
         "fulfillments": [{"tracking_number": "1Z999AA", "tracking_url": "https://"}],
@@ -59,7 +59,7 @@ _ORDER_BROKEN_PRODUCT: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
         "id": 2001,
-        "order_number": "#1234",
+        "name": "#1234",
         "financial_status": "paid",
         "fulfillment_status": "fulfilled",
         "created_at": days_ago(10),
@@ -77,7 +77,7 @@ _ORDER_DIGITAL: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
         "id": 2002,
-        "order_number": "#1235",
+        "name": "#1235",
         "financial_status": "paid",
         "fulfillment_status": "fulfilled",
         "created_at": days_ago(5),

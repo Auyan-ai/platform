@@ -13,6 +13,8 @@ Flujo por run:
 El grafo se invoca DIRECTAMENTE (no por AgentService) para evitar:
   - Trace de Langfuse automático (usamos langfuse_trace_id manual).
   - Envío al helpdesk (respond/escalate no tocan canal externo, ya validado).
+Los nodos respond/escalate guardan la respuesta en `messages`, como en producción; el
+runner solo guarda los mensajes del cliente simulado y el acuse fijo de escalado.
 
 Semáforo PROCESS-wide: 10 simulaciones concurrentes máximo.
 """
@@ -563,7 +565,9 @@ async def _execute_loop(
             )
             return "error"
 
-        await _persist_agent_message(tenant_id, acc.conversation_id, agent_response)
+        ack = _chat_ack(final_state)
+        if ack is not None:
+            await _persist_escalation_ack(tenant_id, acc.conversation_id, ack)
         acc.transcript.turns.append(
             TranscriptTurn(
                 role="agent",
@@ -724,9 +728,11 @@ async def _persist_customer_message(
         await update_conversation_last_message(conn, tenant_id, conversation_id)
 
 
-async def _persist_agent_message(
+async def _persist_escalation_ack(
     tenant_id: UUID, conversation_id: UUID, content: str
 ) -> None:
+    """El grafo ya guardó la respuesta del agente; el acuse fijo de escalado lo guarda
+    quien entrega el turno, igual que `POST /webhooks/inbound`."""
     async with tenant_scope(tenant_id) as conn:
         await insert_message(
             conn,
@@ -735,6 +741,7 @@ async def _persist_agent_message(
             role="agent_ai",
             direction="outbound",
             content=content,
+            metadata={"fixed_message": "escalation_ack"},
         )
         await update_conversation_last_message(conn, tenant_id, conversation_id)
 
@@ -802,15 +809,18 @@ def simulated_chat_reply(final_state: AgentState) -> str:
     """Lo que recibe el cliente en el chat tras el turno, igual que en `POST
     /webhooks/inbound`: el texto del agente o el acuse fijo de escalado. Un turno con
     error nunca entrega el borrador (`AgentService`)."""
+    text = None if final_state.get("error") else final_state.get("agent_response")
+    return _chat_ack(final_state) or text or ""
+
+
+def _chat_ack(final_state: AgentState) -> str | None:
     error = final_state.get("error")
-    text = None if error else final_state.get("agent_response")
-    ack = chat_escalation_ack(
+    return chat_escalation_ack(
         "error" if error else final_state.get("decision"),
-        text,
+        None if error else final_state.get("agent_response"),
         final_state.get("escalation_reason"),
         escalated=final_state.get("escalation_id") is not None,
     )
-    return ack or text or ""
 
 
 def _last_agent_message(transcript: SimulatorTranscript) -> str:

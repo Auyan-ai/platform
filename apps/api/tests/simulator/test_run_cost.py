@@ -103,7 +103,7 @@ def finalize(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         runner, "_setup_run", AsyncMock(return_value=(uuid4(), uuid4(), uuid4()))
     )
     monkeypatch.setattr(runner, "_persist_customer_message", AsyncMock())
-    monkeypatch.setattr(runner, "_persist_agent_message", AsyncMock())
+    monkeypatch.setattr(runner, "_persist_escalation_ack", AsyncMock())
     monkeypatch.setattr(runner, "_get_skill_log", AsyncMock(return_value=[]))
     monkeypatch.setattr(runner, "_pending_approval_present", AsyncMock(return_value=False))
     monkeypatch.setattr(runner, "finalize_simulation_run", finalize_mock)

@@ -19,7 +19,10 @@ Un fixture con la clave `_error` hace que el método lance `MockShopifyError`,
 para probar que el agente maneja fallos de integración correctamente.
 
 Defaults cuando no hay fixture para un método:
-- lecturas que devuelven un objeto opcional → None ("no encontrado")
+- lecturas que devuelven un objeto opcional → None ("no encontrado"). Sin fixture
+  propia, `get_order_by_name` y `get_order` devuelven el pedido con ese nombre o id de
+  las listas del escenario (`search_orders_by_email`, `search_orders_by_phone`,
+  `get_orders_by_customer_id`): en Shopify un pedido listado también se encuentra suelto.
 - lecturas que devuelven listas → []
 - escrituras (cancel/return/update/note/tag) → dict de éxito genérico
 - `get_shop_currency` → None (la skill de productos falla: la moneda nunca se supone)
@@ -35,6 +38,7 @@ Defaults cuando no hay fixture para un método:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -45,6 +49,16 @@ from apps.api.integrations.shopify import (
     RefundableBalance,
     order_snapshot_from_graphql,
 )
+
+_ORDER_LIST_METHODS = (
+    "search_orders_by_email",
+    "search_orders_by_phone",
+    "get_orders_by_customer_id",
+)
+
+
+def _order_number(ref: Any) -> str:
+    return str(ref or "").strip().lstrip("#")
 
 
 class MockShopifyError(Exception):
@@ -77,10 +91,25 @@ class MockShopifyAdapter:
             raise MockShopifyError(data["_error"])
         return data
 
+    def _listed_order(
+        self, matches: Callable[[dict[str, Any]], bool]
+    ) -> dict[str, Any] | None:
+        for method in _ORDER_LIST_METHODS:
+            orders = self.fixtures.get(method)
+            if not isinstance(orders, list):
+                continue
+            for order in orders:
+                if isinstance(order, dict) and matches(order):
+                    return order
+        return None
+
     # ── CommerceProvider protocol ──────────────────────────────────────────────
 
     async def get_order(self, ctx: Any, order_id: str) -> dict[str, Any] | None:
-        return self._resolve("get_order", None)
+        if "get_order" in self.fixtures:
+            return self._resolve("get_order", None)
+        wanted = str(order_id).strip()
+        return self._listed_order(lambda order: str(order.get("id")) == wanted)
 
     async def search_orders_by_email(
         self, ctx: Any, email: str, *, limit: int = 10
@@ -97,7 +126,12 @@ class MockShopifyAdapter:
     async def get_order_by_name(
         self, ctx: Any, order_name: str
     ) -> dict[str, Any] | None:
-        return self._resolve("get_order_by_name", None)
+        if "get_order_by_name" in self.fixtures:
+            return self._resolve("get_order_by_name", None)
+        wanted = _order_number(order_name)
+        return self._listed_order(
+            lambda order: _order_number(order.get("name") or order.get("order_number")) == wanted
+        )
 
     async def get_orders_by_customer_id(
         self, ctx: Any, customer_id: int, *, limit: int = 10

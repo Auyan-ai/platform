@@ -86,7 +86,7 @@ _ORDER_PRE_ENVIO: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
         "id": 4001,
-        "order_number": "#1500",
+        "name": "#1500",
         "financial_status": "paid",
         "fulfillment_status": "unfulfilled",
         "shipping_address": {
@@ -101,7 +101,7 @@ _ORDER_PRE_ENVIO: dict[str, Any] = {
     },
     "update_shipping_address": {
         "id": 4001,
-        "order_number": "#1500",
+        "name": "#1500",
         "shipping_address": {
             "address1": "Calle Nueva 456",
             "city": "Madrid",

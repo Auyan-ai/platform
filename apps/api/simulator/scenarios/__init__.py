@@ -2,7 +2,7 @@
 
 `seed_scenarios(conn, tenant_id)` inserta o actualiza los scenarios base
 para un tenant dado. Es idempotente: si el scenario ya existe (mismo `name`),
-no lo duplica.
+no lo duplica y lo deja igual que en el código.
 """
 
 from __future__ import annotations
@@ -43,14 +43,12 @@ def capabilities_by_name() -> dict[str, list[str]]:
     return {sc["name"]: list(sc.get("capabilities", [])) for sc in ALL_SCENARIOS}
 
 
-async def seed_scenarios(
-    conn: asyncpg.Connection, tenant_id: UUID, *, reseed: bool = False
-) -> dict[str, int]:
+async def seed_scenarios(conn: asyncpg.Connection, tenant_id: UUID) -> dict[str, int]:
     """Inserta profiles y scenarios base para el tenant. Idempotente por nombre.
 
-    Con reseed=True, actualiza los campos mutables y el profile específico del
-    scenario, para que cambios en goal/initial_message/persona no queden viejos
-    en la DB.
+    Un scenario que ya existe se actualiza siempre (campos mutables y su profile): el
+    código es la fuente de verdad y las fechas de los fixtures (`days_ago`) se calculan
+    al sembrar, así que una fila vieja tendría fixtures y plazos caducados.
 
     Retorna {"profiles": N, "scenarios": N, "updated": N} con los counts.
     """
@@ -88,31 +86,30 @@ async def seed_scenarios(
 
     for sc in ALL_SCENARIOS:
         if sc["name"] in existing_names:
-            if reseed:
-                existing_sc = await get_scenario_by_name(conn, tenant_id, sc["name"])
-                if existing_sc is not None:
-                    await update_user_profile(
-                        conn,
-                        tenant_id=tenant_id,
-                        profile_id=existing_sc.user_profile_id,
-                        persona=PERSONAS[sc["profile"]],
-                        goal=sc["goal"],
-                        initial_message=sc["initial_message"],
-                        language="es",
-                    )
-                    await update_simulation_scenario(
-                        conn,
-                        tenant_id=tenant_id,
-                        scenario_id=existing_sc.id,
-                        aop_slug=sc["aop_slug"],
-                        expected_outcome=sc["expected_outcome"],
-                        description=sc.get("description"),
-                        mock_fixtures=sc.get("mock_fixtures", {}),
-                        assertions=sc.get("assertions", {}),
-                        max_turns=sc.get("max_turns", 8),
-                    )
-                    scenarios_updated += 1
-                    logger.info("sim_seed_scenario updated id=%s tenant=%s", sc["id"], tenant_id)
+            existing_sc = await get_scenario_by_name(conn, tenant_id, sc["name"])
+            if existing_sc is not None:
+                await update_user_profile(
+                    conn,
+                    tenant_id=tenant_id,
+                    profile_id=existing_sc.user_profile_id,
+                    persona=PERSONAS[sc["profile"]],
+                    goal=sc["goal"],
+                    initial_message=sc["initial_message"],
+                    language="es",
+                )
+                await update_simulation_scenario(
+                    conn,
+                    tenant_id=tenant_id,
+                    scenario_id=existing_sc.id,
+                    aop_slug=sc["aop_slug"],
+                    expected_outcome=sc["expected_outcome"],
+                    description=sc.get("description"),
+                    mock_fixtures=sc.get("mock_fixtures", {}),
+                    assertions=sc.get("assertions", {}),
+                    max_turns=sc.get("max_turns", 8),
+                )
+                scenarios_updated += 1
+                logger.info("sim_seed_scenario updated id=%s tenant=%s", sc["id"], tenant_id)
             continue
 
         profile_key = sc["profile"]
