@@ -143,3 +143,21 @@ class TestCapabilityCatalogLinks:
             if sc["mock_fixtures"].get("identity") == "chat":
                 order = sc["mock_fixtures"]["shopify"]["get_order_by_name"]
                 assert order["email"], f"{sc['id']}: el pedido debe llevar su propio email"
+
+
+_ORDER_LIST_METHODS = ("search_orders_by_email", "search_orders_by_phone", "get_orders_by_customer_id")
+
+
+@pytest.mark.parametrize("sc", ALL, ids=lambda sc: sc["id"])
+async def test_every_listed_order_has_its_shopify_name_and_resolves_by_it(sc):
+    """`list_my_orders` muestra el `name` y el gate de identidad busca el pedido por él."""
+    from apps.api.simulator.mocks import MockShopifyAdapter
+
+    shopify = sc["mock_fixtures"].get("shopify", {})
+    mock = MockShopifyAdapter(shopify)
+    for method in _ORDER_LIST_METHODS:
+        orders = shopify.get(method)
+        for order in orders if isinstance(orders, list) else []:
+            assert str(order.get("name", "")).startswith("#"), f"{sc['id']}: {order}"
+            found = await mock.get_order_by_name(None, order["name"])
+            assert found is not None and found["id"] == order["id"], sc["id"]
