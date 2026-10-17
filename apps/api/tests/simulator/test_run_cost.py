@@ -127,3 +127,56 @@ async def test_run_cost_sums_agent_cost_and_cached_simulator_and_judge_calls(
     assert kwargs["tokens_simulator"] == 200 + 1500 + 40
     assert kwargs["tokens_judge"] == 3000 + 1200 + 300
     assert kwargs["judge_eval"]["input_tokens"] == 4200
+
+
+async def test_run_leaves_one_langsmith_trace_with_simulation_metadata_and_children(
+    finalize: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apps.api.integrations.langsmith_client import LangSmithClient
+    from apps.api.integrations.observability import ObservabilityClient
+
+    save_trace_id = AsyncMock()
+    monkeypatch.setattr(runner, "set_simulation_run_trace_id", save_trace_id)
+    inner = MagicMock()
+    observability = ObservabilityClient(primary=LangSmithClient(inner, project_name="auyan-test"))
+
+    await runner.run_simulation(
+        uuid4(), TENANT, anthropic=_anthropic(), graph=_graph(), observability=observability
+    )
+
+    creates = [c.kwargs for c in inner.create_run.call_args_list]
+    root = next(c for c in creates if c["name"] == "simulation_run")
+    meta = root["extra"]["metadata"]
+    assert meta["simulation"] is True
+    assert meta["scenario_name"] == "CE-01"
+    assert set(meta) >= {"simulation_run_id", "scenario_id", "capabilities", "tenant_id"}
+    assert "simulation" in root["tags"]
+    assert root["trace_id"] == root["id"]
+
+    turn = next(c for c in creates if c["name"] == "agent_conversation")
+    assert turn["parent_run_id"] == root["id"]
+    assert turn["trace_id"] == root["id"]
+    assert turn["extra"]["metadata"]["simulation_run_id"] == meta["simulation_run_id"]
+
+    llm_runs = {c["name"]: c for c in creates if c["run_type"] == "llm"}
+    assert set(llm_runs) >= {"customer_simulator", "simulation_judge", "agent_model_call"}
+    simulator_usage = llm_runs["customer_simulator"]["extra"]["metadata"]["usage_metadata"]
+    assert simulator_usage["input_tokens"] == 200 + 1500
+    assert simulator_usage["output_tokens"] == 40
+    judge_usage = llm_runs["simulation_judge"]["extra"]["metadata"]["usage_metadata"]
+    assert judge_usage["input_tokens"] == 3000 + 1200
+    assert judge_usage["total_cost"] == pytest.approx(0.018)
+    for child in llm_runs.values():
+        assert child["trace_id"] == root["id"]
+
+    turn_update = next(
+        c.kwargs for c in inner.update_run.call_args_list if c.args[0] == turn["id"]
+    )
+    assert turn_update["parent_run_id"] == root["id"]
+
+    final = next(c.kwargs for c in inner.update_run.call_args_list if c.args[0] == root["id"])
+    assert final["extra"]["metadata"]["cost_usd"] == pytest.approx(0.03055)
+    assert final["extra"]["metadata"]["simulation"] is True
+
+    _conn, run_db_id, tenant_id, trace_id = save_trace_id.call_args.args
+    assert (str(run_db_id), tenant_id, trace_id) == (meta["simulation_run_id"], TENANT, root["id"])

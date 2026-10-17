@@ -17,6 +17,7 @@ from typing import Any
 
 from apps.api.integrations.langfuse_client import LangfuseClient
 from apps.api.integrations.langsmith_client import LangSmithClient, LangSmithTrace
+from apps.api.integrations.pricing import LLMUsage
 from apps.api.services.pii import mask_free_text_pii, mask_pii_recursive
 
 
@@ -55,6 +56,9 @@ class ObservabilityClient:
         end_customer_id: str,
         channel: str,
         input_text: str,
+        parent: LangSmithTrace | None = None,
+        extra_metadata: dict[str, Any] | None = None,
+        extra_tags: list[str] | None = None,
     ) -> ObservabilityTrace:
         input_text = mask_free_text_pii(input_text)
         primary = self._primary.start_conversation_trace(
@@ -63,6 +67,9 @@ class ObservabilityClient:
             end_customer_id=end_customer_id,
             channel=channel,
             input_text=input_text,
+            parent=parent,
+            extra_metadata=extra_metadata,
+            extra_tags=extra_tags,
         )
         mirror = None
         if self._mirror is not None:
@@ -74,6 +81,61 @@ class ObservabilityClient:
                 input_text=input_text,
             )
         return ObservabilityTrace(primary=primary, mirror=mirror)
+
+    def start_simulation_trace(
+        self,
+        *,
+        tenant_id: str,
+        conversation_id: str,
+        metadata: dict[str, Any],
+        tags: list[str],
+        input_text: str,
+    ) -> LangSmithTrace | None:
+        """Raíz de una corrida del simulador (solo en LangSmith, sin espejo)."""
+        return self._primary.start_simulation_trace(
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            metadata=metadata,
+            tags=tags,
+            input_text=mask_free_text_pii(input_text),
+        )
+
+    def finalize_simulation_trace(
+        self,
+        trace: LangSmithTrace | None,
+        *,
+        outputs: dict[str, Any],
+        metadata: dict[str, Any],
+        error: str | None = None,
+    ) -> None:
+        self._primary.finalize_simulation_trace(
+            trace, outputs=mask_pii_recursive(outputs), metadata=metadata, error=error
+        )
+
+    def record_llm_run(
+        self,
+        trace: LangSmithTrace | None,
+        *,
+        name: str,
+        model: str,
+        usage: LLMUsage,
+        cost_usd: float,
+        start_time: datetime,
+        end_time: datetime,
+        outputs: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> None:
+        self._primary.record_llm_run(
+            trace,
+            name=name,
+            model=model,
+            usage=usage,
+            cost_usd=cost_usd,
+            start_time=start_time,
+            end_time=end_time,
+            outputs=mask_pii_recursive(outputs) if outputs else outputs,
+            error=error,
+        )
 
     def finalize_trace(
         self,
