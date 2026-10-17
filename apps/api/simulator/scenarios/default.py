@@ -173,7 +173,9 @@ SCENARIOS: list[dict[str, Any]] = [
         "profile": "cooperativo",
         "goal": (
             "Cambiar la dirección de envío del pedido #1500 a Calle Nueva 456, Madrid, "
-            "28001. Confirma la dirección en cuanto te la lean."
+            "28001. Confirma la dirección en cuanto te la lean. Solo lo has logrado cuando "
+            "el agente te diga que ha solicitado el cambio y que queda pendiente de aprobación; "
+            "confirmar la dirección no basta."
         ),
         "initial_message": (
             "Hola, cometí un error con la dirección del pedido #1500. "
