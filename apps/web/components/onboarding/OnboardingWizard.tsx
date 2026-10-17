@@ -63,7 +63,6 @@ const STEPS: Array<{ id: number; title: string; fields: Field[] }> = [
       { key: 'business_hours', label: 'Horario de atención', placeholder: 'L-V 9:00-18:00' },
       { key: 'support_email', label: 'Email soporte', placeholder: 'soporte@tienda.com' },
       { key: 'support_phone', label: 'Teléfono soporte', placeholder: '+34 900 000 000' },
-      { key: 'return_window_days', label: 'Ventana devolución', placeholder: '30 días' },
     ],
   },
   {

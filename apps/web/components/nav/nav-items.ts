@@ -11,6 +11,7 @@ import {
   ScrollText,
   Sparkles,
   Stethoscope,
+  Undo2,
 } from 'lucide-react'
 
 export type TenantSection =
@@ -18,6 +19,7 @@ export type TenantSection =
   | 'escalations'
   | 'approvals'
   | 'playbook'
+  | 'returns'
   | 'knowledge'
   | 'reports'
   | 'emails'
@@ -72,6 +74,12 @@ export const TENANT_NAV_GROUPS: TenantNavGroup[] = [
         icon: BookOpenText,
         section: 'playbook',
         keywords: ['marca', 'voz', 'reglas'],
+      },
+      {
+        label: 'Devoluciones y cambios',
+        icon: Undo2,
+        section: 'returns',
+        keywords: ['devoluciones', 'cambios', 'politica', 'plazo', 'reembolso', 'returns'],
       },
       {
         label: 'KB Review',

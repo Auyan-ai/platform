@@ -12,6 +12,7 @@ import {
   PanelLeftOpen,
   Settings,
   ShieldCheck,
+  Undo2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -31,6 +32,7 @@ const NAV_GROUPS = [
     items: [
       { label: 'Base de conocimiento', icon: BookOpenText, section: 'knowledge' },
       { label: 'Aprobaciones', icon: ShieldCheck, section: 'approvals' },
+      { label: 'Devoluciones y cambios', icon: Undo2, section: 'returns' },
       { label: 'Puesta en marcha', icon: ClipboardList, section: 'onboarding' },
     ],
   },

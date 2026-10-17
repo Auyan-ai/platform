@@ -249,7 +249,18 @@ export type OutboundEmailJobPayload = Pick<
   max_attempts?: number
 }
 
-async function tenantContextFetch<T>(
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body: unknown,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+export async function tenantContextFetch<T>(
   token: string,
   tenantId: string,
   path: string,
@@ -281,7 +292,11 @@ async function tenantContextFetch<T>(
   }
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: resp.statusText }))
-    throw new Error(err.detail ?? `HTTP ${resp.status}`)
+    throw new ApiError(
+      typeof err.detail === 'string' ? err.detail : `HTTP ${resp.status}`,
+      resp.status,
+      err,
+    )
   }
   return resp.json() as Promise<T>
 }
