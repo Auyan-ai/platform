@@ -15,6 +15,11 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from apps.api.agents.state import AgentState
+from apps.api.integrations.anthropic_client import (
+    PROVIDER_UNAVAILABLE_CATEGORY,
+    LLMProviderUnavailable,
+)
+from apps.api.services.llm_alert import report_provider_unavailable
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +37,17 @@ def guarded(name: str) -> Callable[[NodeFn], NodeFn]:
                 return {}
             try:
                 return await node_fn(state)
+            except LLMProviderUnavailable as exc:
+                # Caída total del proveedor: log + alerta deduplicada; el error lleva la
+                # categoría para que `handle_error` escale con razón explícita.
+                await report_provider_unavailable(
+                    reason=exc.reason,
+                    status_code=exc.status_code,
+                    detail=exc.detail,
+                    tenant_id=state.get("tenant_id"),
+                    conversation_id=state.get("conversation_id"),
+                )
+                return {"error": f"{PROVIDER_UNAVAILABLE_CATEGORY}: {exc.reason} (node {name})"}
             except Exception as exc:
                 logger.exception(
                     "node %s raised %s",

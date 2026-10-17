@@ -65,6 +65,7 @@ from apps.api.services.audit import AuditLogger
 from apps.api.services.cleanup import run_abandoned_cleanup
 from apps.api.services.email_sender import EmailSender
 from apps.api.services.inbound_worker import InboundWorker
+from apps.api.services.llm_alert import LLMProviderAlerter, configure_alerter
 from apps.api.services.reasoning import ReasoningTracker
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -111,6 +112,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     audit_logger = AuditLogger()
     email_sender = EmailSender(build_postmark_adapter(settings))
     app.state.email_sender = email_sender
+    configure_alerter(LLMProviderAlerter(email_sender, settings.alert_email_to))
     deps = AgentDependencies(
         anthropic=anthropic,
         openai=openai,
