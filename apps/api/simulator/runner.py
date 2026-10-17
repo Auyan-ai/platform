@@ -584,6 +584,11 @@ async def _execute_loop(
         # Capturar aop_version si el grafo la setea
         if final_state.get("aop_version") and not hasattr(acc, "_aop_version"):
             acc.transcript.aop_compiled_prompt = final_state.get("aop_workspace")
+        acc.transcript.tenant_facts = final_state.get("tenant_facts") or acc.transcript.tenant_facts
+        for chunk in final_state.get("retrieved_chunks") or []:
+            acc.transcript.knowledge.setdefault(
+                str(chunk.get("document_title", "")), str(chunk.get("content", ""))[:1500]
+            )
 
         if decision == "escalate":
             return "escalated_by_agent"
