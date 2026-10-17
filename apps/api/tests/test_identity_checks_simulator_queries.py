@@ -1,4 +1,4 @@
-"""Queries de `identity_checks` que usa el simulador: contar intentos y borrar los de un run."""
+"""Queries que usa el simulador: intentos de identidad, aprobaciones y la marca de simulación."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 from apps.api.db.identity_checks import count_conversation_attempts, soft_delete_conversation_checks
-from apps.api.db.queries import list_pending_approval_inputs
+from apps.api.db.queries import is_simulation_conversation, list_pending_approval_inputs
 
 
 async def test_count_conversation_attempts_returns_zero_for_no_rows() -> None:
@@ -36,3 +36,15 @@ async def test_list_pending_approval_inputs_keys_by_skill_and_accepts_json_text(
         "shopify.cancel_order": {"refund_mode": "manual"},
         "shopify.start_return": {"order_id": 1},
     }
+
+
+async def test_is_simulation_conversation_is_false_for_missing_or_real() -> None:
+    conn = AsyncMock()
+    conn.fetchval.return_value = None
+    assert await is_simulation_conversation(conn, uuid4(), uuid4()) is False
+    conn.fetchval.return_value = False
+    assert await is_simulation_conversation(conn, uuid4(), uuid4()) is False
+    conn.fetchval.return_value = True
+    assert await is_simulation_conversation(conn, uuid4(), uuid4()) is True
+    # El run soft-deletea su conversación al terminar: la marca debe seguir viéndose.
+    assert "deleted_at" not in conn.fetchval.await_args.args[0]

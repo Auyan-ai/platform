@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import inspect
+import re
 
+import pytest
 from apps.api.db import queries
 
 
@@ -23,3 +25,31 @@ def test_insert_tool_permission_if_missing_never_overwrites() -> None:
     assert "ON CONFLICT (tenant_id, skill_slug) DO NOTHING" in sql
     assert "DO UPDATE" not in sql
     assert "$5::uuid)" in sql
+
+
+_CONVERSATION_ROWS = re.compile(
+    r"\bFROM (conversations|escalations|pending_approvals|messages|intent_classifier_runs)\b"
+    r"(?! sim\b)",
+    re.I,
+)
+
+
+@pytest.mark.parametrize(
+    "reader",
+    [
+        queries.list_pending_approvals,
+        queries.list_admin_review_queue,
+        queries.list_escalations,
+        queries.get_tenant_metrics,
+        queries.get_tenant_resolution_series,
+        queries.get_tenant_insights,
+        queries.build_weekly_report_metrics,
+    ],
+)
+def test_client_views_exclude_simulated_conversations(reader: object) -> None:
+    """#348: la cola de aprobaciones, el inbox, las métricas y el informe del cliente no
+    cuentan nada del simulador. Cada lectura de una tabla de conversación lleva su filtro."""
+    sql = inspect.getsource(reader)
+    reads = _CONVERSATION_ROWS.findall(sql)
+    assert reads
+    assert sql.count("is_simulation") == len(reads), reads

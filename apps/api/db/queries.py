@@ -501,6 +501,19 @@ async def reopen_conversation(
     return int(result.split()[-1]) > 0
 
 
+async def is_simulation_conversation(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> bool:
+    """True si la conversación la creó el simulador, aunque el run ya la haya soft-deleted."""
+    return bool(
+        await conn.fetchval(
+            "SELECT is_simulation FROM conversations WHERE tenant_id = $1 AND id = $2",
+            tenant_id,
+            conversation_id,
+        )
+    )
+
+
 async def soft_delete_conversation(
     conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
 ) -> None:
@@ -1064,6 +1077,10 @@ async def list_escalations(
                triggered_by_message_id, status, assigned_user_id, metadata, created_at
           FROM escalations
          WHERE tenant_id = $1 AND deleted_at IS NULL
+           AND NOT EXISTS (
+               SELECT 1 FROM conversations sim
+                WHERE sim.id = escalations.conversation_id AND sim.is_simulation
+           )
            AND ($2::escalation_status IS NULL OR status = $2::escalation_status)
          ORDER BY created_at DESC
          LIMIT $3 OFFSET $4
@@ -1305,7 +1322,7 @@ async def get_tenant_metrics(conn: asyncpg.Connection, tenant_id: UUID) -> dict[
             COUNT(*) FILTER (WHERE status = 'resolved')       AS resolved_count,
             COUNT(*) FILTER (WHERE status = 'closed')         AS closed_count
           FROM conversations
-         WHERE tenant_id = $1 AND deleted_at IS NULL
+         WHERE tenant_id = $1 AND deleted_at IS NULL AND is_simulation = FALSE
         """,
         tenant_id,
     )
@@ -1341,7 +1358,7 @@ async def get_tenant_resolution_series(
             COUNT(*)::int AS conversations
           FROM conversations c
           JOIN buckets b ON c.created_at::date = b.bucket
-          WHERE c.tenant_id = $1 AND c.deleted_at IS NULL
+          WHERE c.tenant_id = $1 AND c.deleted_at IS NULL AND c.is_simulation = FALSE
           GROUP BY b.key, c.created_at::date
         ),
         resolved_counts AS (
@@ -1352,7 +1369,7 @@ async def get_tenant_resolution_series(
           FROM conversations c
           JOIN buckets b ON c.updated_at::date = b.bucket
           WHERE c.tenant_id = $1
-            AND c.deleted_at IS NULL
+            AND c.deleted_at IS NULL AND c.is_simulation = FALSE
             AND c.status IN ('resolved', 'closed')
           GROUP BY b.key, c.updated_at::date
         ),
@@ -1364,6 +1381,10 @@ async def get_tenant_resolution_series(
           FROM escalations e
           JOIN buckets b ON e.created_at::date = b.bucket
           WHERE e.tenant_id = $1 AND e.deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM conversations sim
+              WHERE sim.id = e.conversation_id AND sim.is_simulation
+            )
           GROUP BY b.key, e.created_at::date
         )
         SELECT
@@ -1399,7 +1420,7 @@ async def get_tenant_resolution_series(
           JOIN buckets b
             ON c.created_at >= b.bucket
            AND c.created_at < b.bucket + INTERVAL '1 hour'
-          WHERE c.tenant_id = $1 AND c.deleted_at IS NULL
+          WHERE c.tenant_id = $1 AND c.deleted_at IS NULL AND c.is_simulation = FALSE
           GROUP BY b.bucket
         ),
         resolved_counts AS (
@@ -1411,7 +1432,7 @@ async def get_tenant_resolution_series(
             ON c.updated_at >= b.bucket
            AND c.updated_at < b.bucket + INTERVAL '1 hour'
           WHERE c.tenant_id = $1
-            AND c.deleted_at IS NULL
+            AND c.deleted_at IS NULL AND c.is_simulation = FALSE
             AND c.status IN ('resolved', 'closed')
           GROUP BY b.bucket
         ),
@@ -1424,6 +1445,10 @@ async def get_tenant_resolution_series(
             ON e.created_at >= b.bucket
            AND e.created_at < b.bucket + INTERVAL '1 hour'
           WHERE e.tenant_id = $1 AND e.deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM conversations sim
+              WHERE sim.id = e.conversation_id AND sim.is_simulation
+            )
           GROUP BY b.bucket
         )
         SELECT
@@ -1501,6 +1526,10 @@ async def get_tenant_insights(
           SELECT i.primary_slug AS label, COUNT(*)::int AS count
           FROM intent_classifier_runs i, bounds b
           WHERE i.tenant_id = $1
+            AND NOT EXISTS (
+              SELECT 1 FROM conversations sim
+              WHERE sim.id = i.conversation_id AND sim.is_simulation
+            )
             AND i.created_at::date >= b.start_date
             AND i.created_at::date <= b.end_date
           GROUP BY i.primary_slug
@@ -1605,8 +1634,13 @@ async def list_admin_review_queue(conn: asyncpg.Connection) -> list[dict[str, An
         ),
         approvals AS (
           SELECT tenant_id, COUNT(*)::int AS pending
-          FROM pending_approvals
+          FROM pending_approvals pa
           WHERE status = 'pending'
+            AND deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM conversations sim
+              WHERE sim.id = pa.conversation_id AND sim.is_simulation
+            )
           GROUP BY tenant_id
         ),
         proposals AS (
@@ -2762,6 +2796,10 @@ async def list_pending_approvals(
              WHERE tenant_id = $1
                AND status = $2
                AND deleted_at IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM conversations sim
+                    WHERE sim.id = pending_approvals.conversation_id AND sim.is_simulation
+               )
              ORDER BY created_at DESC
              LIMIT $3 OFFSET $4
             """,
@@ -2780,6 +2818,10 @@ async def list_pending_approvals(
               FROM pending_approvals
              WHERE tenant_id = $1
                AND deleted_at IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM conversations sim
+                    WHERE sim.id = pending_approvals.conversation_id AND sim.is_simulation
+               )
              ORDER BY created_at DESC
              LIMIT $2 OFFSET $3
             """,
@@ -4902,6 +4944,10 @@ async def build_weekly_report_metrics(
           FROM messages m, bounds b
           WHERE m.tenant_id = $1
             AND m.deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM conversations sim
+              WHERE sim.id = m.conversation_id AND sim.is_simulation
+            )
             AND m.created_at >= b.week_start
             AND m.created_at < b.week_end + INTERVAL '1 day'
         ),
@@ -4921,6 +4967,10 @@ async def build_weekly_report_metrics(
           SELECT e.reason, COUNT(*)::int AS count
           FROM escalations e, bounds b
           WHERE e.tenant_id = $1
+            AND NOT EXISTS (
+              SELECT 1 FROM conversations sim
+              WHERE sim.id = e.conversation_id AND sim.is_simulation
+            )
             AND e.created_at >= b.week_start
             AND e.created_at < b.week_end + INTERVAL '1 day'
           GROUP BY e.reason
@@ -4931,6 +4981,10 @@ async def build_weekly_report_metrics(
           SELECT i.primary_slug, COUNT(*)::int AS count
           FROM intent_classifier_runs i, bounds b
           WHERE i.tenant_id = $1
+            AND NOT EXISTS (
+              SELECT 1 FROM conversations sim
+              WHERE sim.id = i.conversation_id AND sim.is_simulation
+            )
             AND i.created_at >= b.week_start
             AND i.created_at < b.week_end + INTERVAL '1 day'
           GROUP BY i.primary_slug

@@ -97,6 +97,9 @@ def _make_app(
         yield AsyncMock()
 
     monkeypatch.setattr("apps.api.routers.approvals.tenant_scope", _fake_scope)
+    monkeypatch.setattr(
+        "apps.api.routers.approvals.is_simulation_conversation", AsyncMock(return_value=False)
+    )
     # Defaults del cierre post-aprobación; los tests que lo verifican los sobrescriben.
     monkeypatch.setattr(
         "apps.api.routers.approvals.release_approval_escalation", AsyncMock(return_value=True)
@@ -519,6 +522,45 @@ class TestRejectAction:
             deliver_mock.await_args.kwargs["content"]
             == insert_message_mock.await_args.kwargs["content"]
         )
+
+
+class TestSimulatedApproval:
+    """#348: una aprobación nacida en el simulador no se ejecuta ni se resuelve."""
+
+    @pytest.mark.parametrize("action", ["approve", "reject"])
+    def test_refuses_approval_of_simulated_conversation(
+        self, monkeypatch: pytest.MonkeyPatch, action: str
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        skill = MagicMock()
+        skill.return_value.execute = AsyncMock()
+        resolve = AsyncMock()
+        insert_message_mock = AsyncMock()
+        deliver_mock = AsyncMock()
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.get_pending_approval",
+            AsyncMock(return_value=_sample_approval()),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.approvals.is_simulation_conversation", AsyncMock(return_value=True)
+        )
+        monkeypatch.setattr("apps.api.routers.approvals.SkillRegistry.get", lambda slug: skill)
+        monkeypatch.setattr("apps.api.routers.approvals.resolve_pending_approval", resolve)
+        monkeypatch.setattr("apps.api.routers.approvals.insert_message", insert_message_mock)
+        monkeypatch.setattr("apps.api.routers.approvals.deliver_message_to_helpdesk", deliver_mock)
+
+        resp = client.post(
+            f"/approvals/{APPROVAL_ID}/{action}",
+            json={"comment": "desde el panel"},
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+
+        assert resp.status_code == 403
+        assert resp.json()["error"] == "simulated_approval"
+        skill.return_value.execute.assert_not_awaited()
+        resolve.assert_not_awaited()
+        insert_message_mock.assert_not_awaited()
+        deliver_mock.assert_not_awaited()
 
 
 # ----------------------------------------------------------------
