@@ -177,26 +177,44 @@ def test_a_scenario_that_expects_an_l3_skill_expects_its_human_approval(sc):
         assert assertions.get("outcome_is") in (None, "escalated"), sc["id"]
 
 
-async def test_seed_brings_an_existing_scenario_back_to_the_code(monkeypatch):
-    """#358: CE-06 corría con el fixture guardado en staging, anterior al del código."""
-    from types import SimpleNamespace
-    from unittest.mock import AsyncMock, MagicMock
+def _stale_row(name: str):
     from uuid import uuid4
+
+    from apps.api.db.models import SimulationScenario
+
+    return SimulationScenario(
+        id=uuid4(), tenant_id=uuid4(), name=name, aop_slug="consulta_envio",
+        user_profile_id=uuid4(), expected_outcome="viejo", mock_fixtures={"shopify": {}},
+        assertions={}, max_turns=3,
+    )
+
+
+async def test_sync_brings_a_base_scenario_back_to_the_code(monkeypatch):
+    """#358: CE-06 corría con el fixture guardado en staging, anterior al del código."""
+    from unittest.mock import AsyncMock
 
     from apps.api.simulator import scenarios
 
     ce06 = next(sc for sc in ALL if sc["id"] == "CE-06")
-    stale = SimpleNamespace(id=uuid4(), user_profile_id=uuid4())
-    conn = MagicMock()
-    conn.fetch = AsyncMock(return_value=[{"name": sc["name"]} for sc in ALL])
-    update = AsyncMock()
-    monkeypatch.setattr(scenarios, "get_user_profile_by_name", AsyncMock(return_value=stale))
-    monkeypatch.setattr(scenarios, "get_scenario_by_name", AsyncMock(return_value=stale))
+    stale = _stale_row(ce06["name"])
+    update = AsyncMock(side_effect=lambda conn, **kw: stale.model_copy(update=kw))
     monkeypatch.setattr(scenarios, "update_user_profile", AsyncMock())
     monkeypatch.setattr(scenarios, "update_simulation_scenario", update)
 
-    result = await scenarios.seed_scenarios(conn, uuid4())
+    synced = await scenarios.sync_scenario_from_code(object(), stale.tenant_id, stale)
 
-    assert result == {"profiles": 0, "scenarios": 0, "updated": len(ALL)}
-    fixtures = [c.kwargs["mock_fixtures"] for c in update.await_args_list]
-    assert ce06["mock_fixtures"] in fixtures
+    assert synced.mock_fixtures == ce06["mock_fixtures"]
+    assert (synced.aop_slug, synced.max_turns) == ("order_status", 6)
+
+
+async def test_sync_leaves_a_scenario_created_from_the_panel_alone(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from apps.api.simulator import scenarios
+
+    update = AsyncMock()
+    monkeypatch.setattr(scenarios, "update_simulation_scenario", update)
+    custom = _stale_row("Mi escenario del panel")
+
+    assert await scenarios.sync_scenario_from_code(object(), custom.tenant_id, custom) is custom
+    assert update.await_count == 0
