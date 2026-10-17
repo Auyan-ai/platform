@@ -318,7 +318,9 @@ async def test_tenant_failures_pause_guest_then_resume(
     assert resumed.status == "granted"
 
 
-async def test_an_adapter_error_is_not_recorded_and_ends_nothing(store: Store) -> None:
+async def test_an_adapter_error_is_not_recorded_and_reports_the_store_down(
+    store: Store,
+) -> None:
     result = await run_guest_checks(
         AsyncMock(),
         _ctx(_adapter(fail=True)),
@@ -326,8 +328,9 @@ async def test_an_adapter_error_is_not_recorded_and_ends_nothing(store: Store) -
         policy=GuestPolicy(),
         now=NOW,
     )
-    assert result.status == "idle"
-    assert result.reply is None
+    assert result.status == "unavailable"
+    assert result.reply == DEFAULT_MESSAGES["commerce_unavailable"]
+    assert result.error
     assert store.rows == []
 
 

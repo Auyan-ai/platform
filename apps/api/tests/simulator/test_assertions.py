@@ -208,3 +208,24 @@ def test_contacts_grounded_fails_listing_only_masked_contacts() -> None:
     result = _check({"contacts_grounded": True}, unbacked_contacts=["s***@tienda.com"])[0]
     assert not result.passed
     assert "s***@tienda.com" in result.evidence
+
+
+def test_response_contains_looks_at_every_agent_message() -> None:
+    # En varios turnos el último mensaje suele ser la despedida (CE-02, CE-06).
+    said = ["Tu pedido #1234 aún no ha salido: está en preparación.", "¡De nada, un saludo!"]
+    res = _check(
+        {"response_contains": ["preparación"]},
+        last_agent_message=said[-1],
+        agent_messages=said,
+    )
+    assert res[0].passed is True
+
+
+def test_response_not_contains_fails_if_any_agent_message_has_it() -> None:
+    said = ["Hubo un error interno al consultar.", "Ya está resuelto."]
+    res = _check(
+        {"response_not_contains": ["error interno"]},
+        last_agent_message=said[-1],
+        agent_messages=said,
+    )
+    assert res[0].passed is False

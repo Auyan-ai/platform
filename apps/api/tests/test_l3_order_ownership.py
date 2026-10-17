@@ -17,7 +17,15 @@ import pytest
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes import execute_skill
 from apps.api.agents.nodes.execute_skill import make_execute_skill_node
-from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
+from apps.api.services.identity_messages import DEFAULT_MESSAGES
+from apps.api.skills.base import (
+    Skill,
+    SkillContext,
+    SkillInput,
+    SkillOutput,
+    SkillRefusal,
+    SkillTier,
+)
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify.cancel_order import CancelOrder
 from apps.api.tests.identity_support import identity_state, patch_commerce
@@ -76,14 +84,23 @@ class TestOwnershipCheck:
         err = await _error("kenny.medina@ahoracrypto.com", {"text": "x"})
         assert err is not None and err.startswith("identity_required")
 
-    @pytest.mark.parametrize("adapter", [_adapter(order=None), _adapter(fail=True)])
     @pytest.mark.asyncio
-    async def test_unresolvable_order_fails_closed(
-        self, monkeypatch: pytest.MonkeyPatch, adapter: Any
-    ) -> None:
-        patch_commerce(monkeypatch, adapter)
+    async def test_missing_order_fails_closed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        patch_commerce(monkeypatch, _adapter(order=None))
         err = await _error("kenny.medina@ahoracrypto.com", {"order_id": 1429})
         assert err is not None and err.startswith("identity_required")
+
+    @pytest.mark.asyncio
+    async def test_store_down_is_not_an_identity_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Pedirle al cliente más datos no arregla una tienda caída (EX-01): se escala.
+        patch_commerce(monkeypatch, _adapter(fail=True))
+        with pytest.raises(SkillRefusal) as refusal:
+            await _error("kenny.medina@ahoracrypto.com", {"order_id": 1429})
+        assert refusal.value.code == "commerce_unavailable"
+        assert refusal.value.team_reason.startswith("commerce_unavailable:")
+        assert refusal.value.customer_message == DEFAULT_MESSAGES["commerce_unavailable"]
 
 
 class _OrderInput(SkillInput):
@@ -148,6 +165,38 @@ class TestNodeGate:
         last = result["tool_results"][-1]
         assert last["is_error"] is True
         assert last["error"].startswith("identity_required")
+
+    @pytest.mark.asyncio
+    async def test_store_down_escalates_with_fixed_text_and_no_approval(
+        self, fake_deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        patch_commerce(monkeypatch, _adapter(fail=True))
+        create = AsyncMock()
+        monkeypatch.setattr(f"{MODULE}.create_pending_approval", create)
+
+        node = make_execute_skill_node(fake_deps)
+        result = await node(
+            identity_state(
+                email="kenny.medina@ahoracrypto.com",
+                pending_tool_call={"id": "t1", "slug": "test.cancel", "input": {"order_id": 1429}},
+                allowed_skills=["test.cancel"],
+                tool_permissions={
+                    "test.cancel": {
+                        "is_enabled": True,
+                        "human_approval_required": True,
+                        "threshold_override": None,
+                    }
+                },
+                tool_results=[],
+                tool_iterations=0,
+                max_tool_iterations=5,
+            )
+        )
+
+        create.assert_not_awaited()
+        assert result["decision"] == "escalate"
+        assert result["escalation_reason"].startswith("commerce_unavailable:")
+        assert result["agent_response"] == DEFAULT_MESSAGES["commerce_unavailable"]
 
 
 class TestSimulatorOrdersBelongToSimCustomer:

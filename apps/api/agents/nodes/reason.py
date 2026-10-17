@@ -34,6 +34,7 @@ from apps.api.agents.state import AgentState
 from apps.api.core.config import get_models
 from apps.api.integrations.anthropic_client import call_claude_with_tools
 from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
+from apps.api.services.conversation_progress import NO_PROGRESS_MESSAGE, no_progress_reason
 from apps.api.services.identity import IdentityContext
 from apps.api.services.skill_access import visible_skills
 from apps.api.skills.registry import SkillRegistry
@@ -252,6 +253,22 @@ def make_reason_node(
     async def _node(state: AgentState) -> dict[str, Any]:
         conv_id = state.get("conversation_id")
         tenant_id = state.get("tenant_id")
+
+        # Conversación de pedidos que no avanza: al equipo, sin gastar otra vuelta del LLM.
+        if not state.get("tool_iterations") and not state.get("tool_results"):
+            stalled = no_progress_reason(
+                allowed_skills=state.get("allowed_skills") or [],
+                history=state.get("conversation_history"),
+                order_refs_given=bool(state.get("order_refs_given")),
+                order_in_context=bool(state.get("order_in_context")),
+            )
+            if stalled is not None:
+                return {
+                    "decision": "escalate",
+                    "escalation_reason": stalled,
+                    "agent_response": NO_PROGRESS_MESSAGE,
+                    "pending_tool_call": None,
+                }
 
         # Determinar el step actual del AOP (si está definido).
         steps: list[dict[str, Any]] = state.get("aop_steps") or []

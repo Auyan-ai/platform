@@ -315,6 +315,7 @@ async def _run_simulation_inner(
 
     assertion_results = check_assertions(
         assertions=scenario.assertions,
+        agent_messages=[t.content for t in acc.transcript.turns if t.role == "agent"],
         skill_log=skill_log,
         last_agent_message=last_agent_msg,
         termination_reason=termination_reason,

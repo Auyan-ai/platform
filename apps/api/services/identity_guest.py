@@ -37,7 +37,7 @@ from apps.api.services.identity_messages import identity_message
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 if TYPE_CHECKING:
-    from apps.api.skills.base import SkillContext
+    from apps.api.skills.base import SkillContext, SkillRefusal
 
 logger = logging.getLogger(__name__)
 
@@ -241,6 +241,27 @@ class OrderLookupError(Exception):
     """El adapter de commerce falló: no sabemos si el pedido existe."""
 
 
+COMMERCE_UNAVAILABLE = "commerce_unavailable"
+
+
+def commerce_unavailable_reason(error: str) -> str:
+    """Motivo de escalado cuando la tienda no responde al resolver un pedido."""
+    return f"{COMMERCE_UNAVAILABLE}: la tienda no respondió al consultar el pedido ({error})"
+
+
+def commerce_unavailable_refusal(
+    error: str, tenant_facts: Mapping[str, Any] | None
+) -> SkillRefusal:
+    """La tienda caída no es un fallo de identidad: texto fijo al cliente y escalado."""
+    from apps.api.skills.base import SkillRefusal
+
+    return SkillRefusal(
+        COMMERCE_UNAVAILABLE,
+        customer_message=identity_message(COMMERCE_UNAVAILABLE, tenant_facts),
+        team_reason=commerce_unavailable_reason(error),
+    )
+
+
 @dataclass(frozen=True)
 class GuestAttempt:
     outcome: GuestOutcome
@@ -303,7 +324,7 @@ def guest_facts(existing: str | None, orders: Sequence[Mapping[str, Any]]) -> st
 
 # ─── Una ronda de comprobaciones con límites ──────────────────────────────────
 
-RoundStatus = Literal["idle", "granted", "failed", "locked", "paused"]
+RoundStatus = Literal["idle", "granted", "failed", "locked", "paused", "unavailable"]
 
 
 @dataclass(frozen=True)
@@ -313,6 +334,8 @@ class GuestRound:
     orders: tuple[dict[str, Any], ...] = ()
     # Texto fijo que cierra el turno sin pasar por el LLM; None si el turno sigue.
     reply: str | None = None
+    # `unavailable`: error del adapter de commerce (sin pedido que comparar).
+    error: str | None = None
 
 
 async def load_guest_grants(
@@ -382,16 +405,18 @@ async def run_guest_checks(
     grants: list[Grant] = []
     orders: list[dict[str, Any]] = []
     failed = False
+    lookup_error: str | None = None
     for key, pair in fresh:
         if conversation_failures >= policy.guest_max_failures_per_conversation:
             break
         try:
             attempt = await attempt_guest(ctx, pair.order_ref, pair.contact)
         except OrderLookupError as exc:
-            logger.warning(
+            logger.error(
                 "guest_lookup_failed",
                 extra={"tenant_id": ctx.tenant_id, "error": str(exc)},
             )
+            lookup_error = str(exc)
             continue
         claim = pair.contact.claim(salt, ctx.phone_region)
         order_id = int(attempt.order["id"]) if attempt.order else None
@@ -432,6 +457,12 @@ async def run_guest_checks(
 
     if grants:
         return GuestRound("granted", tuple(grants), tuple(orders))
+    if lookup_error is not None:
+        return GuestRound(
+            "unavailable",
+            reply=identity_message(COMMERCE_UNAVAILABLE, tenant_facts),
+            error=lookup_error,
+        )
     if failed:
         return GuestRound("failed", reply=identity_message("guest_not_verified", tenant_facts))
     return GuestRound()

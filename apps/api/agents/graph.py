@@ -177,6 +177,8 @@ def route_after_resolve_identity(state: AgentState) -> str:
     """Routing tras `resolve_identity`: un texto fijo de identidad cierra el turno sin LLM."""
     if state.get("decision") == "respond" and state.get("agent_response"):
         return "respond"
+    if state.get("decision") == "escalate" and state.get("agent_response"):
+        return "escalate"
     return "select_aop"
 
 
