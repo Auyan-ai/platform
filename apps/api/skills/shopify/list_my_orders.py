@@ -17,7 +17,7 @@ class ListMyOrdersOutput(SkillOutput):
     verified_sender: bool
     orders: list[OrderSummary]
     total_found: int
-    # Solo sin remitente verificado: qué decirle al cliente.
+    # Sin remitente verificado, o sin pedidos suyos: qué hacer con el cliente.
     note: str | None = None
 
 
@@ -27,6 +27,13 @@ NO_VERIFIED_SENDER_NOTE = (
     "Explícale con amabilidad que, para ver sus pedidos, escriba desde el email con el "
     "que hizo la compra (o por WhatsApp desde el teléfono de la compra), u ofrécele "
     "pasar el caso a una persona del equipo."
+)
+
+# RE-04 / EX-02: sin esto el agente escalaba en el primer turno a quien compró con otro email.
+NO_ORDERS_FOR_SENDER_NOTE = (
+    "No hay pedidos con el email o teléfono desde el que escribe el cliente. Puede que "
+    "comprara con otro: antes de pasar el caso al equipo, pídele el número de pedido y el "
+    "email o teléfono de esa compra."
 )
 
 
@@ -68,5 +75,8 @@ class ListMyOrders(Skill):
             map_order_summary(order) for order in raw_orders if ctx.level_for(order) == "verified"
         ]
         return ListMyOrdersOutput(
-            verified_sender=True, orders=own_orders, total_found=len(own_orders)
+            verified_sender=True,
+            orders=own_orders,
+            total_found=len(own_orders),
+            note=None if own_orders else NO_ORDERS_FOR_SENDER_NOTE,
         )

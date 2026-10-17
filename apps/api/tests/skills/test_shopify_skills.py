@@ -30,6 +30,7 @@ from apps.api.skills.shopify.get_shop_policies import (
     GetShopPoliciesOutput,
 )
 from apps.api.skills.shopify.list_my_orders import (
+    NO_ORDERS_FOR_SENDER_NOTE,
     NO_VERIFIED_SENDER_NOTE,
     ListMyOrders,
     ListMyOrdersInput,
@@ -185,6 +186,14 @@ class TestListMyOrders:
             result = await ListMyOrders().execute(CTX, ListMyOrdersInput())
         assert [o.order_number for o in result.orders] == ["#1001"]
         assert result.total_found == 1
+
+    async def test_a_sender_without_orders_is_asked_for_the_purchase_data(self) -> None:
+        # RE-04: sin la nota, el agente escalaba a quien compró con otro email.
+        mock_client = _mock_shopify(get_orders_by_email=[])
+        with patch("apps.api.integrations.shopify.ShopifyClient", return_value=mock_client):
+            result = await ListMyOrders().execute(CTX, ListMyOrdersInput())
+        assert result.total_found == 0
+        assert result.note == NO_ORDERS_FOR_SENDER_NOTE
 
     async def test_chat_origin_gets_nothing(self) -> None:
         mock_client = _mock_shopify(get_orders_by_email=[_RAW_ORDER])
