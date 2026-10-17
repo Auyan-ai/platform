@@ -240,6 +240,10 @@ async def _run_simulation_inner(
             raise ValueError(
                 f"UserProfile {scenario.user_profile_id} not found for tenant {tenant_id}"
             )
+        # El idioma del cliente es del escenario, no del perfil compartido (CE-07).
+        language = (scenario.mock_fixtures or {}).get("customer_language")
+        if language:
+            profile = profile.model_copy(update={"language": language})
 
     normalized_judge_model = normalize_judge_model(judge_model)
     run_id = uuid4()

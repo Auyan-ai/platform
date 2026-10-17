@@ -25,6 +25,10 @@ Las assertions vienen del JSONB `simulation_scenarios.assertions`. Tipos:
                                        aprobación pendiente                       (crítica)
     identity_attempts: int           — filas de `identity_checks` guest de la
                                        conversación (0 = nada contó como intento) (crítica)
+    response_language: str           — todo mensaje del agente con texto suficiente está en
+                                       ese idioma, con el detector del agente      (crítica)
+    final_response_language: str     — el último mensaje del agente está en ese idioma
+                                       (cambio de idioma a mitad de conversación) (crítica)
     contacts_grounded: bool          — todo email/teléfono de las respuestas del agente
                                        está en tenant_facts, herramientas o el cliente (crítica)
 """
@@ -34,6 +38,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+
+from apps.api.services.language import LANGUAGES, reply_language_mismatch
+
+ALL_LANGUAGES = frozenset(LANGUAGES)
 
 if TYPE_CHECKING:
     from apps.api.db.models import SkillAuditLog
@@ -263,6 +271,31 @@ def check_assertions(
                     if ok
                     else f"contactos sin respaldo: {', '.join(unbacked_contacts)}"
                 ),
+                is_critical=True,
+            )
+        )
+
+    said = list(agent_messages or (last_agent_message,))
+    if "response_language" in assertions:
+        expected = str(assertions["response_language"])
+        detected = (reply_language_mismatch(m, expected, ALL_LANGUAGES) for m in said)
+        wrong = [w for w in detected if w]
+        results.append(
+            AssertionResult(
+                key=f"response_language.{expected}",
+                passed=not wrong,
+                evidence=f"todo en {expected}" if not wrong else f"mensajes en {', '.join(wrong)}",
+                is_critical=True,
+            )
+        )
+    if "final_response_language" in assertions:
+        expected = str(assertions["final_response_language"])
+        wrong_final = reply_language_mismatch(last_agent_message, expected, ALL_LANGUAGES)
+        results.append(
+            AssertionResult(
+                key=f"final_response_language.{expected}",
+                passed=wrong_final is None,
+                evidence="ok" if wrong_final is None else f"último mensaje en {wrong_final}",
                 is_critical=True,
             )
         )

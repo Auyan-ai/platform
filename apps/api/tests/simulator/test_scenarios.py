@@ -12,11 +12,12 @@ from apps.api.simulator.scenarios.consulta_envio import SCENARIOS as CE
 from apps.api.simulator.scenarios.default import SCENARIOS as DE
 from apps.api.simulator.scenarios.edge_cases import SCENARIOS as EX
 from apps.api.simulator.scenarios.identity import SCENARIOS as ID
+from apps.api.simulator.scenarios.language import SCENARIOS as LG
 from apps.api.simulator.scenarios.orders import SCENARIOS as OR
 from apps.api.simulator.scenarios.profiles import PERSONAS
 from apps.api.simulator.scenarios.returns import SCENARIOS as RE
 
-ALL = CE + RE + DE + EX + ID + OR
+ALL = CE + RE + DE + EX + ID + OR + LG
 VALID_PROFILES = set(PERSONAS.keys())
 
 
@@ -34,7 +35,7 @@ class TestPersonas:
 
 class TestScenarioStructure:
     def test_total_count(self):
-        assert len(ALL) == 37
+        assert len(ALL) == 40
         assert ALL == ALL_SCENARIOS
 
     def test_unique_ids(self):

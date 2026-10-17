@@ -25,6 +25,7 @@ from apps.api.simulator.scenarios.consulta_envio import SCENARIOS as CE_SCENARIO
 from apps.api.simulator.scenarios.default import SCENARIOS as DE_SCENARIOS
 from apps.api.simulator.scenarios.edge_cases import SCENARIOS as EX_SCENARIOS
 from apps.api.simulator.scenarios.identity import SCENARIOS as ID_SCENARIOS
+from apps.api.simulator.scenarios.language import SCENARIOS as LG_SCENARIOS
 from apps.api.simulator.scenarios.orders import SCENARIOS as OR_SCENARIOS
 from apps.api.simulator.scenarios.profiles import PERSONAS
 from apps.api.simulator.scenarios.returns import SCENARIOS as RE_SCENARIOS
@@ -32,7 +33,13 @@ from apps.api.simulator.scenarios.returns import SCENARIOS as RE_SCENARIOS
 logger = logging.getLogger(__name__)
 
 ALL_SCENARIOS = (
-    CE_SCENARIOS + RE_SCENARIOS + DE_SCENARIOS + EX_SCENARIOS + ID_SCENARIOS + OR_SCENARIOS
+    CE_SCENARIOS
+    + RE_SCENARIOS
+    + DE_SCENARIOS
+    + EX_SCENARIOS
+    + ID_SCENARIOS
+    + OR_SCENARIOS
+    + LG_SCENARIOS
 )
 
 

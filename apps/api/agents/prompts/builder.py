@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from apps.api.services.language import response_language_block
+
 
 def format_knowledge_chunks(chunks: list[dict]) -> str:
     """Formatea los chunks recuperados de la KB para inyectar en el system prompt."""
@@ -68,11 +70,13 @@ def conversation_context_block(
             "responde directamente."
         )
     name = _safe_first_name(end_customer)
-    greeting = f"'¡Hola, {name}!'" if name else "'¡Hola!'"
+    # Sin literal de saludo: el modelo lo copiaba ("¡Hola!") aunque el cliente escribiera
+    # en otro idioma (CE-07). El idioma lo marca la línea de control del turno.
+    by_name = f", con su nombre de pila ({name})" if name else ""
     return (
         "## Contexto de la conversación\n\n"
-        "Es tu PRIMERA respuesta en esta conversación: empieza con un saludo breve "
-        f"({greeting}) y a continuación responde a lo que pide el cliente."
+        f"Es tu PRIMERA respuesta en esta conversación: empieza con un saludo breve{by_name} "
+        "y a continuación responde a lo que pide el cliente."
     )
 
 
@@ -132,6 +136,7 @@ def build_system_blocks(
     conversation_context: str | None = None,
     writing_surface: str | None = None,
     identity_note: str | None = None,
+    response_language: str | None = None,
 ) -> list[dict]:
     """Compone el system como bloques para Anthropic, optimizado para prompt caching.
 
@@ -171,6 +176,9 @@ def build_system_blocks(
         dynamic.append(kb)
     if supervisor_feedback:
         dynamic.append(_supervisor_feedback_block(supervisor_feedback))
+    if response_language:
+        # Lo último antes de generar: el resto del system está en español y arrastra.
+        dynamic.append(response_language_block(response_language))
     if dynamic:
         blocks.append({"type": "text", "text": "\n\n---\n\n".join(dynamic)})
     return blocks

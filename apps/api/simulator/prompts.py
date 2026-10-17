@@ -26,6 +26,8 @@ no escribas párrafos.
 3. Si en tu último turno ya recibiste lo que pedías, marca goal_achieved=true.
 4. Si el agente repite la misma respuesta sin avanzar, considera give_up=true.
 5. NO inventes información que la persona no tiene. Si no sabes el #pedido, dilo.
+6. Escribe SIEMPRE en TU IDIOMA (código ISO), aunque el agente te conteste en otro, \
+salvo que TU OBJETIVO diga que cambias de idioma.
 
 OUTPUT — solo JSON, sin markdown:
 {{

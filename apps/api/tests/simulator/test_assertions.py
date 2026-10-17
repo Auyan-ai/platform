@@ -229,3 +229,19 @@ def test_response_not_contains_fails_if_any_agent_message_has_it() -> None:
         agent_messages=said,
     )
     assert res[0].passed is False
+
+
+def test_response_language_checks_every_agent_message() -> None:
+    said = ["Your order #1234 has shipped with UPS.", "¡De nada! ¿Algo más en lo que te ayude?"]
+    res = _check({"response_language": "en"}, last_agent_message=said[-1], agent_messages=said)
+    assert res[0].passed is False and res[0].is_critical is True
+
+    said = ["Your order #1234 has shipped with UPS.", "You're welcome, have a nice day!"]
+    res = _check({"response_language": "en"}, last_agent_message=said[-1], agent_messages=said)
+    assert res[0].passed is True
+
+
+def test_final_response_language_only_checks_the_last_message() -> None:
+    said = ["Tu pedido #1234 ya ha salido con UPS.", "Sure, your order #1234 shipped with UPS."]
+    res = _check({"final_response_language": "en"}, last_agent_message=said[-1], agent_messages=said)
+    assert res[0].passed is True

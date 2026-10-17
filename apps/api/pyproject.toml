@@ -35,6 +35,9 @@ structlog = "^24.4.0"
 # Reliability
 tenacity = "^9.0.0"
 
+# Idioma de la conversación (detección determinista, sin LLM)
+lingua-language-detector = "^2.0.0"
+
 # HTTP client
 httpx = "^0.27.0"
 python-dotenv = "^1.0.0"

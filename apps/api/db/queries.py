@@ -323,6 +323,32 @@ async def get_conversation(
     return None if row is None else Conversation(**dict(row))
 
 
+async def get_conversation_language(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
+) -> str | None:
+    """Idioma fijado de la conversación (`services/language.py`), o None."""
+    value = await conn.fetchval(
+        "SELECT language FROM conversations WHERE tenant_id = $1 AND id = $2",
+        tenant_id,
+        conversation_id,
+    )
+    return str(value) if value else None
+
+
+async def set_conversation_language(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID, language: str
+) -> None:
+    await conn.execute(
+        """
+        UPDATE conversations SET language = $3, updated_at = now()
+         WHERE tenant_id = $1 AND id = $2 AND language IS DISTINCT FROM $3
+        """,
+        tenant_id,
+        conversation_id,
+        language,
+    )
+
+
 async def find_conversation_by_id(
     conn: asyncpg.Connection,
     tenant_id: UUID,
