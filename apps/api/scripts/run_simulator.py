@@ -179,6 +179,17 @@ async def main(
                 missing = CHECKPOINT_SCENARIOS - found
                 logger.warning("Scenarios de checkpoint no encontrados: %s", missing)
 
+        from apps.api.simulator.cost_guard import (
+            SimulationBudgetExceeded,
+            simulation_spend_cents,
+        )
+
+        spent_tenant, spent_global = await simulation_spend_cents(tenant_id)
+        print(
+            f"\nGastado en simulación (24 h): tenant ${spent_tenant / 100:.2f} de "
+            f"${settings.simulator_daily_cap_usd_tenant:.2f} · global "
+            f"${spent_global / 100:.2f} de ${settings.simulator_daily_cap_usd_global:.2f}"
+        )
         print(f"\nCorriendo {len(targets)} scenario(s) para tenant={tenant_id}")
         print("=" * 70)
 
@@ -237,6 +248,10 @@ async def main(
                 else:
                     print("  ERROR: run no encontrado en DB")
                     failed += 1
+            except SimulationBudgetExceeded as exc:
+                print(f"  DETENIDO: {exc.detail}")
+                failed += 1
+                break
             except Exception as exc:
                 print(f"  EXCEPCIÓN: {exc}")
                 logger.exception("scenario_run_failed name=%s", scenario.name)

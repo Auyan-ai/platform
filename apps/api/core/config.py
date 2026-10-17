@@ -131,6 +131,12 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
     llm_timeout_seconds: int = 30
 
+    # Tope de gasto diario del simulador (USD, últimas 24 h, corridas terminadas). Vale
+    # para el panel y para `run_simulator`: el saldo de Anthropic de staging se agotó dos
+    # veces por corridas sin tope (s84, s85). Subirlo por variable de entorno a propósito.
+    simulator_daily_cap_usd_tenant: float = 2.0
+    simulator_daily_cap_usd_global: float = 5.0
+
     # --- Pool de conexiones a Postgres ---
     db_pool_min_size: int = 2
     db_pool_max_size: int = 10
