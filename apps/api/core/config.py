@@ -5,9 +5,15 @@ Todas las variables sensibles llegan por entorno; nada hardcodeado.
 """
 
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field, HttpUrl, PostgresDsn, SecretStr, field_validator
+from apps.api.integrations.model_capabilities import (
+    Effort,
+    ThinkingMode,
+    ThinkingSettings,
+    thinking_settings,
+)
+from pydantic import Field, HttpUrl, PostgresDsn, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AppEnv = Literal["development", "staging", "production"]
@@ -209,7 +215,8 @@ class ModelRegistry(BaseSettings):
     Cada campo se sobrescribe con la variable de entorno del mismo nombre en
     mayúsculas. No tiene campos obligatorios, así que se carga sin el resto de
     `Settings` (simulador, evals y tests). Todo ID que se añada aquí necesita su
-    fila en `integrations/pricing.py`: un test y el arranque de la API lo exigen.
+    fila en `integrations/pricing.py` y en `integrations/model_capabilities.py`: los
+    tests y el arranque de la API lo exigen.
     """
 
     model_config = SettingsConfigDict(
@@ -239,9 +246,41 @@ class ModelRegistry(BaseSettings):
     # Slow agent: primer análisis. Si duda, escala al juez Opus (`judge_opus_model`).
     slow_agent_model: str = "claude-sonnet-4-6"
 
+    # Thinking y esfuerzo por rol, en JSON por entorno, p. ej.
+    # EFFORT_BY_ROLE='{"intent_classifier_model": "low"}'. Un rol sin entrada usa lo que
+    # fija su modelo en `integrations/model_capabilities.py`: nada nuevo en los modelos
+    # actuales; en los 5.5, thinking adaptive y esfuerzo `medium` explícitos.
+    thinking_by_role: dict[str, ThinkingMode] = Field(default_factory=dict)
+    effort_by_role: dict[str, Effort] = Field(default_factory=dict)
+
     def by_role(self) -> dict[str, str]:
         """Rol -> ID de modelo, para el test y el chequeo de precios del arranque."""
-        return {name: getattr(self, name) for name in type(self).model_fields}
+        return {
+            name: getattr(self, name)
+            for name, field in type(self).model_fields.items()
+            if field.annotation is str
+        }
+
+    def thinking(self, role: str, *, model: str | None = None) -> ThinkingSettings:
+        """Thinking y esfuerzo del rol para `model` (por defecto, el modelo del rol).
+
+        `model` cubre el modelo que fija un tenant para el agente."""
+        return thinking_settings(
+            model or getattr(self, role),
+            mode=self.thinking_by_role.get(role),
+            effort=self.effort_by_role.get(role),
+        )
+
+    @model_validator(mode="after")
+    def _validate_role_settings(self) -> Self:
+        """Falla al cargar si un rol pide algo que su modelo rechazaría con un 400."""
+        roles = self.by_role()
+        unknown = (set(self.thinking_by_role) | set(self.effort_by_role)) - set(roles)
+        if unknown:
+            raise ValueError(f"roles desconocidos en thinking/effort_by_role: {sorted(unknown)}")
+        for role in roles:
+            self.thinking(role)
+        return self
 
 
 @lru_cache(maxsize=1)
