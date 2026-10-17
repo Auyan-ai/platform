@@ -498,9 +498,6 @@ async def _execute_loop(
     )
 
     max_turns = scenario.max_turns
-    # El cliente dio el objetivo por logrado en su último mensaje (p. ej. "sí, confirmo la
-    # dirección"): el agente lo responde, como en producción, y ahí acaba la corrida.
-    closing = False
 
     for turn_number in range(1, max_turns + 1):
         # ── Invocar el grafo ──────────────────────────────────────────────────
@@ -589,8 +586,6 @@ async def _execute_loop(
 
         if decision == "escalate":
             return "escalated_by_agent"
-        if closing:
-            return "goal_achieved"
 
         # Loop detection: dos respuestas del agente con el mismo inicio
         acc.last_agent_messages.append(agent_response[:LOOP_DETECTION_WINDOW])
@@ -641,11 +636,11 @@ async def _execute_loop(
         )
 
         if sim_turn.goal_achieved:
-            closing = True
-        elif sim_turn.give_up:
+            return "goal_achieved"
+        if sim_turn.give_up:
             return "give_up"
 
-    return "goal_achieved" if closing else "max_turns"
+    return "max_turns"
 
 
 async def _start_run_trace(

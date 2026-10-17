@@ -119,11 +119,11 @@ async def test_run_cost_sums_agent_cost_and_cached_simulator_and_judge_calls(
         uuid4(), TENANT, anthropic=_anthropic(), graph=_graph()
     )
 
-    # agente: 2 turnos (responde también al "gracias" que cierra) de 0.012 USD = 2.4 ¢
+    # agente: 0.012 USD de final_state["cost_usd"]                         = 1.2 ¢
     # simulador (Haiku): 200*$1 + 1500 lectura caché*$0.10 + 40*$5 = $0.00055 = 0.055 ¢
     # judge (Sonnet): 3000*$3 + 1200 escritura caché*$3.75 + 300*$15 = $0.018 = 1.8 ¢
     kwargs = finalize.call_args.kwargs
-    assert kwargs["cost_cents"] == pytest.approx(4.255)
+    assert kwargs["cost_cents"] == pytest.approx(3.055)
     assert kwargs["tokens_simulator"] == 200 + 1500 + 40
     assert kwargs["tokens_judge"] == 3000 + 1200 + 300
     assert kwargs["judge_eval"]["input_tokens"] == 4200
@@ -175,7 +175,7 @@ async def test_run_leaves_one_langsmith_trace_with_simulation_metadata_and_child
     assert turn_update["parent_run_id"] == root["id"]
 
     final = next(c.kwargs for c in inner.update_run.call_args_list if c.args[0] == root["id"])
-    assert final["extra"]["metadata"]["cost_usd"] == pytest.approx(0.04255)
+    assert final["extra"]["metadata"]["cost_usd"] == pytest.approx(0.03055)
     assert final["extra"]["metadata"]["simulation"] is True
 
     _conn, run_db_id, tenant_id, trace_id = save_trace_id.call_args.args
