@@ -53,3 +53,14 @@ def test_client_views_exclude_simulated_conversations(reader: object) -> None:
     reads = _CONVERSATION_ROWS.findall(sql)
     assert reads
     assert sql.count("is_simulation") == len(reads), reads
+
+
+async def test_soft_deleting_a_simulated_conversation_takes_its_escalations_and_approvals() -> None:
+    from unittest.mock import AsyncMock
+    from uuid import uuid4
+
+    conn = AsyncMock()
+    await queries.soft_delete_conversation(conn, uuid4(), uuid4())
+    sqls = [" ".join(call.args[0].split()) for call in conn.execute.await_args_list]
+    assert [s.split()[1] for s in sqls] == ["escalations", "pending_approvals", "conversations"]
+    assert all("is_simulation" in s for s in sqls), "nunca borra una conversación real"

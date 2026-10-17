@@ -543,16 +543,30 @@ async def is_simulation_conversation(
 async def soft_delete_conversation(
     conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
 ) -> None:
-    """Soft-delete de una conversación. Usado para limpiar conversaciones de simulación."""
-    await conn.execute(
+    """Soft-delete de una conversación simulada con sus escalaciones y aprobaciones.
+
+    Solo toca conversaciones `is_simulation`. Antes quedaban vivas sus escalaciones y
+    aprobaciones `pending` (73 en un día de corridas en Marea, s85).
+    """
+    for statement in (
         """
-        UPDATE conversations
-           SET deleted_at = now()
-         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        UPDATE escalations e SET deleted_at = now(), updated_at = now()
+          FROM conversations c
+         WHERE c.id = e.conversation_id AND c.is_simulation
+           AND e.tenant_id = $1 AND e.conversation_id = $2 AND e.deleted_at IS NULL
         """,
-        tenant_id,
-        conversation_id,
-    )
+        """
+        UPDATE pending_approvals a SET deleted_at = now(), updated_at = now()
+          FROM conversations c
+         WHERE c.id = a.conversation_id AND c.is_simulation
+           AND a.tenant_id = $1 AND a.conversation_id = $2 AND a.deleted_at IS NULL
+        """,
+        """
+        UPDATE conversations SET deleted_at = now()
+         WHERE tenant_id = $1 AND id = $2 AND is_simulation AND deleted_at IS NULL
+        """,
+    ):
+        await conn.execute(statement, tenant_id, conversation_id)
 
 
 async def list_conversations(
