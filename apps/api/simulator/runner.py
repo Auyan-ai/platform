@@ -62,6 +62,7 @@ from apps.api.simulator.judge import (
     normalize_judge_model,
     verdict_to_dict,
 )
+from apps.api.simulator.scenarios import sync_scenario_from_code
 from apps.api.simulator.transcript import (
     SimulatorTranscript,
     TranscriptTurn,
@@ -231,6 +232,7 @@ async def _run_simulation_inner(
         scenario = await get_simulation_scenario(conn, tenant_id, scenario_id)
         if scenario is None:
             raise ValueError(f"Scenario {scenario_id} not found for tenant {tenant_id}")
+        scenario = await sync_scenario_from_code(conn, tenant_id, scenario)
         profile = await get_user_profile(conn, tenant_id, scenario.user_profile_id)
         if profile is None:
             raise ValueError(

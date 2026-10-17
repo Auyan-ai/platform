@@ -133,16 +133,15 @@ async def main(
         )
         graph = build_graph(deps)
 
-        # Los escenarios base salen del código en cada corrida: una fila vieja en la DB
-        # tendría fixtures y fechas de otro día.
+        # Crea los escenarios base que falten; el runner deja cada uno igual que en el
+        # código antes de correrlo.
         logger.info("Haciendo seed de scenarios para tenant=%s ...", tenant_id)
         async with tenant_scope(tenant_id) as conn:
             seed_result = await seed_scenarios(conn, tenant_id)
             logger.info(
-                "Seed: %s profiles, %s scenarios creados, %s actualizados",
+                "Seed: %s profiles, %s scenarios creados",
                 seed_result["profiles"],
                 seed_result["scenarios"],
-                seed_result.get("updated", 0),
             )
 
             # Obtener scenarios a correr
