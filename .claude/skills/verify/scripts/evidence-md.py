@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Compone el bloque Markdown de "Evidencia en vivo" para el cuerpo de un PR.
 
-Lee lo que ya dejaron inbound.sh, dump.sh y trace.sh en evidence/, enmascara emails y teléfonos
+Lee lo que ya dejaron inbound.sh, dump.sh y trace.sh (o sim-dump.sh, para corridas del simulador)
+en evidence/, enmascara emails y teléfonos
 y, si le pasas capturas o vídeo, los sube a la rama huérfana `verify-evidence` para que se vean en el PR.
 No lee .env.staging ni imprime secretos.
 """
@@ -25,6 +26,7 @@ MAX_SECTION = 2500
 EMAIL = re.compile(r"([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
 UUID = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
 DATETIME = re.compile(r"\b\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{2}(?::?\d{2})?|Z)?)?")
+DECIMAL = re.compile(r"(?<![\w.])\d+\.\d+(?![\w.])")
 PHONE = re.compile(r"(?<![\w.])[+(]?\d[\d ().-]{6,}\d(?!\w)")
 
 
@@ -37,7 +39,7 @@ def mask(text: str) -> str:
         keep.append(m.group(0))
         return f"\x00{len(keep) - 1}\x00"
 
-    text = DATETIME.sub(stash, UUID.sub(stash, text))
+    text = DECIMAL.sub(stash, DATETIME.sub(stash, UUID.sub(stash, text)))
 
     def phone(m: re.Match) -> str:
         digits = re.sub(r"\D", "", m.group(0))
@@ -130,6 +132,41 @@ def sections(dump: str) -> list[tuple[str, str]]:
     return [(parts[i], parts[i + 1].strip()) for i in range(1, len(parts) - 1, 2)]
 
 
+def sim_run(run_id: str) -> tuple[dict, dict[str, str]]:
+    dump = newest(f"*-sim-{run_id}.txt")
+    if not dump:
+        sys.exit(f"no hay evidence/*-sim-{run_id}.txt: corre sim-dump.sh {run_id} primero")
+    parts = dict(sections(read(dump)))
+    row = next((line for line in parts.get("run", "").splitlines() if line.startswith("{")), None)
+    if row is None:
+        sys.exit(f"{dump} no tiene la fila de simulation_runs")
+    return json.loads(row), parts
+
+
+def compose_simulation(run_ids: list[str]) -> str:
+    runs = [sim_run(r) for r in run_ids]
+    tenants = sorted({info["tenant"] for info, _ in runs})
+    out = [f"**Staging, tenant `{', '.join(tenants)}`, commit `{git('rev-parse', '--short', 'HEAD')}`.** "
+           "Corridas de `run_simulator` (conversaciones `is_simulation`), sin clientes reales.", "",
+           "| Escenario | Estado | Judge | Terminación | Turnos | Mensajes in/out | Coste | Traza LangSmith |",
+           "|---|---|---|---|---|---|---|---|"]
+    details = []
+    for info, parts in runs:
+        tid = info.get("langsmith_trace_id")
+        judge = "-" if info.get("judge") is None else f"{float(info['judge']):.1f}"
+        cost = "-" if info.get("cost_cents") is None else f"${float(info['cost_cents']) / 100:.4f}"
+        out.append(f"| {info['scenario']} | {info['status']} | {judge} | {info['termination_reason']} | "
+                   f"{info['turns_count']} | {info['inbound']}/{info['outbound']} | {cost} | `{tid or '-'}` |")
+        trace = newest(f"*-trace-{tid}.txt") if tid else None
+        body = [f"Run `{info['id']}`, conversación `{info['conversation_id']}`.", ""]
+        body += ["```", "\n".join(read(trace).strip().splitlines()[:2]) if trace else "sin trace.sh para esta corrida", "```"]
+        for name in ("messages", "skills", "escalations"):
+            if parts.get(name):
+                body += ["", f"Supabase: {name}", "", "```", clip(parts[name], MAX_SECTION), "```"]
+        details += ["", f"<details><summary>{info['scenario']}</summary>", "", *body, "", "</details>"]
+    return mask("\n".join(out + details)) + "\n"
+
+
 def compose(args: argparse.Namespace) -> str:
     conv = args.conversation_id
     inbound = newest("*-inbound-*.txt", conv)
@@ -179,7 +216,9 @@ def main() -> None:
     p = argparse.ArgumentParser(
         description="Compone el bloque de evidencia en vivo para un PR a partir de evidence/ (emails y teléfonos enmascarados).",
         epilog="Ejemplo: evidence-md.py <conversation_id> --media evidence/<ts>-conversaciones.png > /tmp/evidencia.md")
-    p.add_argument("conversation_id", help="uuid de la conversación (lo imprime inbound.sh)")
+    p.add_argument("conversation_id", nargs="?", help="uuid de la conversación (lo imprime inbound.sh)")
+    p.add_argument("--simulation-run-id", nargs="+", metavar="RUN_ID",
+                   help="corridas del simulador (las imprime run_simulator); lee lo que guardó sim-dump.sh")
     p.add_argument("--trace-id", help="por defecto el de la respuesta de inbound.sh")
     p.add_argument("--media", nargs="*", default=[], metavar="ARCHIVO",
                    help="capturas (.png/.jpg) o vídeo (.webm/.mp4) de evidence/; se suben a la rama verify-evidence")
@@ -187,6 +226,14 @@ def main() -> None:
     p.add_argument("--repo", help="owner/repo (por defecto el del checkout)")
     p.add_argument("--folder", help="carpeta dentro de verify-evidence (por defecto la rama actual)")
     args = p.parse_args()
+    if args.simulation_run_id:
+        for run_id in args.simulation_run_id:
+            if not re.fullmatch(r"[0-9a-f-]{36}", run_id):
+                sys.exit(f"simulation_run_id no es un uuid: {run_id}")
+        sys.stdout.write(compose_simulation(args.simulation_run_id))
+        return
+    if args.conversation_id is None:
+        sys.exit("falta conversation_id o --simulation-run-id")
     if not re.fullmatch(r"[0-9a-f-]{36}", args.conversation_id):
         sys.exit("conversation_id no es un uuid")
     sys.stdout.write(compose(args))
