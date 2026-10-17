@@ -1,8 +1,10 @@
 """Package de scenarios del simulador.
 
-`seed_scenarios(conn, tenant_id)` inserta o actualiza los scenarios base
-para un tenant dado. Es idempotente: si el scenario ya existe (mismo `name`),
-no lo duplica.
+`seed_scenarios(conn, tenant_id)` inserta los scenarios base que le falten a un tenant.
+Es idempotente: si el scenario ya existe (mismo `name`), no lo duplica.
+
+`sync_scenario_from_code` deja un scenario base igual que en el código justo antes de
+correrlo. Lo llama el runner, así que vale para `run_simulator` y para el panel.
 """
 
 from __future__ import annotations
@@ -11,8 +13,8 @@ import logging
 from uuid import UUID
 
 import asyncpg
+from apps.api.db.models import SimulationScenario
 from apps.api.db.queries import (
-    get_scenario_by_name,
     get_user_profile_by_name,
     insert_simulation_scenario,
     insert_user_profile,
@@ -34,6 +36,9 @@ ALL_SCENARIOS = (
 )
 
 
+_BY_NAME = {sc["name"]: sc for sc in ALL_SCENARIOS}
+
+
 def capabilities_by_name() -> dict[str, list[str]]:
     """Códigos del catálogo de capacidades que cubre cada escenario, por nombre.
 
@@ -43,20 +48,48 @@ def capabilities_by_name() -> dict[str, list[str]]:
     return {sc["name"]: list(sc.get("capabilities", [])) for sc in ALL_SCENARIOS}
 
 
-async def seed_scenarios(
-    conn: asyncpg.Connection, tenant_id: UUID, *, reseed: bool = False
-) -> dict[str, int]:
-    """Inserta profiles y scenarios base para el tenant. Idempotente por nombre.
+async def sync_scenario_from_code(
+    conn: asyncpg.Connection, tenant_id: UUID, scenario: SimulationScenario
+) -> SimulationScenario:
+    """El scenario base (mismo `name` que en el código) con sus campos y su profile como
+    en el código. Las fechas de los fixtures (`days_ago`) se calculan al importar el
+    módulo, así que una fila sembrada otro día tendría plazos caducados. Un scenario
+    creado desde el panel, sin equivalente en el código, vuelve tal cual."""
+    sc = _BY_NAME.get(scenario.name)
+    if sc is None:
+        return scenario
+    await update_user_profile(
+        conn,
+        tenant_id=tenant_id,
+        profile_id=scenario.user_profile_id,
+        persona=PERSONAS[sc["profile"]],
+        goal=sc["goal"],
+        initial_message=sc["initial_message"],
+        language="es",
+    )
+    updated = await update_simulation_scenario(
+        conn,
+        tenant_id=tenant_id,
+        scenario_id=scenario.id,
+        aop_slug=sc["aop_slug"],
+        expected_outcome=sc["expected_outcome"],
+        description=sc.get("description"),
+        mock_fixtures=sc.get("mock_fixtures", {}),
+        assertions=sc.get("assertions", {}),
+        max_turns=sc.get("max_turns", 8),
+    )
+    logger.info("sim_seed_scenario synced id=%s tenant=%s", sc["id"], tenant_id)
+    return updated or scenario
 
-    Con reseed=True, actualiza los campos mutables y el profile específico del
-    scenario, para que cambios en goal/initial_message/persona no queden viejos
-    en la DB.
 
-    Retorna {"profiles": N, "scenarios": N, "updated": N} con los counts.
+async def seed_scenarios(conn: asyncpg.Connection, tenant_id: UUID) -> dict[str, int]:
+    """Inserta profiles y scenarios base que falten en el tenant. Idempotente por nombre.
+
+    No actualiza los que ya existen: eso lo hace `sync_scenario_from_code` antes de cada
+    corrida. Retorna {"profiles": N, "scenarios": N} con los counts.
     """
     profiles_created = 0
     scenarios_created = 0
-    scenarios_updated = 0
 
     # 1. Upsert profiles por nombre (idempotente)
     profile_map: dict[str, UUID] = {}
@@ -79,7 +112,7 @@ async def seed_scenarios(
         profiles_created += 1
         logger.info("sim_seed_profile created name=%s tenant=%s", profile.name, tenant_id)
 
-    # 2. Upsert scenarios por nombre (idempotente)
+    # 2. Insertar scenarios por nombre (idempotente)
     rows = await conn.fetch(
         "SELECT name FROM simulation_scenarios WHERE tenant_id = $1 AND deleted_at IS NULL",
         tenant_id,
@@ -88,31 +121,6 @@ async def seed_scenarios(
 
     for sc in ALL_SCENARIOS:
         if sc["name"] in existing_names:
-            if reseed:
-                existing_sc = await get_scenario_by_name(conn, tenant_id, sc["name"])
-                if existing_sc is not None:
-                    await update_user_profile(
-                        conn,
-                        tenant_id=tenant_id,
-                        profile_id=existing_sc.user_profile_id,
-                        persona=PERSONAS[sc["profile"]],
-                        goal=sc["goal"],
-                        initial_message=sc["initial_message"],
-                        language="es",
-                    )
-                    await update_simulation_scenario(
-                        conn,
-                        tenant_id=tenant_id,
-                        scenario_id=existing_sc.id,
-                        aop_slug=sc["aop_slug"],
-                        expected_outcome=sc["expected_outcome"],
-                        description=sc.get("description"),
-                        mock_fixtures=sc.get("mock_fixtures", {}),
-                        assertions=sc.get("assertions", {}),
-                        max_turns=sc.get("max_turns", 8),
-                    )
-                    scenarios_updated += 1
-                    logger.info("sim_seed_scenario updated id=%s tenant=%s", sc["id"], tenant_id)
             continue
 
         profile_key = sc["profile"]
@@ -158,8 +166,4 @@ async def seed_scenarios(
         scenarios_created += 1
         logger.info("sim_seed_scenario created id=%s tenant=%s", sc["id"], tenant_id)
 
-    return {
-        "profiles": profiles_created,
-        "scenarios": scenarios_created,
-        "updated": scenarios_updated,
-    }
+    return {"profiles": profiles_created, "scenarios": scenarios_created}

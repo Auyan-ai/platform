@@ -4332,7 +4332,7 @@ async def get_simulation_run(
                batch_id, status, termination_reason, turns_count, transcript,
                judge_eval, assertions_results, assertions_passed, assertions_total,
                triggered_by, tokens_simulator, tokens_agent, tokens_judge,
-               cost_cents, started_at, completed_at
+               cost_cents, started_at, completed_at, langsmith_trace_id
           FROM simulation_runs
          WHERE tenant_id = $1 AND id = $2
         """,

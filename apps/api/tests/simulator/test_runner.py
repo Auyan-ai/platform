@@ -80,6 +80,91 @@ class TestRunnerEvidenceHelpers:
         assert both == ({"shopify.cancel_order": {"refund_mode": "manual"}}, 2)
 
 
+_ACK = "Le hemos pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
+
+
+async def test_each_agent_turn_leaves_exactly_one_outbound_message(monkeypatch: Any) -> None:
+    """#361: el nodo respond guarda la respuesta; el runner solo guarda el acuse de
+    escalado, que en producción también escribe el webhook y no el grafo."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from apps.api.simulator import runner
+    from apps.api.simulator.transcript import SimulatorTranscript
+    from apps.api.tests.conftest import make_fake_tenant_scope
+
+    rows: list[tuple[str, str, dict]] = []
+
+    async def insert_message(conn: Any, **kw: Any) -> Any:
+        rows.append((kw["direction"], kw["content"], kw.get("metadata") or {}))
+        return SimpleNamespace(id=uuid4())
+
+    turns = iter(
+        [
+            {
+                "decision": "respond",
+                "agent_response": "Tu pedido #1234 sale hoy.",
+                "tokens_in": 9,
+                "system_prompt": "",
+            },
+            {
+                "decision": "escalate",
+                "agent_response": None,
+                "escalation_id": "esc-1",
+                "escalation_reason": "low_confidence: 0.50 < threshold 0.65",
+                "tokens_in": 9,
+                "system_prompt": "",
+            },
+        ]
+    )
+
+    class Graph:
+        async def ainvoke(self, state: Any) -> Any:
+            final = next(turns)
+            if final["agent_response"]:
+                await insert_message(None, direction="outbound", content=final["agent_response"])
+                final["output_message_id"] = "graph-msg"
+            return final
+
+    def customer(message: str) -> Any:
+        return SimpleNamespace(
+            message=message, goal_achieved=False, give_up=False, internal_reasoning="",
+            input_tokens=1, output_tokens=1, cost_usd=0.0, usage=None,
+        )
+
+    class Customer:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        def first_message(self) -> Any:
+            return customer("¿Y mi pedido #1234?")
+
+        async def next_turn(self, **_: Any) -> Any:
+            return customer("¿Y el #1235?")
+
+    monkeypatch.setattr(runner, "tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(runner, "insert_message", insert_message)
+    monkeypatch.setattr(runner, "update_conversation_last_message", AsyncMock())
+    monkeypatch.setattr(runner, "UserSimulator", Customer)
+    scenario: Any = SimpleNamespace(mock_fixtures={}, max_turns=4, aop_slug="order_status")
+    acc = runner._RunAccumulator(
+        run_id=uuid4(), conversation_id=uuid4(), end_customer_id=uuid4(),
+        transcript=SimulatorTranscript(scenario=scenario, profile_name="sim"),
+    )
+
+    reason = await runner._execute_loop(
+        acc=acc, scenario=scenario, profile=Any, tenant_id=uuid4(), anthropic=Any, graph=Graph()
+    )
+
+    assert reason == "escalated_by_agent"
+    assert rows == [
+        ("inbound", "¿Y mi pedido #1234?", {}),
+        ("outbound", "Tu pedido #1234 sale hoy.", {}),
+        ("inbound", "¿Y el #1235?", {}),
+        ("outbound", _ACK, {"fixed_message": "escalation_ack"}),
+    ]
+
+
 class TestSimulatedChatReply:
     """#350: el simulador registra lo que recibe el cliente del chat, nunca un texto vacío."""
 

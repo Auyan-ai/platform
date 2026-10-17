@@ -108,14 +108,26 @@ endpoints de test; verifica efectos secundarios (filas, escalaciones) además de
 donde ya hay una frontera de producción (Shopify/helpdesks son los de staging, no se simulan aquí).
 Un `dry-run` se verifica observando (filas/red/logs), no fiándose del nombre.
 
+## Simulador
+
+Corre escenarios del simulador (`apps/api/simulator/`) desde el working tree contra staging. Gasta saldo de Anthropic (unos 5 centavos por escenario con judge):
+```bash
+.claude/skills/verify/scripts/simulate.sh 683246c2-10ce-4f6c-a299-5053f32f8c01 --ids CE-06,RE-01 --show-replies
+.claude/skills/verify/scripts/sim-dump.sh <simulation_run_id>...   # lo llama simulate.sh; a mano para corridas viejas
+node .claude/skills/verify/scripts/sim-api-run.cjs <tenant_uuid> <scenario_uuid>   # el camino del panel: POST /simulations/runs (up.sh api + web-session.sh)
+```
+`simulate.sh` guarda la salida de `run_simulator` en `evidence/<ts>-simulator.txt` y, por cada `Run:` que imprime, llama a `sim-dump.sh`. Ese script guarda la fila de `simulation_runs` (estado, judge, coste, `langsmith_trace_id`, mensajes inbound/outbound), los mensajes, las skills y las escalaciones de la conversación simulada, y la traza raíz con `trace.sh`.
+Antes de cada corrida, desde aquí o desde el panel (`POST /simulations/runs`), el runner deja el escenario base igual que en el código (`sync_scenario_from_code`): las fechas de los fixtures son relativas al día de la siembra. Lo simulado no sale en la cola ni en las métricas del cliente.
+
 ## Evidencia en el PR
 
 **Un cambio en `apps/api` o `apps/web` no está terminado sin el bloque de evidencia en vivo en el cuerpo del PR** (sección "Evidencia en vivo" de `.github/pull_request_template.md`). Reproducciones de solo lectura o tests no lo sustituyen. Lo que no pudiste probar va en "Qué NO se verificó y por qué" (sesión del dashboard caducada, sin ffmpeg para vídeo…).
 ```bash
 .claude/skills/verify/scripts/evidence-md.py <conversation_id> [--media evidence/<ts>-<nombre>.png ...] > evidencia.md   # pégalo en el PR
-python3 .claude/skills/verify/scripts/test_evidence_md.py                                                              # prueba del enmascarado
+.claude/skills/verify/scripts/evidence-md.py --simulation-run-id <run_id>... > evidencia.md                             # corridas del simulador
+python3 .claude/skills/verify/scripts/test_evidence_md.py                                                              # pruebas del script
 ```
-Compone el bloque con lo que ya guardaron `inbound.sh`, `dump.sh` y `trace.sh` (corre los tres antes) y enmascara emails y teléfonos.
+Compone el bloque con lo que ya guardaron `inbound.sh`, `dump.sh` y `trace.sh` (corre los tres antes), o con lo que guardó `sim-dump.sh` para las corridas del simulador (una fila por corrida), y enmascara emails y teléfonos.
 Con `--media` sube capturas o vídeo de `evidence/` a la rama huérfana `verify-evidence` (una carpeta por rama de PR) y los enlaza como
 `github.com/<repo>/blob/verify-evidence/...?raw=true`. Por qué esta vía: `gh` no adjunta imágenes; un artefacto de workflow obliga a bajar un zip (mal desde el móvil);
 la rama se ve en línea con la sesión de GitHub del revisor y el repo es privado, así que no hay URL pública. El script solo sube archivos de `evidence/` con extensión de imagen o vídeo;

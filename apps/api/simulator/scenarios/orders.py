@@ -11,7 +11,7 @@ from typing import Any
 _ORDER_1500: dict[str, Any] = {
     "found": True,
     "id": 4001,
-    "order_number": "#1500",
+    "name": "#1500",
     "financial_status": "paid",
     "fulfillment_status": "unfulfilled",
     "created_at": "2026-10-10T10:00:00Z",

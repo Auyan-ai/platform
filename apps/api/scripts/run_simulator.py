@@ -95,7 +95,6 @@ async def main(
     run_all: bool,
     no_judge: bool,
     judge_model: str,
-    reseed: bool,
     ids: list[str] | None = None,
     show_replies: bool = False,
 ) -> int:
@@ -134,15 +133,15 @@ async def main(
         )
         graph = build_graph(deps)
 
-        # Seed scenarios si no existen
+        # Crea los escenarios base que falten; el runner deja cada uno igual que en el
+        # código antes de correrlo.
         logger.info("Haciendo seed de scenarios para tenant=%s ...", tenant_id)
         async with tenant_scope(tenant_id) as conn:
-            seed_result = await seed_scenarios(conn, tenant_id, reseed=reseed)
+            seed_result = await seed_scenarios(conn, tenant_id)
             logger.info(
-                "Seed: %s profiles, %s scenarios creados, %s actualizados",
+                "Seed: %s profiles, %s scenarios creados",
                 seed_result["profiles"],
                 seed_result["scenarios"],
-                seed_result.get("updated", 0),
             )
 
             # Obtener scenarios a correr
@@ -180,7 +179,7 @@ async def main(
                 missing = CHECKPOINT_SCENARIOS - found
                 logger.warning("Scenarios de checkpoint no encontrados: %s", missing)
 
-        print(f"\nCoriendo {len(targets)} scenario(s) para tenant={tenant_id}")
+        print(f"\nCorriendo {len(targets)} scenario(s) para tenant={tenant_id}")
         print("=" * 70)
 
         capabilities = capabilities_by_name()
@@ -212,6 +211,7 @@ async def main(
                     print(f"  Status: {status_icon} {run.status.upper()}")
                     print(f"  Terminación: {run.termination_reason}")
                     print(f"  Turnos: {run.turns_count}")
+                    print(f"  Run: {run.id}  traza LangSmith: {run.langsmith_trace_id or '-'}")
                     if run.judge_eval:
                         j = run.judge_eval
                         print(f"  Judge overall: {j.get('overall_score', 0):.1f}/10  verdict={j.get('verdict')}")
@@ -313,11 +313,6 @@ def _parse_args() -> argparse.Namespace:
         default="sonnet",
         help="Modelo del judge. Default: sonnet. Usa opus solo para calibración explícita.",
     )
-    parser.add_argument(
-        "--reseed",
-        action="store_true",
-        help="Actualiza mock_fixtures/assertions de los scenarios que ya existen en DB.",
-    )
     return parser.parse_args()
 
 
@@ -336,7 +331,6 @@ if __name__ == "__main__":
             run_all=args.all,
             no_judge=args.no_judge,
             judge_model=args.judge_model,
-            reseed=args.reseed,
             ids=[i.strip() for i in args.ids.split(",")] if args.ids else None,
             show_replies=args.show_replies,
         )

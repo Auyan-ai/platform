@@ -264,7 +264,7 @@ async def create_run(body: RunRequest, auth: AuthDep, tenant_id: TenantIdDep) ->
     await check_tenant_run_rate_limit(run_tenant_id)
 
     triggered_by = auth.user_id
-    anthropic = _get_deps().anthropic
+    deps = _get_deps()
     graph = _get_graph()
 
     try:
@@ -272,10 +272,11 @@ async def create_run(body: RunRequest, auth: AuthDep, tenant_id: TenantIdDep) ->
             run_simulation(
                 body.scenario_id,
                 run_tenant_id,
-                anthropic=anthropic,
+                anthropic=deps.anthropic,
                 graph=graph,
                 triggered_by=triggered_by,
                 judge_model=body.judge_model,
+                observability=deps.observability,
             ),
             timeout=RUN_SYNC_TIMEOUT_SECONDS,
         )
@@ -330,7 +331,7 @@ async def create_batch(
     await check_tenant_batch_rate_limit(tenant_id)
 
     triggered_by = auth.user_id
-    anthropic = _get_deps().anthropic
+    deps = _get_deps()
     graph = _get_graph()
     batch_id = uuid4()
 
@@ -339,10 +340,11 @@ async def create_batch(
             await run_batch(
                 body.scenario_ids,
                 tenant_id,
-                anthropic=anthropic,
+                anthropic=deps.anthropic,
                 graph=graph,
                 triggered_by=triggered_by,
                 judge_model=body.judge_model,
+                observability=deps.observability,
             )
         except Exception:
             logger.exception("sim_background_batch_failed batch_id=%s", batch_id)

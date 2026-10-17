@@ -86,7 +86,7 @@ _ORDER_PRE_ENVIO: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
         "id": 4001,
-        "order_number": "#1500",
+        "name": "#1500",
         "financial_status": "paid",
         "fulfillment_status": "unfulfilled",
         "shipping_address": {
@@ -101,7 +101,7 @@ _ORDER_PRE_ENVIO: dict[str, Any] = {
     },
     "update_shipping_address": {
         "id": 4001,
-        "order_number": "#1500",
+        "name": "#1500",
         "shipping_address": {
             "address1": "Calle Nueva 456",
             "city": "Madrid",
@@ -167,22 +167,28 @@ SCENARIOS: list[dict[str, Any]] = [
     {
         "id": "DE-04",
         "name": "DE-04: Cambiar dirección antes de envío",
-        "description": "Cliente quiere cambiar dirección del pedido #1500 que aún no salió. El agente ejecuta update_shipping_address.",
+        "description": "Cliente quiere cambiar dirección del pedido #1500 que aún no salió. El agente pide update_shipping_address (L3).",
         "aop_slug": "order_change",
         "capabilities": ["ORD-07"],
         "profile": "cooperativo",
         "goal": (
             "Cambiar la dirección de envío del pedido #1500 a Calle Nueva 456, Madrid, "
-            "28001. Confirma la dirección en cuanto te la lean."
+            "28001. Confirma la dirección en cuanto te la lean. Solo lo has logrado cuando "
+            "el agente te diga que ha solicitado el cambio y que queda pendiente de aprobación; "
+            "confirmar la dirección no basta."
         ),
         "initial_message": (
             "Hola, cometí un error con la dirección del pedido #1500. "
             "¿Puedo cambiarla? La nueva es Calle Nueva 456, Madrid"
         ),
-        "expected_outcome": "El agente actualiza la dirección de envío del pedido.",
+        "expected_outcome": (
+            "El agente confirma la nueva dirección y pide el cambio (L3), que queda pendiente "
+            "de aprobación humana."
+        ),
         "mock_fixtures": {"shopify": _ORDER_PRE_ENVIO},
         "assertions": {
             "skills_called": ["shopify.update_shipping_address"],
+            "must_have_pending_approval": True,
         },
         "max_turns": 8,
     },

@@ -10,7 +10,7 @@ _ORDER_IN_WINDOW: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
         "id": 2001,
-        "order_number": "#1234",
+        "name": "#1234",
         "financial_status": "paid",
         "fulfillment_status": "fulfilled",
         "fulfillments": [
@@ -38,7 +38,7 @@ _ORDER_OUT_OF_WINDOW: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
         "id": 2001,
-        "order_number": "#1234",
+        "name": "#1234",
         "financial_status": "paid",
         "fulfillment_status": "fulfilled",
         "fulfillments": [{"tracking_number": "1Z999AA", "tracking_url": "https://"}],
@@ -59,7 +59,7 @@ _ORDER_BROKEN_PRODUCT: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
         "id": 2001,
-        "order_number": "#1234",
+        "name": "#1234",
         "financial_status": "paid",
         "fulfillment_status": "fulfilled",
         "created_at": days_ago(10),
@@ -77,7 +77,7 @@ _ORDER_DIGITAL: dict[str, Any] = {
     "get_order_by_name": {
         "found": True,
         "id": 2002,
-        "order_number": "#1235",
+        "name": "#1235",
         "financial_status": "paid",
         "fulfillment_status": "fulfilled",
         "created_at": days_ago(5),
@@ -107,12 +107,15 @@ SCENARIOS: list[dict[str, Any]] = [
         "profile": "cooperativo",
         "goal": "Iniciar una devolución estándar del pedido #1234 porque la talla no me queda bien; no pedir reembolso inmediato ni cambio por defecto.",
         "initial_message": "Hola, quiero devolver mi pedido #1234 porque la talla no me queda bien",
-        "expected_outcome": "El agente inicia la devolución y confirma el proceso.",
+        "expected_outcome": (
+            "El agente pide la devolución (L3), que queda pendiente de aprobación humana, y le "
+            "explica al cliente que el equipo la confirmará."
+        ),
         "mock_fixtures": {"shopify": _ORDER_IN_WINDOW},
         "assertions": {
             "skills_called": ["shopify.start_return"],
             "skills_not_called": ["shopify.refund_partial"],
-            "outcome_is": "resolved",
+            "must_have_pending_approval": True,
         },
         "max_turns": 6,
     },

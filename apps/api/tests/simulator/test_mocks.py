@@ -67,3 +67,34 @@ async def test_refund_uses_the_order_currency_from_the_balance() -> None:
 async def test_refund_above_refundable_is_rejected_like_the_real_adapter() -> None:
     with pytest.raises(ShopifyActionError, match="refund_amount_exceeds_refundable"):
         await MockShopifyAdapter(_GBP_BALANCE).refund_partial(None, 1, amount=Decimal("40.01"))
+
+
+_TWO_LISTED = {
+    "search_orders_by_email": [
+        {"id": 1001, "name": "#1234", "fulfillment_status": "fulfilled"},
+        {"id": 1002, "name": "#1235", "fulfillment_status": "unfulfilled"},
+    ]
+}
+
+
+async def test_listed_order_is_found_by_name_like_shopify() -> None:
+    mock = MockShopifyAdapter(_TWO_LISTED)
+    assert await mock.get_order_by_name(None, "#1235") == {
+        "id": 1002,
+        "name": "#1235",
+        "fulfillment_status": "unfulfilled",
+    }
+    assert (await mock.get_order_by_name(None, "1234"))["id"] == 1001
+
+
+async def test_listed_order_is_found_by_id_and_unknown_refs_are_not() -> None:
+    mock = MockShopifyAdapter(_TWO_LISTED)
+    assert (await mock.get_order(None, "1002"))["name"] == "#1235"
+    assert await mock.get_order(None, "#1235") is None
+    assert await mock.get_order_by_name(None, "#9999") is None
+
+
+async def test_explicit_single_order_fixture_wins_over_the_lists() -> None:
+    single = {"id": 7, "name": "#1234", "fulfillments": [{"tracking_number": "1Z"}]}
+    mock = MockShopifyAdapter({**_TWO_LISTED, "get_order_by_name": single})
+    assert await mock.get_order_by_name(None, "#1234") == single

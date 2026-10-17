@@ -103,7 +103,7 @@ def finalize(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
         runner, "_setup_run", AsyncMock(return_value=(uuid4(), uuid4(), uuid4()))
     )
     monkeypatch.setattr(runner, "_persist_customer_message", AsyncMock())
-    monkeypatch.setattr(runner, "_persist_agent_message", AsyncMock())
+    monkeypatch.setattr(runner, "_persist_escalation_ack", AsyncMock())
     monkeypatch.setattr(runner, "_get_skill_log", AsyncMock(return_value=[]))
     monkeypatch.setattr(runner, "_pending_approval_present", AsyncMock(return_value=False))
     monkeypatch.setattr(runner, "finalize_simulation_run", finalize_mock)
@@ -180,3 +180,31 @@ async def test_run_leaves_one_langsmith_trace_with_simulation_metadata_and_child
 
     _conn, run_db_id, tenant_id, trace_id = save_trace_id.call_args.args
     assert (str(run_db_id), tenant_id, trace_id) == (meta["simulation_run_id"], TENANT, root["id"])
+
+
+async def test_a_run_uses_the_scenario_as_the_code_defines_it_not_the_stored_row(
+    finalize: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Las corridas del panel (`POST /simulations/runs`) usaban la fila guardada, con
+    fixtures y fechas de cuando se sembró. El runner la sincroniza con el código."""
+    from apps.api.simulator import scenarios
+
+    ce06 = next(sc for sc in scenarios.ALL_SCENARIOS if sc["id"] == "CE-06")
+    stale = SimulationScenario(
+        id=uuid4(), tenant_id=TENANT, name=ce06["name"], aop_slug="order_status",
+        user_profile_id=uuid4(), expected_outcome="viejo", mock_fixtures={"shopify": {}},
+        max_turns=3,
+    )
+    monkeypatch.setattr(runner, "get_simulation_scenario", AsyncMock(return_value=stale))
+    monkeypatch.setattr(scenarios, "update_user_profile", AsyncMock())
+    monkeypatch.setattr(
+        scenarios,
+        "update_simulation_scenario",
+        AsyncMock(side_effect=lambda conn, **kw: stale.model_copy(update=kw)),
+    )
+    graph = _graph()
+
+    await runner.run_simulation(uuid4(), TENANT, anthropic=_anthropic(), graph=graph)
+
+    fixtures = graph.ainvoke.await_args.args[0]["simulation_fixtures"]["shopify"]
+    assert [o["name"] for o in fixtures["search_orders_by_email"]] == ["#1234", "#1235"]

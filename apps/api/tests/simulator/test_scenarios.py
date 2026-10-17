@@ -143,3 +143,78 @@ class TestCapabilityCatalogLinks:
             if sc["mock_fixtures"].get("identity") == "chat":
                 order = sc["mock_fixtures"]["shopify"]["get_order_by_name"]
                 assert order["email"], f"{sc['id']}: el pedido debe llevar su propio email"
+
+
+_ORDER_LIST_METHODS = ("search_orders_by_email", "search_orders_by_phone", "get_orders_by_customer_id")
+
+
+@pytest.mark.parametrize("sc", ALL, ids=lambda sc: sc["id"])
+async def test_every_listed_order_has_its_shopify_name_and_resolves_by_it(sc):
+    """`list_my_orders` muestra el `name` y el gate de identidad busca el pedido por él."""
+    from apps.api.simulator.mocks import MockShopifyAdapter
+
+    shopify = sc["mock_fixtures"].get("shopify", {})
+    mock = MockShopifyAdapter(shopify)
+    for method in _ORDER_LIST_METHODS:
+        orders = shopify.get(method)
+        for order in orders if isinstance(orders, list) else []:
+            assert str(order.get("name", "")).startswith("#"), f"{sc['id']}: {order}"
+            found = await mock.get_order_by_name(None, order["name"])
+            assert found is not None and found["id"] == order["id"], sc["id"]
+
+
+@pytest.mark.parametrize("sc", ALL, ids=lambda sc: sc["id"])
+def test_a_scenario_that_expects_an_l3_skill_expects_its_human_approval(sc):
+    """RE-01 y DE-04 esperaban la devolución o el cambio de dirección ya hechos, pero
+    `start_return` y `update_shipping_address` son L3: quedan pendientes de aprobación."""
+    import apps.api.skills  # noqa: F401
+    from apps.api.skills.registry import SkillRegistry
+
+    assertions = sc.get("assertions", {})
+    l3 = [s for s in assertions.get("skills_called", []) if SkillRegistry.get(s).tier == "L3"]
+    if l3:
+        assert assertions.get("must_have_pending_approval") is True, f"{sc['id']}: {l3}"
+        assert assertions.get("outcome_is") in (None, "escalated"), sc["id"]
+
+
+def _stale_row(name: str):
+    from uuid import uuid4
+
+    from apps.api.db.models import SimulationScenario
+
+    return SimulationScenario(
+        id=uuid4(), tenant_id=uuid4(), name=name, aop_slug="consulta_envio",
+        user_profile_id=uuid4(), expected_outcome="viejo", mock_fixtures={"shopify": {}},
+        assertions={}, max_turns=3,
+    )
+
+
+async def test_sync_brings_a_base_scenario_back_to_the_code(monkeypatch):
+    """#358: CE-06 corría con el fixture guardado en staging, anterior al del código."""
+    from unittest.mock import AsyncMock
+
+    from apps.api.simulator import scenarios
+
+    ce06 = next(sc for sc in ALL if sc["id"] == "CE-06")
+    stale = _stale_row(ce06["name"])
+    update = AsyncMock(side_effect=lambda conn, **kw: stale.model_copy(update=kw))
+    monkeypatch.setattr(scenarios, "update_user_profile", AsyncMock())
+    monkeypatch.setattr(scenarios, "update_simulation_scenario", update)
+
+    synced = await scenarios.sync_scenario_from_code(object(), stale.tenant_id, stale)
+
+    assert synced.mock_fixtures == ce06["mock_fixtures"]
+    assert (synced.aop_slug, synced.max_turns) == ("order_status", 6)
+
+
+async def test_sync_leaves_a_scenario_created_from_the_panel_alone(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from apps.api.simulator import scenarios
+
+    update = AsyncMock()
+    monkeypatch.setattr(scenarios, "update_simulation_scenario", update)
+    custom = _stale_row("Mi escenario del panel")
+
+    assert await scenarios.sync_scenario_from_code(object(), custom.tenant_id, custom) is custom
+    assert update.await_count == 0
