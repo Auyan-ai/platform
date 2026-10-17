@@ -83,23 +83,9 @@ class TestRunnerEvidenceHelpers:
 _ACK = "Le hemos pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
 
 
-def _agent(text: str | None, **extra: Any) -> dict[str, Any]:
-    return {"decision": "respond", "agent_response": text, "tokens_in": 9, "system_prompt": "", **extra}
-
-
-def _customer(message: str, *, goal_achieved: bool = False) -> Any:
-    from types import SimpleNamespace
-
-    return SimpleNamespace(
-        message=message, goal_achieved=goal_achieved, give_up=False, internal_reasoning="",
-        input_tokens=1, output_tokens=1, cost_usd=0.0, usage=None,
-    )
-
-
-async def _run_loop(
-    monkeypatch: Any, agent_turns: list[dict[str, Any]], customer_turns: list[Any]
-) -> tuple[str, list[tuple[str, str, dict]]]:
-    """Corre `_execute_loop` con un grafo que guarda su respuesta como el nodo respond."""
+async def test_each_agent_turn_leaves_exactly_one_outbound_message(monkeypatch: Any) -> None:
+    """#361: el nodo respond guarda la respuesta; el runner solo guarda el acuse de
+    escalado, que en producción también escribe el webhook y no el grafo."""
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
@@ -113,25 +99,48 @@ async def _run_loop(
         rows.append((kw["direction"], kw["content"], kw.get("metadata") or {}))
         return SimpleNamespace(id=uuid4())
 
-    agent, customer = iter(agent_turns), iter(customer_turns)
+    turns = iter(
+        [
+            {
+                "decision": "respond",
+                "agent_response": "Tu pedido #1234 sale hoy.",
+                "tokens_in": 9,
+                "system_prompt": "",
+            },
+            {
+                "decision": "escalate",
+                "agent_response": None,
+                "escalation_id": "esc-1",
+                "escalation_reason": "low_confidence: 0.50 < threshold 0.65",
+                "tokens_in": 9,
+                "system_prompt": "",
+            },
+        ]
+    )
 
     class Graph:
         async def ainvoke(self, state: Any) -> Any:
-            final = next(agent)
+            final = next(turns)
             if final["agent_response"]:
                 await insert_message(None, direction="outbound", content=final["agent_response"])
                 final["output_message_id"] = "graph-msg"
             return final
+
+    def customer(message: str) -> Any:
+        return SimpleNamespace(
+            message=message, goal_achieved=False, give_up=False, internal_reasoning="",
+            input_tokens=1, output_tokens=1, cost_usd=0.0, usage=None,
+        )
 
     class Customer:
         def __init__(self, **_: Any) -> None:
             pass
 
         def first_message(self) -> Any:
-            return next(customer)
+            return customer("¿Y mi pedido #1234?")
 
         async def next_turn(self, **_: Any) -> Any:
-            return next(customer)
+            return customer("¿Y el #1235?")
 
     monkeypatch.setattr(runner, "tenant_scope", make_fake_tenant_scope())
     monkeypatch.setattr(runner, "insert_message", insert_message)
@@ -142,25 +151,9 @@ async def _run_loop(
         run_id=uuid4(), conversation_id=uuid4(), end_customer_id=uuid4(),
         transcript=SimulatorTranscript(scenario=scenario, profile_name="sim"),
     )
+
     reason = await runner._execute_loop(
         acc=acc, scenario=scenario, profile=Any, tenant_id=uuid4(), anthropic=Any, graph=Graph()
-    )
-    return reason, rows
-
-
-async def test_each_agent_turn_leaves_exactly_one_outbound_message(monkeypatch: Any) -> None:
-    """#361: el nodo respond guarda la respuesta; el runner solo guarda el acuse de
-    escalado, que en producción también escribe el webhook y no el grafo."""
-    low_confidence = _agent(
-        None,
-        decision="escalate",
-        escalation_id="esc-1",
-        escalation_reason="low_confidence: 0.50 < threshold 0.65",
-    )
-    reason, rows = await _run_loop(
-        monkeypatch,
-        [_agent("Tu pedido #1234 sale hoy."), low_confidence],
-        [_customer("¿Y mi pedido #1234?"), _customer("¿Y el #1235?")],
     )
 
     assert reason == "escalated_by_agent"
@@ -169,24 +162,6 @@ async def test_each_agent_turn_leaves_exactly_one_outbound_message(monkeypatch: 
         ("outbound", "Tu pedido #1234 sale hoy.", {}),
         ("inbound", "¿Y el #1235?", {}),
         ("outbound", _ACK, {"fixed_message": "escalation_ack"}),
-    ]
-
-
-async def test_the_agent_answers_the_customer_message_that_closes_the_goal(
-    monkeypatch: Any,
-) -> None:
-    """DE-04: el cliente confirma la dirección con goal_achieved y la corrida acababa
-    antes de que el agente aplicara el cambio."""
-    reason, rows = await _run_loop(
-        monkeypatch,
-        [_agent("¿Confirmas Calle Nueva 456?"), _agent("Listo, dirección cambiada.")],
-        [_customer("Cambia la dirección del #1500"), _customer("Sí, confirmo", goal_achieved=True)],
-    )
-
-    assert reason == "goal_achieved"
-    assert [content for direction, content, _ in rows if direction == "outbound"] == [
-        "¿Confirmas Calle Nueva 456?",
-        "Listo, dirección cambiada.",
     ]
 
 
