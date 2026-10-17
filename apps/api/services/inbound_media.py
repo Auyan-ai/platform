@@ -30,6 +30,7 @@ from apps.api.db.inbound_jobs import get_inbound_messages, update_inbound_messag
 from apps.api.integrations.base import StoredAttachment
 from apps.api.integrations.transcription import get_transcriber, ogg_duration_seconds
 from apps.api.services.channel_routing import load_delivery_client
+from apps.api.services.fixed_texts import FALLBACK_LANGUAGE, fixed_text
 from apps.api.services.handoff import is_approval_gate
 from apps.api.services.media_storage import store_attachment
 
@@ -52,26 +53,7 @@ FALLBACK_PRIORITY = (
     "media_without_text",
     "unsupported",
 )
-DEFAULT_FALLBACK_MESSAGES: dict[str, str] = {
-    "media_without_text": (
-        "¡Gracias! Hemos recibido tu archivo, pero no podemos verlo. ¿Nos cuentas por "
-        "escrito en qué te podemos ayudar?"
-    ),
-    "audio_unavailable": (
-        "No hemos podido escuchar tu nota de voz. ¿Nos escribes tu consulta, por favor?"
-    ),
-    "audio_too_long": (
-        "Tu nota de voz es demasiado larga para procesarla. ¿Nos escribes tu consulta en un "
-        "mensaje, por favor?"
-    ),
-    "download_failed": (
-        "No hemos podido abrir lo que nos enviaste. ¿Puedes escribirnos tu consulta, por favor?"
-    ),
-    "unsupported": "¿En qué te podemos ayudar? Escríbenos tu consulta, por favor.",
-    "escalation_ack": (
-        "He pasado tu consulta a nuestro equipo. Te responderán por aquí lo antes posible."
-    ),
-}
+_MEDIA_KINDS = frozenset((*FALLBACK_PRIORITY, "escalation_ack"))
 _DOWNLOADABLE = frozenset({"image", "audio", "video", "file"})
 
 
@@ -85,12 +67,22 @@ class MediaOutcome:
     transcription_cost_usd: float = 0.0
 
 
-def fallback_message(kind: FallbackKind, config: dict[str, Any] | None) -> str:
-    """Mensaje fijo del tenant (`config.media_fallback_messages`) o el default en español."""
-    custom = ((config or {}).get("media_fallback_messages") or {}).get(kind)
-    if isinstance(custom, str) and custom.strip():
-        return custom.strip()
-    return DEFAULT_FALLBACK_MESSAGES.get(kind, DEFAULT_FALLBACK_MESSAGES["unsupported"])
+def fallback_message(
+    kind: FallbackKind,
+    config: dict[str, Any] | None,
+    *,
+    language: str | None = None,
+    tenant_default: str = FALLBACK_LANGUAGE,
+) -> str:
+    """Mensaje fijo en el idioma de la conversación; el del tenant
+    (`config.media_fallback_messages`, texto o `{idioma: texto}`) si lo define."""
+    overrides = (config or {}).get("media_fallback_messages")
+    return fixed_text(
+        kind if kind in _MEDIA_KINDS else "unsupported",
+        language,
+        tenant_default=tenant_default,
+        overrides=overrides if isinstance(overrides, dict) else None,
+    )
 
 
 def chat_escalation_ack(
@@ -99,6 +91,8 @@ def chat_escalation_ack(
     escalation_reason: str | None,
     *,
     escalated: bool,
+    language: str | None = None,
+    tenant_default: str = FALLBACK_LANGUAGE,
 ) -> str | None:
     """Acuse fijo del chat cuando el turno escaló sin texto para el cliente (p. ej.
     low_confidence, empty_reply, o un fallo del sistema ya escalado como
@@ -107,7 +101,9 @@ def chat_escalation_ack(
     escalated_turn = decision == "escalate" or (decision == "error" and escalated)
     if not escalated_turn or response_text or is_approval_gate(escalation_reason):
         return None
-    return fallback_message("escalation_ack", None)
+    return fallback_message(
+        "escalation_ack", None, language=language, tenant_default=tenant_default
+    )
 
 
 def unseen_media_marker(images: int, files: int) -> str:

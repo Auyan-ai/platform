@@ -5,17 +5,19 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 from apps.api.services.approval_reply import (
-    _DEFAULT_DONE,
-    _DEFAULT_DONE_FOLLOWUP,
-    _DEFAULT_GATE,
-    _DEFAULT_WAITING,
-    _FAILED,
     done_followup_message,
     fallback_message,
     gate_message,
     generate_customer_reply,
     waiting_message,
 )
+from apps.api.services.fixed_texts import LANGUAGE_CODES, fixed_text
+
+_DEFAULT_DONE = fixed_text("done.default", "es")
+_DEFAULT_DONE_FOLLOWUP = fixed_text("done_followup.default", "es")
+_DEFAULT_GATE = fixed_text("gate.default", "es")
+_DEFAULT_WAITING = fixed_text("waiting.default", "es")
+_FAILED = fixed_text("failed", "es")
 
 
 class TestDoneFollowupMessage:
@@ -147,14 +149,10 @@ def test_confirmation_without_output_keeps_generic_template() -> None:
 
 class TestNoEmojiOrMarkdownToCustomer:
     def test_fixed_texts_have_no_emoji(self) -> None:
-        from apps.api.services import approval_reply as ar
+        from apps.api.services.fixed_texts import CATALOG
         from apps.api.services.reply_format import has_emoji
 
-        texts = [
-            *ar._SKILL_DONE.values(), *ar._SKILL_GATE.values(), *ar._SKILL_WAITING.values(),
-            *ar._SKILL_DONE_FOLLOWUP.values(),
-            ar._DEFAULT_DONE, ar._DEFAULT_GATE, ar._DEFAULT_WAITING, ar._DEFAULT_DONE_FOLLOWUP,
-        ]
+        texts = [t for per_language in CATALOG.values() for t in per_language.values()]
         assert texts and not [t for t in texts if has_emoji(t)]
 
     async def test_llm_reply_is_stripped_but_details_kept_literal(self) -> None:
@@ -238,3 +236,96 @@ class TestOutcomeReplies:
             "No hemos podido confirmar el cambio de dirección de tu pedido. Nuestro equipo "
             "ya está avisado y te escribirá en cuanto lo tenga resuelto."
         )
+
+
+# ----------------------------------------------------------------
+# Idioma de la conversación: cada mensaje sale en el idioma pedido
+# ----------------------------------------------------------------
+
+
+class TestLanguages:
+    def test_gate_waiting_followup_in_english(self) -> None:
+        assert gate_message("shopify.cancel_order", "en").startswith("Understood.")
+        assert waiting_message("shopify.cancel_order", "en").startswith("Your cancellation")
+        assert done_followup_message(None, "en") == (
+            "Your request has already been completed. If you need anything else, I'm here."
+        )
+
+    def test_unsupported_language_uses_tenant_default_then_spanish(self) -> None:
+        assert gate_message("shopify.cancel_order", "de", "ca").startswith("Entesos.")
+        assert gate_message("shopify.cancel_order", "de").startswith("Entendido.")
+
+    def test_every_template_exists_in_every_language(self) -> None:
+        for language in LANGUAGE_CODES:
+            for slug in ("shopify.cancel_order", "shopify.start_return", "shopify.other", None):
+                assert gate_message(slug, language)
+                assert waiting_message(slug, language)
+                assert done_followup_message(slug, language)
+
+    def test_rejection_keeps_the_team_comment_verbatim(self) -> None:
+        msg = fallback_message(
+            "shopify.cancel_order", success=False, reject_comment="Fuera de plazo.", language="fr"
+        )
+        assert msg.startswith("Nous avons examiné ta demande")
+        assert msg.endswith("Fuera de plazo.")
+
+    async def test_outcome_and_address_details_in_english(self) -> None:
+        msg = await generate_customer_reply(
+            None,
+            "shopify.update_shipping_address",
+            success=True,
+            output={
+                "outcome": "confirmed",
+                "new_address1": "Calle Nueva 42",
+                "new_zip": "28001",
+                "new_city": "Madrid",
+            },
+            language="en",
+        )
+        assert msg == (
+            "We've updated the shipping address of your order.\n\n"
+            "New shipping address: Calle Nueva 42, 28001 Madrid."
+        )
+
+    async def test_unsettled_outcome_in_catalan(self) -> None:
+        msg = await generate_customer_reply(
+            None,
+            "shopify.cancel_order",
+            success=True,
+            output={"outcome": "refund_failed"},
+            language="ca",
+        )
+        assert msg == (
+            "Hem cancel·lat la teva comanda, però el reemborsament no s'ha pogut completar de "
+            "manera automàtica. El nostre equip ja està avisat i t'escriurà tan bon punt ho "
+            "tingui resolt."
+        )
+
+    async def test_llm_prompt_asks_for_the_conversation_language(self) -> None:
+        block = MagicMock()
+        block.type = "text"
+        block.text = "All done, we have cancelled your order. Anything else, just ask."
+        client = MagicMock()
+        client.messages.create = AsyncMock(return_value=MagicMock(content=[block]))
+
+        msg = await generate_customer_reply(
+            client, "shopify.cancel_order", success=True, language="en"
+        )
+
+        assert msg == "All done, we have cancelled your order. Anything else, just ask."
+        sent = client.messages.create.await_args.kwargs
+        assert "en inglés" in sent["system"]
+        assert sent["messages"][0]["content"] == "We've cancelled your order."
+
+    async def test_llm_reply_in_the_wrong_language_falls_back_to_the_template(self) -> None:
+        block = MagicMock()
+        block.type = "text"
+        block.text = "¡Listo! Hemos cancelado tu pedido, cualquier cosa aquí estamos."
+        client = MagicMock()
+        client.messages.create = AsyncMock(return_value=MagicMock(content=[block]))
+
+        msg = await generate_customer_reply(
+            client, "shopify.cancel_order", success=True, language="en"
+        )
+
+        assert msg == "We've cancelled your order."

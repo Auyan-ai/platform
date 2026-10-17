@@ -17,7 +17,7 @@ import pytest
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes import execute_skill
 from apps.api.agents.nodes.execute_skill import make_execute_skill_node
-from apps.api.services.identity_messages import DEFAULT_MESSAGES
+from apps.api.services.fixed_texts import fixed_text
 from apps.api.skills.base import (
     Skill,
     SkillContext,
@@ -100,7 +100,7 @@ class TestOwnershipCheck:
             await _error("kenny.medina@ahoracrypto.com", {"order_id": 1429})
         assert refusal.value.code == "commerce_unavailable"
         assert refusal.value.team_reason.startswith("commerce_unavailable:")
-        assert refusal.value.customer_message == DEFAULT_MESSAGES["commerce_unavailable"]
+        assert refusal.value.customer_message == fixed_text("commerce_unavailable", "es")
 
 
 class _OrderInput(SkillInput):
@@ -196,7 +196,7 @@ class TestNodeGate:
         create.assert_not_awaited()
         assert result["decision"] == "escalate"
         assert result["escalation_reason"].startswith("commerce_unavailable:")
-        assert result["agent_response"] == DEFAULT_MESSAGES["commerce_unavailable"]
+        assert result["agent_response"] == fixed_text("commerce_unavailable", "es")
 
 
 class TestSimulatorOrdersBelongToSimCustomer:

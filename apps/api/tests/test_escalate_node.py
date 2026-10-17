@@ -321,3 +321,46 @@ async def test_escalation_message_is_normalized_and_returned(fake_deps, monkeypa
     expected = "Te paso con mi equipo\n\nEl equipo de Marea SL"
     assert insert_message.await_args.kwargs["content"] == expected
     assert out["agent_response"] == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("extra", "repeat", "status", "start"),
+    [
+        ({"response_language": "en"}, False, None, "Great! I have all the details"),
+        ({"response_language": "ca"}, True, "pending", "El teu canvi d'adreça segueix"),
+        ({"response_language": "fr"}, True, "approved", "Ton changement d'adresse est déjà"),
+        (
+            {
+                "tenant_config": {"extra": {"languages": {"default": "en", "supported": ["en"]}}},
+            },
+            False,
+            None,
+            "Great! I have all the details",
+        ),
+    ],
+)
+async def test_gate_waiting_and_followup_speak_the_conversation_language(
+    fake_deps, monkeypatch, extra, repeat, status, start
+) -> None:
+    out_msg = make_message(id=OUTBOUND_MSG_ID, role="agent_ai", direction="outbound")
+    insert_msg_mock = AsyncMock(return_value=out_msg)
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    _mock_no_existing(monkeypatch)
+    monkeypatch.setattr(f"{MODULE}.insert_escalation", AsyncMock(return_value=make_escalation()))
+    monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
+    monkeypatch.setattr(f"{MODULE}.insert_message", insert_msg_mock)
+    monkeypatch.setattr(f"{MODULE}.update_conversation_last_message", AsyncMock())
+
+    await make_escalate_node(fake_deps)(
+        _state(
+            agent_response="",
+            pending_approval_id="ap-123",
+            pending_approval_skill_slug="shopify.update_shipping_address",
+            pending_approval_is_repeat=repeat,
+            pending_approval_reused_status=status,
+            **extra,
+        )
+    )
+
+    assert insert_msg_mock.await_args.kwargs["content"].startswith(start)

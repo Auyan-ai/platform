@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 from anthropic.types import Usage
 from apps.api.agents.nodes.reason import make_reason_node
+from apps.api.services.fixed_texts import fixed_text
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 
@@ -921,7 +922,6 @@ class TestIterationsExhausted:
     async def test_skill_call_despite_forcing_escalates_with_courtesy(
         self, fake_deps, monkeypatch
     ) -> None:
-        from apps.api.agents.nodes.reason import ITERATIONS_EXHAUSTED_MESSAGE
 
         from tests.conftest import FakeAnthropicResponse
 
@@ -940,5 +940,30 @@ class TestIterationsExhausted:
 
         assert out["decision"] == "escalate"
         assert out["escalation_reason"] == "max_tool_iterations_exceeded (4/4)"
-        assert out["agent_response"] == ITERATIONS_EXHAUSTED_MESSAGE
+        assert out["agent_response"] == fixed_text("iterations_exhausted", "es")
         assert out["pending_tool_call"] is None
+
+
+    @pytest.mark.asyncio
+    async def test_courtesy_message_speaks_the_conversation_language(
+        self, fake_deps, monkeypatch
+    ) -> None:
+        from tests.conftest import FakeAnthropicResponse
+
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.reason.call_claude_with_tools",
+            AsyncMock(
+                return_value=FakeAnthropicResponse(
+                    {"order_identifier": "#1"},
+                    tool_name="shopify_get_order_status",
+                    tool_id="toolu_x",
+                )
+            ),
+        )
+
+        out = await make_reason_node(fake_deps)(
+            {**self._exhausted_state(), "response_language": "en"}
+        )
+
+        assert out["agent_response"] == fixed_text("iterations_exhausted", "en")
+        assert out["agent_response"].startswith("Thanks for writing to us")

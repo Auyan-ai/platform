@@ -306,3 +306,51 @@ async def test_invalid_tenant_override_uses_default():
         )
 
     assert result is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("language", "extra", "expected"),
+    [
+        ("en", {}, "We've received a lot of messages"),
+        ("ca", {}, "Hem rebut molts missatges"),
+        ("fr", {}, "Nous avons reçu beaucoup"),
+        ("es", {"cap_message": "Te paso con una persona."}, "Te paso con una persona."),
+        ("en", {"cap_message": {"en": "A human is joining."}}, "A human is joining."),
+        ("en", {"cap_message": "Te paso con una persona."}, "We've received a lot"),
+    ],
+)
+async def test_cap_courtesy_message_speaks_the_conversation_language(
+    language: str, extra: dict, expected: str
+):
+    insert = AsyncMock(return_value=make_message())
+    with pytest.MonkeyPatch().context() as mp:
+        mp.setattr(
+            "apps.api.services.message_cap.count_inbound_messages", AsyncMock(return_value=99)
+        )
+        mp.setattr(
+            "apps.api.services.message_cap.get_open_escalation_for_conversation",
+            AsyncMock(return_value=None),
+        )
+        mp.setattr(
+            "apps.api.services.message_cap.conversation_text_languages",
+            AsyncMock(return_value=(language, "es")),
+        )
+        mp.setattr("apps.api.services.message_cap.insert_message", insert)
+        mp.setattr(
+            "apps.api.services.message_cap.insert_escalation",
+            AsyncMock(return_value=make_escalation()),
+        )
+        mp.setattr("apps.api.services.message_cap.update_conversation_status", AsyncMock())
+        result = await enforce_message_cap(
+            AsyncMock(),
+            tenant_id=TENANT_ID,
+            conversation_id=CONVERSATION_ID,
+            inbound_message_id=INBOUND_MSG_ID,
+            tenant_config=make_tenant_configuration(extra=extra),
+            settings=FakeSettings(),  # type: ignore[arg-type]
+        )
+
+    assert result is not None
+    assert result.response_text.startswith(expected)
+    assert insert.await_args.kwargs["content"] == result.response_text

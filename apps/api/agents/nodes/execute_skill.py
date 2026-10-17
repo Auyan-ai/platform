@@ -42,6 +42,7 @@ from apps.api.services.identity_guest import (
     guest_policy,
     lookup_order,
 )
+from apps.api.services.language import state_languages
 from apps.api.services.pii import redact_inputs
 from apps.api.services.skill_access import IdentityVerdict, identity_verdict
 from apps.api.skills.base import Skill, SkillContext, SkillRefusal
@@ -82,7 +83,10 @@ def build_skill_context(state: AgentState) -> SkillContext:
     # intake en `identity_evidence`. Un email de chat lo teclea el visitante.
     evidence = evidence_from_state(state)
 
+    language, default_language = state_languages(state)
     return SkillContext(
+        language=language,
+        default_language=default_language,
         tenant_id=state["tenant_id"],
         conversation_id=state["conversation_id"],
         integration_ctx=integration_ctx,
@@ -209,7 +213,7 @@ async def _resolve_order(ctx: SkillContext, order_ref: str) -> dict[str, Any] | 
             "identity_gate_order_resolution_failed",
             extra={"tenant_id": ctx.tenant_id, "error": str(exc)},
         )
-        raise commerce_unavailable_refusal(str(exc), ctx.tenant_facts) from exc
+        raise commerce_unavailable_refusal(str(exc), ctx) from exc
 
 
 async def _identity_gate(

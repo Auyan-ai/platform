@@ -542,3 +542,30 @@ class TestStartReturn:
         assert tool["name"] == "shopify_start_return"
         assert "line_item_id" in tool["input_schema"]["properties"]
         assert "quantity" in tool["input_schema"]["properties"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("language", "default", "start"),
+    [
+        ("en", "es", "Your order has already left the warehouse"),
+        ("fr", "es", "Ta commande a déjà"),
+        ("ca", "es", "La teva comanda ja ha sortit"),
+        ("de", "en", "Your order has already left"),
+    ],
+)
+async def test_order_refusal_speaks_the_conversation_language(
+    language: str, default: str, start: str
+) -> None:
+    from dataclasses import replace
+
+    ctx = replace(
+        _ctx(_adapter(snapshot(fulfillment_status="FULFILLED"))),
+        language=language,
+        default_language=default,
+    )
+    with pytest.raises(SkillRefusal) as refused:
+        await CancelOrder().prepare_approval(ctx, {"order_id": 1001})
+    assert refused.value.customer_message.startswith(start)
+    # El motivo para el equipo no cambia de idioma.
+    assert refused.value.team_reason.startswith("El cliente pidió cancelar el pedido")

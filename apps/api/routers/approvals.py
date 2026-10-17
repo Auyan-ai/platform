@@ -44,6 +44,7 @@ from apps.api.services.approval_resolution import (
 from apps.api.services.commerce_context import build_commerce_integration_ctx
 from apps.api.services.helpdesk_delivery import deliver_message_to_helpdesk
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
+from apps.api.services.language import conversation_text_languages
 from apps.api.skills.base import SkillContext
 from apps.api.skills.registry import SkillRegistry
 from fastapi import APIRouter, Depends, Query, Request
@@ -177,9 +178,14 @@ async def approve_action(
         # Mismo camino que el grafo: creds desde tenant_integrations (cifradas +
         # token exchange Shopify), fallback legacy a tenant_config.extra.
         integration_ctx = await build_commerce_integration_ctx(conn, tenant_id, extra=extra)
+        language, tenant_default = await conversation_text_languages(
+            conn, tenant_id, approval.conversation_id, extra
+        )
 
     # Construir SkillContext con el IntegrationContext del tenant
     skill_ctx = SkillContext(
+        language=language,
+        default_language=tenant_default,
         tenant_id=str(tenant_id),
         conversation_id=str(approval.conversation_id),
         integration_ctx=integration_ctx,
@@ -262,6 +268,8 @@ async def approve_action(
         approval.skill_slug,
         success=True,
         output=output_data,
+        language=language,
+        tenant_default=tenant_default,
     )
 
     # Marcar aprobada y añadir mensaje a la conversación
@@ -382,6 +390,13 @@ async def reject_action(
             reviewed_by=auth.user_id,
             review_comment=body.comment,
         )
+        tenant_config = await get_tenant_configuration(conn, tenant_id)
+        language, tenant_default = await conversation_text_languages(
+            conn,
+            tenant_id,
+            approval.conversation_id,
+            tenant_config.extra if tenant_config else None,
+        )
         # Mensaje al cliente: natural y sin jerga interna (Haiku, con fallback a plantilla).
         anthropic_client = getattr(
             getattr(request.app.state, "agent_deps", None), "anthropic", None
@@ -391,6 +406,8 @@ async def reject_action(
             approval.skill_slug,
             success=False,
             reject_comment=body.comment,
+            language=language,
+            tenant_default=tenant_default,
         )
         msg = await insert_message(
             conn,

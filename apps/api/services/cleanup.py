@@ -20,7 +20,9 @@ Formato del nudge (opt-in por tenant):
         "nudge_message": "¿Pudimos ayudarte? Si necesitas algo más estamos aquí 😊"
     }
 
-Si un tenant no define estos campos, se usan los defaults del módulo.
+`nudge_message` puede ser un texto (idioma por defecto del tenant) o `{idioma: texto}`.
+Si un tenant no define estos campos, se usan los defaults del módulo (catálogo por idioma
+de `services/fixed_texts.py`, en el idioma de cada conversación).
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from apps.api.db.models import TenantConfiguration
 from apps.api.db.queries import (
     delete_expired_rate_limit_buckets,
     get_conversation,
+    get_conversation_language,
     get_nudge_candidates,
     get_stale_conversations,
     get_tenant_configuration,
@@ -44,16 +47,14 @@ from apps.api.db.queries import (
     mark_conversations_nudged,
 )
 from apps.api.services.channel_routing import is_messaging_channel
+from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.helpdesk_closure import close_external_helpdesk_ticket_safe
 from apps.api.services.helpdesk_delivery import deliver_message_to_helpdesk
+from apps.api.services.language import tenant_languages
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_NUDGE_BEFORE_SECONDS = 3_600  # 1 h antes del cierre
-DEFAULT_NUDGE_MESSAGE = (
-    "¿Pudimos resolver tu consulta? Si hay algo más en lo que podamos ayudarte, "
-    "estamos aquí. Esta conversación se cerrará automáticamente si no recibimos respuesta pronto."
-)
 
 # Timeouts por canal (segundos). Overrideable por tenant via extra.conversation_timeouts.
 DEFAULT_TIMEOUTS: dict[str, int] = {
@@ -196,7 +197,8 @@ async def _nudge_for_tenant(
 
     channel_ranges, default_range = ranges_result
     extra = config.extra if config else {}
-    nudge_message: str = extra.get("nudge_message") or DEFAULT_NUDGE_MESSAGE
+    nudge_overrides = {"nudge": extra.get("nudge_message")}
+    tenant_default, _ = tenant_languages(extra)
 
     # Pre-filtro SQL: usar el cutoff_max más permisivo (ventana más pequeña → cutoff más reciente)
     all_maxes = [r[1] for r in channel_ranges.values()] + [default_range[1]]
@@ -225,6 +227,10 @@ async def _nudge_for_tenant(
         # y entregarlo al helpdesk del cliente — antes solo se guardaba en DB y nunca
         # llegaba al widget/ticket.
         for conv_id in nudge_ids:
+            language = await get_conversation_language(conn, tenant_id, conv_id)
+            nudge_message = fixed_text(
+                "nudge", language, tenant_default=tenant_default, overrides=nudge_overrides
+            )
             await insert_message(
                 conn,
                 tenant_id=tenant_id,

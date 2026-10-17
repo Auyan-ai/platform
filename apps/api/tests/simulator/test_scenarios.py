@@ -35,7 +35,7 @@ class TestPersonas:
 
 class TestScenarioStructure:
     def test_total_count(self):
-        assert len(ALL) == 40
+        assert len(ALL) == 42
         assert ALL == ALL_SCENARIOS
 
     def test_unique_ids(self):

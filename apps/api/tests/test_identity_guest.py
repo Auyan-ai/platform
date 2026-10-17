@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from apps.api.integrations.base import IntegrationContext
 from apps.api.services import identity_guest
+from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.identity import IdentityContext, email_claim
 from apps.api.services.identity_guest import (
     Contact,
@@ -26,7 +27,7 @@ from apps.api.services.identity_guest import (
     provided_from_history,
     run_guest_checks,
 )
-from apps.api.services.identity_messages import DEFAULT_MESSAGES, identity_message
+from apps.api.services.identity_messages import identity_message
 from apps.api.skills.base import SkillContext
 from apps.api.tests.conftest import CONVERSATION_ID, TENANT_ID
 
@@ -240,7 +241,7 @@ async def test_unknown_order_and_wrong_contact_get_the_same_reply(store: Store) 
     wrong = await run_guest_checks(
         AsyncMock(), _ctx(), [_pair("1002", "ana@tienda.com")], policy=GuestPolicy(), now=NOW
     )
-    assert unknown.reply == wrong.reply == DEFAULT_MESSAGES["guest_not_verified"]
+    assert unknown.reply == wrong.reply == fixed_text("guest_not_verified", "es")
     assert [r["outcome"] for r in store.rows] == ["order_not_found", "contact_mismatch"]
     assert "existe" not in unknown.reply
 
@@ -269,12 +270,12 @@ async def test_the_fifth_failure_locks_the_conversation(store: Store) -> None:
         result = await run_guest_checks(
             AsyncMock(), _ctx(), [_pair(str(8000 + i), "ana@tienda.com")], policy=policy, now=NOW
         )
-        assert result.reply == DEFAULT_MESSAGES["guest_not_verified"]
+        assert result.reply == fixed_text("guest_not_verified", "es")
     locked = await run_guest_checks(
         AsyncMock(), _ctx(), [_pair("1001", "ana@tienda.com")], policy=policy, now=NOW
     )
     assert locked.status == "locked"
-    assert locked.reply == DEFAULT_MESSAGES["guest_locked"]
+    assert locked.reply == fixed_text("guest_locked", "es")
     assert locked.grants == ()
     assert len(store.rows) == 5
 
@@ -304,7 +305,7 @@ async def test_tenant_failures_pause_guest_then_resume(
         now=NOW + timedelta(minutes=5),
     )
     assert paused.status == "paused"
-    assert paused.reply == DEFAULT_MESSAGES["guest_paused"]
+    assert paused.reply == fixed_text("guest_paused", "es")
 
     for row in store.rows:
         row["attempt_key"] += "-old"
@@ -329,7 +330,7 @@ async def test_an_adapter_error_is_not_recorded_and_reports_the_store_down(
         now=NOW,
     )
     assert result.status == "unavailable"
-    assert result.reply == DEFAULT_MESSAGES["commerce_unavailable"]
+    assert result.reply == fixed_text("commerce_unavailable", "es")
     assert result.error
     assert store.rows == []
 
@@ -355,9 +356,9 @@ def test_policy_defaults_overrides_and_invalid_values() -> None:
 def test_tenant_can_override_the_fixed_texts() -> None:
     facts = {"identity_messages": {"guest_not_verified": "  Revisa los datos, porfa.  "}}
     assert identity_message("guest_not_verified", facts) == "Revisa los datos, porfa."
-    assert identity_message("guest_locked", facts) == DEFAULT_MESSAGES["guest_locked"]
+    assert identity_message("guest_locked", facts) == fixed_text("guest_locked", "es")
     assert identity_message("guest_paused", {"identity_messages": {"guest_paused": " "}}) == (
-        DEFAULT_MESSAGES["guest_paused"]
+        fixed_text("guest_paused", "es")
     )
 
 
@@ -365,3 +366,52 @@ def test_provided_contact_only_for_a_typed_email() -> None:
     assert identity_guest.build_provided_contact(" Ana@x.com ") == {"email": "Ana@x.com"}
     assert identity_guest.build_provided_contact("  ") is None
     assert identity_guest.build_provided_contact(None) is None
+
+
+async def test_guest_texts_follow_the_conversation_language(store: Store) -> None:
+    from dataclasses import replace
+
+    ctx = replace(_ctx(), language="en")
+    failed = await run_guest_checks(
+        AsyncMock(), ctx, [_pair("9999", "otra@tienda.com")], policy=GuestPolicy(), now=NOW
+    )
+    assert failed.reply == fixed_text("guest_not_verified", "en")
+    assert failed.reply.startswith("I couldn't verify")
+
+    down = await run_guest_checks(
+        AsyncMock(),
+        replace(_ctx(_adapter(fail=True)), language="ca"),
+        [_pair("1001", "ana@tienda.com")],
+        policy=GuestPolicy(),
+        now=NOW,
+    )
+    assert down.reply == fixed_text("commerce_unavailable", "ca")
+
+
+def test_commerce_unavailable_refusal_uses_language_and_tenant_overrides() -> None:
+    from dataclasses import replace
+
+    from apps.api.services.identity_guest import commerce_unavailable_refusal
+
+    refusal = commerce_unavailable_refusal("timeout", replace(_ctx(), language="en"))
+    assert refusal.customer_message == fixed_text("commerce_unavailable", "en")
+
+    facts = {"identity_messages": {"commerce_unavailable": {"en": "Store is down, one sec."}}}
+    custom = replace(_ctx(), language="en", tenant_facts=facts)
+    assert commerce_unavailable_refusal("timeout", custom).customer_message == (
+        "Store is down, one sec."
+    )
+    french = replace(_ctx(), language="fr", tenant_facts=facts)
+    assert commerce_unavailable_refusal("timeout", french).customer_message == (
+        fixed_text("commerce_unavailable", "fr")
+    )
+
+
+def test_plain_string_override_follows_the_tenant_default_language() -> None:
+    facts = {"identity_messages": {"guest_locked": "Locked, sorry."}}
+    assert identity_message("guest_locked", facts, language="en", tenant_default="en") == (
+        "Locked, sorry."
+    )
+    assert identity_message("guest_locked", facts, language="en", tenant_default="es") == (
+        fixed_text("guest_locked", "en")
+    )

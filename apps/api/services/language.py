@@ -16,9 +16,14 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from lingua import Language, LanguageDetector, LanguageDetectorBuilder
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    import asyncpg
 
 LANGUAGES: dict[str, Language] = {
     "es": Language.SPANISH,
@@ -129,6 +134,33 @@ def reply_language_mismatch(text: str, target: str, supported: frozenset[str]) -
     """Idioma detectado de una respuesta si NO es `target`; None si coincide o no se sabe."""
     detected = detect(text, supported | {target})
     return detected if detected is not None and detected != target else None
+
+
+def state_languages(state: Mapping[str, Any]) -> tuple[str, str]:
+    """(idioma de la conversación, idioma por defecto del tenant) dentro del grafo.
+
+    `load_conversation` fija `response_language`; si falta (nodo que no corrió), el
+    idioma por defecto del tenant.
+    """
+    default, _ = tenant_languages((state.get("tenant_config") or {}).get("extra"))
+    return state.get("response_language") or default, default
+
+
+async def conversation_text_languages(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    config_extra: Mapping[str, Any] | None,
+) -> tuple[str, str]:
+    """(idioma, defecto del tenant) para un texto fijo fuera del grafo.
+
+    El idioma es el fijado en `conversations.language`; sin él, el defecto del tenant.
+    """
+    from apps.api.db.queries import get_conversation_language
+
+    default, _ = tenant_languages(config_extra)
+    language = await get_conversation_language(conn, tenant_id, conversation_id)
+    return language or default, default
 
 
 def response_language_block(code: str) -> str:

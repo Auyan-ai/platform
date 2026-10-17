@@ -81,7 +81,7 @@ class CheckOrderContact(Skill):
                 tenant_facts=ctx.tenant_facts,
             )
         if result.status == "unavailable":
-            raise commerce_unavailable_refusal(result.error or "", ctx.tenant_facts)
+            raise commerce_unavailable_refusal(result.error or "", ctx)
         if result.status == "granted":
             grant = result.grants[0]
             return CheckOrderContactOutput(

@@ -9,6 +9,7 @@ from typing import Any
 
 from apps.api.simulator.scenarios.consulta_envio import _ORDER_1234_WITH_TRACKING
 from apps.api.simulator.scenarios.default import _POLICIES
+from apps.api.simulator.scenarios.orders import _ORDER_1500, _snapshot
 
 SCENARIOS: list[dict[str, Any]] = [
     {
@@ -67,5 +68,60 @@ SCENARIOS: list[dict[str, Any]] = [
             "response_language": "en",
         },
         "max_turns": 3,
+    },
+    {
+        "id": "LG-04",
+        "name": "LG-04: Tienda caída con el cliente en inglés",
+        "description": (
+            "Shopify no responde y el cliente escribe en inglés. El texto fijo de "
+            "`commerce_unavailable` sale del catálogo en inglés, no en español."
+        ),
+        "aop_slug": "order_status",
+        "capabilities": ["ORD-01"],
+        "profile": "cooperativo",
+        "goal": "Find out where my order #1234 is",
+        "initial_message": "Hi, where is my order #1234?",
+        "expected_outcome": "Escala con el texto fijo de tienda caída, en inglés.",
+        "mock_fixtures": {
+            "shopify": {
+                "get_order_by_name": {"_error": "SHOPIFY_API_UNAVAILABLE"},
+                "search_orders_by_email": {"_error": "SHOPIFY_API_UNAVAILABLE"},
+            },
+            "customer_language": "en",
+        },
+        "assertions": {
+            "response_contains": ["I can't look up the store's orders"],
+            "response_language": "en",
+            "must_escalate": True,
+        },
+        "max_turns": 4,
+    },
+    {
+        "id": "LG-05",
+        "name": "LG-05: Cancelación (L3) en inglés deja la aprobación pendiente y responde en inglés",
+        "description": (
+            "El cliente pide en inglés cancelar un pedido sin enviar. La acción queda "
+            "pendiente de aprobación y todo lo que recibe el cliente, incluido el mensaje "
+            "del gate, está en inglés."
+        ),
+        "aop_slug": "order_change",
+        "capabilities": ["ORD-05"],
+        "profile": "cooperativo",
+        "goal": "Cancel my order #1500, I bought it by mistake. Confirm if asked.",
+        "initial_message": "Hi, I want to cancel my order #1500, I bought it by mistake.",
+        "expected_outcome": "Aprobación pendiente de la cancelación; respuestas en inglés.",
+        "mock_fixtures": {
+            "shopify": {
+                "get_order_by_name": _ORDER_1500,
+                "get_order_snapshot": _snapshot("shopify_payments", False),
+            },
+            "customer_language": "en",
+        },
+        "assertions": {
+            "skills_called": ["shopify.cancel_order"],
+            "must_have_pending_approval": True,
+            "response_language": "en",
+        },
+        "max_turns": 5,
     },
 ]

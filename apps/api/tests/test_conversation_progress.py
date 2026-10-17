@@ -9,10 +9,10 @@ import pytest
 from apps.api.agents.nodes.reason import make_reason_node
 from apps.api.services.conversation_progress import (
     NO_PROGRESS_AGENT_REPLIES,
-    NO_PROGRESS_MESSAGE,
     no_progress_reason,
     order_found_in,
 )
+from apps.api.services.fixed_texts import fixed_text
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 
@@ -126,5 +126,32 @@ async def test_reason_escalates_before_calling_the_llm(fake_deps, monkeypatch) -
 
     llm.assert_not_awaited()
     assert out["decision"] == "escalate"
-    assert out["agent_response"] == NO_PROGRESS_MESSAGE
+    assert out["agent_response"] == fixed_text("no_progress", "es")
+    assert out["escalation_reason"].startswith("no_progress:")
+
+
+@pytest.mark.asyncio
+async def test_no_progress_escalation_speaks_the_conversation_language(
+    fake_deps, monkeypatch
+) -> None:
+    monkeypatch.setattr("apps.api.agents.nodes.reason.call_claude_with_tools", AsyncMock())
+    state = {
+        "tenant_id": "00000000-0000-0000-0000-000000000001",
+        "conversation_id": "00000000-0000-0000-0000-000000000002",
+        "system_prompt": "Eres el agente de Acme.",
+        "retrieved_chunks": [],
+        "conversation_history": _history(NO_PROGRESS_AGENT_REPLIES),
+        "model_used": "claude-sonnet-4-6",
+        "tenant_config": {"escalation_threshold": 0.70},
+        "allowed_skills": ["test.order_status"],
+        "tool_permissions": {"test.order_status": {"is_enabled": True}},
+        "tool_results": [],
+        "response_language": "fr",
+    }
+
+    out = await make_reason_node(fake_deps)(state)
+
+    assert out["agent_response"] == fixed_text("no_progress", "fr")
+    assert out["agent_response"].startswith("Pour ne pas te faire perdre")
+    # El motivo para el equipo sigue en español.
     assert out["escalation_reason"].startswith("no_progress:")

@@ -34,8 +34,10 @@ from apps.api.agents.state import AgentState
 from apps.api.core.config import get_models
 from apps.api.integrations.anthropic_client import call_claude_with_tools
 from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
-from apps.api.services.conversation_progress import NO_PROGRESS_MESSAGE, no_progress_reason
+from apps.api.services.conversation_progress import no_progress_reason
+from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.identity import IdentityContext
+from apps.api.services.language import state_languages
 from apps.api.services.skill_access import visible_skills
 from apps.api.skills.registry import SkillRegistry
 from pydantic import ValidationError
@@ -44,11 +46,11 @@ logger = logging.getLogger(__name__)
 
 DECIDE_TOOL_NAME: str = RESPOND_OR_ESCALATE_TOOL["name"]
 
-# Cortesía al escalar por loop de tools sin decisión (caso defensivo, ver abajo).
-ITERATIONS_EXHAUSTED_MESSAGE: str = (
-    "Gracias por escribirnos. He pasado tu consulta a una persona del equipo, "
-    "que la revisará y te responderá lo antes posible."
-)
+def _fixed_reply(state: AgentState, key: str) -> str:
+    """Texto fijo al cliente en el idioma de la conversación."""
+    language, tenant_default = state_languages(state)
+    return fixed_text(key, language, tenant_default=tenant_default)
+
 
 # Zona horaria por defecto del vertical e-commerce ES. Cada tenant puede sobrescribirla
 # en tenant_facts["timezone"].
@@ -267,7 +269,7 @@ def make_reason_node(
                 return {
                     "decision": "escalate",
                     "escalation_reason": stalled,
-                    "agent_response": NO_PROGRESS_MESSAGE,
+                    "agent_response": _fixed_reply(state, "no_progress"),
                     "pending_tool_call": None,
                 }
 
@@ -349,7 +351,7 @@ def make_reason_node(
                 "escalation_reason": (
                     f"max_tool_iterations_exceeded ({tool_iterations}/{max_iterations})"
                 ),
-                "agent_response": ITERATIONS_EXHAUSTED_MESSAGE,
+                "agent_response": _fixed_reply(state, "iterations_exhausted"),
                 "pending_tool_call": None,
                 **tokens_update,
             }

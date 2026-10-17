@@ -52,6 +52,7 @@ from apps.api.db.queries import (
     update_conversation_last_message,
 )
 from apps.api.services.inbound_media import chat_escalation_ack
+from apps.api.services.language import state_languages
 from apps.api.simulator.assertions import check_assertions, summarize
 from apps.api.simulator.judge import (
     DEFAULT_JUDGE_ALIAS,
@@ -829,11 +830,14 @@ def simulated_chat_reply(final_state: AgentState) -> str:
 
 def _chat_ack(final_state: AgentState) -> str | None:
     error = final_state.get("error")
+    language, tenant_default = state_languages(final_state)
     return chat_escalation_ack(
         "error" if error else final_state.get("decision"),
         None if error else final_state.get("agent_response"),
         final_state.get("escalation_reason"),
         escalated=final_state.get("escalation_id") is not None,
+        language=language,
+        tenant_default=tenant_default,
     )
 
 
