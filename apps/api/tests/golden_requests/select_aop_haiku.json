@@ -1,0 +1,82 @@
+{
+  "body": [
+    {
+      "max_tokens": 512,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Catálogo de procedimientos disponibles:\n[\n  {\n    \"slug\": \"consulta_envio\",\n    \"name\": \"Consulta de envío\",\n    \"description\": \"El cliente pregunta por su pedido\"\n  },\n  {\n    \"slug\": \"default\",\n    \"name\": \"Procedimiento por defecto\",\n    \"description\": \"Cualquier consulta no cubierta por otros procedimientos\"\n  }\n]\n\nProcedimiento del turno anterior: (ninguno)\n\nMensaje del cliente:\n¿Dónde está mi pedido?\n\nHistorial reciente:\n(sin historial previo)"
+        }
+      ],
+      "model": "claude-haiku-4-5-20251001",
+      "system": "Eres un clasificador de intent para un agente de soporte al cliente.\n\nTu única tarea es analizar el mensaje del cliente (y el historial reciente si lo hay)\ny seleccionar el procedimiento (AOP) más apropiado del catálogo disponible.\n\nReglas:\n- Sé conservador: si no hay evidencia clara de cuál AOP aplica, usa el slug \"default\".\n- Considera el historial para detectar si el cliente cambió de tema.\n- Si se indica un \"Procedimiento del turno anterior\", trátalo como el contexto activo:\n  mantenlo salvo que el mensaje muestre un cambio de tema claro. Si el cliente continúa o\n  profundiza el mismo tema, devuelve ESE mismo slug con confianza alta. Solo cambia de\n  procedimiento (y dale confianza alta) cuando el pivote sea inequívoco; ante mensajes\n  cortos o ambiguos, prefiere mantener el procedimiento previo con confianza moderada.\n- Si el mensaje contiene múltiples intents distintos, márcalo con ambiguity_detected=true.\n- NO inventes slugs que no estén en el catálogo.\n",
+      "tool_choice": {
+        "type": "tool",
+        "name": "select_aop"
+      },
+      "tools": [
+        {
+          "name": "select_aop",
+          "description": "Selecciona el procedimiento más apropiado para el mensaje del cliente.",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "primary": {
+                "type": "object",
+                "description": "El procedimiento más probable.",
+                "properties": {
+                  "slug": {
+                    "type": "string"
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "slug",
+                  "confidence"
+                ]
+              },
+              "alternative": {
+                "type": "object",
+                "description": "Segundo candidato más probable. Omitir si no hay duda razonable.",
+                "properties": {
+                  "slug": {
+                    "type": "string"
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "slug",
+                  "confidence"
+                ]
+              },
+              "reasoning": {
+                "type": "string",
+                "description": "Por qué elegiste el primary en 1-2 frases."
+              },
+              "ambiguity_detected": {
+                "type": "boolean",
+                "description": "True si el mensaje contiene múltiples intents claramente distintos."
+              }
+            },
+            "required": [
+              "primary",
+              "reasoning",
+              "ambiguity_detected"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "beta": [
+    null
+  ]
+}
