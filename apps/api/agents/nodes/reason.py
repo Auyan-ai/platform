@@ -92,6 +92,7 @@ def agent_system_blocks(state: AgentState) -> list[dict[str, Any]]:
         ),
         writing_surface=surface_of(state),
         identity_note=state.get("identity_note"),
+        response_language=state.get("response_language"),
     )
 
 

@@ -17,8 +17,51 @@ from apps.api.agents.nodes._reply import EMPTY_REPLY, finalize_agent_reply
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import insert_message, update_conversation_last_message
+from apps.api.services.language import LANGUAGE_NAMES, reply_language_mismatch
 
 logger = logging.getLogger(__name__)
+
+LANGUAGE_MISMATCH = "language_mismatch"
+REGENERATE = "regenerate"
+
+
+def check_reply_language(state: AgentState, content: str) -> dict | None:
+    """Verifica en código el idioma de la respuesta antes de entregarla.
+
+    Si no es el de la conversación: una regeneración con feedback; si vuelve a fallar,
+    escala con `language_mismatch`. None = la respuesta se entrega.
+    """
+    target = state.get("response_language")
+    if not target:
+        return None
+    supported = frozenset(state.get("supported_languages") or [target])
+    wrong = reply_language_mismatch(content, target, supported)
+    if wrong is None:
+        return None
+    extra = {
+        "tenant_id": state.get("tenant_id"),
+        "conversation_id": state.get("conversation_id"),
+        "target": target,
+        "detected": wrong,
+    }
+    if not state.get("language_retry"):
+        logger.warning("reply_language_retry", extra=extra)
+        return {
+            "decision": REGENERATE,
+            "language_retry": True,
+            "agent_response": None,
+            "supervisor_feedback": (
+                f"Tu respuesta estaba en {LANGUAGE_NAMES[wrong]}, pero el cliente escribe en "
+                f"{LANGUAGE_NAMES[target]}. Escribe la misma respuesta en "
+                f"{LANGUAGE_NAMES[target]}."
+            ),
+        }
+    logger.error(LANGUAGE_MISMATCH, extra=extra)
+    return {
+        "decision": "escalate",
+        "escalation_reason": f"{LANGUAGE_MISMATCH}: respuesta en {wrong}, conversación en {target}",
+        "agent_response": None,
+    }
 
 
 def make_respond_node(
@@ -48,6 +91,10 @@ def make_respond_node(
                 "agent_response": None,
             }
 
+        wrong_language = check_reply_language(state, content)
+        if wrong_language is not None:
+            return wrong_language
+
         metadata = {
             # Enlaza la respuesta con el inbound que la originó: el worker lo usa para
             # no responder dos veces si reintenta un turno que ya había respondido.
@@ -61,6 +108,7 @@ def make_respond_node(
             "cost_usd": state.get("cost_usd", 0.0),
             "confidence": state.get("confidence"),
             "writing_surface": surface,
+            "language": state.get("response_language"),
         }
 
         # El agente resuelve salvo que su respuesta pida más datos al cliente

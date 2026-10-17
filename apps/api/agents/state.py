@@ -57,6 +57,11 @@ class AgentState(TypedDict, total=False):
     # Progreso de una conversación de pedidos (services/conversation_progress.py).
     order_refs_given: bool
     order_in_context: bool
+    # Idioma de la respuesta (ISO 639-1), decidido en código: services/language.py.
+    response_language: str
+    supported_languages: list[str]
+    # Una regeneración por idioma equivocado; la segunda escala con `language_mismatch`.
+    language_retry: bool
     # Clase del error si falló `identity_checks`: guest no se concede, el remitente sigue.
     identity_error: str
     # Sal del tenant para hashear los claims de los pedidos. No se traza.

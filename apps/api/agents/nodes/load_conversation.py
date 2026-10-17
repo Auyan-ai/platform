@@ -18,15 +18,26 @@ from apps.api.db.models import Message
 from apps.api.db.queries import (
     get_approved_actions_for_conversation,
     get_conversation,
+    get_conversation_language,
     get_end_customer,
     get_recent_messages,
     get_recent_read_outputs_for_conversation,
+    set_conversation_language,
 )
 from apps.api.services.conversation_progress import order_found_in
+from apps.api.services.language import conversation_language, tenant_languages
 
 
 def _json_compact(obj: dict) -> str:
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+
+
+def _unanswered_customer_texts(messages: list[Message]) -> list[str]:
+    """Textos del cliente posteriores a la última respuesta del agente (o todos)."""
+    last_agent = max(
+        (i for i, m in enumerate(messages) if m.role in ("agent_ai", "agent_human")), default=-1
+    )
+    return [m.content for m in messages[last_agent + 1 :] if m.role == "customer" and m.content]
 
 
 def _pending_customer_messages_last(messages: list[Message]) -> list[Message]:
@@ -113,11 +124,19 @@ def make_load_conversation_node(
             approved_actions = await get_approved_actions_for_conversation(
                 conn, tenant_id, conversation_id
             )
+            ordered = _pending_customer_messages_last(messages)
+            default, supported = tenant_languages((state.get("tenant_config") or {}).get("extra"))
+            current = await get_conversation_language(conn, tenant_id, conversation_id)
+            language = conversation_language(
+                current, _unanswered_customer_texts(ordered), default=default, supported=supported
+            )
+            if language != current:
+                await set_conversation_language(conn, tenant_id, conversation_id, language)
 
         return {
-            "conversation_history": [
-                m.model_dump(mode="json") for m in _pending_customer_messages_last(messages)
-            ],
+            "conversation_history": [m.model_dump(mode="json") for m in ordered],
+            "response_language": language,
+            "supported_languages": sorted(supported),
             "end_customer": customer.model_dump(mode="json"),
             "known_facts": _format_known_facts(read_outputs, approved_actions),
             "order_in_context": order_found_in(read_outputs),

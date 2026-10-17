@@ -249,10 +249,13 @@ def route_after_execute_skill(state: AgentState) -> str:
 
 
 def route_after_respond(state: AgentState) -> str:
-    """Routing tras `respond`: si el texto quedó vacío al normalizarlo, `respond` no lo
-    entrega y pide escalar con `empty_reply`."""
+    """Routing tras `respond`: texto vacío al normalizarlo (`empty_reply`) o idioma
+    equivocado por segunda vez (`language_mismatch`) → escalar; idioma equivocado la
+    primera vez → `reason` lo reescribe."""
     if state.get("decision") == "escalate":
         return "escalate"
+    if state.get("decision") == "regenerate":
+        return "reason"
     return "finalize_trace"
 
 

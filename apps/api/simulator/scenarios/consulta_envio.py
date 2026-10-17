@@ -224,10 +224,11 @@ SCENARIOS: list[dict[str, Any]] = [
         "goal": "Get tracking information for order #1234",
         "initial_message": "Hi, I need to track my order #1234",
         "expected_outcome": "El agente responde en inglés con la información de tracking.",
-        "mock_fixtures": {"shopify": _ORDER_1234_WITH_TRACKING},
+        "mock_fixtures": {"shopify": _ORDER_1234_WITH_TRACKING, "customer_language": "en"},
         "assertions": {
             "skills_called": ["shopify.get_order_status"],
             "response_contains": ["tracking"],
+            "response_language": "en",
         },
         "max_turns": 4,
     },
