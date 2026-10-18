@@ -11,7 +11,12 @@ import { useReturnsPolicy, useSaveReturnsPolicy } from '@/lib/api/hooks/returns-
 import { ApiError } from '@/lib/api/hooks/tenant-context'
 import {
   type ExchangeKind,
+  type FeeMode,
   type FieldErrors,
+  type HigherPrice,
+  type LowerPrice,
+  type RefundMethod,
+  type ShipReplacement,
   type PolicyForm,
   type ReasonRow,
   MAX_REASONS,
@@ -144,6 +149,42 @@ const FAULT_OPTIONS: Option<'store' | 'customer'>[] = [
 const KIND_OPTIONS: Option<ExchangeKind>[] = [
   { value: 'variant', label: 'Otra talla o color del mismo producto' },
   { value: 'product', label: 'Otro producto' },
+]
+
+const FEE_MODE_OPTIONS: Option<FeeMode>[] = [
+  { value: 'fixed', label: 'Una tarifa fija' },
+  {
+    value: 'label_cost',
+    label: 'El coste real de la etiqueta',
+    hint: 'Tu equipo pone el importe al tramitar la devolución.',
+  },
+]
+
+const REFUND_OPTIONS: Option<RefundMethod>[] = [
+  { value: 'original_payment', label: 'Al método de pago original' },
+  { value: 'store_credit', label: 'En crédito de la tienda' },
+  {
+    value: 'customer_choice',
+    label: 'Lo elige el cliente',
+    hint: 'El agente le pregunta antes de abrir la devolución.',
+  },
+]
+
+const HIGHER_OPTIONS: Option<HigherPrice>[] = [
+  { value: 'customer_pays', label: 'El cliente paga la diferencia' },
+  { value: 'store_absorbs', label: 'La tienda asume la diferencia' },
+  { value: 'not_allowed', label: 'No se admite el cambio' },
+]
+
+const LOWER_OPTIONS: Option<LowerPrice>[] = [
+  { value: 'refund_difference', label: 'Se reembolsa la diferencia' },
+  { value: 'store_credit', label: 'La diferencia va en crédito de la tienda' },
+  { value: 'no_refund', label: 'La diferencia no se devuelve' },
+]
+
+const SHIP_OPTIONS: Option<ShipReplacement>[] = [
+  { value: 'immediately', label: 'En cuanto se confirma el cambio' },
+  { value: 'after_receipt', label: 'Cuando la tienda recibe lo devuelto' },
 ]
 
 function formatDate(iso: string): string {
@@ -528,6 +569,21 @@ export function ReturnsPolicyForm({ tenantId }: { tenantId: string }) {
           </div>
           {showFee && (
             <div>
+              <Label>Lo que paga el cliente por la etiqueta</Label>
+              <div className="mt-2">
+                <RadioGroup
+                  name="rp-fee-mode"
+                  value={form.feeMode}
+                  options={FEE_MODE_OPTIONS}
+                  invalid={err('shipping.customer_fee_mode')}
+                  onChange={(feeMode) => patch({ feeMode })}
+                />
+              </div>
+              <FieldError errors={errors} path="shipping.customer_fee_mode" />
+            </div>
+          )}
+          {showFee && form.feeMode === 'fixed' && (
+            <div>
               <Label htmlFor="rp-fee">Tarifa que se descuenta del reembolso</Label>
               <div className="mt-1.5 flex items-center gap-2">
                 <Input
@@ -569,6 +625,53 @@ export function ReturnsPolicyForm({ tenantId }: { tenantId: string }) {
               onChange={(event) => patch({ refundDays: event.target.value })}
             />
             <FieldError errors={errors} path="refund_days" />
+          </div>
+          <div>
+            <Label>Cómo se devuelve el dinero</Label>
+            <div className="mt-2">
+              <RadioGroup
+                name="rp-refund-method"
+                value={form.refundMethod}
+                options={REFUND_OPTIONS}
+                invalid={err('refund_method')}
+                onChange={(refundMethod) => patch({ refundMethod })}
+              />
+            </div>
+            <FieldError errors={errors} path="refund_method" />
+          </div>
+          <div>
+            <Label>Gastos de reposición que se descuentan del reembolso (%)</Label>
+            <p className="mt-0.5 text-xs text-foreground-muted">Pon 0 si no cobras.</p>
+            <div className="mt-1.5 grid gap-3 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="rp-restock-store" className="text-xs text-foreground-muted">
+                  Si la culpa es de la tienda
+                </Label>
+                <Input
+                  id="rp-restock-store"
+                  inputMode="decimal"
+                  className="mt-1 w-32"
+                  value={form.restockStore}
+                  aria-invalid={err('restocking_fee_percent.store_fault')}
+                  onChange={(event) => patch({ restockStore: event.target.value })}
+                />
+                <FieldError errors={errors} path="restocking_fee_percent.store_fault" />
+              </div>
+              <div>
+                <Label htmlFor="rp-restock-customer" className="text-xs text-foreground-muted">
+                  Si la culpa es del cliente
+                </Label>
+                <Input
+                  id="rp-restock-customer"
+                  inputMode="decimal"
+                  className="mt-1 w-32"
+                  value={form.restockCustomer}
+                  aria-invalid={err('restocking_fee_percent.customer_fault')}
+                  onChange={(event) => patch({ restockCustomer: event.target.value })}
+                />
+                <FieldError errors={errors} path="restocking_fee_percent.customer_fault" />
+              </div>
+            </div>
           </div>
         </Section>
 
@@ -626,8 +729,61 @@ export function ReturnsPolicyForm({ tenantId }: { tenantId: string }) {
               <FieldError errors={errors} path="exchanges.kinds" />
             </div>
           )}
+          {form.exchangesEnabled && (
+            <>
+              <div>
+                <Label>Los cambios necesitan mi aprobación</Label>
+                <div className="mt-2">
+                  <YesNo
+                    name="rp-exchange-approval"
+                    value={form.exchangeApproval}
+                    onChange={(exchangeApproval) => patch({ exchangeApproval })}
+                  />
+                </div>
+                <FieldError errors={errors} path="exchanges.requires_approval" />
+              </div>
+              <div>
+                <Label>Si el artículo nuevo cuesta más</Label>
+                <div className="mt-2">
+                  <RadioGroup
+                    name="rp-higher"
+                    value={form.higherPrice}
+                    options={HIGHER_OPTIONS}
+                    invalid={err('exchanges.higher_price')}
+                    onChange={(higherPrice) => patch({ higherPrice })}
+                  />
+                </div>
+                <FieldError errors={errors} path="exchanges.higher_price" />
+              </div>
+              <div>
+                <Label>Si el artículo nuevo cuesta menos</Label>
+                <div className="mt-2">
+                  <RadioGroup
+                    name="rp-lower"
+                    value={form.lowerPrice}
+                    options={LOWER_OPTIONS}
+                    invalid={err('exchanges.lower_price')}
+                    onChange={(lowerPrice) => patch({ lowerPrice })}
+                  />
+                </div>
+                <FieldError errors={errors} path="exchanges.lower_price" />
+              </div>
+              <div>
+                <Label>Cuándo sale el artículo de cambio</Label>
+                <div className="mt-2">
+                  <RadioGroup
+                    name="rp-ship-replacement"
+                    value={form.shipReplacement}
+                    options={SHIP_OPTIONS}
+                    invalid={err('exchanges.ship_replacement')}
+                    onChange={(shipReplacement) => patch({ shipReplacement })}
+                  />
+                </div>
+                <FieldError errors={errors} path="exchanges.ship_replacement" />
+              </div>
+            </>
+          )}
           <FieldError errors={errors} path="exchanges" />
-          <p className="text-xs text-foreground-muted">Los cambios siempre pasan por tu aprobación.</p>
         </Section>
 
         <Section title="Aprobación">
@@ -641,6 +797,10 @@ export function ReturnsPolicyForm({ tenantId }: { tenantId: string }) {
               />
             </div>
             <FieldError errors={errors} path="returns_require_approval" />
+            <p className="mt-1.5 text-xs text-foreground-muted">
+              Si eliges que no, Auyan mantiene la aprobación hasta activar contigo la autonomía de
+              esta acción para tu tienda. Lo mismo vale para los cambios.
+            </p>
           </div>
         </Section>
       </Card>

@@ -33,11 +33,21 @@ const POLICY: ReturnsPolicy = {
     method: 'store_label',
     return_address: null,
     payer: { store_fault: 'store', customer_fault: 'customer' },
+    customer_fee_mode: 'fixed',
     customer_fee: { amount: '4.95', currency: 'EUR' },
   },
   refund_days: 10,
+  refund_method: 'customer_choice',
+  restocking_fee_percent: { store_fault: '0', customer_fault: '10' },
   excluded_product_tags: ['final-sale', 'gift-card'],
-  exchanges: { enabled: true, kinds: ['variant'] },
+  exchanges: {
+    enabled: true,
+    kinds: ['variant'],
+    requires_approval: false,
+    higher_price: 'not_allowed',
+    lower_price: 'store_credit',
+    ship_replacement: 'immediately',
+  },
   returns_require_approval: false,
 }
 
@@ -67,6 +77,9 @@ describe('fromPolicy / toPayload', () => {
       'exchanges.enabled',
       'reasons',
       'refund_days',
+      'refund_method',
+      'restocking_fee_percent.customer_fault',
+      'restocking_fee_percent.store_fault',
       'returns_require_approval',
       'shipping.method',
       'shipping.payer.customer_fault',
@@ -92,6 +105,7 @@ describe('fromPolicy / toPayload', () => {
       method: 'customer_ships',
       return_address: 'Calle Mayor 1, Madrid',
       payer: { store_fault: 'store', customer_fault: 'customer' },
+      customer_fee_mode: null,
       customer_fee: null,
     })
   })
@@ -117,13 +131,45 @@ describe('fromPolicy / toPayload', () => {
     })
   })
 
-  it('store_label con el cliente pagando exige tarifa', () => {
-    const result = toPayload({ ...validForm(), feeAmount: '' })
+  it('store_label con el cliente pagando exige elegir la tarifa y, si es fija, su importe', () => {
+    const noMode = toPayload({ ...validForm(), feeMode: '' })
+    const noAmount = toPayload({ ...validForm(), feeAmount: '' })
+    expect(noMode.ok).toBe(false)
+    expect(noAmount.ok).toBe(false)
+    if (noMode.ok || noAmount.ok) return
+    expect(noMode.errors['shipping.customer_fee_mode']).toEqual([
+      'Elige cuánto paga el cliente por la etiqueta',
+    ])
+    expect(noAmount.errors['shipping.customer_fee.amount']).toEqual([
+      'Importe no válido (máximo 3 decimales)',
+    ])
+  })
+
+  it('el coste real de la etiqueta no lleva importe', () => {
+    const result = toPayload({ ...validForm(), feeMode: 'label_cost', feeAmount: '9' })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.policy.shipping.customer_fee_mode).toBe('label_cost')
+    expect(result.policy.shipping.customer_fee).toBeNull()
+  })
+
+  it('cambios activados exigen sus condiciones', () => {
+    const result = toPayload({ ...validForm(), exchangeApproval: null, higherPrice: '' })
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.errors['shipping.customer_fee.amount']).toEqual([
-      'Importe no válido (máximo 2 decimales)',
+    expect(result.errors['exchanges.requires_approval']).toEqual([
+      'Indica si los cambios necesitan tu aprobación',
     ])
+    expect(result.errors['exchanges.higher_price']).toEqual([
+      'Elige qué pasa si el artículo nuevo cuesta más',
+    ])
+  })
+
+  it('reposición en porcentaje: coma decimal y tope de 100', () => {
+    const ok = toPayload({ ...validForm(), restockCustomer: '7,5' })
+    const bad = toPayload({ ...validForm(), restockCustomer: '120' })
+    expect(ok.ok && ok.policy.restocking_fee_percent.customer_fault).toBe('7.5')
+    expect(bad.ok).toBe(false)
   })
 
   it('acepta coma decimal y minúsculas en la moneda', () => {
@@ -133,8 +179,8 @@ describe('fromPolicy / toPayload', () => {
     expect(result.policy.shipping.customer_fee).toEqual({ amount: '3.5', currency: 'EUR' })
   })
 
-  it('rechaza más de 2 decimales', () => {
-    const result = toPayload({ ...validForm(), feeAmount: '3.555' })
+  it('rechaza más de 3 decimales', () => {
+    const result = toPayload({ ...validForm(), feeAmount: '3.5555' })
     expect(result.ok).toBe(false)
   })
 
@@ -163,11 +209,11 @@ describe('fromPolicy / toPayload', () => {
   })
 
   it('valida plazo y reembolso en rango', () => {
-    const result = toPayload({ ...validForm(), windowDays: '400', refundDays: '0' })
+    const result = toPayload({ ...validForm(), windowDays: '4000', refundDays: '0' })
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.errors['window.days']).toEqual(['Entre 1 y 365 días'])
-    expect(result.errors.refund_days).toEqual(['Entre 1 y 60 días'])
+    expect(result.errors['window.days']).toEqual(['Entre 1 y 3650 días'])
+    expect(result.errors.refund_days).toEqual(['Entre 1 y 3650 días'])
   })
 
   it('un plazo no numérico cuenta como vacío', () => {
@@ -187,9 +233,9 @@ describe('fromPolicy / toPayload', () => {
     expect(result.errors['reasons.0.fault']).toEqual(['Indica de quién es la culpa'])
   })
 
-  it('más de 20 motivos falla', () => {
+  it('más de 50 motivos falla', () => {
     const form = validForm()
-    form.reasons = Array.from({ length: 21 }, (_, i) => ({
+    form.reasons = Array.from({ length: 51 }, (_, i) => ({
       ...form.reasons[0],
       label: `Motivo ${i}`,
       code: `motivo_${i}`,
@@ -197,7 +243,7 @@ describe('fromPolicy / toPayload', () => {
     const result = toPayload(form)
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.errors.reasons).toEqual(['Máximo 20 motivos'])
+    expect(result.errors.reasons).toEqual(['Máximo 50 motivos'])
   })
 })
 
@@ -218,8 +264,8 @@ describe('slugifyCode', () => {
 })
 
 describe('parseTags', () => {
-  it('separa por coma, recorta y quita duplicados', () => {
-    expect(parseTags(' final-sale, gift-card ,,final-sale')).toEqual(['final-sale', 'gift-card'])
+  it('separa por coma, recorta, pasa a minúsculas y quita duplicados', () => {
+    expect(parseTags(' Final-Sale, gift-card ,,final-sale')).toEqual(['final-sale', 'gift-card'])
   })
 })
 
