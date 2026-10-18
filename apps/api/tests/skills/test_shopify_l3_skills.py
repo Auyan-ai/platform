@@ -6,6 +6,7 @@ ShopifyClient mockeado con AsyncMock — sin llamadas HTTP reales.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
@@ -390,7 +391,7 @@ class TestRefundPartial:
             return_value=IssuedRefund(refund_id=9001, amount=Decimal("12.50"), currency="GBP")
         )
         out = await RefundPartial().execute(
-            _ctx(adapter), RefundPartialInput(order_id=1001, amount="12.50")
+            replace(_ctx(adapter), idempotency_key="aprob-1"), RefundPartialInput(order_id=1001, amount="12.50")
         )
         assert isinstance(out, RefundPartialOutput)
         assert (out.refund_id, out.amount, out.outcome, out.success) == (
@@ -411,7 +412,7 @@ class TestRefundPartial:
             return_value=IssuedRefund(refund_id=9001, amount=Decimal("5"), currency="EUR")
         )
         out = await RefundPartial().execute(
-            _ctx(adapter), RefundPartialInput(order_id=1001, amount="5")
+            replace(_ctx(adapter), idempotency_key="aprob-1"), RefundPartialInput(order_id=1001, amount="5")
         )
         assert (out.outcome, out.refund_mode, out.success) == (
             ActionOutcome.REFUND_MANUAL,

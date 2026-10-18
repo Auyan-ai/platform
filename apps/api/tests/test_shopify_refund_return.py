@@ -41,8 +41,15 @@ def _sale(tx_id: int, amount: str, currency: str = "GBP", **extra: str) -> dict:
     }
 
 
+KEY = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+_CREATED = {
+    "data": {"refundCreate": {"refund": {"id": "gid://shopify/Refund/77", "legacyResourceId": "77"},
+                              "userErrors": []}}
+}
+
+
 @respx.mock
-async def test_refund_hangs_from_the_successful_sale_transaction() -> None:
+async def test_refund_hangs_from_the_sale_and_carries_the_idempotency_key() -> None:
     respx.get(f"{BASE}/orders/1001/transactions.json").respond(
         200,
         json={
@@ -53,38 +60,111 @@ async def test_refund_hangs_from_the_successful_sale_transaction() -> None:
             ]
         },
     )
-    refund = respx.post(f"{BASE}/orders/1001/refunds.json").respond(
-        201, json={"refund": {"id": 77}}
+    graphql = respx.post(f"{BASE}/graphql.json").respond(200, json=_CREATED)
+
+    out = await _client().refund_partial(
+        1001, amount=Decimal("12.50"), note="n", idempotency_key=KEY
     )
 
-    out = await _client().refund_partial(1001, amount=Decimal("12.50"), note="n")
-
     assert out == IssuedRefund(refund_id=77, amount=Decimal("12.50"), currency="GBP")
-    body = json.loads(refund.calls.last.request.content)["refund"]
-    assert body["transactions"] == [
-        {"parent_id": 3, "amount": "12.50", "kind": "refund", "gateway": "bogus"}
-    ]
-    assert body["currency"] == "GBP"
+    body = json.loads(graphql.calls.last.request.content)
+    assert "refundCreate(input: $input) @idempotent(key: $idempotencyKey)" in body["query"]
+    assert body["variables"] == {
+        "idempotencyKey": KEY,
+        "input": {
+            "orderId": "gid://shopify/Order/1001",
+            "currency": "GBP",
+            "note": f"n [auyan:{KEY}]",
+            "transactions": [
+                {
+                    "orderId": "gid://shopify/Order/1001",
+                    "parentId": "gid://shopify/OrderTransaction/3",
+                    "amount": "12.50",
+                    "gateway": "bogus",
+                    "kind": "REFUND",
+                }
+            ],
+        },
+    }
 
 
 @respx.mock
-async def test_refund_omits_empty_gateway() -> None:
+async def test_refund_retries_a_lost_response_with_the_same_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("apps.api.integrations.shopify._IDEMPOTENT_RETRY_SECONDS", 0)
     respx.get(f"{BASE}/orders/1001/transactions.json").respond(
-        200, json={"transactions": [_sale(9, "5.00", "USD", gateway="")]}
+        200, json={"transactions": [_sale(3, "45.00")]}
     )
-    refund = respx.post(f"{BASE}/orders/1001/refunds.json").respond(201, json={"refund": {"id": 1}})
-    await _client().refund_partial(1001, amount=Decimal("5.00"))
-    tx = json.loads(refund.calls.last.request.content)["refund"]["transactions"][0]
-    assert tx == {"parent_id": 9, "amount": "5.00", "kind": "refund"}
+    graphql = respx.post(f"{BASE}/graphql.json").mock(
+        side_effect=[httpx.ReadTimeout("lost"), httpx.Response(502), httpx.Response(200, json=_CREATED)]
+    )
+
+    out = await _client().refund_partial(1001, amount=Decimal("5"), idempotency_key=KEY)
+
+    assert out.refund_id == 77
+    keys = [json.loads(c.request.content)["variables"]["idempotencyKey"] for c in graphql.calls]
+    assert keys == [KEY, KEY, KEY]
+
+
+@respx.mock
+async def test_refund_user_errors_raise_without_retrying() -> None:
+    respx.get(f"{BASE}/orders/1001/transactions.json").respond(
+        200, json={"transactions": [_sale(3, "45.00")]}
+    )
+    graphql = respx.post(f"{BASE}/graphql.json").respond(
+        200,
+        json={"data": {"refundCreate": {"refund": None,
+                                        "userErrors": [{"field": None, "message": "nope"}]}}},
+    )
+
+    with pytest.raises(ShopifyActionError, match="refund_create_failed"):
+        await _client().refund_partial(1001, amount=Decimal("5"), idempotency_key=KEY)
+    assert graphql.call_count == 1
+
+
+@respx.mock
+async def test_find_refund_matches_the_marker_in_the_note() -> None:
+    def _refund(legacy: str, note: str | None) -> dict:
+        return {
+            "legacyResourceId": legacy,
+            "note": note,
+            "totalRefundedSet": {"presentmentMoney": {"amount": "5.0", "currencyCode": "EUR"}},
+            "transactions": {"nodes": [
+                {"id": "gid://shopify/OrderTransaction/9", "kind": "REFUND", "status": "SUCCESS",
+                 "gateway": "shopify_payments", "manualPaymentGateway": False, "errorCode": None}
+            ]},
+        }
+
+    respx.post(f"{BASE}/graphql.json").respond(
+        200,
+        json={"data": {"order": {"refunds": [
+            _refund("70", "a mano"),
+            _refund("71", None),
+            _refund("72", f"talla [auyan:{KEY}]"),
+        ]}}},
+    )
+
+    found = await _client().find_refund(1001, KEY)
+
+    assert found is not None
+    assert (found.refund_id, found.amount, found.currency) == (72, Decimal("5.0"), "EUR")
+    assert [(t.kind, t.status) for t in found.transactions] == [("refund", "success")]
+
+
+@respx.mock
+async def test_find_refund_returns_none_without_the_marker() -> None:
+    respx.post(f"{BASE}/graphql.json").respond(200, json={"data": {"order": {"refunds": []}}})
+    assert await _client().find_refund(1001, KEY) is None
 
 
 @respx.mock
 async def test_refund_without_payment_raises_and_does_not_post() -> None:
     respx.get(f"{BASE}/orders/1001/transactions.json").respond(200, json={"transactions": []})
-    refund = respx.post(f"{BASE}/orders/1001/refunds.json")
+    refund = respx.post(f"{BASE}/graphql.json")
 
     with pytest.raises(ShopifyActionError, match="order_has_no_refundable_payment"):
-        await _client().refund_partial(1001, amount=Decimal("1.00"))
+        await _client().refund_partial(1001, amount=Decimal("1.00"), idempotency_key=KEY)
     assert not refund.called
 
 
@@ -100,13 +180,13 @@ async def test_refund_above_what_is_left_is_rejected_and_not_posted() -> None:
             ]
         },
     )
-    refund = respx.post(f"{BASE}/orders/1001/refunds.json")
+    refund = respx.post(f"{BASE}/graphql.json")
 
     with pytest.raises(
         ShopifyActionError,
         match="refund_amount_exceeds_refundable: .*20.00 GBP .*solo quedan 15.00 GBP",
     ):
-        await _client().refund_partial(1001, amount=Decimal("20.00"))
+        await _client().refund_partial(1001, amount=Decimal("20.00"), idempotency_key=KEY)
     assert not refund.called
 
 
