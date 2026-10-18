@@ -26,7 +26,15 @@ for patch_file in "$spec_dir"/mutants/$pattern.patch; do
   echo "== $name: $(sed -n '1s/^# //p' "$patch_file")"
   while read -r mode expectations; do
     declare -A want=()
-    for pair in $expectations; do want["${pair%%=*}"]="${pair#*=}"; done
+    set -f
+    for pair in $expectations; do
+      if [[ "${pair#*=}" != OK && "${pair#*=}" != VIOLADA ]]; then
+        echo "   $patch_file: \"$pair\" no es NOMBRE=OK|VIOLADA" >&2
+        exit 2
+      fi
+      want["${pair%%=*}"]="${pair#*=}"
+    done
+    set +f
     only="$(IFS=,; echo "${!want[*]}")"
     table="$(ONLY="$only" TLC_OUT="$out/$name-$mode" "$here/run_tlc.sh" "$mode" "$copy")"
     for check in "${!want[@]}"; do

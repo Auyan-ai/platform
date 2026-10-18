@@ -1,0 +1,14 @@
+# Arreglo de la escalación huérfana (opción B): escalate bloquea la fila de la aprobación (SELECT ... FOR UPDATE) y solo abre la escalación del gate si sigue pending.
+# espera: each NoOrphanEscalation=OK
+--- a/ApprovalsL3.tla
++++ b/ApprovalsL3.tla
+@@ -202,7 +202,8 @@
+ \* Inserta el mensaje al cliente en la misma transacción.
+ Escalate(w) ==
+     /\ tpc[w] = "escalate"
+-    /\ openEsc' = IF openEsc = {} THEN {tAppr[w]} ELSE openEsc
++    /\ lockedBy[tAppr[w]] = NoOne
++    /\ openEsc' = IF openEsc = {} /\ appr[tAppr[w]] = "pending" THEN {tAppr[w]} ELSE openEsc
+     /\ tpc' = [tpc EXCEPT ![w] = "deliver"]
+     /\ UNCHANGED <<shopVars, appr, lockedBy, inbox, queueVars, tAppr, tKind, lease, humanVars>>
+ 

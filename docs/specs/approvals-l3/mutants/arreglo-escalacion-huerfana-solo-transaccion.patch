@@ -1,0 +1,17 @@
+# Solo la transacción única: reutilizar una aprobación ya resuelta sigue abriendo escalación.
+# espera: each NoOrphanEscalation=VIOLADA
+--- a/ApprovalsL3.tla
++++ b/ApprovalsL3.tla
+@@ -184,9 +184,10 @@
+     /\ LET n == Min(FreeIds) IN
+          /\ appr' = [appr EXCEPT ![n] = "pending"]
+          /\ tAppr' = [tAppr EXCEPT ![w] = n]
++         /\ openEsc' = IF openEsc = {} THEN {n} ELSE openEsc
+     /\ tKind' = [tKind EXCEPT ![w] = "gate"]
+-    /\ tpc' = [tpc EXCEPT ![w] = "escalate"]
+-    /\ UNCHANGED <<shopVars, lockedBy, openEsc, inbox, queueVars, lease, humanVars>>
++    /\ tpc' = [tpc EXCEPT ![w] = "deliver"]
++    /\ UNCHANGED <<shopVars, lockedBy, inbox, queueVars, lease, humanVars>>
+ 
+ \* Cota del modelo, no del código: sin ids libres el turno termina sin L3.
+ GateExhausted(w) ==

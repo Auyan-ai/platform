@@ -1,16 +1,7 @@
-# Boceto del arreglo de la escalación huérfana (#377 y la carrera del issue nuevo): el gate crea la aprobación y su escalación en una transacción, una aprobación ya aprobada no abre escalación y escalate bloquea la fila de la aprobación (FOR UPDATE) y solo escala si sigue pending.
+# Arreglo de la escalación huérfana (opción A): el gate crea la aprobación y su escalación en la misma transacción, y escalate solo abre la escalación del gate si la aprobación sigue pending.
 # espera: each NoOrphanEscalation=OK
 --- a/ApprovalsL3.tla
 +++ b/ApprovalsL3.tla
-@@ -174,7 +174,7 @@
-          /\ tAppr' = [tAppr EXCEPT ![w] = r]
-          /\ tKind' = [tKind EXCEPT ![w] =
-                         IF appr[r] = "approved" THEN "followup_done" ELSE "waiting"]
--    /\ tpc' = [tpc EXCEPT ![w] = "escalate"]
-+         /\ tpc' = [tpc EXCEPT ![w] = IF appr[r] = "approved" THEN "deliver" ELSE "escalate"]
-     /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, lease, humanVars>>
- 
- GateCreate(w) ==
 @@ -184,9 +184,10 @@
      /\ LET n == Min(FreeIds) IN
           /\ appr' = [appr EXCEPT ![n] = "pending"]
@@ -24,12 +15,11 @@
  
  \* Cota del modelo, no del código: sin ids libres el turno termina sin L3.
  GateExhausted(w) ==
-@@ -202,7 +203,8 @@
+@@ -202,7 +203,7 @@
  \* Inserta el mensaje al cliente en la misma transacción.
  Escalate(w) ==
      /\ tpc[w] = "escalate"
 -    /\ openEsc' = IF openEsc = {} THEN {tAppr[w]} ELSE openEsc
-+    /\ lockedBy[tAppr[w]] = NoOne
 +    /\ openEsc' = IF openEsc = {} /\ appr[tAppr[w]] = "pending" THEN {tAppr[w]} ELSE openEsc
      /\ tpc' = [tpc EXCEPT ![w] = "deliver"]
      /\ UNCHANGED <<shopVars, appr, lockedBy, inbox, queueVars, tAppr, tKind, lease, humanVars>>
