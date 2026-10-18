@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any, ClassVar, TypeVar
 
 from apps.api.integrations.shopify import ShopifyAdapter
@@ -27,6 +27,7 @@ from apps.api.services.returns import (
     build_plan,
     evaluate_return,
 )
+from apps.api.services.tenant_time import tenant_zone
 from apps.api.skills.base import (
     Skill,
     SkillContext,
@@ -102,13 +103,18 @@ class _ReturnSkill(Skill):
         return ()
 
     def _refusal(self, ctx: SkillContext, refused: Refused) -> SkillRefusal:
+        params = dict(refused.params)
+        if "deadline" in params:
+            params["deadline"] = _localized_date(
+                date.fromisoformat(params["deadline"]), ctx.language
+            )
         return SkillRefusal(
             refused.code,
             customer_message=fixed_text(
                 f"refusal.returns.{refused.code}",
                 ctx.language,
                 tenant_default=ctx.default_language,
-                **refused.params,
+                **params,
             ),
             team_reason=refused.team_reason,
         )
@@ -149,6 +155,7 @@ class _ReturnSkill(Skill):
             evidence=Evidence(photos=ctx.customer_photos, readable=ctx.attachments_readable),
             now=now,
             refund_preference=inputs.refund_preference,
+            tz=tenant_zone(ctx.tenant_facts)[1],
         )
         if isinstance(decision, Refused):
             raise self._refusal(ctx, decision)
@@ -251,6 +258,28 @@ class _ReturnSkill(Skill):
             shopify_reason=created.reason_handle,
             note_written=note_written,
         )
+
+
+_MONTHS_EN = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+
+
+def _localized_date(day: date, language: str) -> str:
+    if language == "en":
+        return f"{day.day} {_MONTHS_EN[day.month - 1]} {day.year}"
+    return f"{day:%d/%m/%Y}"
 
 
 def _shopify_refusal(ctx: SkillContext, step: str, exc: BaseException) -> SkillRefusal:

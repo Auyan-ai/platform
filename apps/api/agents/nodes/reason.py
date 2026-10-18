@@ -19,9 +19,8 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Literal
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._reply import surface_of
@@ -45,6 +44,7 @@ from apps.api.services.identity import IdentityContext
 from apps.api.services.language import state_languages
 from apps.api.services.returns_policy import ActivePolicy, policy_note
 from apps.api.services.skill_access import visible_skills
+from apps.api.services.tenant_time import tenant_zone
 from apps.api.skills.registry import SkillRegistry
 from pydantic import ValidationError
 
@@ -58,11 +58,6 @@ def _fixed_reply(state: AgentState, key: str) -> str:
     return fixed_text(key, language, tenant_default=tenant_default)
 
 
-# Zona horaria por defecto del vertical e-commerce ES. Cada tenant puede sobrescribirla
-# en tenant_facts["timezone"].
-_DEFAULT_TENANT_TZ = "Europe/Madrid"
-
-
 def _tenant_now_str(tenant_facts: dict | None) -> str:
     """Fecha y hora ACTUAL en la zona horaria de la tienda (tenant_facts['timezone'],
     default Europe/Madrid), con hora + etiqueta de zona.
@@ -71,15 +66,7 @@ def _tenant_now_str(tenant_facts: dict | None) -> str:
     se desplazaba un día para tiendas ES → off-by-one en ventanas de devolución. Si la
     zona es inválida cae a Europe/Madrid; si falta la tzdata del sistema, a UTC.
     """
-    tz_name = (tenant_facts or {}).get("timezone") or _DEFAULT_TENANT_TZ
-    try:
-        tz = ZoneInfo(tz_name)
-    except (ZoneInfoNotFoundError, ValueError):
-        tz_name = _DEFAULT_TENANT_TZ
-        try:
-            tz = ZoneInfo(_DEFAULT_TENANT_TZ)
-        except ZoneInfoNotFoundError:
-            tz_name, tz = "UTC", UTC
+    tz_name, tz = tenant_zone(tenant_facts)
     now = datetime.now(tz)
     return f"{now.strftime('%Y-%m-%d %H:%M')} ({tz_name})"
 

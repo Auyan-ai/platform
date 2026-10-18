@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal
 from uuid import uuid4
@@ -189,16 +189,17 @@ _ANCHOR_LABEL = {"delivery": "la entrega", "shipment": "el envío", "order": "la
 _FAULT_LABEL: dict[Fault, str] = {"store": "de la tienda", "customer": "del cliente"}
 
 
-def _deadline(
-    order: ReturnableOrder, line: ReturnableLine, active: ActivePolicy
-) -> datetime | None:
+def _last_day(
+    order: ReturnableOrder, line: ReturnableLine, active: ActivePolicy, tz: tzinfo
+) -> date | None:
+    """Último día del plazo, en el calendario de la tienda: el plazo acaba a medianoche."""
     window = active.policy.window
     anchor = {
         "delivery": line.delivered_at,
         "shipment": line.shipped_at,
         "order": order.ordered_at,
     }[window.starts_at]
-    return anchor + timedelta(days=window.days) if anchor else None
+    return anchor.astimezone(tz).date() + timedelta(days=window.days) if anchor else None
 
 
 def evaluate_return(
@@ -212,6 +213,7 @@ def evaluate_return(
     evidence: Evidence,
     now: datetime,
     refund_preference: RefundPreference | None = None,
+    tz: tzinfo = UTC,
 ) -> Decision:
     """Aplica la política a una petición. El orden de las comprobaciones es el de la
     tabla del ADR: primero lo que escala sin remedio, luego lo que el cliente corrige."""
@@ -281,21 +283,21 @@ def evaluate_return(
             )
 
     for line, _ in lines:
-        deadline = _deadline(order, line, active)
-        if deadline is None:
+        last_day = _last_day(order, line, active, tz)
+        if last_day is None:
             return Refused(
                 "delivery_date_unknown",
                 f"La política cuenta el plazo desde la entrega y Shopify no tiene fecha de "
                 f"entrega de '{line.title}' ({order.name}). Comprobad la entrega con el "
                 "transportista.",
             )
-        if now > deadline:
+        if now > datetime.combine(last_day, time.max, tzinfo=tz):
             starts = _ANCHOR_LABEL[policy.window.starts_at]
             return Refused(
                 "outside_window",
                 f"'{line.title}' de {order.name} está fuera de plazo: {policy.window.days} días "
-                f"desde {starts}, terminó el {deadline:%d/%m/%Y}.",
-                {"deadline": f"{deadline:%d/%m/%Y}"},
+                f"desde {starts}, terminó el {last_day:%d/%m/%Y}.",
+                {"deadline": last_day.isoformat()},
             )
 
     if "photo" in reason.required_evidence:

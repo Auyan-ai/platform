@@ -202,18 +202,43 @@ def test_excluded_tag_refuses_and_unknown_product_too_when_there_are_exclusions(
 
 
 def test_the_window_counts_from_the_event_the_store_chose() -> None:
-    by_delivery = _evaluate(now=DELIVERED + timedelta(days=30))
-    late = _evaluate(now=DELIVERED + timedelta(days=30, seconds=1))
+    last_day = datetime(2026, 10, 30, 23, 59, 59, tzinfo=UTC)
+    in_time = _evaluate(now=last_day)
+    late = _evaluate(now=last_day + timedelta(seconds=1))
     by_shipment = _evaluate(
         _policy(window={"days": 30, "starts_at": "shipment"}),
-        now=DELIVERED + timedelta(days=30),
+        now=last_day,
     )
 
-    assert isinstance(by_delivery, Eligible)
+    assert isinstance(in_time, Eligible)
     assert isinstance(late, Refused)
     assert late.code == "outside_window"
-    assert late.params == {"deadline": "30/10/2026"}
+    assert late.params == {"deadline": "2026-10-30"}
     assert isinstance(by_shipment, Refused) and by_shipment.code == "outside_window"
+
+
+def test_the_last_day_ends_at_midnight_in_the_store_zone() -> None:
+    from zoneinfo import ZoneInfo
+
+    order = _order(_line(delivered_at=datetime(2026, 9, 30, 21, 0, tzinfo=UTC)))
+    half_past_midnight_in_madrid = datetime(2026, 10, 30, 23, 30, tzinfo=UTC)
+
+    def at(tz: Any) -> Eligible | Refused | Rejected:
+        return evaluate_return(
+            _policy(),
+            order,
+            reason_code="too_small",
+            items=(RequestedItem(line_item_id=501, quantity=1),),
+            exchange=(),
+            variants=(),
+            evidence=NO_PHOTOS,
+            now=half_past_midnight_in_madrid,
+            tz=tz,
+        )
+
+    madrid = at(ZoneInfo("Europe/Madrid"))
+    assert isinstance(madrid, Refused) and madrid.params == {"deadline": "2026-10-30"}
+    assert isinstance(at(UTC), Eligible)
 
 
 def test_counting_from_delivery_without_a_delivery_date_refuses() -> None:

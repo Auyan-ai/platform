@@ -189,8 +189,13 @@ async def test_without_a_policy_the_skill_escalates_with_a_fixed_text() -> None:
 
 
 async def test_outside_the_window_the_customer_reads_the_deadline_in_their_language() -> None:
+    from zoneinfo import ZoneInfo
+
     shopify = FakeShopify(order=_order(delivered_days_ago=31))
-    deadline = (NOW - timedelta(days=1)).strftime("%d/%m/%Y")
+    delivered = shopify.order.lines[0].delivered_at
+    assert delivered is not None
+    last = delivered.astimezone(ZoneInfo("Europe/Madrid")).date() + timedelta(days=30)
+    deadline = f"{last.day} {last.strftime('%B')} {last.year}"
 
     with pytest.raises(SkillRefusal) as exc:
         await StartReturn().prepare(_ctx(shopify, _policy(), language="en"), RAW)
