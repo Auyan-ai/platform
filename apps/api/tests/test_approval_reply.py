@@ -329,3 +329,87 @@ class TestLanguages:
         )
 
         assert msg == "We've cancelled your order."
+
+
+def _return_output(**plan_overrides: object) -> dict:
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from apps.api.services.returns import PlanLine, ReturnPlan, Settlement, SettlementLine
+
+    plan = {
+        "policy_version": 2,
+        "requested_at": datetime(2026, 10, 18, tzinfo=UTC),
+        "order_id": 1,
+        "order_name": "#1042",
+        "reason_code": "talla",
+        "reason_label": "Talla",
+        "fault": "customer",
+        "shopify_reason": "too-small",
+        "lines": (
+            PlanLine(
+                line_item_id=1, fulfillment_line_item_id="gid://x/1", title="Blusa", quantity=1
+            ),
+        ),
+        "exchange_lines": (),
+        "evidence": (),
+        "shipping_method": "store_label",
+        "return_address": None,
+        "refund_days": 14,
+        "requires_approval": True,
+        "settlement": Settlement(
+            currency="EUR",
+            returned=(SettlementLine(title="Blusa", quantity=1, amount=Decimal("52.15")),),
+            exchanged=(),
+            shipping_payer="customer",
+            fee=Decimal("4.95"),
+            fee_pending=None,
+        ),
+    }
+    plan.update(plan_overrides)
+    return {
+        "outcome": "confirmed",
+        "order_id": 1,
+        "plan": ReturnPlan(**plan).model_dump(mode="json"),
+    }
+
+
+def test_opened_return_says_what_happens_next_and_never_that_money_is_back() -> None:
+    from apps.api.services.approval_reply import outcome_message
+
+    text = outcome_message("shopify.start_return", _return_output(), "es")
+
+    assert text == (
+        "Hemos abierto la devolución de tu pedido.\n\n"
+        "Te enviaremos la etiqueta de devolución. Por el envío de vuelta descontaremos "
+        "4,95 EUR del reembolso. Cuando recibamos el artículo y lo revisemos, te "
+        "devolveremos el dinero en un plazo de 14 días."
+    )
+
+
+def test_customer_ships_to_the_store_address_in_english() -> None:
+    from decimal import Decimal
+
+    from apps.api.services.approval_reply import outcome_message
+    from apps.api.services.returns import Settlement, SettlementLine
+
+    output = _return_output(
+        shipping_method="customer_ships",
+        return_address="Calle Mayor 1, Madrid",
+        settlement=Settlement(
+            currency="EUR",
+            returned=(SettlementLine(title="Blusa", quantity=1, amount=Decimal("52.15")),),
+            exchanged=(),
+            shipping_payer="customer",
+            fee=Decimal("0"),
+            fee_pending=None,
+        ),
+    )
+
+    text = outcome_message("shopify.start_return", output, "en")
+
+    assert text == (
+        "We've opened the return for your order.\n\n"
+        "Send the item to this address: Calle Mayor 1, Madrid. Return shipping is at your "
+        "expense. Once we receive and check the item, we'll refund you within 14 days."
+    )

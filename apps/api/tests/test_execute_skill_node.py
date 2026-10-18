@@ -20,7 +20,14 @@ from apps.api.agents.nodes.execute_skill import (
     build_skill_context,
     make_execute_skill_node,
 )
-from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
+from apps.api.skills.base import (
+    Skill,
+    SkillContext,
+    SkillInput,
+    SkillOutput,
+    SkillRejection,
+    SkillTier,
+)
 from apps.api.skills.registry import SkillRegistry
 
 # ----------------------------------------------------------------
@@ -1159,3 +1166,139 @@ class TestAuditLog:
         assert entries[0]["latency_ms"] is not None
         assert isinstance(entries[0]["latency_ms"], int)
         assert entries[0]["latency_ms"] >= 0
+
+
+# ----------------------------------------------------------------
+# prepare en los dos caminos, rechazo tipado, aprobación del plan y texto fijo (ADR 0014)
+# ----------------------------------------------------------------
+
+
+class PlanInput(SkillInput):
+    text: str
+    plan: dict[str, Any] | None = None
+
+
+class PlanOutput(SkillOutput):
+    outcome: str
+    order_id: int = 1
+
+
+class PlannedSkill(Skill):
+    """L3 cuyo `prepare` escribe el plan y decide si hace falta aprobación."""
+
+    slug = "test.planned"
+    description = "Planned."
+    tier: SkillTier = "L3"
+    input_schema = PlanInput
+    output_schema = PlanOutput
+    default_threshold = 0.95
+    reply_from_outcome = True
+    seen: list[dict[str, Any]] = []
+
+    async def prepare(self, ctx: SkillContext, raw_input: dict[str, Any]) -> dict[str, Any]:
+        if raw_input["text"] == "sin foto":
+            raise SkillRejection("evidence_missing", "falta la foto")
+        return {"text": raw_input["text"], "plan": {"approve": raw_input["text"] == "cambio"}}
+
+    @classmethod
+    def requires_approval(cls, prepared: dict[str, Any]) -> bool:
+        return bool(prepared["plan"]["approve"])
+
+    async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
+        assert isinstance(inputs, PlanInput)
+        PlannedSkill.seen.append(inputs.model_dump())
+        return PlanOutput(outcome="confirmed" if inputs.text == "ok" else "not_confirmed")
+
+
+def _autonomous_state(text: str, **overrides: Any) -> dict[str, Any]:
+    SkillRegistry.register(PlannedSkill)
+    return _base_state(
+        pending_tool_call=_pending(
+            slug="test.planned", input={"text": text, "plan": {"approve": False, "forged": 1}}
+        ),
+        allowed_skills=["test.planned"],
+        tool_permissions={
+            "test.planned": {
+                "is_enabled": True,
+                "human_approval_required": False,
+                "l3_autonomy_acknowledged": True,
+            }
+        },
+        **overrides,
+    )
+
+
+class TestPreparedSkills:
+    async def test_prepare_replaces_the_llm_input_also_without_approval(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import unittest.mock as mock
+
+        PlannedSkill.seen.clear()
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.outcome_message",
+            mock.Mock(return_value="Hemos abierto la devolución de tu pedido."),
+        )
+
+        result = await make_execute_skill_node(deps)(_autonomous_state("ok"))
+
+        assert PlannedSkill.seen == [{"text": "ok", "plan": {"approve": False}}]
+        assert result["decision"] == "respond"
+        assert result["agent_response"] == "Hemos abierto la devolución de tu pedido."
+
+    async def test_an_unsettled_outcome_escalates_with_the_team_reason(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import unittest.mock as mock
+
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.outcome_message",
+            mock.Mock(return_value="No hemos podido confirmarlo."),
+        )
+
+        result = await make_execute_skill_node(deps)(_autonomous_state("falla"))
+
+        assert result["decision"] == "escalate"
+        assert result["agent_response"] == "No hemos podido confirmarlo."
+        assert "se aprobó y se ejecutó" in result["escalation_reason"]
+
+    async def test_a_rejection_goes_back_to_the_llm_and_is_audited(
+        self, deps: AgentDependencies
+    ) -> None:
+        result = await make_execute_skill_node(deps)(_autonomous_state("sin foto"))
+
+        entry = result["tool_results"][-1]
+        assert entry["is_error"] is True
+        assert entry["error"] == "skill_rejected: evidence_missing: falta la foto"
+        assert "decision" not in result
+        audit = deps.audit_logger.entries[-1]  # type: ignore[attr-defined]
+        assert audit["status"] == "rejected_by_permissions"
+        assert audit["error_message"] == "skill_rejected: evidence_missing"
+
+    async def test_the_plan_can_demand_approval_over_an_autonomous_tenant(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import unittest.mock as mock
+
+        PlannedSkill.seen.clear()
+        scope = mock.MagicMock()
+        scope.__aenter__ = mock.AsyncMock(
+            return_value=mock.AsyncMock(fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}))
+        )
+        scope.__aexit__ = mock.AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.tenant_scope", lambda *a, **kw: scope
+        )
+        create = mock.AsyncMock()
+        monkeypatch.setattr("apps.api.agents.nodes.execute_skill.create_pending_approval", create)
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
+            mock.AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr("apps.api.agents.nodes.execute_skill.redact_inputs", lambda i, s: i)
+
+        result = await make_execute_skill_node(deps)(_autonomous_state("cambio"))
+
+        assert result["pending_approval_id"] is not None
+        assert create.await_args.kwargs["inputs_raw"] == {"text": "cambio", "plan": {"approve": True}}
+        assert PlannedSkill.seen == []
