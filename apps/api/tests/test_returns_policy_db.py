@@ -41,3 +41,34 @@ async def test_a_missing_table_reads_as_no_policy_inside_a_savepoint(
 
 async def test_without_rows_there_is_no_policy() -> None:
     assert await load_current_returns_policy(_Conn(None), TENANT) is None  # type: ignore[arg-type]
+
+
+class _Rows:
+    def __init__(self, row: dict[str, Any] | None) -> None:
+        self.row = row
+        self.sql = ""
+
+    async def fetchrow(self, sql: str, *args: Any) -> Any:
+        self.sql = sql
+        return self.row
+
+
+async def test_a_soft_deleted_latest_version_means_no_policy_not_the_previous_one() -> None:
+    from datetime import UTC, datetime
+
+    from apps.api.db.returns_policy import get_current_returns_policy
+
+    now = datetime.now(UTC)
+    deleted = _Rows(
+        {
+            "version": 3,
+            "policy": "{}",
+            "created_at": now,
+            "edited_by_email": None,
+            "edited_by_role": None,
+            "deleted_at": now,
+        }
+    )
+
+    assert await get_current_returns_policy(deleted, TENANT) is None  # type: ignore[arg-type]
+    assert "deleted_at IS NULL" not in deleted.sql

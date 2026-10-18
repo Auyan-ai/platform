@@ -218,3 +218,43 @@ def test_super_admin_edits_the_tenant_named_in_the_header(
 
     assert resp.status_code == 200
     assert insert.await_args.args[1] == TENANT_ID
+
+
+def test_the_store_sees_auyan_staff_as_the_team_not_their_email(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_reads(
+        monkeypatch,
+        StoredPolicy(
+            version=2,
+            policy=POLICY,
+            edited_by_email="kenny+admin@auyan.es",
+            created_at=NOW,
+            edited_by_role="super_admin",
+        ),
+        [
+            PolicyVersion(
+                version=2,
+                edited_by_email="kenny+admin@auyan.es",
+                created_at=NOW,
+                edited_by_role="super_admin",
+            ),
+            PolicyVersion(
+                version=1,
+                edited_by_email="admin@acme.io",
+                created_at=NOW,
+                edited_by_role="tenant_admin",
+            ),
+        ],
+    )
+
+    tenant = _app(monkeypatch).get("/tenants/me/returns-policy", headers=_headers()).json()
+    staff = (
+        _app(monkeypatch, role="super_admin")
+        .get("/tenants/me/returns-policy", headers=_headers(**{"X-Tenant-Id": str(TENANT_ID)}))
+        .json()
+    )
+
+    assert tenant["edited_by_email"] == "Equipo Auyan"
+    assert [h["edited_by_email"] for h in tenant["history"]] == ["Equipo Auyan", "admin@acme.io"]
+    assert staff["edited_by_email"] == "kenny+admin@auyan.es"

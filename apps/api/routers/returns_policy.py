@@ -57,19 +57,33 @@ class ReturnsPolicyUpdate(BaseModel):
     expected_version: int | None
 
 
-async def _read(tenant_id: UUID) -> ReturnsPolicyResponse:
+_AUYAN_TEAM = "Equipo Auyan"
+
+
+async def _read(tenant_id: UUID, viewer_role: str) -> ReturnsPolicyResponse:
     async with tenant_scope(tenant_id) as conn:
         current = await get_current_returns_policy(conn, tenant_id)
         history = await list_returns_policy_versions(conn, tenant_id)
+
+    def editor(email: str | None, role: str | None) -> str | None:
+        # La tienda no ve los emails del equipo interno de Auyan.
+        if role == "super_admin" and viewer_role != "super_admin":
+            return _AUYAN_TEAM
+        return email
+
     return ReturnsPolicyResponse(
         tenant_id=tenant_id,
         policy=parse_stored_policy(current.policy) if current else None,
         version=current.version if current else None,
         updated_at=current.created_at if current else None,
-        edited_by_email=current.edited_by_email if current else None,
+        edited_by_email=editor(current.edited_by_email, current.edited_by_role)
+        if current
+        else None,
         history=[
             PolicyVersionOut(
-                version=h.version, edited_by_email=h.edited_by_email, created_at=h.created_at
+                version=h.version,
+                edited_by_email=editor(h.edited_by_email, h.edited_by_role),
+                created_at=h.created_at,
             )
             for h in history
         ],
@@ -77,8 +91,8 @@ async def _read(tenant_id: UUID) -> ReturnsPolicyResponse:
 
 
 @router.get("", response_model=ReturnsPolicyResponse, summary="Política de devoluciones vigente")
-async def get_returns_policy(tenant_id: TenantIdDep) -> ReturnsPolicyResponse:
-    return await _read(tenant_id)
+async def get_returns_policy(tenant_id: TenantIdDep, auth: AuthDep) -> ReturnsPolicyResponse:
+    return await _read(tenant_id, auth.role)
 
 
 @router.put("", response_model=ReturnsPolicyResponse, summary="Guarda una versión nueva")
@@ -105,4 +119,4 @@ async def put_returns_policy(
         "returns_policy_saved",
         extra={"tenant_id": str(tenant_id), "version": version, "user_id": str(auth.user_id)},
     )
-    return await _read(tenant_id)
+    return await _read(tenant_id, auth.role)
