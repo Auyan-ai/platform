@@ -640,8 +640,10 @@ export function ReturnsPolicyForm({ tenantId }: { tenantId: string }) {
             <FieldError errors={errors} path="refund_method" />
           </div>
           <div>
-            <Label>Gastos de reposición que se descuentan del reembolso (%)</Label>
-            <p className="mt-0.5 text-xs text-foreground-muted">Pon 0 si no cobras.</p>
+            <Label>Gastos de reposición sobre el precio de lo devuelto (%)</Label>
+            <p className="mt-0.5 text-xs text-foreground-muted">
+              Se aplican también a los cambios. Pon 0 si no cobras.
+            </p>
             <div className="mt-1.5 grid gap-3 sm:grid-cols-2">
               <div>
                 <Label htmlFor="rp-restock-store" className="text-xs text-foreground-muted">
