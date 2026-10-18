@@ -173,6 +173,13 @@ class Skill(ABC):
         return raw_input
 
     @classmethod
+    def approval_key(cls, inputs: dict[str, Any]) -> dict[str, Any]:
+        """Lo que distingue una acción de otra sobre el mismo pedido, para reusar su
+        aprobación pendiente. Por defecto, todos los inputs salvo `order_id` (que se
+        compara aparte, resuelto al id interno)."""
+        return {k: v for k, v in inputs.items() if k != "order_id"}
+
+    @classmethod
     def requires_approval(cls, prepared: dict[str, Any]) -> bool:
         """Aprobación humana que exige la propia acción, además del piso L3 del tenant."""
         return False

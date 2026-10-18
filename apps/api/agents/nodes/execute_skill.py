@@ -163,7 +163,9 @@ async def _refs_point_to_same_order(state: AgentState, ref_a: str, ref_b: str) -
         return False
 
 
-async def _same_order_action(state: AgentState, existing_inputs: dict, new_inputs: dict) -> bool:
+async def _same_order_action(
+    state: AgentState, existing_inputs: dict, new_inputs: dict, skill_cls: type[Skill]
+) -> bool:
     """¿El nuevo tool call es la MISMA acción que un approval previo?
 
     Los campos que no son order_id deben coincidir exactamente (p.ej. la
@@ -174,8 +176,8 @@ async def _same_order_action(state: AgentState, existing_inputs: dict, new_input
     de decidir — ignorarlo se tragaba una acción L3 sobre OTRO pedido cuando
     el resto de inputs coincidía (auditoría sesión 67).
     """
-    a = {k: v for k, v in (existing_inputs or {}).items() if k != "order_id"}
-    b = {k: v for k, v in (new_inputs or {}).items() if k != "order_id"}
+    a = skill_cls.approval_key(existing_inputs or {})
+    b = skill_cls.approval_key(new_inputs or {})
     if a != b:
         return False
 
@@ -616,7 +618,7 @@ def make_execute_skill_node(
                         conn, tenant_id_uuid, conv_id_uuid, slug
                     )
                     if existing is not None and await _same_order_action(
-                        state, existing.inputs_raw, raw_input
+                        state, existing.inputs_raw, raw_input, skill_cls
                     ):
                         approval_id = existing.id
                         is_repeat = True

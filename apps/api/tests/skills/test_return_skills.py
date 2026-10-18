@@ -356,3 +356,22 @@ def test_the_llm_never_sees_the_plan_in_the_tool_schema() -> None:
 
 def test_photo_refs_travel_in_the_plan() -> None:
     assert PhotoRef(message_id="m-1", index=0).model_dump() == {"message_id": "m-1", "index": 0}
+
+
+@pytest.mark.parametrize("skill", [StartReturn, StartExchange])
+async def test_the_same_request_reuses_its_pending_approval(skill: Any) -> None:
+    from apps.api.agents.nodes.execute_skill import _same_order_action
+
+    raw = {**RAW, "exchange_items": [{"variant_id": CAQUI.variant_id, "quantity": 1}]}
+    if skill is StartReturn:
+        raw.pop("exchange_items")
+    shopify = FakeShopify(variants=(CAQUI,))
+    first = await skill().prepare(_ctx(shopify, _policy()), raw)
+    again = await skill().prepare(_ctx(shopify, _policy()), raw)
+    again["plan"]["requested_at"] = "2030-01-01T00:00:00+00:00"
+    again["settlement_note"] = "otra redacción"
+
+    assert await _same_order_action({}, first, again, skill) is True
+    assert (
+        await _same_order_action({}, first, {**again, "reason_code": "defectuoso"}, skill) is False
+    )
