@@ -321,7 +321,7 @@ export type PayloadResult =
   | { ok: false; errors: FieldErrors }
 
 function addError(errors: FieldErrors, path: string, message: string) {
-  ;(errors[path] ??= []).push(message)
+  errors[path] = [...(errors[path] ?? []), message]
 }
 
 export function toPayload(form: PolicyForm): PayloadResult {
