@@ -158,18 +158,35 @@ def return_next_steps(plan: ReturnPlan, language: str, tenant_default: str) -> s
         steps.append(text("returns.shipping_reimbursed"))
     else:
         steps.append(text("returns.shipping_paid_by_store"))
+    if s.restocking_fee:
+        fee = _money(s.restocking_fee, s.currency, language)
+        steps.append(text("returns.restocking_fee", fee=fee))
     days = str(plan.refund_days)
+    credit = s.refund_as == "store_credit"
     if not plan.exchange_lines:
-        steps.append(text("returns.refund_after_receipt", days=days))
+        key = "returns.credit_after_receipt" if credit else "returns.refund_after_receipt"
+        steps.append(text(key, days=days))
         return " ".join(steps)
-    steps.append(text("returns.exchange_ships"))
-    if s.net is None:
+    steps.append(
+        text(
+            "returns.exchange_ships_now"
+            if plan.ship_replacement == "immediately"
+            else "returns.exchange_ships_after_receipt"
+        )
+    )
+    if s.price_rule == "store_absorbs":
+        steps.append(text("returns.exchange_difference_absorbed"))
+    elif s.price_rule == "no_refund":
+        steps.append(text("returns.exchange_no_refund"))
+    if s.balance is None:
         steps.append(text("returns.exchange_difference_pending"))
-    elif s.net < 0:
-        steps.append(text("returns.exchange_you_owe", amount=_money(-s.net, s.currency, language)))
-    elif s.net > 0:
-        amount = _money(s.net, s.currency, language)
-        steps.append(text("returns.exchange_refund", amount=amount, days=days))
+    elif s.balance < 0:
+        owed = _money(-s.balance, s.currency, language)
+        steps.append(text("returns.exchange_you_owe", amount=owed))
+    elif s.balance > 0:
+        amount = _money(s.balance, s.currency, language)
+        key = "returns.exchange_credit" if credit else "returns.exchange_refund"
+        steps.append(text(key, amount=amount, days=days))
     return " ".join(steps)
 
 

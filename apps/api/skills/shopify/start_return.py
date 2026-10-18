@@ -17,6 +17,7 @@ from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.returns import (
     Eligible,
     Evidence,
+    RefundPreference,
     Refused,
     Rejected,
     RequestedExchange,
@@ -50,6 +51,13 @@ class StartReturnInput(SkillInput):
     )
     reason_code: str = Field(
         description="Código del motivo, de la lista de la política de la tienda."
+    )
+    refund_preference: RefundPreference | None = Field(
+        default=None,
+        description=(
+            "Solo si la política deja elegir: `original_payment` (método de pago original) "
+            "o `store_credit` (crédito de la tienda), según diga el cliente."
+        ),
     )
     # Lo escribe el código en `prepare`; el que mande el LLM se descarta.
     plan: SkipJsonSchema[ReturnPlan | None] = None
@@ -130,6 +138,7 @@ class _ReturnSkill(Skill):
             variants=variants,
             evidence=Evidence(photos=ctx.customer_photos, readable=ctx.attachments_readable),
             now=now,
+            refund_preference=inputs.refund_preference,
         )
         if isinstance(decision, Refused):
             raise self._refusal(ctx, decision)
@@ -143,6 +152,8 @@ class _ReturnSkill(Skill):
             exchange=[(ln.variant_id, ln.quantity) for ln in decision.exchange_lines],
         )
         plan = build_plan(decision, calculation, requested_at=now)
+        if isinstance(plan, Rejected):
+            raise SkillRejection(plan.code, plan.detail)
         return {
             **inputs.model_dump(mode="json", exclude={"plan"}),
             "plan": plan.model_dump(mode="json"),

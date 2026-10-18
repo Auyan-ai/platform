@@ -356,6 +356,7 @@ def _return_output(**plan_overrides: object) -> dict:
         "shipping_method": "store_label",
         "return_address": None,
         "refund_days": 14,
+        "ship_replacement": None,
         "requires_approval": True,
         "settlement": Settlement(
             currency="EUR",
@@ -364,6 +365,10 @@ def _return_output(**plan_overrides: object) -> dict:
             shipping_payer="customer",
             fee=Decimal("4.95"),
             fee_pending=None,
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="none",
+            refund_as="original_payment",
         ),
     }
     plan.update(plan_overrides)
@@ -403,6 +408,10 @@ def test_customer_ships_to_the_store_address_in_english() -> None:
             shipping_payer="customer",
             fee=Decimal("0"),
             fee_pending=None,
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="none",
+            refund_as="original_payment",
         ),
     )
 
@@ -412,4 +421,38 @@ def test_customer_ships_to_the_store_address_in_english() -> None:
         "We've opened the return for your order.\n\n"
         "Send the item to this address: Calle Mayor 1, Madrid. Return shipping is at your "
         "expense. Once we receive and check the item, we'll refund you within 14 days."
+    )
+
+
+def test_cheaper_exchange_as_store_credit_after_receipt() -> None:
+    from decimal import Decimal
+
+    from apps.api.services.approval_reply import outcome_message
+    from apps.api.services.returns import PlanExchangeLine, Settlement, SettlementLine
+
+    output = _return_output(
+        exchange_lines=(PlanExchangeLine(variant_id=9, title="Blusa M", quantity=1),),
+        ship_replacement="after_receipt",
+        settlement=Settlement(
+            currency="EUR",
+            returned=(SettlementLine(title="Blusa", quantity=1, amount=Decimal("52.15")),),
+            exchanged=(SettlementLine(title="Blusa M", quantity=1, amount=Decimal("40.00")),),
+            shipping_payer="store",
+            fee=Decimal("0"),
+            fee_pending=None,
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="store_credit",
+            refund_as="store_credit",
+        ),
+    )
+
+    text = outcome_message("shopify.start_exchange", output, "es")
+
+    assert text == (
+        "Hemos abierto el cambio de tu pedido.\n\n"
+        "Te enviaremos la etiqueta de devolución. El envío de vuelta corre de nuestra cuenta. "
+        "Te enviaremos el artículo de cambio cuando recibamos el que devuelves. Cuando "
+        "recibamos el artículo, te abonaremos 12,15 EUR en crédito de la tienda en un plazo "
+        "de 14 días."
     )

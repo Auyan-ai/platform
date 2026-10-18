@@ -35,9 +35,7 @@ def _patch_module(
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
     monkeypatch.setattr(f"{MODULE}.get_tenant_by_id", AsyncMock(return_value=tenant))
     monkeypatch.setattr(f"{MODULE}.get_tenant_configuration", AsyncMock(return_value=config))
-    monkeypatch.setattr(
-        f"{MODULE}.get_active_system_prompt", AsyncMock(return_value=system_prompt)
-    )
+    monkeypatch.setattr(f"{MODULE}.get_active_system_prompt", AsyncMock(return_value=system_prompt))
     monkeypatch.setattr(f"{MODULE}.list_tool_permissions", AsyncMock(return_value=[]))
     monkeypatch.setattr(f"{MODULE}.get_tenant_playbook", AsyncMock(return_value=playbook))
     monkeypatch.setattr(f"{MODULE}.get_tenant_facts", AsyncMock(return_value=facts))
@@ -256,6 +254,8 @@ _POLICY = {
         "payer": {"store_fault": "store", "customer_fault": "customer"},
     },
     "refund_days": 14,
+    "refund_method": "original_payment",
+    "restocking_fee_percent": {"store_fault": "0", "customer_fault": "0"},
     "excluded_product_tags": [],
     "exchanges": {"enabled": False},
     "returns_require_approval": True,

@@ -27,6 +27,7 @@ def listed_attachments(raw: Any) -> list[dict[str, Any]]:
     de una foto en una aprobación y el de la vista previa apuntan al mismo adjunto."""
     return [a for a in (raw or []) if isinstance(a, dict) and (a.get("path") or a.get("filename"))]
 
+
 MEDIA_BUCKET = "conversation-media"
 MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
 # Vida de las URLs firmadas para ver un adjunto en el dashboard: el bucket sigue privado.

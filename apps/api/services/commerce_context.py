@@ -40,9 +40,7 @@ async def build_commerce_integration_ctx(
     cae a `tenant_config.extra` (legacy) si se pasa `extra` con shopify_domain/token.
     Debe llamarse con un `conn` ya dentro de su `tenant_scope`.
     """
-    integration = await get_primary_integration_for_kind(
-        conn, tenant_id=tenant_id, kind="commerce"
-    )
+    integration = await get_primary_integration_for_kind(conn, tenant_id=tenant_id, kind="commerce")
     if integration:
         encrypted = await get_integration_credentials_encrypted(
             conn, tenant_id=tenant_id, integration_id=integration.id

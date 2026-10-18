@@ -48,6 +48,8 @@ POLICY: dict[str, Any] = {
         "customer_fee": None,
     },
     "refund_days": 14,
+    "refund_method": "original_payment",
+    "restocking_fee_percent": {"store_fault": "0", "customer_fault": "0"},
     "excluded_product_tags": [],
     "exchanges": {"enabled": False, "kinds": []},
     "returns_require_approval": True,

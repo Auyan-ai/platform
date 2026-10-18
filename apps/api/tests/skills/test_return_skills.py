@@ -55,8 +55,17 @@ def _policy(**overrides: Any) -> ActivePolicy:
             "payer": {"store_fault": "store", "customer_fault": "customer"},
         },
         "refund_days": 14,
+        "refund_method": "original_payment",
+        "restocking_fee_percent": {"store_fault": "0", "customer_fault": "0"},
         "excluded_product_tags": [],
-        "exchanges": {"enabled": True, "kinds": ["variant"]},
+        "exchanges": {
+            "enabled": True,
+            "kinds": ["variant"],
+            "requires_approval": True,
+            "higher_price": "customer_pays",
+            "lower_price": "refund_difference",
+            "ship_replacement": "after_receipt",
+        },
         "returns_require_approval": False,
     }
     raw.update(overrides)
@@ -208,7 +217,7 @@ async def test_prepare_writes_the_plan_and_discards_one_from_the_llm() -> None:
     assert plan.policy_version == 5
     assert plan.order_id == 7409804542232
     assert plan.lines[0].fulfillment_line_item_id == FLI
-    assert plan.settlement.net == Decimal("76.95")
+    assert plan.settlement.balance == Decimal("76.95")
     assert plan.return_address == "Calle Mayor 1, 28013 Madrid"
     assert prepared["settlement_note"] == plan.team_note()
     assert StartReturn.requires_approval(prepared) is False
@@ -282,7 +291,24 @@ CAQUI = ExchangeVariant(
 )
 
 
-async def test_an_exchange_always_needs_approval_and_nets_the_difference() -> None:
+async def test_an_exchange_follows_the_store_approval_choice() -> None:
+    terms = {
+        "enabled": True,
+        "kinds": ["variant"],
+        "requires_approval": False,
+        "higher_price": "customer_pays",
+        "lower_price": "refund_difference",
+        "ship_replacement": "immediately",
+    }
+
+    prepared = await StartExchange().prepare(
+        _ctx(FakeShopify(variants=(CAQUI,)), _policy(exchanges=terms)), EXCHANGE
+    )
+
+    assert StartExchange.requires_approval(prepared) is False
+
+
+async def test_an_exchange_with_approval_nets_the_difference() -> None:
     prepared = await StartExchange().prepare(
         _ctx(FakeShopify(variants=(CAQUI,)), _policy()), EXCHANGE
     )
@@ -290,7 +316,7 @@ async def test_an_exchange_always_needs_approval_and_nets_the_difference() -> No
     plan = ReturnPlan.model_validate(prepared["plan"])
     assert StartExchange.requires_approval(prepared) is True
     assert plan.exchange_lines[0].title == "Bolso Bandolera - Caqui"
-    assert plan.settlement.net == Decimal("0.00")
+    assert plan.settlement.balance == Decimal("0.00")
 
 
 async def test_an_exchange_for_another_product_is_rejected_when_only_variants_count() -> None:
@@ -317,8 +343,14 @@ def test_the_llm_never_sees_the_plan_in_the_tool_schema() -> None:
     returns = StartReturn().to_anthropic_tool()["input_schema"]["properties"]
     exchange = StartExchange().to_anthropic_tool()["input_schema"]["properties"]
 
-    assert sorted(returns) == ["items", "order_id", "reason_code"]
-    assert sorted(exchange) == ["exchange_items", "items", "order_id", "reason_code"]
+    assert sorted(returns) == ["items", "order_id", "reason_code", "refund_preference"]
+    assert sorted(exchange) == [
+        "exchange_items",
+        "items",
+        "order_id",
+        "reason_code",
+        "refund_preference",
+    ]
 
 
 def test_photo_refs_travel_in_the_plan() -> None:

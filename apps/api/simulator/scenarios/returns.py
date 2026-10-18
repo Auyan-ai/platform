@@ -37,8 +37,17 @@ _POLICY: dict[str, Any] = {
         "customer_fee": {"amount": "4.95", "currency": "EUR"},
     },
     "refund_days": 14,
+    "refund_method": "original_payment",
+    "restocking_fee_percent": {"store_fault": "0", "customer_fault": "0"},
     "excluded_product_tags": ["digital"],
-    "exchanges": {"enabled": True, "kinds": ["variant"]},
+    "exchanges": {
+        "enabled": True,
+        "kinds": ["variant"],
+        "requires_approval": True,
+        "higher_price": "customer_pays",
+        "lower_price": "refund_difference",
+        "ship_replacement": "after_receipt",
+    },
     "returns_require_approval": True,
 }
 

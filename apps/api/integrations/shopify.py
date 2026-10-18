@@ -660,9 +660,7 @@ class ShopifyClient:
             raise ShopifyActionError(f"order_not_found: {order_id}")
         return returnable_order_from_graphql(data)
 
-    async def get_exchange_variants(
-        self, variant_ids: list[int]
-    ) -> tuple[ExchangeVariant, ...]:
+    async def get_exchange_variants(self, variant_ids: list[int]) -> tuple[ExchangeVariant, ...]:
         """Variantes que se ofrecen a cambio; las que no existen no vienen."""
         if not variant_ids:
             return ()
@@ -1027,9 +1025,7 @@ def return_calculation_from_graphql(node: dict[str, Any]) -> ReturnCalculation:
         currencies.update((cur, tax_cur))
         return CalculatedLine(key=key, quantity=int(raw["quantity"]), subtotal=subtotal, tax=tax)
 
-    returned = tuple(
-        _line(r, str(r["fulfillmentLineItem"]["id"])) for r in node["returnLineItems"]
-    )
+    returned = tuple(_line(r, str(r["fulfillmentLineItem"]["id"])) for r in node["returnLineItems"])
     exchanged = tuple(_line(e, str(e["variant"]["id"])) for e in node["exchangeLineItems"])
     if len(currencies) != 1:
         raise ShopifyActionError(f"return_calculation_currency_ambiguous: {currencies}")
@@ -1038,6 +1034,8 @@ def return_calculation_from_graphql(node: dict[str, Any]) -> ReturnCalculation:
 
 def return_input(plan: ReturnPlan, reason_definition_id: str) -> dict[str, Any]:
     """`ReturnInput` de `returnCreate` para el plan aprobado."""
+    percent = plan.settlement.restocking_percent
+    restocking = {"restockingFee": {"percentage": float(percent)}} if percent else {}
     payload: dict[str, Any] = {
         "orderId": f"gid://shopify/Order/{plan.order_id}",
         "requestedAt": plan.requested_at.isoformat(),
@@ -1047,6 +1045,7 @@ def return_input(plan: ReturnPlan, reason_definition_id: str) -> dict[str, Any]:
                 "quantity": line.quantity,
                 "returnReasonDefinitionId": reason_definition_id,
                 "returnReasonNote": f"{plan.reason_label} [{plan.reason_code}]"[:255],
+                **restocking,
             }
             for line in plan.lines
         ],
@@ -1397,9 +1396,7 @@ class ShopifyAdapter:
         order_id = await self._resolve_order_id(ctx, order_id)
         return await self._client(ctx).find_refund(order_id, idempotency_key)
 
-    async def get_returnable_order(
-        self, ctx: IntegrationContext, order_id: int
-    ) -> ReturnableOrder:
+    async def get_returnable_order(self, ctx: IntegrationContext, order_id: int) -> ReturnableOrder:
         order_id = await self._resolve_order_id(ctx, order_id)
         return await self._client(ctx).get_returnable_order(order_id)
 

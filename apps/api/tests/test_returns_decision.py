@@ -20,6 +20,7 @@ from apps.api.services.returns import (
     ReturnableLine,
     ReturnableOrder,
     ReturnCalculation,
+    ReturnPlan,
     build_plan,
     customer_photos,
     evaluate_return,
@@ -56,8 +57,17 @@ def _policy(**overrides: Any) -> ActivePolicy:
             "customer_fee": {"amount": "4.95", "currency": "EUR"},
         },
         "refund_days": 14,
+        "refund_method": "original_payment",
+        "restocking_fee_percent": {"store_fault": "0", "customer_fault": "0"},
         "excluded_product_tags": ["final-sale"],
-        "exchanges": {"enabled": True, "kinds": ["variant"]},
+        "exchanges": {
+            "enabled": True,
+            "kinds": ["variant"],
+            "requires_approval": True,
+            "higher_price": "customer_pays",
+            "lower_price": "refund_difference",
+            "ship_replacement": "after_receipt",
+        },
         "returns_require_approval": False,
     }
     raw.update(overrides)
@@ -233,7 +243,16 @@ def test_variant_exchanges_must_stay_on_the_same_product_and_be_available() -> N
     missing = _evaluate(exchange=exchange, variants=())
     ok = _evaluate(exchange=exchange, variants=(same,))
     any_product = _evaluate(
-        _policy(exchanges={"enabled": True, "kinds": ["product"]}),
+        _policy(
+            exchanges={
+                "enabled": True,
+                "kinds": ["product"],
+                "requires_approval": True,
+                "higher_price": "customer_pays",
+                "lower_price": "refund_difference",
+                "ship_replacement": "after_receipt",
+            }
+        ),
         exchange=exchange,
         variants=(other_product,),
     )
@@ -272,6 +291,12 @@ def test_shipping_payer_and_fee_follow_the_fault_of_the_reason() -> None:
     assert store.fee is None
 
 
+def _built(*args: Any, **kwargs: Any) -> ReturnPlan:
+    plan = build_plan(*args, **kwargs)
+    assert isinstance(plan, ReturnPlan), plan
+    return plan
+
+
 def _calc(returned: str, tax: str, exchanged: str | None = None) -> ReturnCalculation:
     return ReturnCalculation(
         currency="EUR",
@@ -302,13 +327,13 @@ def test_settlement_nets_items_minus_fee_with_tax_included() -> None:
     eligible = _evaluate()
     assert isinstance(eligible, Eligible)
 
-    plan = build_plan(eligible, _calc("-52.15", "-9.05"), requested_at=NOW)
+    plan = _built(eligible, _calc("-52.15", "-9.05"), requested_at=NOW)
 
     settlement = plan.settlement
     assert settlement.currency == "EUR"
     assert settlement.returned_total == Decimal("52.15")
     assert settlement.fee == Decimal("4.95")
-    assert settlement.net == Decimal("47.20")
+    assert settlement.balance == Decimal("47.20")
     assert plan.policy_version == 7
     assert plan.requested_at == NOW
     assert plan.lines[0].fulfillment_line_item_id == "gid://shopify/FulfillmentLineItem/9001"
@@ -327,11 +352,11 @@ def test_settlement_adds_tax_when_prices_exclude_it() -> None:
     )
     assert isinstance(eligible, Eligible)
 
-    plan = build_plan(eligible, _calc("-50.00", "-10.50"), requested_at=NOW)
+    plan = _built(eligible, _calc("-50.00", "-10.50"), requested_at=NOW)
 
     assert plan.settlement.returned_total == Decimal("60.50")
     assert plan.settlement.fee == Decimal("0")
-    assert plan.settlement.net == Decimal("60.50")
+    assert plan.settlement.balance == Decimal("60.50")
 
 
 def test_exchange_difference_is_negative_when_the_new_item_costs_more() -> None:
@@ -343,17 +368,17 @@ def test_exchange_difference_is_negative_when_the_new_item_costs_more() -> None:
     )
     assert isinstance(eligible, Eligible)
 
-    plan = build_plan(eligible, _calc("-52.15", "-9.05", exchanged="60.00"), requested_at=NOW)
+    plan = _built(eligible, _calc("-52.15", "-9.05", exchanged="60.00"), requested_at=NOW)
 
     assert plan.settlement.exchanged_total == Decimal("60.00")
-    assert plan.settlement.net == Decimal("-12.80")
+    assert plan.settlement.balance == Decimal("-12.80")
 
 
 def test_a_fee_in_another_currency_is_left_to_the_team() -> None:
     eligible = _evaluate(order=_order(currency="USD"))
     assert isinstance(eligible, Eligible)
 
-    plan = build_plan(
+    plan = _built(
         eligible,
         ReturnCalculation(
             currency="USD",
@@ -373,7 +398,7 @@ def test_a_fee_in_another_currency_is_left_to_the_team() -> None:
     assert plan.settlement.fee == Decimal("0")
     assert plan.settlement.fee_pending is not None
     assert plan.settlement.fee_pending.currency == "EUR"
-    assert plan.settlement.net is None
+    assert plan.settlement.balance is None
     assert plan.shopify_fee is None
 
 
@@ -381,14 +406,14 @@ def test_settlement_note_tells_the_team_what_to_refund() -> None:
     eligible = _evaluate()
     assert isinstance(eligible, Eligible)
 
-    plan = build_plan(eligible, _calc("-52.15", "-9.05"), requested_at=NOW)
+    plan = _built(eligible, _calc("-52.15", "-9.05"), requested_at=NOW)
 
     assert plan.team_note() == (
         "Auyan · devolución #1042 (política v7)\n"
         "Motivo: Pequeña [too_small], culpa del cliente\n"
         "Devuelve: 1 x Blusa - Marino / S = 52.15 EUR\n"
         "Envío de vuelta: etiqueta de la tienda, paga el cliente; tarifa 4.95 EUR\n"
-        "Neto a reembolsar al recibir: 47.20 EUR"
+        "A devolver al recibir: 47.20 EUR, al método de pago original"
     )
 
 
@@ -429,3 +454,112 @@ def test_customer_photos_are_the_images_the_customer_sent_indexed_like_the_inbox
         PhotoRef(message_id="m-1", index=1),
         PhotoRef(message_id="m-3", index=0),
     )
+
+
+BLUSA_M = ExchangeVariant(variant_id=88, product_id=77, title="Blusa - M", available=True)
+SWAP = (RequestedExchange(variant_id=88, quantity=1),)
+
+
+def _exchange_policy(**terms: Any) -> ActivePolicy:
+    base = {
+        "enabled": True,
+        "kinds": ["variant"],
+        "requires_approval": True,
+        "higher_price": "customer_pays",
+        "lower_price": "refund_difference",
+        "ship_replacement": "after_receipt",
+    }
+    return _policy(
+        exchanges={**base, **terms},
+        shipping={
+            "method": "customer_ships",
+            "return_address": "Calle Mayor 1, Madrid",
+            "payer": {"store_fault": "store", "customer_fault": "customer"},
+        },
+    )
+
+
+def _swap(policy: ActivePolicy, exchanged: str) -> ReturnPlan | Rejected:
+    eligible = _evaluate(policy, exchange=SWAP, variants=(BLUSA_M,))
+    assert isinstance(eligible, Eligible)
+    return build_plan(eligible, _calc("-52.15", "-9.05", exchanged=exchanged), requested_at=NOW)
+
+
+def test_exchange_approval_is_the_store_choice() -> None:
+    free = _evaluate(_exchange_policy(requires_approval=False), exchange=SWAP, variants=(BLUSA_M,))
+
+    assert isinstance(free, Eligible) and free.requires_approval is False
+
+
+@pytest.mark.parametrize(
+    ("higher", "balance", "rule"),
+    [
+        ("customer_pays", Decimal("-7.85"), "customer_pays"),
+        ("store_absorbs", Decimal("0"), "store_absorbs"),
+    ],
+)
+def test_a_dearer_exchange_follows_the_store_rule(higher: str, balance: Decimal, rule: str) -> None:
+    plan = _swap(_exchange_policy(higher_price=higher), "60.00")
+
+    assert isinstance(plan, ReturnPlan)
+    assert plan.settlement.price_difference == Decimal("7.85")
+    assert plan.settlement.price_rule == rule
+    assert plan.settlement.balance == balance
+
+
+def test_a_dearer_exchange_the_store_does_not_allow_goes_back_to_the_llm() -> None:
+    result = _swap(_exchange_policy(higher_price="not_allowed"), "60.00")
+
+    assert isinstance(result, Rejected) and result.code == "exchange_price_higher"
+
+
+@pytest.mark.parametrize(
+    ("lower", "balance", "refund_as"),
+    [
+        ("refund_difference", Decimal("12.15"), "original_payment"),
+        ("store_credit", Decimal("12.15"), "store_credit"),
+        ("no_refund", Decimal("0"), "original_payment"),
+    ],
+)
+def test_a_cheaper_exchange_follows_the_store_rule(
+    lower: str, balance: Decimal, refund_as: str
+) -> None:
+    plan = _swap(_exchange_policy(lower_price=lower), "40.00")
+
+    assert isinstance(plan, ReturnPlan)
+    assert plan.settlement.balance == balance
+    assert plan.settlement.refund_as == refund_as
+    assert plan.ship_replacement == "after_receipt"
+
+
+def test_refund_method_is_the_store_choice_or_asked_to_the_customer() -> None:
+    credit = _evaluate(_policy(refund_method="store_credit"))
+    ask = _evaluate(_policy(refund_method="customer_choice"))
+    chosen = evaluate_return(
+        _policy(refund_method="customer_choice"),
+        _order(),
+        reason_code="too_small",
+        items=(RequestedItem(line_item_id=501, quantity=1),),
+        exchange=(),
+        variants=(),
+        evidence=NO_PHOTOS,
+        now=NOW,
+        refund_preference="store_credit",
+    )
+
+    assert isinstance(credit, Eligible) and credit.refund_as == "store_credit"
+    assert isinstance(ask, Rejected) and ask.code == "refund_preference_missing"
+    assert isinstance(chosen, Eligible) and chosen.refund_as == "store_credit"
+
+
+def test_restocking_fee_follows_the_fault_and_comes_off_the_refund() -> None:
+    eligible = _evaluate(
+        _policy(restocking_fee_percent={"store_fault": "0", "customer_fault": "10"})
+    )
+    assert isinstance(eligible, Eligible)
+
+    plan = _built(eligible, _calc("-52.15", "-9.05"), requested_at=NOW)
+
+    assert plan.settlement.restocking_fee == Decimal("5.22")
+    assert plan.settlement.balance == Decimal("41.98")
+    assert "Reposición: 10% = 5.22 EUR" in plan.team_note()

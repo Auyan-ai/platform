@@ -55,9 +55,7 @@ def verify_chatwoot_signature(
         return False
 
     message = timestamp.encode() + b"." + raw_body
-    expected = "sha256=" + hmac.new(
-        signing_secret.encode(), message, hashlib.sha256
-    ).hexdigest()
+    expected = "sha256=" + hmac.new(signing_secret.encode(), message, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature_header)
 
 
@@ -91,9 +89,7 @@ class ChatwootClient:
     async def list_webhooks(self) -> list[dict[str, Any]]:
         """Lista los webhooks de cuenta ya registrados (para evitar duplicados)."""
         async with httpx.AsyncClient() as client:
-            response = await client.get(
-                self._url("/webhooks"), headers=self._headers(), timeout=10
-            )
+            response = await client.get(self._url("/webhooks"), headers=self._headers(), timeout=10)
             response.raise_for_status()
             payload = response.json()
         # Chatwoot devuelve {"payload": [...]} o una lista plana según versión.
@@ -102,9 +98,7 @@ class ChatwootClient:
             return webhooks if isinstance(webhooks, list) else []
         return payload if isinstance(payload, list) else []
 
-    async def create_webhook(
-        self, url: str, subscriptions: list[str]
-    ) -> dict[str, Any]:
+    async def create_webhook(self, url: str, subscriptions: list[str]) -> dict[str, Any]:
         """Registra un webhook de cuenta que apunta a Auyan.
 
         Chatwoot no expone vía API un secreto de firma usable (bug chatwoot#13809),

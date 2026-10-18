@@ -10,16 +10,19 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal
 
 from apps.api.services.media_storage import listed_attachments
 from apps.api.services.returns_policy import (
     ActivePolicy,
     Fault,
+    HigherPrice,
+    LowerPrice,
     Money,
     Payer,
     ReturnReason,
+    ShipReplacement,
 )
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
@@ -40,6 +43,14 @@ RejectionCode = Literal[
     "evidence_missing",
     "exchange_kind_not_allowed",
     "exchange_variant_unavailable",
+    "exchange_price_higher",
+    "refund_preference_missing",
+]
+# Lo que elige el cliente cuando la política le deja elegir (`refund_method = customer_choice`).
+RefundPreference = Literal["original_payment", "store_credit"]
+# Cómo se salda la diferencia de precio de un cambio (`none`: devolución o mismo precio).
+PriceRule = Literal[
+    "none", "customer_pays", "store_absorbs", "refund_difference", "store_credit", "no_refund"
 ]
 
 
@@ -159,6 +170,11 @@ class Eligible:
     shipping_payer: Payer
     fee: Money | None
     refund_days: int
+    refund_as: RefundPreference
+    restocking_percent: Decimal
+    higher_price: HigherPrice | None
+    lower_price: LowerPrice | None
+    ship_replacement: ShipReplacement | None
     requires_approval: bool
 
 
@@ -190,6 +206,7 @@ def evaluate_return(
     variants: tuple[ExchangeVariant, ...],
     evidence: Evidence,
     now: datetime,
+    refund_preference: RefundPreference | None = None,
 ) -> Decision:
     """Aplica la política a una petición. El orden de las comprobaciones es el de la
     tabla del ADR: primero lo que escala sin remedio, luego lo que el cliente corrige."""
@@ -311,6 +328,23 @@ def evaluate_return(
             )
         )
 
+    terms = policy.exchanges
+    if exchange_lines:
+        refund_as: RefundPreference = (
+            "store_credit" if terms.lower_price == "store_credit" else "original_payment"
+        )
+    elif policy.refund_method != "customer_choice":
+        refund_as = policy.refund_method
+    elif refund_preference is None:
+        return Rejected(
+            "refund_preference_missing",
+            "La tienda deja elegir cómo se devuelve el dinero: pregunta al cliente si lo "
+            "quiere en su método de pago original (`original_payment`) o en crédito de la "
+            "tienda (`store_credit`) y pásalo en `refund_preference`.",
+        )
+    else:
+        refund_as = refund_preference
+
     shipping = policy.shipping
     payer = shipping.payer_for(reason.fault)
     return Eligible(
@@ -336,7 +370,14 @@ def evaluate_return(
         shipping_payer=payer,
         fee=shipping.customer_fee if payer == "customer" else None,
         refund_days=policy.refund_days,
-        requires_approval=bool(exchange_lines) or policy.returns_require_approval,
+        refund_as=refund_as,
+        restocking_percent=policy.restocking_fee_percent.for_fault(reason.fault),
+        higher_price=terms.higher_price if exchange_lines else None,
+        lower_price=terms.lower_price if exchange_lines else None,
+        ship_replacement=terms.ship_replacement if exchange_lines else None,
+        requires_approval=bool(terms.requires_approval)
+        if exchange_lines
+        else policy.returns_require_approval,
     )
 
 
@@ -378,6 +419,10 @@ class Settlement(BaseModel):
     fee: Decimal
     # Tarifa de la política en otra moneda que el pedido: no se resta, la decide el equipo.
     fee_pending: Money | None
+    restocking_percent: Decimal
+    restocking_fee: Decimal
+    price_rule: PriceRule
+    refund_as: RefundPreference
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -391,11 +436,27 @@ class Settlement(BaseModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def net(self) -> Decimal | None:
-        """Positivo: se le devuelve al cliente. Negativo: el cliente debe la diferencia."""
+    def price_difference(self) -> Decimal:
+        """Positivo: el artículo de cambio cuesta más que lo devuelto."""
+        return self.exchanged_total - self.returned_total if self.exchanged else Decimal("0")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def balance(self) -> Decimal | None:
+        """Lo que se le devuelve al cliente (positivo, en `refund_as`) o lo que debe
+        (negativo), según la política. None si falta decidir la tarifa de envío."""
         if self.fee_pending is not None:
             return None
-        return self.returned_total - self.exchanged_total - self.fee
+        diff = self.price_difference
+        if not self.exchanged:
+            items = self.returned_total
+        elif diff < 0 and self.price_rule in ("refund_difference", "store_credit"):
+            items = -diff
+        elif diff > 0 and self.price_rule == "customer_pays":
+            items = -diff
+        else:
+            items = Decimal("0")
+        return items - self.restocking_fee - self.fee
 
 
 class ReturnPlan(_Frozen):
@@ -416,6 +477,7 @@ class ReturnPlan(_Frozen):
     shipping_method: Literal["customer_ships", "store_label"]
     return_address: str | None
     refund_days: int
+    ship_replacement: ShipReplacement | None
     requires_approval: bool
     settlement: Settlement
 
@@ -457,15 +519,50 @@ class ReturnPlan(_Frozen):
         else:
             fee = ""
         rows.append(f"Envío de vuelta: {method}, {payer}{fee}")
+        if s.restocking_fee:
+            rows.append(f"Reposición: {s.restocking_percent}% = {s.restocking_fee} {s.currency}")
+        if s.exchanged and s.price_difference:
+            rule = _PRICE_RULE_LABEL[s.price_rule]
+            rows.append(f"Diferencia de precio: {s.price_difference} {s.currency}, {rule}")
+        if self.ship_replacement:
+            rows.append(f"Artículo de cambio: {_SHIP_LABEL[self.ship_replacement]}")
         if self.evidence:
             rows.append(f"Fotos del cliente: {len(self.evidence)} en la conversación")
-        if s.net is None:
-            rows.append("Neto: pendiente de la tarifa de envío")
-        elif s.net >= 0:
-            rows.append(f"Neto a reembolsar al recibir: {s.net} {s.currency}")
+        if s.balance is None:
+            rows.append("Saldo: pendiente de la tarifa de envío")
+        elif s.balance >= 0:
+            how = _REFUND_LABEL[s.refund_as]
+            rows.append(f"A devolver al recibir: {s.balance} {s.currency}, {how}")
         else:
-            rows.append(f"Diferencia a cobrar al cliente: {-s.net} {s.currency}")
+            rows.append(f"A cobrar al cliente: {-s.balance} {s.currency}")
         return "\n".join(rows)
+
+
+_PRICE_RULE_LABEL: dict[PriceRule, str] = {
+    "none": "sin diferencia",
+    "customer_pays": "la paga el cliente",
+    "store_absorbs": "la asume la tienda",
+    "refund_difference": "se reembolsa",
+    "store_credit": "en crédito de la tienda",
+    "no_refund": "no se reembolsa",
+}
+_SHIP_LABEL: dict[ShipReplacement, str] = {
+    "immediately": "sale al confirmar el cambio",
+    "after_receipt": "sale al recibir lo devuelto",
+}
+_REFUND_LABEL: dict[RefundPreference, str] = {
+    "original_payment": "al método de pago original",
+    "store_credit": "en crédito de la tienda",
+}
+_CENT = Decimal("0.01")
+
+
+def _price_rule(eligible: Eligible, difference: Decimal) -> PriceRule:
+    if not eligible.exchange_lines or difference == 0:
+        return "none"
+    if difference > 0:
+        return "store_absorbs" if eligible.higher_price == "store_absorbs" else "customer_pays"
+    return eligible.lower_price or "none"
 
 
 def _amount(line: CalculatedLine, *, taxes_included: bool) -> Decimal:
@@ -475,36 +572,56 @@ def _amount(line: CalculatedLine, *, taxes_included: bool) -> Decimal:
 
 def build_plan(
     eligible: Eligible, calculation: ReturnCalculation, *, requested_at: datetime
-) -> ReturnPlan:
-    """Plan con la liquidación, a partir de los importes de `returnCalculate`."""
+) -> ReturnPlan | Rejected:
+    """Plan con la liquidación, a partir de los importes de `returnCalculate`. Rechaza el
+    cambio a un artículo más caro si la política no lo admite."""
     returned = {c.key: c for c in calculation.returned}
     exchanged = {c.key: c for c in calculation.exchanged}
     fee_currency_matches = (
         eligible.fee is not None and eligible.fee.currency == calculation.currency
     )
+    returned_lines = tuple(
+        SettlementLine(
+            title=ln.title,
+            quantity=ln.quantity,
+            amount=_amount(
+                returned[ln.fulfillment_line_item_id], taxes_included=eligible.taxes_included
+            ),
+        )
+        for ln in eligible.lines
+    )
+    exchanged_lines = tuple(
+        SettlementLine(
+            title=ln.title,
+            quantity=ln.quantity,
+            amount=_amount(
+                exchanged[f"gid://shopify/ProductVariant/{ln.variant_id}"],
+                taxes_included=eligible.taxes_included,
+            ),
+        )
+        for ln in eligible.exchange_lines
+    )
+    returned_total = sum((ln.amount for ln in returned_lines), Decimal("0"))
+    difference = sum((ln.amount for ln in exchanged_lines), Decimal("0")) - returned_total
+    if eligible.exchange_lines and difference > 0 and eligible.higher_price == "not_allowed":
+        return Rejected(
+            "exchange_price_higher",
+            f"El artículo de cambio cuesta {difference} {calculation.currency} más que lo "
+            "devuelto y la tienda no admite cambios con diferencia a pagar. Ofrece una "
+            "variante del mismo precio o más barata.",
+        )
+    rule = _price_rule(eligible, difference)
+    restocking = (returned_total * eligible.restocking_percent / 100).quantize(
+        _CENT, rounding=ROUND_HALF_UP
+    )
     settlement = Settlement(
         currency=calculation.currency,
-        returned=tuple(
-            SettlementLine(
-                title=ln.title,
-                quantity=ln.quantity,
-                amount=_amount(
-                    returned[ln.fulfillment_line_item_id], taxes_included=eligible.taxes_included
-                ),
-            )
-            for ln in eligible.lines
-        ),
-        exchanged=tuple(
-            SettlementLine(
-                title=ln.title,
-                quantity=ln.quantity,
-                amount=_amount(
-                    exchanged[f"gid://shopify/ProductVariant/{ln.variant_id}"],
-                    taxes_included=eligible.taxes_included,
-                ),
-            )
-            for ln in eligible.exchange_lines
-        ),
+        returned=returned_lines,
+        exchanged=exchanged_lines,
+        restocking_percent=eligible.restocking_percent,
+        restocking_fee=restocking,
+        price_rule=rule,
+        refund_as=eligible.refund_as,
         shipping_payer=eligible.shipping_payer,
         fee=eligible.fee.amount if eligible.fee and fee_currency_matches else Decimal("0"),
         fee_pending=eligible.fee if eligible.fee and not fee_currency_matches else None,
@@ -524,6 +641,7 @@ def build_plan(
         shipping_method=eligible.shipping_method,
         return_address=eligible.return_address,
         refund_days=eligible.refund_days,
+        ship_replacement=eligible.ship_replacement,
         requires_approval=eligible.requires_approval,
         settlement=settlement,
     )

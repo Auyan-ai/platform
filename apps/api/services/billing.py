@@ -74,14 +74,24 @@ def current_period_bounds(now: datetime, anchor_day: int) -> tuple[datetime, dat
         ny, nm = _shift_month(now.year, now.month, 1)
         start = anchor_this
         end = now.replace(
-            year=ny, month=nm, day=_clamp_day(ny, nm, anchor_day),
-            hour=0, minute=0, second=0, microsecond=0,
+            year=ny,
+            month=nm,
+            day=_clamp_day(ny, nm, anchor_day),
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
         )
     else:
         py, pm = _shift_month(now.year, now.month, -1)
         start = now.replace(
-            year=py, month=pm, day=_clamp_day(py, pm, anchor_day),
-            hour=0, minute=0, second=0, microsecond=0,
+            year=py,
+            month=pm,
+            day=_clamp_day(py, pm, anchor_day),
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
         )
         end = anchor_this
     return start, end

@@ -737,28 +737,65 @@ CATALOG: dict[str, Texts] = {
         "{days} dies.",
         "Une fois l'article reçu et vérifié, nous te rembourserons sous {days} jours.",
     ),
-    "returns.exchange_ships": _t(
-        "Nuestro equipo te avisará cuando salga el artículo de cambio.",
-        "Our team will let you know when the replacement item ships.",
-        "El nostre equip t'avisarà quan surti l'article de canvi.",
-        "Notre équipe te préviendra quand l'article d'échange sera expédié.",
+    "returns.restocking_fee": _t(
+        "Por gastos de reposición descontaremos {fee} del reembolso.",
+        "We'll deduct {fee} from the refund as a restocking fee.",
+        "Per despeses de reposició descomptarem {fee} del reemborsament.",
+        "Nous déduirons {fee} du remboursement pour frais de remise en stock.",
+    ),
+    "returns.credit_after_receipt": _t(
+        "Cuando recibamos el artículo y lo revisemos, te abonaremos el importe en crédito de "
+        "la tienda en un plazo de {days} días.",
+        "Once we receive and check the item, we'll give you the amount as store credit within "
+        "{days} days.",
+        "Quan rebem l'article i el revisem, t'abonarem l'import en crèdit de la botiga en un "
+        "termini de {days} dies.",
+        "Une fois l'article reçu et vérifié, nous te créditerons le montant en avoir sur la "
+        "boutique sous {days} jours.",
+    ),
+    "returns.exchange_ships_now": _t(
+        "Te enviaremos el artículo de cambio en cuanto el cambio quede confirmado.",
+        "We'll ship the replacement item as soon as the exchange is confirmed.",
+        "T'enviarem l'article de canvi tan bon punt el canvi quedi confirmat.",
+        "Nous t'enverrons l'article d'échange dès que l'échange sera confirmé.",
+    ),
+    "returns.exchange_ships_after_receipt": _t(
+        "Te enviaremos el artículo de cambio cuando recibamos el que devuelves.",
+        "We'll ship the replacement item once we receive the one you're returning.",
+        "T'enviarem l'article de canvi quan rebem el que tornes.",
+        "Nous t'enverrons l'article d'échange dès réception de celui que tu retournes.",
+    ),
+    "returns.exchange_difference_absorbed": _t(
+        "La diferencia de precio corre de nuestra cuenta.",
+        "The price difference is on us.",
+        "La diferència de preu va a càrrec nostre.",
+        "La différence de prix est à notre charge.",
+    ),
+    "returns.exchange_no_refund": _t(
+        "Según la política de la tienda, la diferencia de precio no se reembolsa.",
+        "Under the store's policy, the price difference isn't refunded.",
+        "Segons la política de la botiga, la diferència de preu no es reemborsa.",
+        "Selon la politique de la boutique, la différence de prix n'est pas remboursée.",
     ),
     "returns.exchange_you_owe": _t(
-        "La diferencia de precio, {amount}, corre de tu cuenta; nuestro equipo te indicará "
-        "cómo pagarla.",
-        "The price difference, {amount}, is on you; our team will tell you how to pay it.",
-        "La diferència de preu, {amount}, va a càrrec teu; el nostre equip t'indicarà com "
-        "pagar-la.",
-        "La différence de prix, {amount}, est à ta charge ; notre équipe t'indiquera comment "
-        "la régler.",
+        "Te quedan por pagar {amount}; nuestro equipo te indicará cómo hacerlo.",
+        "You have {amount} left to pay; our team will tell you how.",
+        "Et queden per pagar {amount}; el nostre equip t'indicarà com fer-ho.",
+        "Il te reste {amount} à payer ; notre équipe t'indiquera comment faire.",
     ),
     "returns.exchange_refund": _t(
-        "Cuando recibamos el artículo, te devolveremos la diferencia, {amount}, en un plazo "
-        "de {days} días.",
-        "Once we receive the item, we'll refund the difference, {amount}, within {days} days.",
-        "Quan rebem l'article, et retornarem la diferència, {amount}, en un termini de "
+        "Cuando recibamos el artículo, te devolveremos {amount} en un plazo de {days} días.",
+        "Once we receive the item, we'll refund {amount} within {days} days.",
+        "Quan rebem l'article, et retornarem {amount} en un termini de {days} dies.",
+        "Une fois l'article reçu, nous te rembourserons {amount} sous {days} jours.",
+    ),
+    "returns.exchange_credit": _t(
+        "Cuando recibamos el artículo, te abonaremos {amount} en crédito de la tienda en un "
+        "plazo de {days} días.",
+        "Once we receive the item, we'll give you {amount} as store credit within {days} days.",
+        "Quan rebem l'article, t'abonarem {amount} en crèdit de la botiga en un termini de "
         "{days} dies.",
-        "Une fois l'article reçu, nous te rembourserons la différence, {amount}, sous "
+        "Une fois l'article reçu, nous te créditerons {amount} en avoir sur la boutique sous "
         "{days} jours.",
     ),
     "returns.exchange_difference_pending": _t(

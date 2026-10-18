@@ -229,6 +229,7 @@ def _plan(**overrides: Any) -> ReturnPlan:
         "shipping_method": "store_label",
         "return_address": None,
         "refund_days": 14,
+        "ship_replacement": None,
         "requires_approval": True,
         "settlement": Settlement(
             currency="USD",
@@ -237,6 +238,10 @@ def _plan(**overrides: Any) -> ReturnPlan:
             shipping_payer="customer",
             fee=Decimal("4.95"),
             fee_pending=None,
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="none",
+            refund_as="original_payment",
         ),
     }
     base.update(overrides)
@@ -272,6 +277,10 @@ def test_return_input_omits_fee_left_to_the_team() -> None:
             shipping_payer="customer",
             fee=Decimal("0"),
             fee_pending=Money(amount=Decimal("4.95"), currency="EUR"),
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="none",
+            refund_as="original_payment",
         ),
     )
 
@@ -377,3 +386,16 @@ async def test_append_order_note_keeps_the_existing_note() -> None:
     assert json.loads(put.calls[0].request.content)["order"]["note"] == (
         "Cliente VIP\n\nAuyan · devolución"
     )
+
+
+def test_return_input_sends_the_restocking_percentage() -> None:
+    plan = _plan()
+    plan = plan.model_copy(
+        update={
+            "settlement": plan.settlement.model_copy(update={"restocking_percent": Decimal("10")})
+        }
+    )
+
+    line = return_input(plan, "gid://shopify/ReturnReasonDefinition/9")["returnLineItems"][0]
+
+    assert line["restockingFee"] == {"percentage": 10.0}

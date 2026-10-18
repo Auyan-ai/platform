@@ -30,8 +30,17 @@ def _policy(**overrides: Any) -> dict[str, Any]:
             "customer_fee": {"amount": "4.95", "currency": "EUR"},
         },
         "refund_days": 14,
+        "refund_method": "original_payment",
+        "restocking_fee_percent": {"store_fault": "0", "customer_fault": "0"},
         "excluded_product_tags": ["final-sale"],
-        "exchanges": {"enabled": True, "kinds": ["variant"]},
+        "exchanges": {
+            "enabled": True,
+            "kinds": ["variant"],
+            "requires_approval": True,
+            "higher_price": "customer_pays",
+            "lower_price": "refund_difference",
+            "ship_replacement": "after_receipt",
+        },
         "returns_require_approval": True,
     }
     base.update(overrides)
@@ -58,7 +67,7 @@ def test_a_complete_policy_parses_with_typed_values() -> None:
 def test_there_is_no_default_for_any_business_field() -> None:
     errors = _errors({"schema_version": 1})
 
-    assert len(errors) == 7
+    assert len(errors) == 9
 
 
 def test_unknown_fields_are_rejected() -> None:
@@ -123,6 +132,34 @@ def test_enabled_exchanges_name_at_least_one_kind() -> None:
     ]
 
 
+def test_enabled_exchanges_need_every_term_from_the_store() -> None:
+    assert _errors(_policy(exchanges={"enabled": True, "kinds": ["variant"]})) == [
+        "Value error, exchanges.enabled exige requires_approval, higher_price, lower_price, "
+        "ship_replacement"
+    ]
+
+
+def test_disabled_exchanges_carry_no_terms() -> None:
+    assert _errors(_policy(exchanges={"enabled": False, "higher_price": "customer_pays"})) == [
+        "Value error, sin cambios (enabled=false) sobran los tipos y las condiciones"
+    ]
+    assert ReturnsPolicy.model_validate(_policy(exchanges={"enabled": False})).exchanges.kinds == (
+        frozenset()
+    )
+
+
+def test_restocking_fee_is_a_percentage_per_fault() -> None:
+    policy = ReturnsPolicy.model_validate(
+        _policy(restocking_fee_percent={"store_fault": "0", "customer_fault": "10"})
+    )
+
+    assert policy.restocking_fee_percent.for_fault("customer") == Decimal("10")
+    assert (
+        len(_errors(_policy(restocking_fee_percent={"store_fault": "0", "customer_fault": "101"})))
+        == 1
+    )
+
+
 def test_money_is_an_iso_currency_with_cents() -> None:
     shipping = {
         "method": "store_label",
@@ -165,7 +202,9 @@ def test_the_turn_lists_reason_codes_and_what_each_needs() -> None:
         "- Motivos (usa el código en `reason_code`):\n"
         "  - `defective`: Llegó defectuoso (exige foto del cliente)\n"
         "  - `too_small`: Talla pequeña\n"
-        "- Cambios: sí, por otra talla o color del mismo producto.\n"
+        "- Reembolso: al método de pago original.\n"
+        "- Cambios: sí, por otra talla o color del mismo producto; se admite aunque el nuevo "
+        "cueste más.\n"
     ) in text
 
 

@@ -23,6 +23,13 @@ Payer = Literal["store", "customer"]
 Evidence = Literal["photo"]
 WindowStart = Literal["delivery", "shipment", "order"]
 ExchangeKind = Literal["variant", "product"]
+# Cómo se devuelve el dinero de una devolución sin cambio.
+RefundMethod = Literal["original_payment", "store_credit", "customer_choice"]
+# Qué pasa si el artículo de cambio cuesta más o menos que el devuelto.
+HigherPrice = Literal["customer_pays", "store_absorbs", "not_allowed"]
+LowerPrice = Literal["refund_difference", "store_credit", "no_refund"]
+# Cuándo sale el artículo de cambio.
+ShipReplacement = Literal["immediately", "after_receipt"]
 
 
 class _Strict(BaseModel):
@@ -81,14 +88,38 @@ class ReturnShipping(_Strict):
         return self.payer.store_fault if fault == "store" else self.payer.customer_fault
 
 
+class RestockingFee(_Strict):
+    """Porcentaje del precio devuelto que se queda la tienda, según la culpa (0 = nada)."""
+
+    store_fault: Decimal = Field(ge=0, le=100, max_digits=5, decimal_places=2)
+    customer_fault: Decimal = Field(ge=0, le=100, max_digits=5, decimal_places=2)
+
+    def for_fault(self, fault: Fault) -> Decimal:
+        return self.store_fault if fault == "store" else self.customer_fault
+
+
+_EXCHANGE_TERMS = ("requires_approval", "higher_price", "lower_price", "ship_replacement")
+
+
 class ExchangePolicy(_Strict):
     enabled: bool
     kinds: frozenset[ExchangeKind] = frozenset()
+    # Obligatorios con `enabled`; sin cambios, no se rellenan.
+    requires_approval: bool | None = None
+    higher_price: HigherPrice | None = None
+    lower_price: LowerPrice | None = None
+    ship_replacement: ShipReplacement | None = None
 
     @model_validator(mode="after")
-    def _kinds_when_enabled(self) -> ExchangePolicy:
-        if self.enabled and not self.kinds:
-            raise ValueError("exchanges.enabled exige al menos un tipo de cambio")
+    def _terms_when_enabled(self) -> ExchangePolicy:
+        missing = [t for t in _EXCHANGE_TERMS if getattr(self, t) is None]
+        if self.enabled:
+            if not self.kinds:
+                raise ValueError("exchanges.enabled exige al menos un tipo de cambio")
+            if missing:
+                raise ValueError(f"exchanges.enabled exige {', '.join(missing)}")
+        elif self.kinds or len(missing) < len(_EXCHANGE_TERMS):
+            raise ValueError("sin cambios (enabled=false) sobran los tipos y las condiciones")
         return self
 
 
@@ -98,6 +129,8 @@ class ReturnsPolicy(_Strict):
     reasons: tuple[ReturnReason, ...] = Field(min_length=1, max_length=20)
     shipping: ReturnShipping
     refund_days: int = Field(ge=1, le=60)
+    refund_method: RefundMethod
+    restocking_fee_percent: RestockingFee
     excluded_product_tags: frozenset[str]
     exchanges: ExchangePolicy
     returns_require_approval: bool
@@ -138,6 +171,14 @@ _WINDOW_START_LABEL: dict[WindowStart, str] = {
     "shipment": "el envío",
     "order": "la compra",
 }
+_REFUND_METHOD_LABEL: dict[RefundMethod, str] = {
+    "original_payment": "al método de pago original",
+    "store_credit": "en crédito de la tienda",
+    "customer_choice": (
+        "a elegir por el cliente entre su método de pago y crédito de la tienda (pregúntale "
+        "y pásalo en `refund_preference`)"
+    ),
+}
 _EXCHANGE_KIND_LABEL: dict[ExchangeKind, str] = {
     "variant": "otra talla o color del mismo producto",
     "product": "otro producto",
@@ -162,15 +203,23 @@ def policy_note(active: ActivePolicy | None) -> str:
         for r in policy.reasons
     )
     starts = _WINDOW_START_LABEL[policy.window.starts_at]
-    if policy.exchanges.enabled:
-        kinds = " o ".join(_EXCHANGE_KIND_LABEL[k] for k in sorted(policy.exchanges.kinds))
-        exchanges = f"Cambios: sí, por {kinds}."
+    terms = policy.exchanges
+    if terms.enabled:
+        kinds = " o ".join(_EXCHANGE_KIND_LABEL[k] for k in sorted(terms.kinds))
+        dearer = (
+            "no se admite si el nuevo cuesta más"
+            if terms.higher_price == "not_allowed"
+            else "se admite aunque el nuevo cueste más"
+        )
+        exchanges = f"Cambios: sí, por {kinds}; {dearer}."
     else:
         exchanges = "Cambios: no."
+    refund = _REFUND_METHOD_LABEL[policy.refund_method]
     return (
         f"Política de devoluciones y cambios de la tienda (versión {active.version}):\n"
         f"- Plazo: {policy.window.days} días desde {starts}.\n"
         f"- Motivos (usa el código en `reason_code`):\n{reasons}\n"
+        f"- Reembolso: {refund}.\n"
         f"- {exchanges}\n"
         "Plazo, pruebas, envío e importes los comprueba el sistema al pedir la acción."
     )

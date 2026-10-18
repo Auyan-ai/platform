@@ -90,11 +90,7 @@ def map_order_detail(raw: dict[str, Any]) -> OrderDetail:
     # updated_at del fulfillment que el carrier marca como "delivered".
     fulfilled_at = raw_fulfillments[0].get("created_at") if raw_fulfillments else None
     delivered_at = next(
-        (
-            f.get("updated_at")
-            for f in raw_fulfillments
-            if f.get("shipment_status") == "delivered"
-        ),
+        (f.get("updated_at") for f in raw_fulfillments if f.get("shipment_status") == "delivered"),
         None,
     )
     line_items = [map_line_item(li, raw) for li in raw.get("line_items", []) if "id" in li]
