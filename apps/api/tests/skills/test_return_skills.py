@@ -390,3 +390,36 @@ async def test_several_units_are_settled_per_unit() -> None:
     assert plan.settlement.returned_total == Decimal("153.90")
     assert plan.settlement.balance == Decimal("153.90")
     assert shopify.called("calculate_return") == [([(FLI, 2)], [])]
+
+
+@dataclass
+class BrokenShopify(FakeShopify):
+    fail_on: str = "calculate_return"
+
+    async def calculate_return(self, ctx: Any, order_id: int, **kw: Any) -> ReturnCalculation:
+        if self.fail_on == "calculate_return":
+            raise RuntimeError("Shopify 502")
+        return await super().calculate_return(ctx, order_id, **kw)
+
+    async def create_return(self, ctx: Any, plan: ReturnPlan) -> CreatedReturn:
+        raise RuntimeError("ReadTimeout")
+
+
+async def test_a_shopify_failure_while_preparing_escalates_with_a_fixed_text() -> None:
+    with pytest.raises(SkillRefusal) as exc:
+        await StartReturn().prepare(_ctx(BrokenShopify(), _policy()), RAW)
+
+    assert exc.value.code == "shopify_error"
+    assert exc.value.customer_message.startswith("No he podido preparar la devolución")
+    assert "RuntimeError: Shopify 502" in exc.value.team_reason
+
+
+async def test_a_shopify_failure_while_creating_escalates_too() -> None:
+    shopify = BrokenShopify(fail_on="create_return")
+    prepared = await StartReturn().prepare(_ctx(shopify, _policy()), RAW)
+
+    with pytest.raises(SkillRefusal) as exc:
+        await StartReturn().execute(_ctx(shopify), StartReturnInput.model_validate(prepared))
+
+    assert exc.value.code == "shopify_error"
+    assert "ReadTimeout" in exc.value.team_reason

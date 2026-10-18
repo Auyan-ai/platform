@@ -706,6 +706,22 @@ class ShopifyClient:
         """
         wanted = plan.shopify_reason or _FALLBACK_REASON_HANDLE
         async with httpx.AsyncClient() as client:
+            existing = await self._graphql(
+                client, _ORDER_RETURNS_QUERY, {"id": f"gid://shopify/Order/{plan.order_id}"}
+            )
+            marker = return_marker(plan)
+            for ret in ((existing.get("order") or {}).get("returns") or {}).get("nodes") or []:
+                notes = [
+                    str(n.get("returnReasonNote") or "")
+                    for n in (ret.get("returnLineItems") or {}).get("nodes") or []
+                ]
+                if any(note.startswith(marker) for note in notes):
+                    return CreatedReturn(
+                        return_id=_gid_int(ret["id"]),
+                        name=str(ret.get("name") or ""),
+                        status=str(ret["status"]).lower(),
+                        reason_handle=wanted,
+                    )
             reasons = await self._graphql(
                 client, _RETURN_REASON_QUERY, {"handles": [wanted, _FALLBACK_REASON_HANDLE]}
             )
@@ -1032,6 +1048,10 @@ def return_calculation_from_graphql(node: dict[str, Any]) -> ReturnCalculation:
     return ReturnCalculation(currency=currencies.pop(), returned=returned, exchanged=exchanged)
 
 
+def return_marker(plan: ReturnPlan) -> str:
+    return f"auyan:{plan.plan_id}"
+
+
 def return_input(plan: ReturnPlan, reason_definition_id: str) -> dict[str, Any]:
     """`ReturnInput` de `returnCreate` para el plan aprobado."""
     percent = plan.settlement.restocking_percent
@@ -1044,7 +1064,9 @@ def return_input(plan: ReturnPlan, reason_definition_id: str) -> dict[str, Any]:
                 "fulfillmentLineItemId": line.fulfillment_line_item_id,
                 "quantity": line.quantity,
                 "returnReasonDefinitionId": reason_definition_id,
-                "returnReasonNote": f"{plan.reason_label} [{plan.reason_code}]"[:255],
+                "returnReasonNote": (
+                    f"{return_marker(plan)} · {plan.reason_label} [{plan.reason_code}]"
+                )[:255],
                 **restocking,
             }
             for line in plan.lines
@@ -1157,6 +1179,16 @@ query ReturnableOrder($orderId: ID!) {
           }
         }
       }
+    }
+  }
+}
+"""
+
+_ORDER_RETURNS_QUERY = """
+query OrderReturns($id: ID!) {
+  order(id: $id) {
+    returns(first: 20) {
+      nodes { id name status returnLineItems(first: 50) { nodes { returnReasonNote } } }
     }
   }
 }

@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal
+from uuid import uuid4
 
 from apps.api.services.media_storage import listed_attachments
 from apps.api.services.returns_policy import (
@@ -485,6 +486,8 @@ class ReturnPlan(_Frozen):
     """Lo que el código decidió y el humano aprueba. Se guarda en la aprobación L3 y se
     ejecuta tal cual: la ventana se juzgó en `requested_at`."""
 
+    # Marca la devolución en Shopify: un reintento tras un timeout la encuentra y no duplica.
+    plan_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     policy_version: int
     requested_at: datetime
     order_id: int
@@ -595,7 +598,11 @@ def _amount(line: CalculatedLine, *, taxes_included: bool) -> Decimal:
 
 
 def build_plan(
-    eligible: Eligible, calculation: ReturnCalculation, *, requested_at: datetime
+    eligible: Eligible,
+    calculation: ReturnCalculation,
+    *,
+    requested_at: datetime,
+    plan_id: str | None = None,
 ) -> ReturnPlan | Rejected:
     """Plan con la liquidación, a partir de los importes de `returnCalculate`. Rechaza el
     cambio a un artículo más caro si la política no lo admite."""
@@ -652,6 +659,7 @@ def build_plan(
         fee_label_cost=eligible.fee_label_cost,
     )
     return ReturnPlan(
+        plan_id=plan_id or uuid4().hex,
         policy_version=eligible.policy_version,
         requested_at=requested_at,
         order_id=eligible.order_id,

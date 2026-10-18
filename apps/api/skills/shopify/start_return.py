@@ -9,8 +9,9 @@ y, en un cambio, la variante.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable
 from datetime import UTC, datetime
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeVar
 
 from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.services.fixed_texts import fixed_text
@@ -41,6 +42,7 @@ from pydantic import Field, computed_field, field_validator
 from pydantic.json_schema import SkipJsonSchema
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 
 class StartReturnInput(SkillInput):
@@ -120,10 +122,18 @@ class _ReturnSkill(Skill):
             raise ValueError("shopify_not_configured")
         adapter = ctx.commerce_mock or ShopifyAdapter()
         exchange = self._exchange(inputs)
-        order = await adapter.get_returnable_order(ctx.integration_ctx, inputs.order_id)
+        order = await _shopify(
+            ctx,
+            "leer el pedido",
+            adapter.get_returnable_order(ctx.integration_ctx, inputs.order_id),
+        )
         variants = (
-            await adapter.get_exchange_variants(
-                ctx.integration_ctx, [e.variant_id for e in exchange]
+            await _shopify(
+                ctx,
+                "leer las variantes de cambio",
+                adapter.get_exchange_variants(
+                    ctx.integration_ctx, [e.variant_id for e in exchange]
+                ),
             )
             if exchange and ctx.returns_policy and ctx.returns_policy.policy.exchanges.enabled
             else ()
@@ -145,13 +155,20 @@ class _ReturnSkill(Skill):
         if isinstance(decision, Rejected):
             raise SkillRejection(decision.code, decision.detail)
         assert isinstance(decision, Eligible)
-        calculation = await adapter.calculate_return(
-            ctx.integration_ctx,
-            order.order_id,
-            lines=[(ln.fulfillment_line_item_id, ln.quantity) for ln in decision.lines],
-            exchange=[(ln.variant_id, ln.quantity) for ln in decision.exchange_lines],
+        calculation = await _shopify(
+            ctx,
+            "calcular la devolución",
+            adapter.calculate_return(
+                ctx.integration_ctx,
+                order.order_id,
+                lines=[(ln.fulfillment_line_item_id, ln.quantity) for ln in decision.lines],
+                exchange=[(ln.variant_id, ln.quantity) for ln in decision.exchange_lines],
+            ),
         )
-        plan = build_plan(decision, calculation, requested_at=now)
+        try:
+            plan = build_plan(decision, calculation, requested_at=now)
+        except KeyError as exc:
+            raise _shopify_refusal(ctx, "cuadrar el cálculo de Shopify con el pedido", exc) from exc
         if isinstance(plan, Rejected):
             raise SkillRejection(plan.code, plan.detail)
         return {
@@ -210,7 +227,9 @@ class _ReturnSkill(Skill):
                     f"cual: {problem}. Revisad el pedido en Shopify."
                 ),
             )
-        created = await adapter.create_return(ctx.integration_ctx, plan)
+        created = await _shopify(
+            ctx, "crear la devolución", adapter.create_return(ctx.integration_ctx, plan)
+        )
         note_written = True
         try:
             await adapter.append_order_note(ctx.integration_ctx, plan.order_id, plan.team_note())
@@ -232,6 +251,35 @@ class _ReturnSkill(Skill):
             shopify_reason=created.reason_handle,
             note_written=note_written,
         )
+
+
+def _shopify_refusal(ctx: SkillContext, step: str, exc: BaseException) -> SkillRefusal:
+    logger.error(
+        "return_shopify_failed",
+        extra={"tenant_id": ctx.tenant_id, "step": step, "error_type": type(exc).__name__},
+        exc_info=exc,
+    )
+    return SkillRefusal(
+        "shopify_error",
+        customer_message=fixed_text(
+            "refusal.returns.shopify_error", ctx.language, tenant_default=ctx.default_language
+        ),
+        team_reason=(
+            f"Shopify falló al {step} ({type(exc).__name__}: {exc}). No se abrió nada desde "
+            "Auyan: revisad el pedido en Shopify antes de reintentarlo."
+        ),
+    )
+
+
+async def _shopify(ctx: SkillContext, step: str, call: Awaitable[T]) -> T:
+    """Una llamada a Shopify de la skill: un fallo no llega al LLM como texto crudo, pasa
+    el caso al equipo con texto fijo y la razón."""
+    try:
+        return await call
+    except (SkillRefusal, SkillRejection):
+        raise
+    except Exception as exc:
+        raise _shopify_refusal(ctx, step, exc) from exc
 
 
 def _no_longer_possible(plan: ReturnPlan, order: Any) -> str | None:

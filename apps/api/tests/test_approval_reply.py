@@ -338,6 +338,7 @@ def _return_output(**plan_overrides: object) -> dict:
     from apps.api.services.returns import PlanLine, ReturnPlan, Settlement, SettlementLine
 
     plan = {
+        "plan_id": "a" * 32,
         "policy_version": 2,
         "requested_at": datetime(2026, 10, 18, tzinfo=UTC),
         "order_id": 1,

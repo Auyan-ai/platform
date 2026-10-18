@@ -204,6 +204,7 @@ async def test_return_calculation_keeps_presentment_amounts() -> None:
 
 def _plan(**overrides: Any) -> ReturnPlan:
     base: dict[str, Any] = {
+        "plan_id": "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
         "policy_version": 3,
         "requested_at": datetime(2026, 10, 18, 10, 0, tzinfo=UTC),
         "order_id": 7409804542232,
@@ -258,7 +259,8 @@ def test_return_input_carries_exchange_fee_and_request_time() -> None:
                 "fulfillmentLineItemId": "gid://shopify/FulfillmentLineItem/15106785509656",
                 "quantity": 1,
                 "returnReasonDefinitionId": "gid://shopify/ReturnReasonDefinition/9",
-                "returnReasonNote": "Color distinto [wrong_colour]",
+                "returnReasonNote": "auyan:0f1e2d3c4b5a69788796a5b4c3d2e1f0 · Color distinto "
+                "[wrong_colour]",
             }
         ],
         "exchangeLineItems": [
@@ -304,6 +306,7 @@ async def test_create_return_uses_the_store_reason_or_falls_back_to_other() -> N
     }
     route = respx.post(GQL).mock(
         side_effect=[
+            httpx.Response(200, json={"data": {"order": {"returns": {"nodes": []}}}}),
             httpx.Response(
                 200,
                 json={
@@ -325,10 +328,10 @@ async def test_create_return_uses_the_store_reason_or_falls_back_to_other() -> N
 
     out = await _client().create_return(_plan())
 
-    assert json.loads(route.calls[0].request.content)["variables"] == {
+    assert json.loads(route.calls[1].request.content)["variables"] == {
         "handles": ["color", "other-reason"]
     }
-    mutation = json.loads(route.calls[1].request.content)["variables"]["input"]
+    mutation = json.loads(route.calls[2].request.content)["variables"]["input"]
     assert mutation["returnLineItems"][0]["returnReasonDefinitionId"] == (
         "gid://shopify/ReturnReasonDefinition/5"
     )
@@ -344,6 +347,7 @@ async def test_create_return_uses_the_store_reason_or_falls_back_to_other() -> N
 async def test_create_return_user_errors_raise() -> None:
     respx.post(GQL).mock(
         side_effect=[
+            httpx.Response(200, json={"data": {"order": {"returns": {"nodes": []}}}}),
             httpx.Response(
                 200,
                 json={
@@ -401,3 +405,46 @@ def test_return_input_sends_the_restocking_percentage() -> None:
     line = return_input(plan, "gid://shopify/ReturnReasonDefinition/9")["returnLineItems"][0]
 
     assert line["restockingFee"] == {"percentage": 10.0}
+
+
+@respx.mock
+async def test_create_return_is_idempotent_by_the_plan_marker() -> None:
+    plan = _plan()
+    existing = {
+        "data": {
+            "order": {
+                "returns": {
+                    "nodes": [
+                        {
+                            "id": "gid://shopify/Return/7001",
+                            "name": "#1431-R2",
+                            "status": "OPEN",
+                            "returnLineItems": {
+                                "nodes": [
+                                    {
+                                        "returnReasonNote": f"auyan:{plan.plan_id} · Color",
+                                        "quantity": 1,
+                                    }
+                                ]
+                            },
+                        }
+                    ]
+                }
+            }
+        }
+    }
+    route = respx.post(GQL).mock(return_value=httpx.Response(200, json=existing))
+
+    out = await _client().create_return(plan)
+
+    assert (out.return_id, out.name, out.status) == (7001, "#1431-R2", "open")
+    assert len(route.calls) == 1
+    assert "mutation" not in json.loads(route.calls[0].request.content)["query"]
+
+
+def test_return_input_carries_the_plan_marker_first() -> None:
+    plan = _plan()
+
+    note = return_input(plan, "gid://x")["returnLineItems"][0]["returnReasonNote"]
+
+    assert note == f"auyan:{plan.plan_id} · Color distinto [wrong_colour]"

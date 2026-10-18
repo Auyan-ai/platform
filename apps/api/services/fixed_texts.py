@@ -315,6 +315,15 @@ CATALOG: dict[str, Texts] = {
         ),
         _PASS_TO_TEAM,
     ),
+    "refusal.returns.shopify_error": _then(
+        _t(
+            "No he podido preparar la devolución con los datos de la tienda en este momento.",
+            "I couldn't prepare the return with the store's data right now.",
+            "No he pogut preparar la devolució amb les dades de la botiga en aquest moment.",
+            "Je n'ai pas pu préparer le retour avec les données de la boutique pour le moment.",
+        ),
+        _PASS_TO_TEAM,
+    ),
     "refusal.returns.no_longer_possible": _then(
         _t(
             "No he podido abrir la devolución con los datos de tu pedido.",
