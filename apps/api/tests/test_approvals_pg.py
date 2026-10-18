@@ -25,7 +25,16 @@ from apps.api.core.errors import register_exception_handlers
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
 from apps.api.db import client as db_client
 from apps.api.routers.approvals import router as approvals_router
-from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
+from apps.api.services.approval_execution import recover_stale_executions
+from apps.api.skills.base import (
+    ReconcileUnknown,
+    Skill,
+    SkillContext,
+    SkillInput,
+    SkillOutput,
+    SkillRefusal,
+    SkillTier,
+)
 from apps.api.skills.registry import SkillRegistry
 from fastapi import FastAPI
 
@@ -80,14 +89,29 @@ class FakeL3(Skill):
     entered: ClassVar[asyncio.Event]
     gate: ClassVar[asyncio.Event]
     die_after_mutation: ClassVar[bool] = False
+    refusal: ClassVar[SkillRefusal | None] = None
+    # Lo que `reconcile` lee del "proveedor": el contador, o que no se puede saber.
+    reconcile_unknown: ClassVar[bool] = False
+    keys: ClassVar[list[str | None]] = []
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, FakeL3Input)
+        type(self).keys.append(ctx.idempotency_key)
         type(self).entered.set()
         await type(self).gate.wait()
+        if type(self).refusal is not None:
+            raise type(self).refusal
         type(self).mutations += 1
         if type(self).die_after_mutation:
             raise ProcessDied
+        return FakeL3Output(order_id=inputs.order_id, mutations=type(self).mutations)
+
+    async def reconcile(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput | None:
+        assert isinstance(inputs, FakeL3Input)
+        if type(self).reconcile_unknown:
+            raise ReconcileUnknown("el proveedor no responde")
+        if type(self).mutations == 0:
+            return None
         return FakeL3Output(order_id=inputs.order_id, mutations=type(self).mutations)
 
 
@@ -102,6 +126,9 @@ def fake_skill(monkeypatch: pytest.MonkeyPatch) -> type[FakeL3]:
     FakeL3.entered = asyncio.Event()
     FakeL3.gate = asyncio.Event()
     FakeL3.die_after_mutation = False
+    FakeL3.refusal = None
+    FakeL3.reconcile_unknown = False
+    FakeL3.keys = []
     return FakeL3
 
 
@@ -326,3 +353,123 @@ async def test_death_after_the_mutation_does_not_allow_a_second_execution(
     assert retry.status_code == 409
     assert await _status(pool, s) == "executing"
     assert await _outcome_messages(pool, s) == []
+
+
+async def _die_mid_execution(pool: asyncpg.Pool, s: Seeded, skill: type[FakeL3]) -> None:
+    """La petición muere tras la mutación y la `executing` queda colgada una hora."""
+    skill.gate.set()
+    skill.die_after_mutation = True
+    async with _client(s) as c:
+        with pytest.raises(ProcessDied):
+            await _approve(c, s)
+    skill.die_after_mutation = False
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "update pending_approvals set reviewed_at = now() - interval '1 hour' where id = $1",
+            s.approval_id,
+        )
+
+
+async def _open_escalations(pool: asyncpg.Pool, s: Seeded) -> list[str]:
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "select reason from escalations where conversation_id = $1"
+            " and status <> 'resolved' order by created_at",
+            s.conversation_id,
+        )
+    return [r["reason"] for r in rows]
+
+
+async def test_recovery_closes_a_dead_execution_that_landed_without_executing_again(
+    pool: asyncpg.Pool, fake_skill: type[FakeL3]
+) -> None:
+    s = await _seed(pool)
+    await _die_mid_execution(pool, s, fake_skill)
+
+    assert await recover_stale_executions() == 1
+
+    assert fake_skill.mutations == 1
+    assert await _status(pool, s) == "approved"
+    assert await _outcome_messages(pool, s) == ["success"]
+    assert await _open_escalations(pool, s) == []
+    assert await recover_stale_executions() == 0
+
+
+async def test_recovery_reopens_a_dead_execution_that_never_landed(
+    pool: asyncpg.Pool, fake_skill: type[FakeL3]
+) -> None:
+    s = await _seed(pool)
+    await _die_mid_execution(pool, s, fake_skill)
+    fake_skill.mutations = 0  # la mutación no llegó al proveedor
+
+    assert await recover_stale_executions() == 1
+
+    assert fake_skill.mutations == 0, "la recuperación nunca ejecuta"
+    assert await _status(pool, s) == "pending"
+    assert await _outcome_messages(pool, s) == []
+    assert await _open_escalations(pool, s) == [f"awaiting_human_approval:{s.approval_id}"]
+
+
+async def test_recovery_hands_an_unknowable_execution_to_the_team(
+    pool: asyncpg.Pool, fake_skill: type[FakeL3]
+) -> None:
+    s = await _seed(pool)
+    await _die_mid_execution(pool, s, fake_skill)
+    fake_skill.reconcile_unknown = True
+
+    assert await recover_stale_executions() == 1
+
+    assert fake_skill.mutations == 1
+    assert await _status(pool, s) == "failed"
+    assert await _outcome_messages(pool, s) == []
+    [reason] = await _open_escalations(pool, s)
+    assert "no se pudo comprobar en Shopify si se aplicó" in reason
+    assert "ejecución interrumpida" in reason
+
+
+async def test_recovery_leaves_a_live_execution_alone(
+    pool: asyncpg.Pool, fake_skill: type[FakeL3]
+) -> None:
+    s = await _seed(pool)
+    async with _client(s) as c:
+        approve = asyncio.create_task(_approve(c, s))
+        await _overlap(approve, fake_skill)
+        assert await recover_stale_executions() == 0
+        fake_skill.gate.set()
+        assert (await approve).status_code == 200
+
+    assert fake_skill.mutations == 1
+    assert await _status(pool, s) == "approved"
+
+
+async def test_refusal_at_execution_tells_the_customer_and_escalates_with_the_reason(
+    pool: asyncpg.Pool, fake_skill: type[FakeL3]
+) -> None:
+    s = await _seed(pool)
+    fake_skill.gate.set()
+    fake_skill.refusal = SkillRefusal(
+        "order_shipped",
+        customer_message="Tu pedido ya salió del almacén.",
+        team_reason="El pedido 1001 salió mientras esperaba la aprobación.",
+    )
+    async with _client(s) as c:
+        resp = await _approve(c, s)
+
+    assert resp.json()["execution_status"] == "refused"
+    assert fake_skill.mutations == 0
+    assert await _status(pool, s) == "failed"
+    assert await _outcome_messages(pool, s) == ["refused"]
+    assert await _open_escalations(pool, s) == [
+        "El pedido 1001 salió mientras esperaba la aprobación."
+    ]
+
+
+async def test_the_approval_is_the_idempotency_key(
+    pool: asyncpg.Pool, fake_skill: type[FakeL3]
+) -> None:
+    s = await _seed(pool)
+    fake_skill.gate.set()
+    async with _client(s) as c:
+        await _approve(c, s)
+
+    assert fake_skill.keys == [str(s.approval_id)]
