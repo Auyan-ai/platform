@@ -210,6 +210,7 @@ async def test_prepare_writes_the_plan_and_discards_one_from_the_llm() -> None:
     assert plan.lines[0].fulfillment_line_item_id == FLI
     assert plan.settlement.net == Decimal("76.95")
     assert plan.return_address == "Calle Mayor 1, 28013 Madrid"
+    assert prepared["settlement_note"] == plan.team_note()
     assert StartReturn.requires_approval(prepared) is False
     assert (
         StartReturn.requires_approval(

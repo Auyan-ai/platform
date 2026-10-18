@@ -146,6 +146,7 @@ class _ReturnSkill(Skill):
         return {
             **inputs.model_dump(mode="json", exclude={"plan"}),
             "plan": plan.model_dump(mode="json"),
+            "settlement_note": plan.team_note(),
         }
 
     @classmethod
