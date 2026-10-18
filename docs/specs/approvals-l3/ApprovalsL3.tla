@@ -389,8 +389,14 @@ Quiescent ==
     /\ \A h \in Humans : hpc[h] = "idle"
     /\ unclaimed = 0
 
+\* ADR 0008: nunca hay dos turnos a la vez sobre la misma conversación.
+OneTurnAtATime == Cardinality({w \in Workers : tpc[w] # "idle"}) <= 1
+
 \* La L3 se ejecuta como mucho una vez por aprobación.
 ExecAtMostOnce == \A a \in Ids : ExecCount(a) <= 1
+
+\* Y como mucho una vez por pedido: un pedido no acumula dos aprobaciones ejecutadas.
+OneExecPerOrder == Len(execs) <= 1
 
 \* cancel y address nunca mutan un pedido enviado o cancelado (refund sí puede:
 \* reembolsar un pedido enviado es legítimo y no tiene guard).

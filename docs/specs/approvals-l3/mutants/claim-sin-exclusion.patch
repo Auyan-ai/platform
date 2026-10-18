@@ -1,0 +1,12 @@
+# Mutante: Claim no mira si otro turno tiene el lease vigente (quita el "busy" de claim_next_inbound_job).
+# espera: each OneTurnAtATime=VIOLADA
+--- a/ApprovalsL3.tla
++++ b/ApprovalsL3.tla
+@@ -142,7 +142,6 @@
+ \* vuelve a extender el lease (UPDATE ... WHERE status='running').
+ Claim(w) ==
+     /\ tpc[w] = "idle"
+-    /\ \A v \in Workers : ~LeaseHeld(v)
+     /\ unclaimed > 0 \/ StaleTurn
+     /\ tpc' = [tpc EXCEPT ![w] = "precheck"]
+     /\ lease' = [v \in Workers |-> v = w \/ tpc[v] # "idle"]

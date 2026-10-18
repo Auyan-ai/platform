@@ -1,0 +1,3 @@
+# El modelo del código actual, sin cambios.
+# espera: each OneTurnAtATime=OK ExecAtMostOnce=VIOLADA OneExecPerOrder=VIOLADA NoExecOnClosedOrder=VIOLADA RejectedNeverExecuted=VIOLADA OneOutcomePerApproval=VIOLADA OutcomeIsTruthful=VIOLADA NoWaitingAfterOutcome=VIOLADA NoOrphanEscalation=VIOLADA ExecutedIsApproved=VIOLADA
+# espera: liveness MessagesTaken=OK ApprovalEventuallyFinal=VIOLADA

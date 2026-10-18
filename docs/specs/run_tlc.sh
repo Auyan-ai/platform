@@ -5,10 +5,12 @@
 #
 # Modos:
 #   parse     solo SANY (sintaxis y niveles)
+#   full      TLC solo con TypeOK: tamaño del espacio de estados completo
 #   safety    TLC con <Modulo>.cfg (todas las invariantes; para en la primera violación)
 #   each      un TLC por invariante de <Modulo>.cfg y una tabla final
-#   liveness  TLC con <Modulo>Liveness.cfg
+#   liveness  un TLC por propiedad de <Modulo>Liveness.cfg y una tabla final
 #
+# ONLY=A,B limita each y liveness a esos nombres.
 # spec_dir por defecto: docs/specs/approvals-l3. El módulo es el único .tla del directorio.
 # Las trazas y los logs quedan en $TLC_OUT (por defecto un directorio temporal); el repo
 # no se toca porque TLC corre sobre una copia.
@@ -21,10 +23,12 @@ spec_dir="$(cd "${2:-$here/approvals-l3}" && pwd)"
 if [[ -z "${TLA2TOOLS_JAR:-}" || ! -f "${TLA2TOOLS_JAR}" ]]; then
   cat >&2 <<'EOF'
 Falta tla2tools.jar (SANY + TLC). No viene en el repo ni se descarga solo.
-Bájalo de la release estable oficial:
-  https://github.com/tlaplus/tlaplus/releases  (asset "tla2tools.jar")
+Probado con la release estable v1.7.4 (2.274.532 bytes):
+  https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+  sha256 936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88
+Guárdalo fuera del repo (p. ej. ~/.cache/tlaplus/v1.7.4/), compruébalo con sha256sum
 y apúntalo con:
-  export TLA2TOOLS_JAR=/ruta/a/tla2tools.jar
+  export TLA2TOOLS_JAR=~/.cache/tlaplus/v1.7.4/tla2tools.jar
 Necesita Java 11 o superior.
 EOF
   exit 2
@@ -66,38 +70,58 @@ verdict() {
   fi
 }
 
+# Una corrida de TLC por nombre de la sección (INVARIANTS o PROPERTIES) de un .cfg.
+one_by_one() {
+  local base="$work/$1" section="$2" label="$3"
+  local names header name cfg log distinct
+  mapfile -t names < <(awk -v s="$section" '$1==s{on=1; next} on && NF {print $1}' "$base")
+  header="$(awk -v s="$section" '$1==s{exit} {print}' "$base")"
+  printf '%-26s %-16s %s\n' "$label" "resultado" "estados distintos"
+  for name in "${names[@]}"; do
+    [[ "$name" == TypeOK ]] && continue
+    [[ -n "${ONLY:-}" && ",$ONLY," != *",$name,"* ]] && continue
+    cfg="$work/only-$name.cfg"
+    if [[ "$section" == INVARIANTS ]]; then
+      printf '%s\nINVARIANTS\n    TypeOK\n    %s\n' "$header" "$name" >"$cfg"
+    else
+      printf '%s\nPROPERTIES\n    %s\n' "$header" "$name" >"$cfg"
+    fi
+    log="$out/$name.log"
+    run_tlc "$(basename "$cfg")" "$log" >/dev/null
+    distinct="$(grep -oE '[0-9,]+ distinct states found' "$log" | tail -1 | cut -d' ' -f1 || true)"
+    printf '%-26s %-16s %s\n' "$name" "$(verdict "$log")" "${distinct:-?}"
+  done
+  echo
+  echo "Logs y trazas en $out (resumen legible: docs/specs/tlc_trace.py <log>)"
+}
+
 case "$mode" in
   parse)
     (cd "$work" && "${java_cmd[@]}" tla2sany.SANY "$module.tla")
     ;;
-  safety | liveness)
-    cfg="$module.cfg"
-    [[ "$mode" == liveness ]] && cfg="${module}Liveness.cfg"
-    log="$out/$mode.log"
-    status="$(run_tlc "$cfg" "$log")"
+  full)
+    header="$(awk '$1=="INVARIANTS"{exit} {print}' "$work/$module.cfg")"
+    printf '%s\nINVARIANTS\n    TypeOK\n' "$header" >"$work/full.cfg"
+    log="$out/full.log"
+    status="$(run_tlc full.cfg "$log")"
+    grep -E "states generated|depth of the complete|No error|violated" "$log"
+    echo "TLC salió con $status: $(verdict "$log"). Log en $log"
+    ;;
+  safety)
+    log="$out/safety.log"
+    status="$(run_tlc "$module.cfg" "$log")"
     cat "$log"
     echo
     echo "TLC salió con $status: $(verdict "$log"). Log en $log"
     ;;
   each)
-    base="$work/$module.cfg"
-    mapfile -t invariants < <(awk '/^INVARIANTS/{on=1; next} on && NF {print $1}' "$base")
-    header="$(awk '/^INVARIANTS/{exit} {print}' "$base")"
-    printf '%-26s %-16s %s\n' "invariante" "resultado" "estados distintos"
-    for inv in "${invariants[@]}"; do
-      [[ "$inv" == TypeOK ]] && continue
-      cfg="$work/only-$inv.cfg"
-      printf '%s\nINVARIANTS\n    TypeOK\n    %s\n' "$header" "$inv" >"$cfg"
-      log="$out/$inv.log"
-      run_tlc "$(basename "$cfg")" "$log" >/dev/null
-      distinct="$(grep -oE '[0-9,]+ distinct states found' "$log" | tail -1 | cut -d' ' -f1)"
-      printf '%-26s %-16s %s\n' "$inv" "$(verdict "$log")" "${distinct:-?}"
-    done
-    echo
-    echo "Logs y trazas en $out"
+    one_by_one "$module.cfg" INVARIANTS invariante
+    ;;
+  liveness)
+    one_by_one "${module}Liveness.cfg" PROPERTIES propiedad
     ;;
   *)
-    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac
