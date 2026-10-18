@@ -1,4 +1,4 @@
-"""Decisión de una devolución o un cambio y su liquidación (ADR 0014 §4–§5), sin LLM."""
+"""Decisión de una devolución o un cambio y su liquidación (ADR 0014 §4-§5), sin LLM."""
 
 from __future__ import annotations
 
@@ -36,10 +36,19 @@ def _policy(**overrides: Any) -> ActivePolicy:
         "schema_version": 1,
         "window": {"days": 30, "starts_at": "delivery"},
         "reasons": [
-            {"code": "defective", "label": "Defectuoso", "fault": "store",
-             "required_evidence": ["photo"], "shopify_reason": "damaged-or-defective"},
-            {"code": "too_small", "label": "Pequeña", "fault": "customer",
-             "shopify_reason": "too-small"},
+            {
+                "code": "defective",
+                "label": "Defectuoso",
+                "fault": "store",
+                "required_evidence": ["photo"],
+                "shopify_reason": "damaged-or-defective",
+            },
+            {
+                "code": "too_small",
+                "label": "Pequeña",
+                "fault": "customer",
+                "shopify_reason": "too-small",
+            },
         ],
         "shipping": {
             "method": "store_label",
@@ -85,6 +94,7 @@ def _order(*lines: ReturnableLine, **overrides: Any) -> ReturnableOrder:
 
 
 PHOTO = PhotoRef(message_id="m-1", index=0)
+NO_PHOTOS = Evidence(photos=(), readable=True)
 
 
 def _evaluate(
@@ -95,7 +105,7 @@ def _evaluate(
     items: tuple[RequestedItem, ...] = (RequestedItem(line_item_id=501, quantity=1),),
     exchange: tuple[RequestedExchange, ...] = (),
     variants: tuple[ExchangeVariant, ...] = (),
-    evidence: Evidence = Evidence(photos=(), readable=True),
+    evidence: Evidence = NO_PHOTOS,
     now: datetime = NOW,
     use_default_policy: bool = True,
 ) -> Eligible | Refused | Rejected:
@@ -240,7 +250,9 @@ def test_returns_follow_the_policy_flag_and_exchanges_always_need_approval() -> 
     strict = _evaluate(_policy(returns_require_approval=True))
     exchange = _evaluate(
         exchange=(RequestedExchange(variant_id=88, quantity=1),),
-        variants=(ExchangeVariant(variant_id=88, product_id=77, title="Blusa - M", available=True),),
+        variants=(
+            ExchangeVariant(variant_id=88, product_id=77, title="Blusa - M", available=True),
+        ),
     )
 
     assert isinstance(plain, Eligible) and plain.requires_approval is False
@@ -304,11 +316,13 @@ def test_settlement_nets_items_minus_fee_with_tax_included() -> None:
 
 def test_settlement_adds_tax_when_prices_exclude_it() -> None:
     eligible = _evaluate(
-        _policy(shipping={
-            "method": "customer_ships",
-            "return_address": "Calle Mayor 1, Madrid",
-            "payer": {"store_fault": "store", "customer_fault": "customer"},
-        }),
+        _policy(
+            shipping={
+                "method": "customer_ships",
+                "return_address": "Calle Mayor 1, Madrid",
+                "payer": {"store_fault": "store", "customer_fault": "customer"},
+            }
+        ),
         order=_order(taxes_included=False),
     )
     assert isinstance(eligible, Eligible)
@@ -323,7 +337,9 @@ def test_settlement_adds_tax_when_prices_exclude_it() -> None:
 def test_exchange_difference_is_negative_when_the_new_item_costs_more() -> None:
     eligible = _evaluate(
         exchange=(RequestedExchange(variant_id=88, quantity=1),),
-        variants=(ExchangeVariant(variant_id=88, product_id=77, title="Blusa - M", available=True),),
+        variants=(
+            ExchangeVariant(variant_id=88, product_id=77, title="Blusa - M", available=True),
+        ),
     )
     assert isinstance(eligible, Eligible)
 
@@ -370,7 +386,7 @@ def test_settlement_note_tells_the_team_what_to_refund() -> None:
     assert plan.team_note() == (
         "Auyan · devolución #1042 (política v7)\n"
         "Motivo: Pequeña [too_small], culpa del cliente\n"
-        "Devuelve: 1 × Blusa - Marino / S = 52.15 EUR\n"
+        "Devuelve: 1 x Blusa - Marino / S = 52.15 EUR\n"
         "Envío de vuelta: etiqueta de la tienda, paga el cliente; tarifa 4.95 EUR\n"
         "Neto a reembolsar al recibir: 47.20 EUR"
     )
@@ -384,17 +400,29 @@ def test_requested_quantities_are_positive(bad: int) -> None:
 
 def test_customer_photos_are_the_images_the_customer_sent_indexed_like_the_inbox() -> None:
     history = [
-        {"id": "m-1", "role": "customer", "attachments": [
-            {"path": "t/c/m-1/0.ogg", "kind": "audio", "mime_type": "audio/ogg"},
-            {"kind": "image"},
-            {"path": "t/c/m-1/1.jpg", "kind": "image", "mime_type": "image/jpeg"},
-        ]},
-        {"id": "m-2", "role": "agent_ai", "attachments": [
-            {"path": "t/c/m-2/0.jpg", "kind": "image"},
-        ]},
-        {"id": "m-3", "role": "customer", "attachments": [
-            {"filename": "foto.png", "mime_type": "image/png"},
-        ]},
+        {
+            "id": "m-1",
+            "role": "customer",
+            "attachments": [
+                {"path": "t/c/m-1/0.ogg", "kind": "audio", "mime_type": "audio/ogg"},
+                {"kind": "image"},
+                {"path": "t/c/m-1/1.jpg", "kind": "image", "mime_type": "image/jpeg"},
+            ],
+        },
+        {
+            "id": "m-2",
+            "role": "agent_ai",
+            "attachments": [
+                {"path": "t/c/m-2/0.jpg", "kind": "image"},
+            ],
+        },
+        {
+            "id": "m-3",
+            "role": "customer",
+            "attachments": [
+                {"filename": "foto.png", "mime_type": "image/png"},
+            ],
+        },
     ]
 
     assert customer_photos(history) == (

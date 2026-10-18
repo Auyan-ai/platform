@@ -1,4 +1,4 @@
-"""Decisión y liquidación de una devolución o un cambio (ADR 0014 §4–§5).
+"""Decisión y liquidación de una devolución o un cambio (ADR 0014 §4-§5).
 
 Funciones puras: reciben la política vigente, el pedido releído de Shopify y lo que pidió
 el cliente, y devuelven un `Eligible`, un `Refused` (escala al equipo) o un `Rejected`
@@ -168,7 +168,9 @@ _ANCHOR_LABEL = {"delivery": "la entrega", "shipment": "el envío", "order": "la
 _FAULT_LABEL: dict[Fault, str] = {"store": "de la tienda", "customer": "del cliente"}
 
 
-def _deadline(order: ReturnableOrder, line: ReturnableLine, active: ActivePolicy) -> datetime | None:
+def _deadline(
+    order: ReturnableOrder, line: ReturnableLine, active: ActivePolicy
+) -> datetime | None:
     window = active.policy.window
     anchor = {
         "delivery": line.delivered_at,
@@ -433,10 +435,16 @@ class ReturnPlan(_Frozen):
             f"Auyan · {kind} {self.order_name} (política v{self.policy_version})",
             f"Motivo: {self.reason_label} [{self.reason_code}], culpa {_FAULT_LABEL[self.fault]}",
         ]
-        rows += [f"Devuelve: {ln.quantity} × {ln.title} = {ln.amount} {s.currency}" for ln in s.returned]
-        rows += [f"Envía: {ln.quantity} × {ln.title} = {ln.amount} {s.currency}" for ln in s.exchanged]
+        rows += [
+            f"Devuelve: {ln.quantity} x {ln.title} = {ln.amount} {s.currency}" for ln in s.returned
+        ]
+        rows += [
+            f"Envía: {ln.quantity} x {ln.title} = {ln.amount} {s.currency}" for ln in s.exchanged
+        ]
         method = (
-            "etiqueta de la tienda" if self.shipping_method == "store_label" else "lo envía el cliente"
+            "etiqueta de la tienda"
+            if self.shipping_method == "store_label"
+            else "lo envía el cliente"
         )
         payer = "paga la tienda" if s.shipping_payer == "store" else "paga el cliente"
         if s.fee_pending is not None:

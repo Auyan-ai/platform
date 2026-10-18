@@ -306,3 +306,18 @@ async def test_unreadable_or_missing_policy_is_none(fake_deps, monkeypatch) -> N
     out = await make_load_tenant_context_node(fake_deps)(_state())
 
     assert out["returns_policy"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_simulator_scenario_fixes_its_own_policy(fake_deps, monkeypatch) -> None:
+    _patch_module(
+        monkeypatch, tenant=make_tenant(), config=make_tenant_configuration(), system_prompt="ok"
+    )
+    node = make_load_tenant_context_node(fake_deps)
+    sim = {**_state(), "simulation_mode": True}
+
+    with_policy = await node({**sim, "simulation_fixtures": {"returns_policy": _POLICY}})
+    without = await node({**sim, "simulation_fixtures": {"returns_policy": None}})
+
+    assert with_policy["returns_policy"] == {"version": 0, "policy": _POLICY}
+    assert without["returns_policy"] is None

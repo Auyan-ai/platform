@@ -1,10 +1,105 @@
-"""Scenarios RE-* — Devoluciones y reembolsos (7 scenarios)."""
+"""Scenarios RE-* — Devoluciones y reembolsos (8 scenarios)."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from apps.api.simulator.scenarios.dates import days_ago
+
+# Política del escenario (ADR 0014): la fija el escenario, no el tenant del simulador.
+_POLICY: dict[str, Any] = {
+    "schema_version": 1,
+    "window": {"days": 30, "starts_at": "delivery"},
+    "reasons": [
+        {
+            "code": "talla",
+            "label": "La talla no me queda bien",
+            "fault": "customer",
+            "shopify_reason": "too-small",
+        },
+        {
+            "code": "defectuoso",
+            "label": "Llegó roto o defectuoso",
+            "fault": "store",
+            "required_evidence": ["photo"],
+            "shopify_reason": "damaged-or-defective",
+        },
+        {
+            "code": "no_lo_quiero",
+            "label": "Ya no lo quiero",
+            "fault": "customer",
+            "shopify_reason": "changed-my-mind",
+        },
+    ],
+    "shipping": {
+        "method": "store_label",
+        "payer": {"store_fault": "store", "customer_fault": "customer"},
+        "customer_fee": {"amount": "4.95", "currency": "EUR"},
+    },
+    "refund_days": 14,
+    "excluded_product_tags": ["digital"],
+    "exchanges": {"enabled": True, "kinds": ["variant"]},
+    "returns_require_approval": True,
+}
+
+
+def _returnable(
+    order_id: int, name: str, line_id: int, title: str, delivered: str, tags: list[str]
+) -> dict[str, Any]:
+    return {
+        "order": {
+            "id": f"gid://shopify/Order/{order_id}",
+            "name": name,
+            "processedAt": delivered,
+            "cancelledAt": None,
+            "taxesIncluded": True,
+            "presentmentCurrencyCode": "EUR",
+        },
+        "returnableFulfillments": {
+            "nodes": [
+                {
+                    "fulfillment": {"createdAt": delivered, "deliveredAt": delivered},
+                    "returnableFulfillmentLineItems": {
+                        "nodes": [
+                            {
+                                "quantity": 1,
+                                "fulfillmentLineItem": {
+                                    "id": f"gid://shopify/FulfillmentLineItem/{line_id}0",
+                                    "lineItem": {
+                                        "id": f"gid://shopify/LineItem/{line_id}",
+                                        "name": title,
+                                        "title": title,
+                                        "product": {
+                                            "id": "gid://shopify/Product/7001",
+                                            "tags": tags,
+                                        },
+                                    },
+                                },
+                            }
+                        ]
+                    },
+                }
+            ]
+        },
+    }
+
+
+def _calculated(line_id: int, amount: str) -> dict[str, Any]:
+    def money(value: str) -> dict[str, Any]:
+        return {"presentmentMoney": {"amount": value, "currencyCode": "EUR"}}
+
+    return {
+        "returnLineItems": [
+            {
+                "quantity": 1,
+                "fulfillmentLineItem": {"id": f"gid://shopify/FulfillmentLineItem/{line_id}0"},
+                "subtotalSet": money(f"-{amount}"),
+                "totalTaxSet": money("0"),
+            }
+        ],
+        "exchangeLineItems": [],
+    }
+
 
 _ORDER_IN_WINDOW: dict[str, Any] = {
     "get_order_by_name": {
@@ -21,9 +116,7 @@ _ORDER_IN_WINDOW: dict[str, Any] = {
             }
         ],
         "created_at": days_ago(15),
-        "line_items": [
-            {"id": 5001, "title": "Camiseta azul L", "quantity": 1, "price": "29.99"}
-        ],
+        "line_items": [{"id": 5001, "title": "Camiseta azul L", "quantity": 1, "price": "29.99"}],
     },
     "get_policies": [
         {
@@ -32,7 +125,10 @@ _ORDER_IN_WINDOW: dict[str, Any] = {
             "body": "Tienes 30 días desde la fecha de compra para devolver tu pedido.",
         }
     ],
-    "start_return": {"ok": True, "simulated": True, "id": 9001, "status": "open"},
+    "get_returnable_order": _returnable(
+        2001, "#1234", 5001, "Camiseta azul L", days_ago(13), ["camisetas"]
+    ),
+    "calculate_return": _calculated(5001, "29.99"),
 }
 
 _ORDER_OUT_OF_WINDOW: dict[str, Any] = {
@@ -44,10 +140,11 @@ _ORDER_OUT_OF_WINDOW: dict[str, Any] = {
         "fulfillment_status": "fulfilled",
         "fulfillments": [{"tracking_number": "1Z999AA", "tracking_url": "https://"}],
         "created_at": days_ago(55),  # >30 días atrás
-        "line_items": [
-            {"id": 5001, "title": "Camiseta azul L", "quantity": 1, "price": "29.99"}
-        ],
+        "line_items": [{"id": 5001, "title": "Camiseta azul L", "quantity": 1, "price": "29.99"}],
     },
+    "get_returnable_order": _returnable(
+        2001, "#1234", 5001, "Camiseta azul L", days_ago(52), ["camisetas"]
+    ),
     "get_policies": [
         {
             "title": "Política de devolución",
@@ -67,9 +164,7 @@ _ORDER_BROKEN_PRODUCT: dict[str, Any] = {
         "created_at": days_ago(10),
         "total_price": "49.99",
         "currency": "EUR",
-        "line_items": [
-            {"id": 5001, "title": "Lámpara LED", "quantity": 1, "price": "49.99"}
-        ],
+        "line_items": [{"id": 5001, "title": "Lámpara LED", "quantity": 1, "price": "49.99"}],
     },
     "get_refundable_balance": {"captured": "49.99", "refunded": "0", "currency": "EUR"},
     "refund_partial": {"ok": True, "simulated": True},
@@ -88,6 +183,9 @@ _ORDER_DIGITAL: dict[str, Any] = {
         ],
         "tags": "digital",
     },
+    "get_returnable_order": _returnable(
+        2002, "#1235", 5002, "Plantilla digital Notion", days_ago(4), ["digital"]
+    ),
     "get_policies": [
         {
             "title": "Política de devolución",
@@ -111,10 +209,11 @@ SCENARIOS: list[dict[str, Any]] = [
         "goal": "Iniciar una devolución estándar del pedido #1234 porque la talla no me queda bien; no pedir reembolso inmediato ni cambio por defecto.",
         "initial_message": "Hola, quiero devolver mi pedido #1234 porque la talla no me queda bien",
         "expected_outcome": (
-            "El agente pide la devolución (L3), que queda pendiente de aprobación humana, y le "
-            "explica al cliente que el equipo la confirmará."
+            "El agente pide la devolución (L3) con el motivo 'talla' de la política, que queda "
+            "pendiente de aprobación humana, y le explica al cliente que el equipo la "
+            "confirmará, sin decir que el dinero ya vuelve."
         ),
-        "mock_fixtures": {"shopify": _ORDER_IN_WINDOW},
+        "mock_fixtures": {"shopify": _ORDER_IN_WINDOW, "returns_policy": _POLICY},
         "assertions": {
             "skills_called": ["shopify.start_return"],
             "skills_not_called": ["shopify.refund_partial"],
@@ -125,17 +224,23 @@ SCENARIOS: list[dict[str, Any]] = [
     {
         "id": "RE-02",
         "name": "RE-02: Devolución fuera de plazo",
-        "description": "Cliente quiere devolver pedido de hace más de 30 días. El agente informa la política sin iniciar devolución.",
+        "description": (
+            "Cliente quiere devolver un pedido entregado hace 52 días. El código rechaza la "
+            "devolución por plazo y pasa el caso al equipo con la fecha límite."
+        ),
         "aop_slug": "returns",
         "capabilities": [],
         "profile": "cooperativo",
         "goal": "Devolver pedido #1234 de hace 55 días",
         "initial_message": "Quiero devolver mi pedido #1234, lo compré hace un par de meses",
-        "expected_outcome": "El agente informa que el plazo venció y cita la política de 30 días.",
-        "mock_fixtures": {"shopify": _ORDER_OUT_OF_WINDOW},
+        "expected_outcome": (
+            "El cliente lee que el plazo terminó y que su caso pasa al equipo; no se abre "
+            "ninguna devolución."
+        ),
+        "mock_fixtures": {"shopify": _ORDER_OUT_OF_WINDOW, "returns_policy": _POLICY},
         "assertions": {
-            "response_contains": ["30 días", "política"],
-            "skills_not_called": ["shopify.start_return"],
+            "must_escalate": True,
+            "escalation_reason_present": True,
         },
         "max_turns": 4,
     },
@@ -177,17 +282,21 @@ SCENARIOS: list[dict[str, Any]] = [
     {
         "id": "RE-05",
         "name": "RE-05: Devolver producto digital",
-        "description": "Cliente quiere devolver un producto digital. El agente informa que no aplica devolución.",
+        "description": (
+            "Cliente quiere devolver un producto con la etiqueta 'digital', que la política "
+            "excluye. El código lo rechaza y pasa el caso al equipo."
+        ),
         "aop_slug": "returns",
         "capabilities": [],
         "profile": "cooperativo",
         "goal": "Devolver plantilla digital que no me sirve",
         "initial_message": "Quiero devolver la plantilla digital que compré, pedido #1235",
-        "expected_outcome": "El agente informa que los productos digitales no tienen devolución.",
-        "mock_fixtures": {"shopify": _ORDER_DIGITAL},
+        "expected_outcome": (
+            "El cliente lee que ese artículo no admite devolución y que su caso pasa al equipo."
+        ),
+        "mock_fixtures": {"shopify": _ORDER_DIGITAL, "returns_policy": _POLICY},
         "assertions": {
-            "response_contains": ["digital", "devolución"],
-            "skills_not_called": ["shopify.start_return"],
+            "must_escalate": True,
         },
         "max_turns": 4,
     },
@@ -217,10 +326,33 @@ SCENARIOS: list[dict[str, Any]] = [
         "goal": "Iniciar devolución, luego cancelarla porque decidí quedarme con el producto",
         "initial_message": "Hola, quiero devolver el pedido #1234",
         "expected_outcome": "El agente acepta que el cliente no quiere proceder y cierra amablemente.",
-        "mock_fixtures": {"shopify": _ORDER_IN_WINDOW},
+        "mock_fixtures": {"shopify": _ORDER_IN_WINDOW, "returns_policy": _POLICY},
         "assertions": {
             "outcome_is": "resolved",
         },
         "max_turns": 8,
+    },
+    {
+        "id": "RE-08",
+        "name": "RE-08: Tienda sin política de devoluciones",
+        "description": (
+            "La tienda no ha configurado su política (ADR 0014): no hay valores por defecto. "
+            "El código no abre la devolución y pasa el caso al equipo con la razón."
+        ),
+        "aop_slug": "returns",
+        "capabilities": [],
+        "profile": "cooperativo",
+        "goal": "Devolver el pedido #1234 porque la talla no me queda bien",
+        "initial_message": "Hola, quiero devolver mi pedido #1234 porque la talla no me queda bien",
+        "expected_outcome": (
+            "El agente no inventa plazos ni condiciones; el caso pasa al equipo sin abrir "
+            "ninguna devolución."
+        ),
+        "mock_fixtures": {"shopify": _ORDER_IN_WINDOW, "returns_policy": None},
+        "assertions": {
+            "must_escalate": True,
+            "escalation_reason_present": True,
+        },
+        "max_turns": 4,
     },
 ]

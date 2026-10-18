@@ -35,10 +35,19 @@ def _policy(**overrides: Any) -> ActivePolicy:
         "schema_version": 1,
         "window": {"days": 30, "starts_at": "delivery"},
         "reasons": [
-            {"code": "defective", "label": "Defectuoso", "fault": "store",
-             "required_evidence": ["photo"], "shopify_reason": "damaged-or-defective"},
-            {"code": "too_small", "label": "Pequeña", "fault": "customer",
-             "shopify_reason": "too-small"},
+            {
+                "code": "defective",
+                "label": "Defectuoso",
+                "fault": "store",
+                "required_evidence": ["photo"],
+                "shopify_reason": "damaged-or-defective",
+            },
+            {
+                "code": "too_small",
+                "label": "Pequeña",
+                "fault": "customer",
+                "shopify_reason": "too-small",
+            },
         ],
         "shipping": {
             "method": "customer_ships",
@@ -94,12 +103,19 @@ class FakeShopify:
         return self.variants
 
     async def calculate_return(
-        self, ctx: Any, order_id: int, *, lines: list[tuple[str, int]], exchange: list[tuple[int, int]]
+        self,
+        ctx: Any,
+        order_id: int,
+        *,
+        lines: list[tuple[str, int]],
+        exchange: list[tuple[int, int]],
     ) -> ReturnCalculation:
         self.calls.append(("calculate_return", (lines, exchange)))
         return ReturnCalculation(
             currency="USD",
-            returned=(CalculatedLine(key=FLI, quantity=1, subtotal=Decimal("-76.95"), tax=Decimal("0")),),
+            returned=(
+                CalculatedLine(key=FLI, quantity=1, subtotal=Decimal("-76.95"), tax=Decimal("0")),
+            ),
             exchanged=tuple(
                 CalculatedLine(
                     key=f"gid://shopify/ProductVariant/{v}",
@@ -178,9 +194,7 @@ async def test_a_missing_photo_goes_back_to_the_llm() -> None:
     raw = {**RAW, "reason_code": "defective"}
 
     with pytest.raises(SkillRejection) as exc:
-        await StartReturn().prepare(
-            _ctx(FakeShopify(), _policy(), attachments_readable=True), raw
-        )
+        await StartReturn().prepare(_ctx(FakeShopify(), _policy(), attachments_readable=True), raw)
 
     assert exc.value.code == "evidence_missing"
 
@@ -197,20 +211,21 @@ async def test_prepare_writes_the_plan_and_discards_one_from_the_llm() -> None:
     assert plan.settlement.net == Decimal("76.95")
     assert plan.return_address == "Calle Mayor 1, 28013 Madrid"
     assert StartReturn.requires_approval(prepared) is False
-    assert StartReturn.requires_approval(
-        await StartReturn().prepare(
-            _ctx(FakeShopify(), _policy(returns_require_approval=True)), RAW
+    assert (
+        StartReturn.requires_approval(
+            await StartReturn().prepare(
+                _ctx(FakeShopify(), _policy(returns_require_approval=True)), RAW
+            )
         )
-    ) is True
+        is True
+    )
 
 
 async def test_execute_creates_the_approved_plan_and_notes_the_settlement() -> None:
     shopify = FakeShopify()
     prepared = await StartReturn().prepare(_ctx(shopify, _policy()), RAW)
 
-    out = await StartReturn().execute(
-        _ctx(shopify), StartReturnInput.model_validate(prepared)
-    )
+    out = await StartReturn().execute(_ctx(shopify), StartReturnInput.model_validate(prepared))
 
     assert out.outcome is ActionOutcome.CONFIRMED
     assert (out.return_id, out.return_name, out.note_written) == (5001, "#1431-R2", True)
@@ -254,9 +269,7 @@ async def test_execute_refuses_when_the_item_is_no_longer_returnable() -> None:
 
 async def test_execute_without_a_plan_fails_closed() -> None:
     with pytest.raises(ValueError, match="return_plan_missing"):
-        await StartReturn().execute(
-            _ctx(FakeShopify()), StartReturnInput.model_validate(RAW)
-        )
+        await StartReturn().execute(_ctx(FakeShopify()), StartReturnInput.model_validate(RAW))
 
 
 EXCHANGE = {**RAW, "exchange_items": [{"variant_id": 52117802090776, "quantity": 1}]}

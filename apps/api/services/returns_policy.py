@@ -161,6 +161,7 @@ def policy_note(active: ActivePolicy | None) -> str:
         + (" (exige foto del cliente)" if "photo" in r.required_evidence else "")
         for r in policy.reasons
     )
+    starts = _WINDOW_START_LABEL[policy.window.starts_at]
     if policy.exchanges.enabled:
         kinds = " o ".join(_EXCHANGE_KIND_LABEL[k] for k in sorted(policy.exchanges.kinds))
         exchanges = f"Cambios: sí, por {kinds}."
@@ -168,7 +169,7 @@ def policy_note(active: ActivePolicy | None) -> str:
         exchanges = "Cambios: no."
     return (
         f"Política de devoluciones y cambios de la tienda (versión {active.version}):\n"
-        f"- Plazo: {policy.window.days} días desde {_WINDOW_START_LABEL[policy.window.starts_at]}.\n"
+        f"- Plazo: {policy.window.days} días desde {starts}.\n"
         f"- Motivos (usa el código en `reason_code`):\n{reasons}\n"
         f"- {exchanges}\n"
         "Plazo, pruebas, envío e importes los comprueba el sistema al pedir la acción."

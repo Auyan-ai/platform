@@ -86,6 +86,12 @@ def make_load_tenant_context_node(
             if stored_policy and policy
             else None
         )
+        # Un escenario del simulador fija su propia política (None = sin configurar), así
+        # no depende de la que tenga el tenant.
+        fixtures = state.get("simulation_fixtures") or {}
+        if state.get("simulation_mode") and "returns_policy" in fixtures:
+            raw = fixtures["returns_policy"]
+            returns_policy = {"version": 0, "policy": raw} if raw else None
 
         out: dict = {
             "tenant_config": config_dump,

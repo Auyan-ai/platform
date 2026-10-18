@@ -35,7 +35,7 @@ class TestPersonas:
 
 class TestScenarioStructure:
     def test_total_count(self):
-        assert len(ALL) == 42
+        assert len(ALL) == 43
         assert ALL == ALL_SCENARIOS
 
     def test_unique_ids(self):
@@ -79,7 +79,7 @@ class TestScenarioGroups:
             assert sc["id"].startswith("CE-")
 
     def test_re_group(self):
-        assert len(RE) == 7
+        assert len(RE) == 8
         for sc in RE:
             assert sc["id"].startswith("RE-")
 

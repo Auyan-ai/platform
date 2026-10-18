@@ -41,7 +41,13 @@ class _FakePermissionTable:
         self.rows: dict[str, tuple[bool, bool]] = dict(rows or {})
 
     async def insert_if_missing(
-        self, conn, *, tenant_id, skill_slug, is_enabled, human_approval_required=False,
+        self,
+        conn,
+        *,
+        tenant_id,
+        skill_slug,
+        is_enabled,
+        human_approval_required=False,
         enabled_by=None,
     ) -> bool:
         if skill_slug in self.rows:
@@ -50,8 +56,15 @@ class _FakePermissionTable:
         return True
 
     async def upsert(
-        self, conn, *, tenant_id, skill_slug, is_enabled, human_approval_required=False,
-        threshold_override=None, enabled_by=None,
+        self,
+        conn,
+        *,
+        tenant_id,
+        skill_slug,
+        is_enabled,
+        human_approval_required=False,
+        threshold_override=None,
+        enabled_by=None,
     ) -> SimpleNamespace:
         self.rows[skill_slug] = (is_enabled, human_approval_required)
         return SimpleNamespace()
@@ -103,21 +116,14 @@ def _ensure_shopify_skills_registered():
     recargando sus submódulos (re-ejecuta los @SkillRegistry.register), y restauramos al
     terminar para no contaminar a otros tests."""
     import importlib
+    import pkgutil
+
+    import apps.api.skills.shopify as shopify_skills
 
     saved = dict(SkillRegistry._by_slug)
-    for name in (
-        "add_order_note",
-        "cancel_order",
-        "get_order_status",
-        "get_product_info",
-        "get_shop_policies",
-        "list_my_orders",
-        "refund_partial",
-        "start_return",
-        "tag_order",
-        "update_shipping_address",
-    ):
-        importlib.reload(importlib.import_module(f"apps.api.skills.shopify.{name}"))
+    for module in pkgutil.iter_modules(shopify_skills.__path__):
+        if not module.name.startswith("_"):
+            importlib.reload(importlib.import_module(f"apps.api.skills.shopify.{module.name}"))
     yield
     SkillRegistry._by_slug.clear()
     SkillRegistry._by_slug.update(saved)
@@ -145,21 +151,17 @@ def test_smalltalk_has_no_skills():
     assert smalltalk["frontmatter"]["allowed_skills"] == []
 
 
-def test_returns_verifies_policy_before_claiming():
-    """INVARIANTE de latencia (anti reject+retry del supervisor): el AOP returns
-    instruye obtener el plazo de una fuente real ANTES de afirmarlo. Si el agente
-    suelta un plazo sin verificar, el supervisor lo rechaza (reject legítimo) y se
-    encadena un retry → HOPS extra. La secuenciación 'dato primero, afirmación
-    después' mata ese ciclo de raíz."""
+def test_returns_leaves_window_and_eligibility_to_the_code():
+    """ADR 0014: plazo, pruebas, envío e importes los decide `evaluate_return` con la
+    política del tenant. El AOP no calcula fechas ni trae un plazo propio."""
     returns = next(a for a in CANONICAL_AOPS if a["slug"] == "returns")
-    guardrails = " ".join(returns["frontmatter"]["guardrails"]).lower()
-    body = returns["body"].lower()
-    # La fuente de verdad de la política sigue disponible como skill...
-    assert "shopify.get_shop_policies" in returns["frontmatter"]["allowed_skills"]
-    # ...y los guardrails + el procedimiento exigen verificar ANTES de afirmar.
-    assert "get_shop_policies" in guardrails
-    assert "antes" in guardrails
-    assert "antes de afirmar" in body
+    blob = (" ".join(returns["frontmatter"]["guardrails"]) + returns["body"]).lower()
+    assert {"shopify.start_return", "shopify.start_exchange"} <= set(
+        returns["frontmatter"]["allowed_skills"]
+    )
+    assert "los comprueba el sistema" in blob
+    for computed_by_code in ("delivered_at", "fulfilled_at", "created_at", "días"):
+        assert computed_by_code not in blob, computed_by_code
 
 
 def test_order_change_never_promises_on_unverified_orders():
@@ -225,13 +227,13 @@ def test_permission_posture_l3_requires_approval():
         expected_enabled = p["skill_slug"] != "shopify.refund_partial"
         assert p["is_enabled"] is expected_enabled, f"{p['skill_slug']}: is_enabled"
         if tier == "L3":
-            assert p["human_approval_required"] is True, (
-                f"{p['skill_slug']} es L3 y debe requerir approval por defecto"
-            )
+            assert (
+                p["human_approval_required"] is True
+            ), f"{p['skill_slug']} es L3 y debe requerir approval por defecto"
         else:
-            assert p["human_approval_required"] is False, (
-                f"{p['skill_slug']} es {tier} y no debería requerir approval"
-            )
+            assert (
+                p["human_approval_required"] is False
+            ), f"{p['skill_slug']} es {tier} y no debería requerir approval"
 
 
 def test_no_hardcoded_tenant_constants():
@@ -399,34 +401,6 @@ def test_order_change_prompt_no_respawn_after_approval():
     assert "acción nueva o distinta" in prompt
 
 
-def test_returns_prompt_measures_window_from_delivery():
-    """El plazo de devolución se mide desde la recepción (delivered_at → fulfilled_at
-    → created_at), no desde la compra (H4): created_at solo como último recurso."""
-    tenant_id = uuid4()
-    tc = TenantConfiguration(
-        tenant_id=tenant_id, agent_model="claude-sonnet-4-6", escalation_threshold=0.7
-    )
-    a = next(x for x in CANONICAL_AOPS if x["slug"] == "returns")
-    fm = a["frontmatter"]
-    awc = AopWithContent(
-        id=uuid4(),
-        tenant_id=tenant_id,
-        slug="returns",
-        workspace="production",
-        current_version=1,
-        yaml_frontmatter=fm,
-        body_markdown=a["body"],
-        raw_source=_build_raw_source(fm, a["body"]),
-    )
-    prompt = compile_aop(awc, tc).system_prompt.lower()
-    assert "desde la recepción" in prompt
-    assert "delivered_at" in prompt
-    assert "fulfilled_at" in prompt
-
-
-# ─── provision_canonical_aops ───────────────────────────────────────────────────
-
-
 @pytest.mark.asyncio
 async def test_provision_creates_eight_aops_and_all_permissions(monkeypatch):
     created_slugs: list[str] = []
@@ -434,7 +408,17 @@ async def test_provision_creates_eight_aops_and_all_permissions(monkeypatch):
     async def fake_get(conn, tenant_id, slug, workspace):
         return None  # ninguno existe
 
-    async def fake_create(conn, *, tenant_id, slug, workspace, yaml_frontmatter, body_markdown, raw_source, created_by=None):
+    async def fake_create(
+        conn,
+        *,
+        tenant_id,
+        slug,
+        workspace,
+        yaml_frontmatter,
+        body_markdown,
+        raw_source,
+        created_by=None,
+    ):
         created_slugs.append(slug)
         return SimpleNamespace(id=uuid4())
 
@@ -453,7 +437,7 @@ async def test_provision_creates_eight_aops_and_all_permissions(monkeypatch):
     assert result["updated"] == 0
     assert result["skipped"] == 0
     assert set(created_slugs) == EXPECTED_SLUGS
-    assert result["permissions_written"] == len(CANONICAL_TOOL_PERMISSIONS) == 10
+    assert result["permissions_written"] == len(CANONICAL_TOOL_PERMISSIONS) == 11
     assert table.rows == _CANONICAL_ROWS
 
 
@@ -497,7 +481,11 @@ async def test_reseed_with_update_keeps_permissions_changed_by_hand(monkeypatch)
 @pytest.mark.asyncio
 async def test_reset_permissions_restores_the_canonical_values(monkeypatch):
     table = _FakePermissionTable(
-        {**_CANONICAL_ROWS, "shopify.refund_partial": (True, False), "shopify.tag_order": (False, False)}
+        {
+            **_CANONICAL_ROWS,
+            "shopify.refund_partial": (True, False),
+            "shopify.tag_order": (False, False),
+        }
     )
     table.install(monkeypatch)
     monkeypatch.setattr(canonical, "get_aop_by_slug", _existing_aop)
@@ -506,7 +494,7 @@ async def test_reset_permissions_restores_the_canonical_values(monkeypatch):
 
     result = await provision_canonical_aops(AsyncMock(), uuid4(), reset_permissions=True)
 
-    assert result["permissions_written"] == 10
+    assert result["permissions_written"] == 11
     assert table.rows == _CANONICAL_ROWS
 
 
@@ -543,7 +531,9 @@ async def test_provision_update_existing_creates_new_versions(monkeypatch):
     async def fake_create(*args, **kwargs):
         raise AssertionError("no debe crear cuando el AOP ya existe")
 
-    async def fake_save(conn, *, tenant_id, aop_id, yaml_frontmatter, body_markdown, raw_source, created_by=None):
+    async def fake_save(
+        conn, *, tenant_id, aop_id, yaml_frontmatter, body_markdown, raw_source, created_by=None
+    ):
         saved_slugs.append(yaml_frontmatter["slug"])
         return SimpleNamespace()
 
