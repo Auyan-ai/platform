@@ -94,6 +94,13 @@ def team_followup_reason(skill_slug: str, output: dict[str, Any]) -> str | None:
     """Motivo para el equipo cuando la acción aprobada se ejecutó pero no quedó
     cerrada. None si no hace falta nadie (sin `outcome` o resultado ya resuelto)."""
     raw = output.get("outcome")
+    if raw is not None and output.get("note_written") is False:
+        action = _ACTION_NAME.get(skill_slug, f"La acción {skill_slug}")
+        return (
+            f"{action} del pedido {output.get('order_id')} se abrió en Shopify "
+            f"({output.get('return_name') or 'sin nombre'}), pero no se pudo escribir la "
+            "liquidación en la nota del pedido. Copiadla desde la aprobación."
+        )
     if raw is None or ActionOutcome(raw).settled:
         return None
     outcome = ActionOutcome(raw)

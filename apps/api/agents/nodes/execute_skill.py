@@ -571,6 +571,15 @@ def make_execute_skill_node(
                 },
             )
             if state.get("conversation_id") and state.get("tenant_id"):
+                tracker.emit(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    phase="decision",
+                    event_type="tool_result",
+                    label=slug,
+                    detail={"error": precheck_error},
+                    status="error",
+                )
                 auditor.log(
                     tenant_id=state["tenant_id"],
                     conversation_id=state["conversation_id"],

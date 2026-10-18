@@ -1344,3 +1344,29 @@ class TestPreparedSkills:
             "plan": {"approve": True},
         }
         assert PlannedSkill.seen == []
+
+
+class TestPrecheckObservability:
+    async def test_a_failed_precheck_leaves_a_reasoning_event(
+        self, deps: AgentDependencies
+    ) -> None:
+        class FailingPrepare(PlannedSkill):
+            slug = "test.failing_prepare"
+
+            async def prepare(self, ctx: SkillContext, raw_input: dict[str, Any]) -> dict[str, Any]:
+                raise RuntimeError("Shopify 500")
+
+        SkillRegistry.register(FailingPrepare)
+        state = _autonomous_state("ok")
+        state["pending_tool_call"]["slug"] = "test.failing_prepare"
+        state["allowed_skills"] = ["test.failing_prepare"]
+        state["tool_permissions"] = {
+            "test.failing_prepare": state["tool_permissions"]["test.planned"]
+        }
+
+        await make_execute_skill_node(deps)(state)
+
+        events = deps.reasoning_tracker.events  # type: ignore[attr-defined]
+        assert events[-1]["label"] == "test.failing_prepare"
+        assert events[-1]["status"] == "error"
+        assert events[-1]["detail"]["error"].startswith("skill_precheck_failed: RuntimeError")
