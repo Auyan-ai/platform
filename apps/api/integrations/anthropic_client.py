@@ -412,7 +412,7 @@ async def call_claude_text(
     system: str | list[dict[str, Any]],
     messages: list[dict[str, Any]],
     max_tokens: int,
-    timeout_seconds: float,
+    timeout_seconds: float | None = None,
     model: str | None = None,
     temperature: float | None = None,
 ) -> TextReply:
@@ -428,9 +428,10 @@ async def call_claude_text(
         else max_tokens,
         "system": system,
         "messages": messages,
-        "timeout": timeout_seconds,
         **thinking.request_options(),
     }
+    if timeout_seconds is not None:
+        kwargs["timeout"] = timeout_seconds
     if temperature is not None and capabilities_of(model).sampling_params:
         kwargs["extra_body"] = {"temperature": temperature}
     response = await client.messages.create(**kwargs)

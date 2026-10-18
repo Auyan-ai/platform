@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from apps.api.core.config import get_models
+from apps.api.integrations.anthropic_client import call_claude_text
 from apps.api.services.fixed_texts import CATALOG, FALLBACK_LANGUAGE, LANGUAGE_CODES, fixed_text
 from apps.api.services.language import LANGUAGE_NAMES, reply_language_mismatch
 from apps.api.services.reply_format import strip_emojis, strip_formatting
@@ -198,21 +198,15 @@ async def generate_customer_reply(
         tenant_default=tenant_default,
     )
     try:
-        resp = await client.messages.create(
-            model=get_models().reply_model,
+        reply = await call_claude_text(
+            client=client,
+            role="reply_model",
             max_tokens=200,
             system=_system_prompt(language),
             messages=[{"role": "user", "content": base}],
-            timeout=timeout_seconds,
+            timeout_seconds=timeout_seconds,
         )
-        warm = next(
-            (
-                block.text.strip()
-                for block in resp.content
-                if getattr(block, "type", None) == "text" and block.text.strip()
-            ),
-            base,
-        )
+        warm = reply.text.strip() or base
     except Exception:
         logger.warning("approval_reply_generation_failed skill=%s", skill_slug, exc_info=True)
         warm = base

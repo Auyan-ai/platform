@@ -448,3 +448,113 @@ class TestSuperviseOn55:
         assert out["agent_response"] is None
         # 100 in @ $2 + 50 out @ $10, sobre el 0,01 que ya traía el turno
         assert out["cost_usd"] == pytest.approx(0.0107)
+
+
+class TestTextRolesOn55:
+    """Jueces, simulador y mensajes al cliente: el texto se lee aunque venga tras un
+    thinking block, y la petición no lleva lo que un 5.5 rechaza."""
+
+    @pytest.mark.asyncio
+    async def test_text_call_on_sonnet_5_5(self, _env: pytest.MonkeyPatch) -> None:
+        from apps.api.integrations.anthropic_client import call_claude_text
+
+        _env.setenv("JUDGE_SONNET_MODEL", "claude-sonnet-5-5")
+        get_models.cache_clear()
+        api = RecordingAnthropic(
+            message(thinking(), text('{"ok": true}'), stop_reason="end_turn", model="claude-sonnet-5-5")
+        )
+
+        reply = await call_claude_text(
+            client=api.client,
+            role="judge_sonnet_model",
+            system="juzga",
+            messages=[{"role": "user", "content": "transcript"}],
+            max_tokens=1024,
+            timeout_seconds=90,
+            temperature=0.7,
+        )
+
+        body = api.requests[0]
+        assert body["thinking"] == ADAPTIVE
+        assert body["output_config"] == {"effort": "medium"}
+        assert body["max_tokens"] == 16000
+        assert "temperature" not in body
+        assert api.beta_headers == [PRESERVED_BETA]
+        assert reply.text == '{"ok": true}'
+        assert reply.usage.output_tokens == 50
+
+    @pytest.mark.asyncio
+    async def test_refusal_returns_no_text_and_its_category(
+        self, _env: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from apps.api.integrations.anthropic_client import call_claude_text
+
+        _env.setenv("REPLY_MODEL", "claude-opus-5-5")
+        get_models.cache_clear()
+        api = RecordingAnthropic(refusal("bio"))
+
+        with caplog.at_level("ERROR"):
+            reply = await call_claude_text(
+                client=api.client,
+                role="reply_model",
+                system="s",
+                messages=[{"role": "user", "content": "m"}],
+                max_tokens=200,
+                timeout_seconds=15,
+            )
+
+        assert (reply.text, reply.refusal_category) == ("", "bio")
+        assert any("llm_refusal: bio" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_user_simulator_on_sonnet_5_5(self, _env: pytest.MonkeyPatch) -> None:
+        from apps.api.simulator.user_simulator import UserSimulator
+        from apps.api.tests.simulator.test_user_simulator import _make_profile
+
+        _env.setenv("SIMULATOR_MODEL", "claude-sonnet-5-5")
+        get_models.cache_clear()
+        reply = '{"message": "vale", "goal_achieved": false, "give_up": false, "internal_reasoning": "ok"}'
+        api = RecordingAnthropic(
+            message(thinking(), text(reply), stop_reason="end_turn", model="claude-sonnet-5-5")
+        )
+
+        turn = await UserSimulator(profile=_make_profile(), anthropic=api.client).next_turn(
+            conversation_history=[{"role": "agent", "content": "¿En qué ayudo?"}], turn_number=1
+        )
+
+        assert turn.message == "vale"
+        assert "temperature" not in api.requests[0]
+        assert api.requests[0]["model"] == "claude-sonnet-5-5"
+
+    @pytest.mark.asyncio
+    async def test_slow_agent_judge_on_sonnet_5_5(self, _env: pytest.MonkeyPatch) -> None:
+        from apps.api.slow_agent.judge import _call_judge
+        from apps.api.tests.slow_agent.test_judge import _transcript
+
+        _env.setenv("SLOW_AGENT_MODEL", "claude-sonnet-5-5")
+        get_models.cache_clear()
+        payload = {"should_propose": False, "confidence": 0.9, "rationale": "bien"}
+        api = RecordingAnthropic(
+            message(thinking(), text(json.dumps(payload)), stop_reason="end_turn", model="claude-sonnet-5-5")
+        )
+
+        verdict = await _call_judge(api.client, _transcript(), "slow_agent_model")
+
+        assert verdict.confidence == 0.9
+        assert verdict.model_used == "claude-sonnet-5-5"
+        assert api.requests[0]["thinking"] == ADAPTIVE
+
+    @pytest.mark.asyncio
+    async def test_approval_reply_on_opus_5_5(self, _env: pytest.MonkeyPatch) -> None:
+        from apps.api.services.approval_reply import generate_customer_reply
+
+        _env.setenv("REPLY_MODEL", "claude-opus-5-5")
+        get_models.cache_clear()
+        api = RecordingAnthropic(
+            message(thinking(), text("Listo, pedido cancelado."), stop_reason="end_turn", model="claude-opus-5-5")
+        )
+
+        msg = await generate_customer_reply(api.client, "shopify.cancel_order", success=True)
+
+        assert msg == "Listo, pedido cancelado."
+        assert api.requests[0]["output_config"] == {"effort": "medium"}

@@ -134,7 +134,7 @@ class TestNextTurn:
     async def test_calls_anthropic_and_returns_turn(self):
         profile = _make_profile()
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text='{"message": "vale", "goal_achieved": false, "give_up": false, "internal_reasoning": "ok"}')]
+        mock_response.content = [MagicMock(type="text", text='{"message": "vale", "goal_achieved": false, "give_up": false, "internal_reasoning": "ok"}')]
         mock_response.usage.input_tokens = 200
         mock_response.usage.output_tokens = 30
 

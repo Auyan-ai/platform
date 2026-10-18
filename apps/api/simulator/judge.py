@@ -16,6 +16,7 @@ from typing import Literal
 from anthropic import AsyncAnthropic
 from apps.api.core.config import get_models
 from apps.api.db.models import SimulationScenario
+from apps.api.integrations.anthropic_client import call_claude_text
 from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.simulator.prompts import SIM_JUDGE_SYSTEM_PROMPT
 from apps.api.simulator.transcript import SimulatorTranscript, format_for_sim_judge
@@ -72,8 +73,12 @@ async def judge_simulation(
     formatted = format_for_sim_judge(transcript)
     model = normalize_judge_model(judge_model)
 
-    response = await anthropic.messages.create(
+    reply = await call_claude_text(
+        client=anthropic,
         model=model,
+        role=(
+            "judge_opus_model" if model == get_models().judge_opus_model else "judge_sonnet_model"
+        ),
         max_tokens=JUDGE_MAX_TOKENS,
         system=[
             {
@@ -83,11 +88,9 @@ async def judge_simulation(
             }
         ],
         messages=[{"role": "user", "content": formatted}],
-        timeout=JUDGE_TIMEOUT_SECONDS,
+        timeout_seconds=JUDGE_TIMEOUT_SECONDS,
     )
-
-    raw = response.content[0].text.strip() if response.content else "{}"
-    return _parse_verdict(raw, LLMUsage.from_anthropic(response.usage), model_used=model)
+    return _parse_verdict(reply.text.strip() or "{}", reply.usage, model_used=model)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
