@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID, uuid4
 
 from apps.api.core.errors import ConflictError
@@ -2711,13 +2711,14 @@ async def get_recent_approval_for_skill(
     conversation_id: UUID,
     skill_slug: str,
 ) -> PendingApproval | None:
-    """Devuelve la aprobación más reciente (pending o approved) de la conversación
-    para esa skill, o None.
+    """Devuelve la aprobación más reciente (pending, executing o approved) de la
+    conversación para esa skill, o None.
 
     Sirve para no duplicar el gate L3: si el cliente vuelve a escribir mientras su
-    acción sigue en revisión (pending) o ya fue aprobada/ejecutada (approved), el
-    agente reusa esa aprobación en vez de crear otra. Las rechazadas se ignoran:
-    una acción rechazada sí puede re-intentarse.
+    acción sigue en revisión (pending), se está ejecutando (executing) o ya fue
+    aprobada (approved), el agente reusa esa aprobación en vez de crear otra: una
+    segunda aprobación de la misma acción podría ejecutarse otra vez. Las rechazadas y
+    las fallidas se ignoran: esa acción sí puede pedirse de nuevo.
     """
     row = await conn.fetchrow(
         """
@@ -2729,7 +2730,7 @@ async def get_recent_approval_for_skill(
          WHERE tenant_id = $1
            AND conversation_id = $2
            AND skill_slug = $3
-           AND status IN ('pending', 'approved')
+           AND status IN ('pending', 'executing', 'approved')
            AND deleted_at IS NULL
          ORDER BY created_at DESC
          LIMIT 1
@@ -2903,28 +2904,82 @@ async def list_pending_approval_inputs(
     }
 
 
-async def resolve_pending_approval(
+async def claim_pending_approval(
     conn: asyncpg.Connection,
     *,
     tenant_id: UUID,
     approval_id: UUID,
-    new_status: str,
     reviewed_by: UUID,
-    review_comment: str | None = None,
+    review_comment: str | None,
 ) -> PendingApproval | None:
-    """Aprueba o rechaza una pending_approval (CAS sobre status='pending')."""
+    """CAS `pending → executing`: quien lo gana es el único que ejecuta la L3. None si
+    la aprobación ya no estaba pendiente (otro operador, un doble clic o un rechazo)."""
     row = await conn.fetchrow(
         """
         UPDATE pending_approvals
-           SET status         = $3,
-               reviewed_by    = $4,
-               reviewed_at    = NOW(),
-               review_comment = $5,
-               updated_at     = NOW()
-         WHERE tenant_id = $1
-           AND id = $2
-           AND status = 'pending'
-           AND deleted_at IS NULL
+           SET status = 'executing', reviewed_by = $3, reviewed_at = NOW(),
+               review_comment = $4, updated_at = NOW()
+         WHERE tenant_id = $1 AND id = $2 AND status = 'pending' AND deleted_at IS NULL
+        RETURNING id, tenant_id, conversation_id, skill_slug, skill_tier,
+                  inputs_raw, inputs_redacted, aop_slug, aop_version,
+                  langfuse_trace_id, status, reviewed_by, reviewed_at,
+                  review_comment, created_at
+        """,
+        tenant_id,
+        approval_id,
+        reviewed_by,
+        review_comment,
+    )
+    return PendingApproval(**dict(row)) if row else None
+
+
+async def reject_pending_approval(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    approval_id: UUID,
+    reviewed_by: UUID,
+    review_comment: str | None,
+) -> PendingApproval | None:
+    """CAS `pending → rejected`. None si ya no estaba pendiente (p. ej. se está ejecutando)."""
+    row = await conn.fetchrow(
+        """
+        UPDATE pending_approvals
+           SET status = 'rejected', reviewed_by = $3, reviewed_at = NOW(),
+               review_comment = $4, updated_at = NOW()
+         WHERE tenant_id = $1 AND id = $2 AND status = 'pending' AND deleted_at IS NULL
+        RETURNING id, tenant_id, conversation_id, skill_slug, skill_tier,
+                  inputs_raw, inputs_redacted, aop_slug, aop_version,
+                  langfuse_trace_id, status, reviewed_by, reviewed_at,
+                  review_comment, created_at
+        """,
+        tenant_id,
+        approval_id,
+        reviewed_by,
+        review_comment,
+    )
+    return PendingApproval(**dict(row)) if row else None
+
+
+async def settle_executing_approval(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    approval_id: UUID,
+    new_status: Literal["approved", "failed", "pending"],
+) -> PendingApproval | None:
+    """CAS desde `executing` al resultado de la ejecución. None si otro (la recuperación
+    de colgadas o una petición lenta) ya la cerró. Volver a `pending` borra la revisión:
+    consta que no se aplicó y el operador decide otra vez."""
+    row = await conn.fetchrow(
+        """
+        UPDATE pending_approvals
+           SET status = $3,
+               reviewed_by    = CASE WHEN $3 = 'pending' THEN NULL ELSE reviewed_by END,
+               reviewed_at    = CASE WHEN $3 = 'pending' THEN NULL ELSE reviewed_at END,
+               review_comment = CASE WHEN $3 = 'pending' THEN NULL ELSE review_comment END,
+               updated_at = NOW()
+         WHERE tenant_id = $1 AND id = $2 AND status = 'executing' AND deleted_at IS NULL
         RETURNING id, tenant_id, conversation_id, skill_slug, skill_tier,
                   inputs_raw, inputs_redacted, aop_slug, aop_version,
                   langfuse_trace_id, status, reviewed_by, reviewed_at,
@@ -2933,10 +2988,32 @@ async def resolve_pending_approval(
         tenant_id,
         approval_id,
         new_status,
-        reviewed_by,
-        review_comment,
     )
     return PendingApproval(**dict(row)) if row else None
+
+
+async def list_stale_executing_approvals(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    started_before: datetime,
+) -> list[PendingApproval]:
+    """`executing` que empezaron antes de `started_before`: su proceso murió."""
+    rows = await conn.fetch(
+        """
+        SELECT id, tenant_id, conversation_id, skill_slug, skill_tier,
+               inputs_raw, inputs_redacted, aop_slug, aop_version,
+               langfuse_trace_id, status, reviewed_by, reviewed_at,
+               review_comment, created_at
+          FROM pending_approvals
+         WHERE tenant_id = $1 AND status = 'executing' AND reviewed_at < $2
+           AND deleted_at IS NULL
+         ORDER BY reviewed_at
+        """,
+        tenant_id,
+        started_before,
+    )
+    return [PendingApproval(**dict(r)) for r in rows]
 
 
 # ============================================================

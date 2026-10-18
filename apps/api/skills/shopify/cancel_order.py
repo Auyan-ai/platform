@@ -14,12 +14,20 @@ from __future__ import annotations
 from typing import Any
 
 from apps.api.integrations.shopify import RefundMode, ShopifyAdapter
-from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
+from apps.api.skills.base import (
+    ReconcileUnknown,
+    Skill,
+    SkillContext,
+    SkillInput,
+    SkillOutput,
+    SkillTier,
+)
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._order_guard import (
     ActionOutcome,
     cancellation_verdict,
     ensure_order_changeable,
+    refund_transactions_verdict,
 )
 from pydantic import computed_field
 
@@ -103,6 +111,29 @@ class CancelOrder(Skill):
         return CancelOrderOutput(
             order_id=after.order_id,
             cancelled=after.cancelled,
+            outcome=verdict.outcome,
+            detail=verdict.detail,
+            refund_mode=route.mode,
+            refund_gateway=route.gateway,
+        )
+
+    async def reconcile(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput | None:
+        """`orderCancel` no admite clave de idempotencia: consta aplicada si el pedido
+        figura cancelado. El reembolso se juzga por todas las transacciones de reembolso
+        del pedido, porque no queda la foto de antes de cancelar."""
+        assert isinstance(inputs, CancelOrderInput)
+        if not ctx.integration_ctx:
+            raise ReconcileUnknown("shopify_not_configured")
+        snapshot = await ShopifyAdapter().get_order_snapshot(ctx.integration_ctx, inputs.order_id)
+        if not snapshot.cancelled:
+            return None
+        route = snapshot.refund_route
+        verdict = refund_transactions_verdict(
+            route, tuple(t for t in snapshot.transactions if t.kind == "refund")
+        )
+        return CancelOrderOutput(
+            order_id=snapshot.order_id,
+            cancelled=True,
             outcome=verdict.outcome,
             detail=verdict.detail,
             refund_mode=route.mode,

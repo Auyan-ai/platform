@@ -272,7 +272,9 @@ class TenantToolPermission(_BaseModel):
 
 # ─── Pending Approvals (Sprint 10) ───────────────────────────────────────────
 
-PendingApprovalStatus = Literal["pending", "approved", "rejected"]
+# pending → executing → approved | failed | pending, y pending → rejected (#376). Las
+# transiciones las hacen los CAS de `db/queries.py`; ver la migración 20261018000003.
+PendingApprovalStatus = Literal["pending", "executing", "approved", "rejected", "failed"]
 
 
 class PendingApproval(_BaseModel):

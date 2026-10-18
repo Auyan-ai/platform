@@ -63,6 +63,7 @@ from apps.api.routers.webhooks_gorgias import router as webhooks_gorgias_router
 from apps.api.routers.webhooks_zendesk import router as webhooks_zendesk_router
 from apps.api.routers.webhooks_zernio import router as webhooks_zernio_router
 from apps.api.services.aop_listener import AopCacheListener
+from apps.api.services.approval_execution import recover_stale_executions
 from apps.api.services.audit import AuditLogger
 from apps.api.services.cleanup import run_abandoned_cleanup
 from apps.api.services.email_sender import EmailSender
@@ -79,7 +80,8 @@ logger = logging.getLogger(__name__)
 
 
 async def _cleanup_loop(interval_seconds: int) -> None:
-    """Corre `run_abandoned_cleanup` cada `interval_seconds`. Se cancela en shutdown."""
+    """Cada `interval_seconds` corre `run_abandoned_cleanup` y reconcilia las aprobaciones
+    L3 colgadas en `executing` (#376). Se cancela en shutdown."""
     while True:
         try:
             await asyncio.sleep(interval_seconds)
@@ -90,6 +92,14 @@ async def _cleanup_loop(interval_seconds: int) -> None:
             break
         except Exception:
             logger.exception("cleanup_job_error")
+        try:
+            recovered = await recover_stale_executions()
+            if recovered:
+                logger.warning("approval_executions_recovered count=%d", recovered)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("approval_recovery_job_error")
 
 
 @asynccontextmanager

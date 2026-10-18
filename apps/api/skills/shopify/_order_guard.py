@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
 
-from apps.api.integrations.shopify import OrderSnapshot, RefundRoute
+from apps.api.integrations.shopify import OrderSnapshot, RefundRoute, SnapshotTransaction
 from apps.api.services.fixed_texts import fixed_text
 from apps.api.skills.base import SkillContext, SkillRefusal
 
@@ -89,9 +89,15 @@ def refund_verdict(route: RefundRoute, before: OrderSnapshot, after: OrderSnapsh
     Con pasarela manual Shopify marca el REFUND como SUCCESS sin mover dinero (visto
     en Marea), así que su estado no dice nada: devuelve la tienda.
     """
+    return refund_transactions_verdict(route, after.refunds_since(before))
+
+
+def refund_transactions_verdict(
+    route: RefundRoute, refunds: tuple[SnapshotTransaction, ...]
+) -> Verdict:
+    """Estado de un reembolso a partir de sus transacciones de tipo `refund`."""
     if route.mode == "manual":
         return Verdict(ActionOutcome.REFUND_MANUAL)
-    refunds = after.refunds_since(before)
     if not refunds:
         return Verdict(ActionOutcome.REFUND_FAILED, "refund_transaction_missing")
     failed = [t for t in refunds if t.status in ("failure", "error")]

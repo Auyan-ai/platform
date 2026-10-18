@@ -516,45 +516,94 @@ class ShopifyClient:
         *,
         amount: Decimal,
         note: str = "",
+        idempotency_key: str,
     ) -> IssuedRefund:
         """Crea un reembolso parcial en un pedido. Acción L3.
 
         Moneda y tope salen de las transacciones del pedido, no de quien llama: un
         importe por encima de lo que queda por reembolsar se rechaza sin llamar a
-        Shopify. La transacción de reembolso cuelga (`parent_id`) de la de cobro
-        (`sale`/`capture`) y usa su mismo gateway: con `parent_id` nulo el reembolso
-        de un pedido cobrado se rechaza.
+        Shopify. La transacción de reembolso cuelga (`parentId`) de la de cobro
+        (`sale`/`capture`) y usa su mismo gateway: sin padre el reembolso de un pedido
+        cobrado se rechaza.
+
+        GraphQL `refundCreate` con `@idempotent`: en 2026-04 la clave es obligatoria y,
+        durante 24 h, repetir la misma petición devuelve el reembolso original en vez de
+        crear otro. La nota lleva `refund_marker(idempotency_key)` para encontrarlo
+        después (`find_refund`), pasadas las 24 h incluso.
         """
+        order_gid = f"gid://shopify/Order/{order_id}"
         async with httpx.AsyncClient() as client:
             transactions = await self._get_transactions(client, order_id)
             balance = refundable_balance(transactions)
             balance.require(amount)
             parent = _successful(transactions, _PAYMENT_KINDS)[-1]
-            refund_tx: dict[str, Any] = {
-                "parent_id": parent["id"],
-                "amount": str(amount),
-                "kind": "refund",
-            }
-            # Pedidos creados por API (sin checkout) traen gateway vacío: no se envía.
-            if parent.get("gateway"):
-                refund_tx["gateway"] = parent["gateway"]
-            response = await client.post(
-                f"{self._base_url}/orders/{order_id}/refunds.json",
-                headers=self._headers(),
-                json={
-                    "refund": {
-                        "currency": balance.currency,
-                        "note": note,
-                        "transactions": [refund_tx],
+            refund_input = {
+                "orderId": order_gid,
+                "currency": balance.currency,
+                "note": f"{note} {refund_marker(idempotency_key)}".strip(),
+                "transactions": [
+                    {
+                        "orderId": order_gid,
+                        "parentId": f"gid://shopify/OrderTransaction/{parent['id']}",
+                        "amount": str(amount),
+                        "gateway": parent.get("gateway") or "",
+                        "kind": "REFUND",
                     }
-                },
-                timeout=15,
+                ],
+            }
+            data = await self._idempotent_graphql(
+                client,
+                _REFUND_CREATE_MUTATION,
+                {"input": refund_input, "idempotencyKey": idempotency_key},
             )
-            response.raise_for_status()
-            refund: dict[str, Any] = response.json()["refund"]
-            return IssuedRefund(
-                refund_id=refund.get("id"), amount=amount, currency=balance.currency
+        result = data["refundCreate"]
+        if result["userErrors"]:
+            raise ShopifyActionError(f"refund_create_failed: {result['userErrors']}")
+        return IssuedRefund(
+            refund_id=int(result["refund"]["legacyResourceId"]),
+            amount=amount,
+            currency=balance.currency,
+        )
+
+    async def find_refund(self, order_id: int, idempotency_key: str) -> MarkedRefund | None:
+        """El reembolso que creó `refund_partial` con esta clave, o None si no existe."""
+        marker = refund_marker(idempotency_key)
+        async with httpx.AsyncClient() as client:
+            data = await self._graphql(
+                client, _ORDER_REFUNDS_QUERY, {"id": f"gid://shopify/Order/{order_id}"}
             )
+        if data.get("order") is None:
+            raise ShopifyActionError(f"order_not_found: {order_id}")
+        for refund in data["order"]["refunds"]:
+            if marker in (refund.get("note") or ""):
+                money = refund["totalRefundedSet"]["presentmentMoney"]
+                return MarkedRefund(
+                    refund_id=int(refund["legacyResourceId"]),
+                    amount=Decimal(str(money["amount"])),
+                    currency=str(money["currencyCode"]),
+                    transactions=tuple(
+                        snapshot_transaction(t) for t in refund["transactions"]["nodes"]
+                    ),
+                )
+        return None
+
+    async def _idempotent_graphql(
+        self, client: httpx.AsyncClient, query: str, variables: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Una mutación con `@idempotent`. Ante un corte de red o un 5xx no se sabe si
+        llegó: se repite con la misma clave y Shopify devuelve el resultado original."""
+        for attempt in range(1, _IDEMPOTENT_ATTEMPTS + 1):
+            try:
+                return await self._graphql(client, query, variables)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code < 500 or attempt == _IDEMPOTENT_ATTEMPTS:
+                    raise
+            except httpx.TransportError:
+                if attempt == _IDEMPOTENT_ATTEMPTS:
+                    raise
+            logger.warning("shopify.idempotent_retry attempt=%d", attempt)
+            await asyncio.sleep(_IDEMPOTENT_RETRY_SECONDS * attempt)
+        raise AssertionError("unreachable")
 
     async def _graphql(
         self, client: httpx.AsyncClient, query: str, variables: dict[str, Any]
@@ -689,6 +738,11 @@ class IssuedRefund:
     currency: str
 
 
+def refund_marker(idempotency_key: str) -> str:
+    """Marca en la nota del reembolso (solo la ve el staff) que lo ata a su ejecución."""
+    return f"[auyan:{idempotency_key}]"
+
+
 def refundable_balance(transactions: list[dict[str, Any]]) -> RefundableBalance:
     """Cobrado menos reembolsado, a partir de las transacciones exitosas del pedido."""
     payments = _successful(transactions, _PAYMENT_KINDS)
@@ -736,6 +790,16 @@ class SnapshotTransaction:
     gateway: str | None
     manual_gateway: bool
     error_code: str | None
+
+
+@dataclass(frozen=True)
+class MarkedRefund:
+    """Un reembolso del pedido encontrado por su `refund_marker`."""
+
+    refund_id: int
+    amount: Decimal
+    currency: str
+    transactions: tuple[SnapshotTransaction, ...]
 
 
 @dataclass(frozen=True)
@@ -796,6 +860,18 @@ class OrderSnapshot:
         return tuple(t for t in self.transactions if t.kind == "refund" and t.id not in seen)
 
 
+def snapshot_transaction(t: dict[str, Any]) -> SnapshotTransaction:
+    """Una `OrderTransaction` de GraphQL. Enums de Shopify a minúsculas."""
+    return SnapshotTransaction(
+        id=str(t["id"]),
+        kind=str(t.get("kind") or "").lower(),
+        status=str(t.get("status") or "").lower(),
+        gateway=t.get("gateway") or None,
+        manual_gateway=bool(t.get("manualPaymentGateway")),
+        error_code=t.get("errorCode") or None,
+    )
+
+
 def order_snapshot_from_graphql(node: dict[str, Any]) -> OrderSnapshot:
     """Parsea el `order` de `_ORDER_SNAPSHOT_QUERY`. Enums de Shopify a minúsculas."""
     address = node.get("shippingAddress") or {}
@@ -813,17 +889,7 @@ def order_snapshot_from_graphql(node: dict[str, Any]) -> OrderSnapshot:
             )
             for f in node.get("fulfillments") or []
         ),
-        transactions=tuple(
-            SnapshotTransaction(
-                id=str(t["id"]),
-                kind=str(t.get("kind") or "").lower(),
-                status=str(t.get("status") or "").lower(),
-                gateway=t.get("gateway") or None,
-                manual_gateway=bool(t.get("manualPaymentGateway")),
-                error_code=t.get("errorCode") or None,
-            )
-            for t in node.get("transactions") or []
-        ),
+        transactions=tuple(snapshot_transaction(t) for t in node.get("transactions") or []),
         shipping_address={
             key: address.get(key) for key in ("address1", "address2", "city", "zip", "country")
         },
@@ -872,6 +938,33 @@ mutation OrderCancel(
   ) {
     job { id done }
     orderCancelUserErrors { field message code }
+  }
+}
+"""
+
+_IDEMPOTENT_ATTEMPTS = 3
+_IDEMPOTENT_RETRY_SECONDS = 1.0
+
+_REFUND_CREATE_MUTATION = """
+mutation RefundCreate($input: RefundInput!, $idempotencyKey: String!) {
+  refundCreate(input: $input) @idempotent(key: $idempotencyKey) {
+    refund { id legacyResourceId }
+    userErrors { field message }
+  }
+}
+"""
+
+_ORDER_REFUNDS_QUERY = """
+query OrderRefunds($id: ID!) {
+  order(id: $id) {
+    refunds(first: 50) {
+      legacyResourceId
+      note
+      totalRefundedSet { presentmentMoney { amount currencyCode } }
+      transactions(first: 10) {
+        nodes { id kind status gateway manualPaymentGateway errorCode }
+      }
+    }
   }
 }
 """
@@ -1105,9 +1198,18 @@ class ShopifyAdapter:
         *,
         amount: Decimal,
         note: str = "",
+        idempotency_key: str,
     ) -> IssuedRefund:
         order_id = await self._resolve_order_id(ctx, order_id)
-        return await self._client(ctx).refund_partial(order_id, amount=amount, note=note)
+        return await self._client(ctx).refund_partial(
+            order_id, amount=amount, note=note, idempotency_key=idempotency_key
+        )
+
+    async def find_refund(
+        self, ctx: IntegrationContext, order_id: int, idempotency_key: str
+    ) -> MarkedRefund | None:
+        order_id = await self._resolve_order_id(ctx, order_id)
+        return await self._client(ctx).find_refund(order_id, idempotency_key)
 
     async def start_return(
         self,

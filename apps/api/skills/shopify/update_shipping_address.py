@@ -9,11 +9,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from apps.api.integrations.shopify import ShopifyAdapter
-from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
+from apps.api.integrations.shopify import OrderSnapshot, ShopifyAdapter
+from apps.api.skills.base import (
+    ReconcileUnknown,
+    Skill,
+    SkillContext,
+    SkillInput,
+    SkillOutput,
+    SkillTier,
+)
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._order_guard import (
     ActionOutcome,
+    Verdict,
     address_verdict,
     ensure_order_changeable,
 )
@@ -51,6 +59,20 @@ class UpdateShippingAddressOutput(SkillOutput):
     @property
     def success(self) -> bool:
         return self.outcome.settled
+
+
+def _output(after: OrderSnapshot, verdict: Verdict) -> UpdateShippingAddressOutput:
+    saved = after.shipping_address
+    return UpdateShippingAddressOutput(
+        order_id=after.order_id,
+        outcome=verdict.outcome,
+        detail=verdict.detail,
+        new_address1=saved.get("address1"),
+        new_address2=saved.get("address2"),
+        new_zip=saved.get("zip"),
+        new_city=saved.get("city"),
+        new_country=saved.get("country"),
+    )
 
 
 @SkillRegistry.register
@@ -105,14 +127,18 @@ class UpdateShippingAddress(Skill):
         verdict = address_verdict(
             after, address1=inputs.address1, zip_code=inputs.zip_code, city=inputs.city
         )
-        saved = after.shipping_address
-        return UpdateShippingAddressOutput(
-            order_id=after.order_id,
-            outcome=verdict.outcome,
-            detail=verdict.detail,
-            new_address1=saved.get("address1"),
-            new_address2=saved.get("address2"),
-            new_zip=saved.get("zip"),
-            new_city=saved.get("city"),
-            new_country=saved.get("country"),
+        return _output(after, verdict)
+
+    async def reconcile(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput | None:
+        """El cambio de dirección no admite clave de idempotencia: consta aplicado si el
+        pedido ya tiene la dirección pedida."""
+        assert isinstance(inputs, UpdateShippingAddressInput)
+        if not ctx.integration_ctx:
+            raise ReconcileUnknown("shopify_not_configured")
+        after = await ShopifyAdapter().get_order_snapshot(ctx.integration_ctx, inputs.order_id)
+        verdict = address_verdict(
+            after, address1=inputs.address1, zip_code=inputs.zip_code, city=inputs.city
         )
+        if verdict.outcome is not ActionOutcome.CONFIRMED:
+            return None
+        return _output(after, verdict)
