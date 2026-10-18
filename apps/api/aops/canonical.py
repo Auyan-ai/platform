@@ -170,7 +170,6 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             "allowed_skills": [
                 "shopify.get_order_status",
                 "shopify.list_my_orders",
-                "shopify.get_shop_policies",
                 "shopify.get_product_info",
                 "shopify.start_return",
                 "shopify.start_exchange",

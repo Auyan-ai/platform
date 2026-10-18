@@ -160,6 +160,8 @@ def test_returns_leaves_window_and_eligibility_to_the_code():
         returns["frontmatter"]["allowed_skills"]
     )
     assert "los comprueba el sistema" in blob
+    # La política estructurada manda: la página de políticas de Shopify podría contradecirla.
+    assert "shopify.get_shop_policies" not in returns["frontmatter"]["allowed_skills"]
     for computed_by_code in ("delivered_at", "fulfilled_at", "created_at", "días"):
         assert computed_by_code not in blob, computed_by_code
 
