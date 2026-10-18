@@ -134,6 +134,9 @@ async def test_exchange_variants_skip_unknown_ids() -> None:
                         "id": "gid://shopify/ProductVariant/52117802090776",
                         "displayName": "Bolso Bandolera - Caqui",
                         "availableForSale": True,
+                        "inventoryPolicy": "DENY",
+                        "inventoryQuantity": 24,
+                        "inventoryItem": {"tracked": True},
                         "product": {"id": "gid://shopify/Product/10287987851544"},
                     },
                     None,
@@ -148,8 +151,8 @@ async def test_exchange_variants_skip_unknown_ids() -> None:
         "gid://shopify/ProductVariant/52117802090776",
         "gid://shopify/ProductVariant/1",
     ]
-    assert [(v.variant_id, v.product_id, v.title, v.available) for v in variants] == [
-        (52117802090776, 10287987851544, "Bolso Bandolera - Caqui", True)
+    assert [(v.variant_id, v.product_id, v.title, v.available, v.stock) for v in variants] == [
+        (52117802090776, 10287987851544, "Bolso Bandolera - Caqui", True, 24)
     ]
 
 

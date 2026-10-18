@@ -129,6 +129,8 @@ class ExchangeVariant:
     product_id: int
     title: str
     available: bool
+    # Unidades que se pueden vender si la tienda no vende sin stock; None = sin tope.
+    stock: int | None = None
 
 
 @dataclass(frozen=True)
@@ -334,7 +336,9 @@ def evaluate_return(
     by_id = {v.variant_id: v for v in variants}
     for wanted in exchange:
         variant = by_id.get(wanted.variant_id)
-        if variant is None or not variant.available:
+        stock = variant.stock if variant is not None else None
+        short = stock is not None and stock < wanted.quantity
+        if variant is None or not variant.available or short:
             return Rejected(
                 "exchange_variant_unavailable",
                 f"La variante {wanted.variant_id} no existe o no está disponible.",
@@ -399,9 +403,10 @@ def evaluate_return(
         higher_price=terms.higher_price if exchange_lines else None,
         lower_price=terms.lower_price if exchange_lines else None,
         ship_replacement=terms.ship_replacement if exchange_lines else None,
-        requires_approval=bool(terms.requires_approval)
-        if exchange_lines
-        else policy.returns_require_approval,
+        requires_approval=(
+            bool(terms.requires_approval) if exchange_lines else policy.returns_require_approval
+        )
+        or ("photo" in reason.required_evidence and policy.evidence_requires_approval),
     )
 
 
@@ -583,7 +588,6 @@ _REFUND_LABEL: dict[RefundPreference, str] = {
     "original_payment": "al método de pago original",
     "store_credit": "en crédito de la tienda",
 }
-_CENT = Decimal("0.01")
 
 
 def _price_rule(eligible: Eligible, difference: Decimal) -> PriceRule:
@@ -595,8 +599,8 @@ def _price_rule(eligible: Eligible, difference: Decimal) -> PriceRule:
 
 
 def _amount(line: CalculatedLine, *, taxes_included: bool) -> Decimal:
-    total = abs(line.subtotal) + (Decimal("0") if taxes_included else abs(line.tax))
-    return total.quantize(Decimal("0.01"))
+    # Con la precisión que da Shopify para la moneda (0, 2 o 3 decimales).
+    return abs(line.subtotal) + (Decimal("0") if taxes_included else abs(line.tax))
 
 
 def build_plan(
@@ -644,8 +648,9 @@ def build_plan(
             "variante del mismo precio o más barata.",
         )
     rule = _price_rule(eligible, difference)
+    step = Decimal(1).scaleb(min(int(returned_total.as_tuple().exponent), -2))
     restocking = (returned_total * eligible.restocking_percent / 100).quantize(
-        _CENT, rounding=ROUND_HALF_UP
+        step, rounding=ROUND_HALF_UP
     )
     settlement = Settlement(
         currency=calculation.currency,

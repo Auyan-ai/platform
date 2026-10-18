@@ -49,6 +49,7 @@ const POLICY: ReturnsPolicy = {
     ship_replacement: 'immediately',
   },
   returns_require_approval: false,
+  evidence_requires_approval: true,
 }
 
 function validForm(): PolicyForm {
@@ -74,6 +75,7 @@ describe('fromPolicy / toPayload', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(Object.keys(result.errors).sort()).toEqual([
+      'evidence_requires_approval',
       'exchanges.enabled',
       'reasons',
       'refund_days',

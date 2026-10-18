@@ -52,6 +52,7 @@ _POLICY: dict[str, Any] = {
         "ship_replacement": "after_receipt",
     },
     "returns_require_approval": True,
+    "evidence_requires_approval": True,
 }
 
 

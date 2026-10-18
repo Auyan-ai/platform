@@ -69,6 +69,7 @@ def _policy(**overrides: Any) -> ActivePolicy:
             "ship_replacement": "after_receipt",
         },
         "returns_require_approval": False,
+        "evidence_requires_approval": True,
     }
     raw.update(overrides)
     return ActivePolicy(version=5, policy=ReturnsPolicy.model_validate(raw))

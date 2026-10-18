@@ -48,6 +48,7 @@ def _policy(**overrides: Any) -> dict[str, Any]:
             "ship_replacement": "after_receipt",
         },
         "returns_require_approval": True,
+        "evidence_requires_approval": True,
     }
     base.update(overrides)
     return base
@@ -73,7 +74,7 @@ def test_a_complete_policy_parses_with_typed_values() -> None:
 def test_there_is_no_default_for_any_business_field() -> None:
     errors = _errors({"schema_version": 1})
 
-    assert len(errors) == 9
+    assert len(errors) == 10
 
 
 def test_unknown_fields_are_rejected() -> None:

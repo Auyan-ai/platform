@@ -41,6 +41,7 @@ export interface ReturnsPolicy {
     ship_replacement?: ShipReplacement | null
   }
   returns_require_approval: boolean
+  evidence_requires_approval: boolean
 }
 
 export interface ReasonRow {
@@ -75,6 +76,7 @@ export interface PolicyForm {
   lowerPrice: LowerPrice | ''
   shipReplacement: ShipReplacement | ''
   requireApproval: boolean | null
+  evidenceApproval: boolean | null
 }
 
 export type FieldErrors = Record<string, string[]>
@@ -120,6 +122,7 @@ export function emptyForm(): PolicyForm {
     lowerPrice: '',
     shipReplacement: '',
     requireApproval: null,
+    evidenceApproval: null,
   }
 }
 
@@ -171,6 +174,7 @@ export function fromPolicy(policy: ReturnsPolicy | null): PolicyForm {
     lowerPrice: policy.exchanges.lower_price ?? '',
     shipReplacement: policy.exchanges.ship_replacement ?? '',
     requireApproval: policy.returns_require_approval,
+    evidenceApproval: policy.evidence_requires_approval,
   }
 }
 
@@ -243,6 +247,7 @@ function toDraft(form: PolicyForm): unknown {
         }
       : { enabled: form.exchangesEnabled ?? undefined, kinds: [] },
     returns_require_approval: form.requireApproval ?? undefined,
+    evidence_requires_approval: form.evidenceApproval ?? undefined,
   }
 }
 
@@ -344,6 +349,10 @@ export const policySchema = z
     returns_require_approval: z.boolean({
       required_error: 'Indica si las devoluciones necesitan tu aprobación',
       invalid_type_error: 'Indica si las devoluciones necesitan tu aprobación',
+    }),
+    evidence_requires_approval: z.boolean({
+      required_error: 'Indica si las devoluciones con foto necesitan tu aprobación',
+      invalid_type_error: 'Indica si las devoluciones con foto necesitan tu aprobación',
     }),
   })
   .superRefine((policy, ctx) => {

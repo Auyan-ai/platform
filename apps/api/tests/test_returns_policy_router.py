@@ -53,6 +53,7 @@ POLICY: dict[str, Any] = {
     "excluded_product_tags": [],
     "exchanges": {"enabled": False, "kinds": []},
     "returns_require_approval": True,
+    "evidence_requires_approval": True,
 }
 
 

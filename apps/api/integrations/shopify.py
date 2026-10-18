@@ -1014,6 +1014,15 @@ def returnable_order_from_graphql(data: dict[str, Any]) -> ReturnableOrder:
     )
 
 
+def _sellable_stock(node: dict[str, Any]) -> int | None:
+    """Unidades vendibles si la tienda controla stock y no vende sin él; si no, sin tope."""
+    tracked = bool((node.get("inventoryItem") or {}).get("tracked"))
+    if node.get("inventoryPolicy") != "DENY" or not tracked:
+        return None
+    quantity = node.get("inventoryQuantity")
+    return int(quantity) if quantity is not None else None
+
+
 def exchange_variants_from_graphql(data: dict[str, Any]) -> tuple[ExchangeVariant, ...]:
     return tuple(
         ExchangeVariant(
@@ -1021,6 +1030,7 @@ def exchange_variants_from_graphql(data: dict[str, Any]) -> tuple[ExchangeVarian
             product_id=_gid_int(node["product"]["id"]),
             title=str(node.get("displayName") or node.get("title") or ""),
             available=bool(node.get("availableForSale")),
+            stock=_sellable_stock(node),
         )
         for node in data.get("nodes") or []
         if node and node.get("product")
@@ -1197,7 +1207,11 @@ query OrderReturns($id: ID!) {
 _VARIANTS_QUERY = """
 query ExchangeVariants($ids: [ID!]!) {
   nodes(ids: $ids) {
-    ... on ProductVariant { id displayName availableForSale product { id } }
+    ... on ProductVariant {
+      id displayName availableForSale inventoryPolicy inventoryQuantity
+      inventoryItem { tracked }
+      product { id }
+    }
   }
 }
 """

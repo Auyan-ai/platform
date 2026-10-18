@@ -150,6 +150,9 @@ class ReturnsPolicy(_Strict):
     excluded_product_tags: frozenset[str]
     exchanges: ExchangePolicy
     returns_require_approval: bool
+    # Una devolución o un cambio con un motivo que exige foto pasa por aprobación (alguien
+    # mira la foto antes de que la tienda pague el envío o reembolse).
+    evidence_requires_approval: bool
 
     @field_validator("excluded_product_tags")
     @classmethod

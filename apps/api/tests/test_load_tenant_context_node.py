@@ -261,6 +261,7 @@ _POLICY = {
     "excluded_product_tags": [],
     "exchanges": {"enabled": False},
     "returns_require_approval": True,
+    "evidence_requires_approval": True,
 }
 
 

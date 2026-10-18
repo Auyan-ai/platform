@@ -797,6 +797,20 @@ export function ReturnsPolicyForm({ tenantId }: { tenantId: string }) {
               />
             </div>
             <FieldError errors={errors} path="returns_require_approval" />
+          </div>
+          <div>
+            <Label>Las devoluciones y cambios con foto obligatoria necesitan mi aprobación</Label>
+            <p className="mt-0.5 text-xs text-foreground-muted">
+              Alguien de tu equipo mira la foto antes de que la tienda pague el envío o reembolse.
+            </p>
+            <div className="mt-2">
+              <YesNo
+                name="rp-evidence-approval"
+                value={form.evidenceApproval}
+                onChange={(evidenceApproval) => patch({ evidenceApproval })}
+              />
+            </div>
+            <FieldError errors={errors} path="evidence_requires_approval" />
             <p className="mt-1.5 text-xs text-foreground-muted">
               Si eliges que no, Auyan mantiene la aprobación hasta activar contigo la autonomía de
               esta acción para tu tienda. Lo mismo vale para los cambios.

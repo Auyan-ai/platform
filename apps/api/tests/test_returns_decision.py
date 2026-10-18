@@ -71,6 +71,7 @@ def _policy(**overrides: Any) -> ActivePolicy:
             "ship_replacement": "after_receipt",
         },
         "returns_require_approval": False,
+        "evidence_requires_approval": True,
     }
     raw.update(overrides)
     return ActivePolicy(version=7, policy=ReturnsPolicy.model_validate(raw))
@@ -632,3 +633,67 @@ def test_an_exchange_gives_back_at_most_the_returned_units() -> None:
 
     assert isinstance(five, Rejected) and five.code == "exchange_quantity_exceeds_returned"
     assert isinstance(twice, Rejected) and twice.code == "exchange_variant_repeated"
+
+
+def test_the_store_decides_if_a_return_with_photo_needs_approval() -> None:
+    photo = Evidence(photos=(PHOTO,), readable=True)
+    reviewed = _evaluate(
+        _policy(evidence_requires_approval=True), reason="defective", evidence=photo
+    )
+    trusted = _evaluate(
+        _policy(evidence_requires_approval=False), reason="defective", evidence=photo
+    )
+
+    assert isinstance(reviewed, Eligible) and reviewed.requires_approval is True
+    assert isinstance(trusted, Eligible) and trusted.requires_approval is False
+
+
+def test_an_exchange_needs_stock_for_every_unit_when_the_store_does_not_oversell() -> None:
+    low = ExchangeVariant(variant_id=88, product_id=77, title="Blusa - M", available=True, stock=1)
+    order = _order(_line(returnable_quantity=2))
+    two = (RequestedExchange(variant_id=88, quantity=2),)
+    items = (RequestedItem(line_item_id=501, quantity=2),)
+
+    short = _evaluate(_exchange_policy(), order, items=items, exchange=two, variants=(low,))
+    oversell = _evaluate(
+        _exchange_policy(),
+        order,
+        items=items,
+        exchange=two,
+        variants=(
+            ExchangeVariant(
+                variant_id=88, product_id=77, title="Blusa - M", available=True, stock=None
+            ),
+        ),
+    )
+
+    assert isinstance(short, Rejected) and short.code == "exchange_variant_unavailable"
+    assert isinstance(oversell, Eligible)
+
+
+def test_three_decimal_currencies_keep_their_precision() -> None:
+    eligible = _evaluate(
+        _policy(restocking_fee_percent={"store_fault": "0", "customer_fault": "10"}),
+        order=_order(currency="KWD", taxes_included=True),
+    )
+    assert isinstance(eligible, Eligible)
+
+    plan = _built(
+        eligible,
+        ReturnCalculation(
+            currency="KWD",
+            returned=(
+                CalculatedLine(
+                    key="gid://shopify/FulfillmentLineItem/9001",
+                    quantity=1,
+                    subtotal=Decimal("-12.345"),
+                    tax=Decimal("0"),
+                ),
+            ),
+            exchanged=(),
+        ),
+        requested_at=NOW,
+    )
+
+    assert plan.settlement.returned_total == Decimal("12.345")
+    assert plan.settlement.restocking_fee == Decimal("1.235")
