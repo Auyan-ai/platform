@@ -46,9 +46,7 @@ def mocks(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
                 duplicate=False, conversation_id=CONVERSATION_ID, job_id=JOB_ID
             )
         ),
-        "handle_zernio_status_event": AsyncMock(
-            return_value={"received": True, "processed": True}
-        ),
+        "handle_zernio_status_event": AsyncMock(return_value={"received": True, "processed": True}),
     }
     for name, mock in m.items():
         monkeypatch.setattr(f"{MODULE}.{name}", mock)

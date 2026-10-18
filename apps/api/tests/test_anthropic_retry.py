@@ -68,9 +68,7 @@ async def test_retries_on_connection_error_and_succeeds() -> None:
     """Falla dos veces, tercera vez OK → debe reintentar y devolver la buena."""
     client = MagicMock()
     fake_resp = _fake_response()
-    client.messages.create = AsyncMock(
-        side_effect=[_conn_error(), _conn_error(), fake_resp]
-    )
+    client.messages.create = AsyncMock(side_effect=[_conn_error(), _conn_error(), fake_resp])
 
     result = await call_claude_with_tools(
         client=client,

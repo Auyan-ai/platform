@@ -10,21 +10,27 @@ from apps.api.simulator.runner import _compute_status
 
 class TestComputeStatus:
     def test_no_judge_mode_uses_assertions_only(self) -> None:
-        assert _compute_status(
-            all_critical_passed=True,
-            passed=3,
-            total=3,
-            judge_verdict=None,
-            judge_required=False,
-        ) == "passed"
+        assert (
+            _compute_status(
+                all_critical_passed=True,
+                passed=3,
+                total=3,
+                judge_verdict=None,
+                judge_required=False,
+            )
+            == "passed"
+        )
 
     def test_missing_required_judge_is_errored(self) -> None:
-        assert _compute_status(
-            all_critical_passed=True,
-            passed=3,
-            total=3,
-            judge_verdict=None,
-        ) == "errored"
+        assert (
+            _compute_status(
+                all_critical_passed=True,
+                passed=3,
+                total=3,
+                judge_verdict=None,
+            )
+            == "errored"
+        )
 
 
 class TestRunnerEvidenceHelpers:
@@ -128,8 +134,14 @@ async def test_each_agent_turn_leaves_exactly_one_outbound_message(monkeypatch: 
 
     def customer(message: str) -> Any:
         return SimpleNamespace(
-            message=message, goal_achieved=False, give_up=False, internal_reasoning="",
-            input_tokens=1, output_tokens=1, cost_usd=0.0, usage=None,
+            message=message,
+            goal_achieved=False,
+            give_up=False,
+            internal_reasoning="",
+            input_tokens=1,
+            output_tokens=1,
+            cost_usd=0.0,
+            usage=None,
         )
 
     class Customer:
@@ -148,7 +160,9 @@ async def test_each_agent_turn_leaves_exactly_one_outbound_message(monkeypatch: 
     monkeypatch.setattr(runner, "UserSimulator", Customer)
     scenario: Any = SimpleNamespace(mock_fixtures={}, max_turns=4, aop_slug="order_status")
     acc = runner._RunAccumulator(
-        run_id=uuid4(), conversation_id=uuid4(), end_customer_id=uuid4(),
+        run_id=uuid4(),
+        conversation_id=uuid4(),
+        end_customer_id=uuid4(),
         transcript=SimulatorTranscript(scenario=scenario, profile_name="sim"),
     )
 

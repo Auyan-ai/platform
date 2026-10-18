@@ -91,7 +91,9 @@ def test_filter_caps_at_max():
 def test_filter_escalated_first():
     resolved = [_conv("resolved") for _ in range(10)]
     escalated = [_conv("escalated") for _ in range(5)]
-    result = filter_candidates(resolved + escalated, set(), max_conversations=20, sample_threshold=256)
+    result = filter_candidates(
+        resolved + escalated, set(), max_conversations=20, sample_threshold=256
+    )
     # Las primeras 5 deben ser escalated
     assert all(c.status == "escalated" for c in result[:5])
 

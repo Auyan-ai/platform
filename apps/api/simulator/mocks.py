@@ -104,9 +104,7 @@ class MockShopifyAdapter:
             raise MockShopifyError(data["_error"])
         return data
 
-    def _listed_order(
-        self, matches: Callable[[dict[str, Any]], bool]
-    ) -> dict[str, Any] | None:
+    def _listed_order(self, matches: Callable[[dict[str, Any]], bool]) -> dict[str, Any] | None:
         for method in _ORDER_LIST_METHODS:
             orders = self.fixtures.get(method)
             if not isinstance(orders, list):
@@ -136,9 +134,7 @@ class MockShopifyAdapter:
 
     # ── Métodos extendidos usados por las skills ───────────────────────────────
 
-    async def get_order_by_name(
-        self, ctx: Any, order_name: str
-    ) -> dict[str, Any] | None:
+    async def get_order_by_name(self, ctx: Any, order_name: str) -> dict[str, Any] | None:
         if "get_order_by_name" in self.fixtures:
             return self._resolve("get_order_by_name", None)
         wanted = _order_number(order_name)
@@ -162,14 +158,10 @@ class MockShopifyAdapter:
     async def get_policies(self, ctx: Any) -> list[dict[str, Any]]:
         return self._resolve("get_policies", [])
 
-    async def add_order_note(
-        self, ctx: Any, order_id: int, note: str
-    ) -> dict[str, Any]:
+    async def add_order_note(self, ctx: Any, order_id: int, note: str) -> dict[str, Any]:
         return self._resolve("add_order_note", dict(_WRITE_DEFAULT))
 
-    async def tag_order(
-        self, ctx: Any, order_id: int, tags_to_add: list[str]
-    ) -> dict[str, Any]:
+    async def tag_order(self, ctx: Any, order_id: int, tags_to_add: list[str]) -> dict[str, Any]:
         return self._resolve("tag_order", dict(_WRITE_DEFAULT))
 
     async def cancel_order(

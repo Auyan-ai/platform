@@ -247,7 +247,9 @@ async def test_playbook_and_facts_none_when_not_configured(fake_deps, monkeypatc
 _POLICY = {
     "schema_version": 1,
     "window": {"days": 30, "starts_at": "delivery"},
-    "reasons": [{"code": "too_small", "label": "Pequeña", "fault": "customer"}],
+    "reasons": [
+        {"code": "too_small", "label": "Pequeña", "fault": "customer", "required_evidence": []}
+    ],
     "shipping": {
         "method": "customer_ships",
         "return_address": "Calle Mayor 1, Madrid",

@@ -121,10 +121,14 @@ def good_aop_ce():
 @pytest.fixture
 def good_compiled_ce(good_aop_ce):
     """CompiledAOP de un buen AOP de order_status."""
-    with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry(
-        ["shopify.list_my_orders", "shopify.get_order_status"]
-    ).side_effect):
+    with patch(
+        "apps.api.aops.compiler.SkillRegistry.get",
+        side_effect=_mock_registry(
+            ["shopify.list_my_orders", "shopify.get_order_status"]
+        ).side_effect,
+    ):
         from apps.api.aops.compiler import compile_aop
+
         return compile_aop(good_aop_ce, make_tenant_configuration())
 
 
@@ -145,7 +149,9 @@ class TestPromptContainsAssertion:
         assert result.passed
 
     def test_fails_when_phrase_missing(self, good_aop_ce, good_compiled_ce):
-        result = _check_assertion("prompt_contains", ["frase_que_no_existe_xyz"], good_aop_ce, good_compiled_ce, None)
+        result = _check_assertion(
+            "prompt_contains", ["frase_que_no_existe_xyz"], good_aop_ce, good_compiled_ce, None
+        )
         assert not result.passed
         assert "frase_que_no_existe_xyz" in result.message
 
@@ -156,11 +162,15 @@ class TestPromptContainsAssertion:
 
 class TestPromptNotContainsAssertion:
     def test_passes_when_absent(self, good_aop_ce, good_compiled_ce):
-        result = _check_assertion("prompt_not_contains", ["frase_inexistente_zzz"], good_aop_ce, good_compiled_ce, None)
+        result = _check_assertion(
+            "prompt_not_contains", ["frase_inexistente_zzz"], good_aop_ce, good_compiled_ce, None
+        )
         assert result.passed
 
     def test_fails_when_present(self, good_aop_ce, good_compiled_ce):
-        result = _check_assertion("prompt_not_contains", ["Consulta de Envío"], good_aop_ce, good_compiled_ce, None)
+        result = _check_assertion(
+            "prompt_not_contains", ["Consulta de Envío"], good_aop_ce, good_compiled_ce, None
+        )
         assert not result.passed
 
 
@@ -179,7 +189,9 @@ class TestSkillsIncludeAssertion:
         result = _check_assertion(
             "skills_include",
             ["shopify.list_my_orders", "shopify.get_order_status"],
-            good_aop_ce, good_compiled_ce, None
+            good_aop_ce,
+            good_compiled_ce,
+            None,
         )
         assert result.passed
 
@@ -200,9 +212,7 @@ class TestSkillsNotIncludeAssertion:
 
     def test_fails_when_present(self, good_aop_ce, good_compiled_ce):
         result = _check_assertion(
-            "skills_not_include",
-            ["shopify.list_my_orders"],
-            good_aop_ce, good_compiled_ce, None
+            "skills_not_include", ["shopify.list_my_orders"], good_aop_ce, good_compiled_ce, None
         )
         assert not result.passed
 
@@ -219,46 +229,65 @@ class TestMaxIterationsGteAssertion:
 
 class TestConfidenceThresholdBetweenAssertion:
     def test_passes_in_range(self, good_aop_ce, good_compiled_ce):
-        result = _check_assertion("confidence_threshold_between", [0.0, 1.0], good_aop_ce, good_compiled_ce, None)
+        result = _check_assertion(
+            "confidence_threshold_between", [0.0, 1.0], good_aop_ce, good_compiled_ce, None
+        )
         assert result.passed
 
     def test_fails_below_range(self, good_aop_ce, good_compiled_ce):
-        result = _check_assertion("confidence_threshold_between", [0.9, 1.0], good_aop_ce, good_compiled_ce, None)
+        result = _check_assertion(
+            "confidence_threshold_between", [0.9, 1.0], good_aop_ce, good_compiled_ce, None
+        )
         assert not result.passed
 
 
 class TestToolCountMatchesSkillsAssertion:
     def test_passes_when_equal(self, good_aop_ce, good_compiled_ce):
-        result = _check_assertion("tool_count_matches_skills", None, good_aop_ce, good_compiled_ce, None)
+        result = _check_assertion(
+            "tool_count_matches_skills", None, good_aop_ce, good_compiled_ce, None
+        )
         assert result.passed
 
     def test_fails_when_unregistered_skill(self, good_aop_ce):
         aop_with_unknown = _make_aop(
-            {**GOOD_CE_FRONTMATTER, "allowed_skills": ["shopify.list_my_orders", "skill.no_registrada"]},
+            {
+                **GOOD_CE_FRONTMATTER,
+                "allowed_skills": ["shopify.list_my_orders", "skill.no_registrada"],
+            },
             GOOD_CE_BODY,
         )
-        with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry(
-            ["shopify.list_my_orders"]
-        ).side_effect):
+        with patch(
+            "apps.api.aops.compiler.SkillRegistry.get",
+            side_effect=_mock_registry(["shopify.list_my_orders"]).side_effect,
+        ):
             from apps.api.aops.compiler import compile_aop
+
             compiled = compile_aop(aop_with_unknown, make_tenant_configuration())
-        result = _check_assertion("tool_count_matches_skills", None, aop_with_unknown, compiled, None)
+        result = _check_assertion(
+            "tool_count_matches_skills", None, aop_with_unknown, compiled, None
+        )
         assert not result.passed
 
 
 class TestFrontmatterHasKeyAssertion:
     def test_passes_when_key_exists(self, good_aop_ce, good_compiled_ce):
-        result = _check_assertion("frontmatter_has_key", "slug", good_aop_ce, good_compiled_ce, None)
+        result = _check_assertion(
+            "frontmatter_has_key", "slug", good_aop_ce, good_compiled_ce, None
+        )
         assert result.passed
 
     def test_fails_when_key_missing(self, good_aop_ce, good_compiled_ce):
-        result = _check_assertion("frontmatter_has_key", "clave_inexistente", good_aop_ce, good_compiled_ce, None)
+        result = _check_assertion(
+            "frontmatter_has_key", "clave_inexistente", good_aop_ce, good_compiled_ce, None
+        )
         assert not result.passed
 
 
 class TestUnknownAssertionKind:
     def test_unknown_kind_returns_failed(self, good_aop_ce, good_compiled_ce):
-        result = _check_assertion("assertion_inexistente", None, good_aop_ce, good_compiled_ce, None)
+        result = _check_assertion(
+            "assertion_inexistente", None, good_aop_ce, good_compiled_ce, None
+        )
         assert not result.passed
         assert "desconocido" in result.message
 
@@ -272,9 +301,12 @@ def test_run_fixture_all_pass():
         name="test",
         assertions=[Assertion(kind="frontmatter_has_key", expected="slug")],
     )
-    with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry(
-        ["shopify.list_my_orders", "shopify.get_order_status"]
-    ).side_effect):
+    with patch(
+        "apps.api.aops.compiler.SkillRegistry.get",
+        side_effect=_mock_registry(
+            ["shopify.list_my_orders", "shopify.get_order_status"]
+        ).side_effect,
+    ):
         result = run_fixture(aop, make_tenant_configuration(), fixture)
     assert result.passed
     assert result.fixture_name == "test"
@@ -289,9 +321,12 @@ def test_run_fixture_one_fail():
             Assertion(kind="frontmatter_has_key", expected="clave_que_no_existe"),
         ],
     )
-    with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry(
-        ["shopify.list_my_orders", "shopify.get_order_status"]
-    ).side_effect):
+    with patch(
+        "apps.api.aops.compiler.SkillRegistry.get",
+        side_effect=_mock_registry(
+            ["shopify.list_my_orders", "shopify.get_order_status"]
+        ).side_effect,
+    ):
         result = run_fixture(aop, make_tenant_configuration(), fixture)
     assert not result.passed
     assert result.assertion_results[0].passed
@@ -311,9 +346,12 @@ def test_run_eval_no_fixtures_returns_not_meets_gate():
 
 def test_run_eval_good_aop_passes_gate():
     aop = _make_aop(GOOD_CE_FRONTMATTER, GOOD_CE_BODY)
-    with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry(
-        ["shopify.list_my_orders", "shopify.get_order_status"]
-    ).side_effect):
+    with patch(
+        "apps.api.aops.compiler.SkillRegistry.get",
+        side_effect=_mock_registry(
+            ["shopify.list_my_orders", "shopify.get_order_status"]
+        ).side_effect,
+    ):
         result = run_eval(aop, make_tenant_configuration())
     assert result.total_fixtures == 8
     assert result.meets_gate
@@ -329,7 +367,9 @@ def test_run_eval_bad_aop_fails_gate():
         "confidence_threshold": 0.70,
     }
     aop = _make_aop(bad_frontmatter, "body")
-    with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry([]).side_effect):
+    with patch(
+        "apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry([]).side_effect
+    ):
         result = run_eval(aop, make_tenant_configuration())
     assert result.total_fixtures == 8
     assert not result.meets_gate
@@ -338,7 +378,9 @@ def test_run_eval_bad_aop_fails_gate():
 
 def test_run_eval_default_good_aop_passes():
     aop = _make_aop(GOOD_DEFAULT_FRONTMATTER, GOOD_DEFAULT_BODY)
-    with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry([]).side_effect):
+    with patch(
+        "apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry([]).side_effect
+    ):
         result = run_eval(aop, make_tenant_configuration())
     assert result.total_fixtures == 5
     assert result.meets_gate
@@ -346,7 +388,9 @@ def test_run_eval_default_good_aop_passes():
 
 def test_run_eval_uses_default_tenant_config_when_none():
     aop = _make_aop(GOOD_DEFAULT_FRONTMATTER, GOOD_DEFAULT_BODY)
-    with patch("apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry([]).side_effect):
+    with patch(
+        "apps.api.aops.compiler.SkillRegistry.get", side_effect=_mock_registry([]).side_effect
+    ):
         result = run_eval(aop)  # sin tenant_config
     assert result.total_fixtures == 5
 

@@ -116,10 +116,26 @@ def _base_state(**overrides: Any) -> dict[str, Any]:
         "tool_results": [],
         # Permisos por defecto para las skills dummy de prueba
         "tool_permissions": {
-            "test.echo": {"is_enabled": True, "human_approval_required": False, "threshold_override": None},
-            "test.boom": {"is_enabled": True, "human_approval_required": False, "threshold_override": None},
-            "test.probe": {"is_enabled": True, "human_approval_required": False, "threshold_override": None},
-            "test.l2_dummy": {"is_enabled": True, "human_approval_required": False, "threshold_override": None},
+            "test.echo": {
+                "is_enabled": True,
+                "human_approval_required": False,
+                "threshold_override": None,
+            },
+            "test.boom": {
+                "is_enabled": True,
+                "human_approval_required": False,
+                "threshold_override": None,
+            },
+            "test.probe": {
+                "is_enabled": True,
+                "human_approval_required": False,
+                "threshold_override": None,
+            },
+            "test.l2_dummy": {
+                "is_enabled": True,
+                "human_approval_required": False,
+                "threshold_override": None,
+            },
         },
     }
     base.update(overrides)
@@ -142,9 +158,7 @@ def _pending(slug: str = "test.echo", **kwargs: Any) -> dict[str, Any]:
 
 
 class TestHappyPath:
-    async def test_executes_skill_and_appends_result(
-        self, deps: AgentDependencies
-    ) -> None:
+    async def test_executes_skill_and_appends_result(self, deps: AgentDependencies) -> None:
         node = make_execute_skill_node(deps)
         state = _base_state(pending_tool_call=_pending())
         result = await node(state)
@@ -171,11 +185,16 @@ class TestHappyPath:
         result = await node(state)
         assert result["tool_iterations"] == 4
 
-    async def test_appends_to_existing_results(
-        self, deps: AgentDependencies
-    ) -> None:
+    async def test_appends_to_existing_results(self, deps: AgentDependencies) -> None:
         node = make_execute_skill_node(deps)
-        prior = {"id": "toolu_prev", "slug": "test.echo", "input": {}, "output": {}, "is_error": False, "error": None}
+        prior = {
+            "id": "toolu_prev",
+            "slug": "test.echo",
+            "input": {},
+            "output": {},
+            "is_error": False,
+            "error": None,
+        }
         state = _base_state(pending_tool_call=_pending(), tool_results=[prior])
         result = await node(state)
         assert len(result["tool_results"]) == 2
@@ -189,9 +208,7 @@ class TestHappyPath:
 
 
 class TestSkillNotAllowed:
-    async def test_empty_allowed_skills_rejects_all(
-        self, deps: AgentDependencies
-    ) -> None:
+    async def test_empty_allowed_skills_rejects_all(self, deps: AgentDependencies) -> None:
         node = make_execute_skill_node(deps)
         state = _base_state(pending_tool_call=_pending(), allowed_skills=[])
         result = await node(state)
@@ -210,9 +227,7 @@ class TestSkillNotAllowed:
         assert entry["is_error"] is True
         assert "skill_not_allowed: test.echo" in entry["error"]
 
-    async def test_increments_iterations_even_on_rejection(
-        self, deps: AgentDependencies
-    ) -> None:
+    async def test_increments_iterations_even_on_rejection(self, deps: AgentDependencies) -> None:
         node = make_execute_skill_node(deps)
         state = _base_state(pending_tool_call=_pending(), allowed_skills=[])
         result = await node(state)
@@ -220,9 +235,7 @@ class TestSkillNotAllowed:
 
 
 class TestUnknownSkill:
-    async def test_unknown_slug_returns_error_entry(
-        self, deps: AgentDependencies
-    ) -> None:
+    async def test_unknown_slug_returns_error_entry(self, deps: AgentDependencies) -> None:
         node = make_execute_skill_node(deps)
         state = _base_state(
             pending_tool_call=_pending("test.nonexistent"),
@@ -245,9 +258,7 @@ class TestInvalidInput:
         assert entry["is_error"] is True
         assert "invalid_input" in entry["error"]
 
-    async def test_wrong_type_returns_error_entry(
-        self, deps: AgentDependencies
-    ) -> None:
+    async def test_wrong_type_returns_error_entry(self, deps: AgentDependencies) -> None:
         node = make_execute_skill_node(deps)
         state = _base_state(pending_tool_call=_pending(input={"text": 123}))
         result = await node(state)
@@ -258,9 +269,7 @@ class TestInvalidInput:
 
 
 class TestSkillExecutionFails:
-    async def test_skill_raising_is_captured_as_error_entry(
-        self, deps: AgentDependencies
-    ) -> None:
+    async def test_skill_raising_is_captured_as_error_entry(self, deps: AgentDependencies) -> None:
         node = make_execute_skill_node(deps)
         state = _base_state(pending_tool_call=_pending("test.boom"))
         result = await node(state)
@@ -364,9 +373,7 @@ class TestUnexpectedErrors:
 
 
 class TestSkillContextPropagation:
-    async def test_context_reaches_skill_with_creds(
-        self, deps: AgentDependencies
-    ) -> None:
+    async def test_context_reaches_skill_with_creds(self, deps: AgentDependencies) -> None:
         captured: dict[str, Any] = {}
 
         class ProbeInput(SkillInput):
@@ -383,9 +390,7 @@ class TestSkillContextPropagation:
             output_schema = ProbeOutput
             default_threshold = 0.70
 
-            async def execute(
-                self, ctx: SkillContext, inputs: SkillInput
-            ) -> SkillOutput:
+            async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
                 captured["ctx"] = ctx
                 return ProbeOutput(ok=True)
 
@@ -546,9 +551,11 @@ class TestPermissionGate:
         import unittest.mock as mock
 
         mock_scope = mock.MagicMock()
-        mock_scope.__aenter__ = mock.AsyncMock(return_value=mock.AsyncMock(
-            fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}),
-        ))
+        mock_scope.__aenter__ = mock.AsyncMock(
+            return_value=mock.AsyncMock(
+                fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}),
+            )
+        )
         mock_scope.__aexit__ = mock.AsyncMock(return_value=False)
         monkeypatch.setattr(
             "apps.api.agents.nodes.execute_skill.tenant_scope", lambda *a, **kw: mock_scope
@@ -560,9 +567,7 @@ class TestPermissionGate:
             "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
             mock.AsyncMock(return_value=None),
         )
-        monkeypatch.setattr(
-            "apps.api.agents.nodes.execute_skill.redact_inputs", lambda i, s: i
-        )
+        monkeypatch.setattr("apps.api.agents.nodes.execute_skill.redact_inputs", lambda i, s: i)
 
         node = make_execute_skill_node(deps)
         state = _base_state(
@@ -588,9 +593,11 @@ class TestPermissionGate:
         import unittest.mock as mock
 
         mock_scope = mock.MagicMock()
-        mock_scope.__aenter__ = mock.AsyncMock(return_value=mock.AsyncMock(
-            fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}),
-        ))
+        mock_scope.__aenter__ = mock.AsyncMock(
+            return_value=mock.AsyncMock(
+                fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}),
+            )
+        )
         mock_scope.__aexit__ = mock.AsyncMock(return_value=False)
         monkeypatch.setattr(
             "apps.api.agents.nodes.execute_skill.tenant_scope", lambda *a, **kw: mock_scope
@@ -603,9 +610,7 @@ class TestPermissionGate:
             "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
             mock.AsyncMock(return_value=None),
         )
-        monkeypatch.setattr(
-            "apps.api.agents.nodes.execute_skill.redact_inputs", lambda i, s: i
-        )
+        monkeypatch.setattr("apps.api.agents.nodes.execute_skill.redact_inputs", lambda i, s: i)
 
         node = make_execute_skill_node(deps)
         state = _base_state(
@@ -669,9 +674,11 @@ class TestL3HumanApprovalGate:
 
         mock_create = mock.AsyncMock()
         mock_scope = mock.MagicMock()
-        mock_scope.__aenter__ = mock.AsyncMock(return_value=mock.AsyncMock(
-            fetchrow=mock.AsyncMock(return_value={"pii_salt": "test_salt"}),
-        ))
+        mock_scope.__aenter__ = mock.AsyncMock(
+            return_value=mock.AsyncMock(
+                fetchrow=mock.AsyncMock(return_value={"pii_salt": "test_salt"}),
+            )
+        )
         mock_scope.__aexit__ = mock.AsyncMock(return_value=False)
 
         monkeypatch.setattr(
@@ -697,7 +704,9 @@ class TestL3HumanApprovalGate:
         state = _base_state(
             pending_tool_call=_pending(slug="test.dangerous"),
             allowed_skills=["test.dangerous"],
-            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+            tool_permissions={
+                "test.dangerous": _perm(is_enabled=True, human_approval_required=True)
+            },
             aop_slug="test_aop",
             aop_version=1,
         )
@@ -716,12 +725,18 @@ class TestL3HumanApprovalGate:
         import unittest.mock as mock
 
         mock_scope = mock.MagicMock()
-        mock_scope.__aenter__ = mock.AsyncMock(return_value=mock.AsyncMock(
-            fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}),
-        ))
+        mock_scope.__aenter__ = mock.AsyncMock(
+            return_value=mock.AsyncMock(
+                fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}),
+            )
+        )
         mock_scope.__aexit__ = mock.AsyncMock(return_value=False)
-        monkeypatch.setattr("apps.api.agents.nodes.execute_skill.tenant_scope", lambda *a, **kw: mock_scope)
-        monkeypatch.setattr("apps.api.agents.nodes.execute_skill.create_pending_approval", mock.AsyncMock())
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.tenant_scope", lambda *a, **kw: mock_scope
+        )
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.create_pending_approval", mock.AsyncMock()
+        )
         monkeypatch.setattr(
             "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
             mock.AsyncMock(return_value=None),
@@ -732,7 +747,9 @@ class TestL3HumanApprovalGate:
         state = _base_state(
             pending_tool_call=_pending(slug="test.dangerous"),
             allowed_skills=["test.dangerous"],
-            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+            tool_permissions={
+                "test.dangerous": _perm(is_enabled=True, human_approval_required=True)
+            },
         )
         result = await node(state)
         reason = result.get("escalation_reason", "")
@@ -743,12 +760,18 @@ class TestL3HumanApprovalGate:
         import unittest.mock as mock
 
         mock_scope = mock.MagicMock()
-        mock_scope.__aenter__ = mock.AsyncMock(return_value=mock.AsyncMock(
-            fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}),
-        ))
+        mock_scope.__aenter__ = mock.AsyncMock(
+            return_value=mock.AsyncMock(
+                fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}),
+            )
+        )
         mock_scope.__aexit__ = mock.AsyncMock(return_value=False)
-        monkeypatch.setattr("apps.api.agents.nodes.execute_skill.tenant_scope", lambda *a, **kw: mock_scope)
-        monkeypatch.setattr("apps.api.agents.nodes.execute_skill.create_pending_approval", mock_create)
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.tenant_scope", lambda *a, **kw: mock_scope
+        )
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.create_pending_approval", mock_create
+        )
         monkeypatch.setattr(
             "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
             mock.AsyncMock(return_value=recent_return),
@@ -771,7 +794,9 @@ class TestL3HumanApprovalGate:
         state = _base_state(
             pending_tool_call=_pending(slug="test.dangerous"),
             allowed_skills=["test.dangerous"],
-            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+            tool_permissions={
+                "test.dangerous": _perm(is_enabled=True, human_approval_required=True)
+            },
         )
         result = await node(state)
 
@@ -802,9 +827,13 @@ class TestL3HumanApprovalGate:
 
         node = make_execute_skill_node(deps)
         state = _base_state(
-            pending_tool_call=_pending(slug="test.dangerous", input={"text": "hola", "order_id": 1278}),
+            pending_tool_call=_pending(
+                slug="test.dangerous", input={"text": "hola", "order_id": 1278}
+            ),
             allowed_skills=["test.dangerous"],
-            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+            tool_permissions={
+                "test.dangerous": _perm(is_enabled=True, human_approval_required=True)
+            },
             simulation_mode=True,
             simulation_fixtures={"shopify": {"get_order_by_name": {"id": 7133911154968}}},
         )
@@ -837,9 +866,13 @@ class TestL3HumanApprovalGate:
         # Sin fixture de get_order_by_name → el mock devuelve None → cada ref
         # se resuelve a sí misma: 999 ≠ 1278 → pedidos distintos.
         state = _base_state(
-            pending_tool_call=_pending(slug="test.dangerous", input={"text": "hola", "order_id": 1278}),
+            pending_tool_call=_pending(
+                slug="test.dangerous", input={"text": "hola", "order_id": 1278}
+            ),
             allowed_skills=["test.dangerous"],
-            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+            tool_permissions={
+                "test.dangerous": _perm(is_enabled=True, human_approval_required=True)
+            },
             simulation_mode=True,
             simulation_fixtures={"shopify": {}},
         )
@@ -868,9 +901,13 @@ class TestL3HumanApprovalGate:
         node = make_execute_skill_node(deps)
         # Sin simulation_mode ni commerce_integration_ctx → no hay adapter.
         state = _base_state(
-            pending_tool_call=_pending(slug="test.dangerous", input={"text": "hola", "order_id": 1278}),
+            pending_tool_call=_pending(
+                slug="test.dangerous", input={"text": "hola", "order_id": 1278}
+            ),
             allowed_skills=["test.dangerous"],
-            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+            tool_permissions={
+                "test.dangerous": _perm(is_enabled=True, human_approval_required=True)
+            },
         )
         result = await node(state)
 
@@ -894,9 +931,13 @@ class TestL3HumanApprovalGate:
 
         node = make_execute_skill_node(deps)
         state = _base_state(
-            pending_tool_call=_pending(slug="test.dangerous", input={"text": "hola", "order_id": 1278}),
+            pending_tool_call=_pending(
+                slug="test.dangerous", input={"text": "hola", "order_id": 1278}
+            ),
             allowed_skills=["test.dangerous"],
-            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+            tool_permissions={
+                "test.dangerous": _perm(is_enabled=True, human_approval_required=True)
+            },
         )
         result = await node(state)
 
@@ -924,7 +965,9 @@ class TestL3HumanApprovalGate:
         state = _base_state(
             pending_tool_call=_pending(slug="test.dangerous"),  # input {"text": "hola"}
             allowed_skills=["test.dangerous"],
-            tool_permissions={"test.dangerous": _perm(is_enabled=True, human_approval_required=True)},
+            tool_permissions={
+                "test.dangerous": _perm(is_enabled=True, human_approval_required=True)
+            },
         )
         result = await node(state)
 
@@ -1134,9 +1177,7 @@ class TestAuditLog:
         assert entries[0]["status"] == "failed"
         assert "boom" in entries[0]["error_message"]
 
-    async def test_permission_rejection_emite_audit_log(
-        self, deps: AgentDependencies
-    ) -> None:
+    async def test_permission_rejection_emite_audit_log(self, deps: AgentDependencies) -> None:
         node = make_execute_skill_node(deps)
         state = _base_state(
             pending_tool_call=_pending("test.l2_dummy"),
@@ -1156,9 +1197,7 @@ class TestAuditLog:
             await node(state)
         assert deps.audit_logger.entries == []  # type: ignore[attr-defined]
 
-    async def test_latency_ms_esta_presente_en_audit(
-        self, deps: AgentDependencies
-    ) -> None:
+    async def test_latency_ms_esta_presente_en_audit(self, deps: AgentDependencies) -> None:
         node = make_execute_skill_node(deps)
         state = _base_state(pending_tool_call=_pending())
         await node(state)
@@ -1300,5 +1339,8 @@ class TestPreparedSkills:
         result = await make_execute_skill_node(deps)(_autonomous_state("cambio"))
 
         assert result["pending_approval_id"] is not None
-        assert create.await_args.kwargs["inputs_raw"] == {"text": "cambio", "plan": {"approve": True}}
+        assert create.await_args.kwargs["inputs_raw"] == {
+            "text": "cambio",
+            "plan": {"approve": True},
+        }
         assert PlannedSkill.seen == []

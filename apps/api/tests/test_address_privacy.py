@@ -100,7 +100,9 @@ async def test_non_owner_is_stopped_by_the_gate(
     mock.get_order_by_name = AsyncMock(return_value=_ORDER)
     patch_commerce(monkeypatch, mock)
     state = identity_state(email=email, phone=phone, channel=channel)
-    blocked = await execute_skill._identity_gate(state, GetOrderStatus, {"order_identifier": "1429"})
+    blocked = await execute_skill._identity_gate(
+        state, GetOrderStatus, {"order_identifier": "1429"}
+    )
     assert blocked is not None and blocked[0] == "identity_required"
 
 
@@ -112,7 +114,10 @@ async def test_owner_passes_the_gate_with_any_case_of_the_email(
     mock.get_order_by_name = AsyncMock(return_value=_ORDER)
     patch_commerce(monkeypatch, mock)
     state = identity_state(email=" kenny.medina@AHORACRYPTO.com ")
-    assert await execute_skill._identity_gate(state, GetOrderStatus, {"order_identifier": "1429"}) is None
+    assert (
+        await execute_skill._identity_gate(state, GetOrderStatus, {"order_identifier": "1429"})
+        is None
+    )
 
 
 @pytest.mark.asyncio

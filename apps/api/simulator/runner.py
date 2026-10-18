@@ -120,7 +120,6 @@ class _RunAccumulator:
     sim_metadata: dict[str, Any] = field(default_factory=dict)
 
 
-
 def sim_customer_email(run_id: object) -> str:
     """Email del cliente sintético de una simulación (único por run)."""
     return f"sim-{run_id}@simulator.auyan.internal"
@@ -149,6 +148,7 @@ def assign_mock_orders_to_customer(fixtures: dict[str, Any], email: str) -> dict
         if isinstance(shopify.get(key), list):
             shopify[key] = [_owned_by(order, email) for order in shopify[key]]
     return {**(fixtures or {}), "shopify": shopify}
+
 
 async def run_simulation(
     scenario_id: UUID,
@@ -304,9 +304,7 @@ async def _run_simulation_inner(
         )
         termination_reason = "error"
     except Exception:
-        logger.exception(
-            "sim_loop_failed run_id=%s scenario_id=%s", run_id, scenario_id
-        )
+        logger.exception("sim_loop_failed run_id=%s scenario_id=%s", run_id, scenario_id)
         termination_reason = "error"
 
     acc.transcript.termination_reason = termination_reason
@@ -548,9 +546,7 @@ async def _execute_loop(
         try:
             final_state: AgentState = await graph.ainvoke(initial_state)
         except Exception:
-            logger.exception(
-                "sim_graph_invoke_failed run_id=%s turn=%d", acc.run_id, turn_number
-            )
+            logger.exception("sim_graph_invoke_failed run_id=%s turn=%d", acc.run_id, turn_number)
             _finalize_trace(observability, trace, None, error="graph_invoke_failed")
             return "error"
         _finalize_trace(observability, trace, final_state)
@@ -691,9 +687,7 @@ async def _start_run_trace(
         return
     try:
         async with tenant_scope(tenant_id) as conn:
-            await set_simulation_run_trace_id(
-                conn, acc.db_run_id, tenant_id, acc.root_trace.run_id
-            )
+            await set_simulation_run_trace_id(conn, acc.db_run_id, tenant_id, acc.root_trace.run_id)
     except Exception:
         logger.exception("sim_trace_id_save_failed run_id=%s", acc.run_id)
 
@@ -731,9 +725,7 @@ async def _next_simulator_turn(
     return sim_turn
 
 
-async def _persist_customer_message(
-    tenant_id: UUID, conversation_id: UUID, content: str
-) -> None:
+async def _persist_customer_message(tenant_id: UUID, conversation_id: UUID, content: str) -> None:
     async with tenant_scope(tenant_id) as conn:
         await insert_message(
             conn,
@@ -746,9 +738,7 @@ async def _persist_customer_message(
         await update_conversation_last_message(conn, tenant_id, conversation_id)
 
 
-async def _persist_escalation_ack(
-    tenant_id: UUID, conversation_id: UUID, content: str
-) -> None:
+async def _persist_escalation_ack(tenant_id: UUID, conversation_id: UUID, content: str) -> None:
     """El grafo ya guardó la respuesta del agente; el acuse fijo de escalado lo guarda
     quien entrega el turno, igual que `POST /webhooks/inbound`."""
     async with tenant_scope(tenant_id) as conn:
@@ -897,9 +887,7 @@ def _unbacked_contacts(final_state: AgentState, response: str) -> list[str]:
 
     if not response:
         return []
-    region = default_phone_region(
-        final_state.get("tenant_config"), final_state.get("tenant_facts")
-    )
+    region = default_phone_region(final_state.get("tenant_config"), final_state.get("tenant_facts"))
     return [c.masked() for c in unbacked_contacts(response, _literal_evidence(final_state), region)]
 
 
@@ -948,4 +936,3 @@ def _compute_status(
     if (passed / total >= 0.5 if total > 0 else False) and overall >= 6.0:
         return "partial"
     return "failed"
-

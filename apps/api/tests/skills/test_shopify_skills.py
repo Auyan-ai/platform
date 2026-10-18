@@ -53,7 +53,9 @@ OWNER_EMAIL = "cliente@example.com"
 CTX = verified_context(email=OWNER_EMAIL, integration_ctx=_SHOPIFY_INTEGRATION_CTX)
 
 # Otro remitente verificado: no es dueño de ningún pedido de prueba.
-CTX_OTHER_SENDER = verified_context(email="ajeno@example.com", integration_ctx=_SHOPIFY_INTEGRATION_CTX)
+CTX_OTHER_SENDER = verified_context(
+    email="ajeno@example.com", integration_ctx=_SHOPIFY_INTEGRATION_CTX
+)
 
 # Sin remitente verificado (ticket de chat): no hay grants.
 CTX_NO_SENDER = verified_context(channel="zendesk", integration_ctx=_SHOPIFY_INTEGRATION_CTX)
@@ -391,9 +393,7 @@ class TestGetProductInfo:
             "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
-            result = await GetProductInfo().execute(
-                CTX, GetProductInfoInput(query="camiseta")
-            )
+            result = await GetProductInfo().execute(CTX, GetProductInfoInput(query="camiseta"))
         assert isinstance(result, GetProductInfoOutput)
         assert result.total_found == 1
         p = result.products[0]
@@ -539,8 +539,10 @@ class TestSkillsRegistered:
     def test_list_for_aop_with_shopify_skills(self) -> None:
         from apps.api.skills.registry import SkillRegistry
 
-        skills = SkillRegistry.list_for_aop([
-            "shopify.list_my_orders",
-            "shopify.get_order_status",
-        ])
+        skills = SkillRegistry.list_for_aop(
+            [
+                "shopify.list_my_orders",
+                "shopify.get_order_status",
+            ]
+        )
         assert len(skills) == 2

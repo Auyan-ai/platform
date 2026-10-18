@@ -165,9 +165,7 @@ async def test_shopify_client_credentials_trigger_token_exchange(monkeypatch) ->
         key=key,
     )
     exchange = AsyncMock(return_value=("shpat_resolved", 3600))
-    monkeypatch.setattr(
-        "apps.api.integrations.shopify.ensure_shopify_access_token", exchange
-    )
+    monkeypatch.setattr("apps.api.integrations.shopify.ensure_shopify_access_token", exchange)
 
     ctx = await build_commerce_integration_ctx(MagicMock(), TENANT_ID)
 

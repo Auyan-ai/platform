@@ -105,8 +105,7 @@ def test_format_for_judge_includes_outcome():
 
 def test_format_for_judge_includes_escalation_reason():
     t = build_transcript(
-        _conv("escalated"), [], [], None, None, "salt",
-        escalation_reason="cliente frustrado"
+        _conv("escalated"), [], [], None, None, "salt", escalation_reason="cliente frustrado"
     )
     text = format_for_judge(t)
     assert "cliente frustrado" in text

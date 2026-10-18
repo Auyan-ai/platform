@@ -22,11 +22,17 @@ def _policy(**overrides: Any) -> dict[str, Any]:
                 "required_evidence": ["photo"],
                 "shopify_reason": "damaged-or-defective",
             },
-            {"code": "too_small", "label": "Talla pequeña", "fault": "customer"},
+            {
+                "code": "too_small",
+                "label": "Talla pequeña",
+                "fault": "customer",
+                "required_evidence": [],
+            },
         ],
         "shipping": {
             "method": "store_label",
             "payer": {"store_fault": "store", "customer_fault": "customer"},
+            "customer_fee_mode": "fixed",
             "customer_fee": {"amount": "4.95", "currency": "EUR"},
         },
         "refund_days": 14,
@@ -76,8 +82,8 @@ def test_unknown_fields_are_rejected() -> None:
 
 def test_reason_codes_are_unique() -> None:
     reasons = [
-        {"code": "too_small", "label": "Pequeña", "fault": "customer"},
-        {"code": "too_small", "label": "Otra", "fault": "store"},
+        {"code": "too_small", "label": "Pequeña", "fault": "customer", "required_evidence": []},
+        {"code": "too_small", "label": "Otra", "fault": "store", "required_evidence": []},
     ]
     assert _errors(_policy(reasons=reasons)) == ["Value error, motivo repetido: too_small"]
 
@@ -97,11 +103,12 @@ def test_a_fee_only_applies_when_the_store_sends_the_label() -> None:
         "method": "customer_ships",
         "return_address": "Calle Mayor 1, 28013 Madrid",
         "payer": {"store_fault": "store", "customer_fault": "customer"},
+        "customer_fee_mode": "fixed",
         "customer_fee": {"amount": "4.95", "currency": "EUR"},
     }
     assert _errors(_policy(shipping=shipping)) == [
-        "Value error, customer_fee solo vale con store_label: con customer_ships el "
-        "cliente paga el transporte directamente"
+        "Value error, la tarifa solo existe con store_label y el cliente pagando: con "
+        "customer_ships el cliente paga el transporte directamente"
     ]
 
 
@@ -111,7 +118,7 @@ def test_store_label_paid_by_the_customer_needs_its_fee() -> None:
         "payer": {"store_fault": "store", "customer_fault": "customer"},
     }
     assert _errors(_policy(shipping=shipping)) == [
-        "Value error, store_label con el cliente pagando exige customer_fee"
+        "Value error, store_label con el cliente pagando exige customer_fee_mode"
     ]
 
 
@@ -119,10 +126,12 @@ def test_store_label_paid_by_the_store_takes_no_fee() -> None:
     shipping = {
         "method": "store_label",
         "payer": {"store_fault": "store", "customer_fault": "store"},
+        "customer_fee_mode": "fixed",
         "customer_fee": {"amount": "4.95", "currency": "EUR"},
     }
     assert _errors(_policy(shipping=shipping)) == [
-        "Value error, customer_fee sobra: la tienda paga siempre el envío de vuelta"
+        "Value error, la tarifa solo existe con store_label y el cliente pagando: con "
+        "customer_ships el cliente paga el transporte directamente"
     ]
 
 
@@ -164,14 +173,15 @@ def test_money_is_an_iso_currency_with_cents() -> None:
     shipping = {
         "method": "store_label",
         "payer": {"store_fault": "store", "customer_fault": "customer"},
-        "customer_fee": {"amount": "4.955", "currency": "eur"},
+        "customer_fee_mode": "fixed",
+        "customer_fee": {"amount": "4.9555", "currency": "eur"},
     }
     errors = _errors(_policy(shipping=shipping))
 
     assert len(errors) == 2
 
 
-@pytest.mark.parametrize("days", [0, 366])
+@pytest.mark.parametrize("days", [0, 3651])
 def test_window_days_are_bounded(days: int) -> None:
     assert len(_errors(_policy(window={"days": days, "starts_at": "delivery"}))) == 1
 
@@ -214,3 +224,22 @@ def test_without_policy_only_return_aops_hear_that_it_is_missing() -> None:
 
     assert "la tienda no la ha configurado" in returns_aop
     assert "Política de devoluciones" not in other_aop
+
+
+def test_the_label_cost_mode_needs_no_amount() -> None:
+    shipping = {
+        "method": "store_label",
+        "payer": {"store_fault": "store", "customer_fault": "customer"},
+        "customer_fee_mode": "label_cost",
+    }
+
+    assert ReturnsPolicy.model_validate(_policy(shipping=shipping)).shipping.customer_fee is None
+    assert _errors(
+        _policy(shipping={**shipping, "customer_fee": {"amount": "1", "currency": "EUR"}})
+    ) == ["Value error, customer_fee va con customer_fee_mode=fixed y solo con él"]
+
+
+def test_excluded_tags_are_case_insensitive() -> None:
+    policy = ReturnsPolicy.model_validate(_policy(excluded_product_tags=["Final-Sale ", ""]))
+
+    assert policy.excluded_product_tags == frozenset({"final-sale"})

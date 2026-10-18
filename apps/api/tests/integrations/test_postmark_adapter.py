@@ -119,9 +119,7 @@ class TestPostmarkClientSendEmail:
             MockHTTP.return_value.__aexit__ = AsyncMock(return_value=None)
             MockHTTP.return_value.post = AsyncMock(return_value=mock_resp)
 
-            await client.send_email(
-                to="a@b.com", from_field="f", subject="s", text_body="t"
-            )
+            await client.send_email(to="a@b.com", from_field="f", subject="s", text_body="t")
 
         headers = MockHTTP.return_value.post.call_args.kwargs["headers"]
         assert headers["X-Postmark-Server-Token"] == "secret-token-xyz"

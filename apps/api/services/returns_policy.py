@@ -12,7 +12,14 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +43,19 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+# Límites técnicos, no de negocio: evitan valores absurdos (un plazo de siglos, una lista
+# que no cabe en el prompt). Dentro de ellos, la tienda decide.
+MAX_DAYS = 3650
+MAX_REASONS = 50
+
+
 class Money(_Strict):
-    amount: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
+    amount: Decimal = Field(ge=0, max_digits=12, decimal_places=3)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
 
 
 class ReturnWindow(_Strict):
-    days: int = Field(ge=1, le=365)
+    days: int = Field(ge=1, le=MAX_DAYS)
     starts_at: WindowStart
 
 
@@ -50,7 +63,7 @@ class ReturnReason(_Strict):
     code: str = Field(pattern=r"^[a-z][a-z0-9_]{1,39}$")
     label: str = Field(min_length=1, max_length=80)
     fault: Fault
-    required_evidence: frozenset[Evidence] = frozenset()
+    required_evidence: frozenset[Evidence]
     # Handle de la librería de motivos de Shopify (`returnReasonDefinitions`).
     shopify_reason: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{1,59}$")
 
@@ -64,24 +77,27 @@ class ReturnShipping(_Strict):
     method: Literal["customer_ships", "store_label"]
     return_address: str | None = Field(default=None, min_length=5, max_length=300)
     payer: ShippingPayer
-    # Lo que se descuenta del reembolso cuando paga el cliente y la tienda pone la etiqueta.
+    # Cuando paga el cliente y la tienda pone la etiqueta: una tarifa fija (`fixed`, con
+    # `customer_fee`) o el coste real de la etiqueta (`label_cost`, lo pone el equipo).
+    customer_fee_mode: Literal["fixed", "label_cost"] | None = None
     customer_fee: Money | None = None
 
     @model_validator(mode="after")
     def _coherent(self) -> ReturnShipping:
         customer_pays = "customer" in (self.payer.store_fault, self.payer.customer_fault)
-        if self.method == "customer_ships":
-            if not self.return_address:
-                raise ValueError("customer_ships exige return_address")
-            if self.customer_fee is not None:
+        charges = self.method == "store_label" and customer_pays
+        if self.method == "customer_ships" and not self.return_address:
+            raise ValueError("customer_ships exige return_address")
+        if not charges:
+            if self.customer_fee_mode is not None or self.customer_fee is not None:
                 raise ValueError(
-                    "customer_fee solo vale con store_label: con customer_ships el cliente "
-                    "paga el transporte directamente"
+                    "la tarifa solo existe con store_label y el cliente pagando: con "
+                    "customer_ships el cliente paga el transporte directamente"
                 )
-        elif customer_pays and self.customer_fee is None:
-            raise ValueError("store_label con el cliente pagando exige customer_fee")
-        elif not customer_pays and self.customer_fee is not None:
-            raise ValueError("customer_fee sobra: la tienda paga siempre el envío de vuelta")
+        elif self.customer_fee_mode is None:
+            raise ValueError("store_label con el cliente pagando exige customer_fee_mode")
+        elif (self.customer_fee_mode == "fixed") != (self.customer_fee is not None):
+            raise ValueError("customer_fee va con customer_fee_mode=fixed y solo con él")
         return self
 
     def payer_for(self, fault: Fault) -> Payer:
@@ -126,14 +142,20 @@ class ExchangePolicy(_Strict):
 class ReturnsPolicy(_Strict):
     schema_version: Literal[1]
     window: ReturnWindow
-    reasons: tuple[ReturnReason, ...] = Field(min_length=1, max_length=20)
+    reasons: tuple[ReturnReason, ...] = Field(min_length=1, max_length=MAX_REASONS)
     shipping: ReturnShipping
-    refund_days: int = Field(ge=1, le=60)
+    refund_days: int = Field(ge=1, le=MAX_DAYS)
     refund_method: RefundMethod
     restocking_fee_percent: RestockingFee
     excluded_product_tags: frozenset[str]
     exchanges: ExchangePolicy
     returns_require_approval: bool
+
+    @field_validator("excluded_product_tags")
+    @classmethod
+    def _casefold_tags(cls, tags: frozenset[str]) -> frozenset[str]:
+        # Shopify no distingue mayúsculas en las etiquetas: "Final-Sale" = "final-sale".
+        return frozenset(t.strip().casefold() for t in tags if t.strip())
 
     @model_validator(mode="after")
     def _unique_codes(self) -> ReturnsPolicy:

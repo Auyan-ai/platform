@@ -16,6 +16,7 @@ _POLICY: dict[str, Any] = {
             "label": "La talla no me queda bien",
             "fault": "customer",
             "shopify_reason": "too-small",
+            "required_evidence": [],
         },
         {
             "code": "defectuoso",
@@ -29,11 +30,13 @@ _POLICY: dict[str, Any] = {
             "label": "Ya no lo quiero",
             "fault": "customer",
             "shopify_reason": "changed-my-mind",
+            "required_evidence": [],
         },
     ],
     "shipping": {
         "method": "store_label",
         "payer": {"store_fault": "store", "customer_fault": "customer"},
+        "customer_fee_mode": "fixed",
         "customer_fee": {"amount": "4.95", "currency": "EUR"},
     },
     "refund_days": 14,

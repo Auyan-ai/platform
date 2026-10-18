@@ -196,8 +196,10 @@ async def test_over_cap_updates_conversation_status_to_escalated():
 
     status_mock.assert_awaited_once()
     _, kwargs = status_mock.call_args
-    assert kwargs.get("status", status_mock.call_args.args[-1]) == "escalated" or \
-        status_mock.call_args.args[-1] == "escalated"
+    assert (
+        kwargs.get("status", status_mock.call_args.args[-1]) == "escalated"
+        or status_mock.call_args.args[-1] == "escalated"
+    )
 
 
 # ----------------------------------------------------------------

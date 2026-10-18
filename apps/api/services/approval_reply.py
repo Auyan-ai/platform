@@ -148,7 +148,7 @@ def return_next_steps(plan: ReturnPlan, language: str, tenant_default: str) -> s
         if plan.shipping_method == "customer_ships" and plan.return_address
         else text("returns.label")
     ]
-    if s.fee_pending is not None:
+    if s.fee_pending is not None or s.fee_label_cost:
         steps.append(text("returns.shipping_fee_pending"))
     elif s.fee:
         steps.append(text("returns.shipping_fee", fee=_money(s.fee, s.currency, language)))

@@ -8,7 +8,9 @@ import pytest
 from apps.api.integrations.shopify import IssuedRefund, ShopifyActionError
 from apps.api.simulator.mocks import MockShopifyAdapter, MockShopifyError
 
-_GBP_BALANCE = {"get_refundable_balance": {"captured": "45.00", "refunded": "5.00", "currency": "GBP"}}
+_GBP_BALANCE = {
+    "get_refundable_balance": {"captured": "45.00", "refunded": "5.00", "currency": "GBP"}
+}
 
 
 async def test_returns_fixture_when_present() -> None:

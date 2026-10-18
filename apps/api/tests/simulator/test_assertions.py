@@ -45,11 +45,13 @@ def test_skills_called_requires_success_status() -> None:
 def test_skills_called_passes_for_l3_awaiting_approval() -> None:
     # Skills L3 con pending_approval tienen status="rejected_by_permissions" pero
     # error_message="awaiting_human_approval" — se consideran "invocadas" en assertions.
-    log = [_FakeAudit(
-        "shopify.cancel_order",
-        status="rejected_by_permissions",
-        error_message="awaiting_human_approval",
-    )]
+    log = [
+        _FakeAudit(
+            "shopify.cancel_order",
+            status="rejected_by_permissions",
+            error_message="awaiting_human_approval",
+        )
+    ]
     res = _check({"skills_called": ["shopify.cancel_order"]}, skill_log=log)
     assert res[0].passed is True
 
@@ -159,9 +161,9 @@ def test_skills_not_succeeded_accepts_a_gate_rejection_but_not_an_approval() -> 
             error_message="verified_required",
         )
     ]
-    assert _check({"skills_not_succeeded": ["shopify.update_shipping_address"]}, skill_log=rejected)[
-        0
-    ].passed
+    assert _check(
+        {"skills_not_succeeded": ["shopify.update_shipping_address"]}, skill_log=rejected
+    )[0].passed
     awaiting = [
         _FakeAudit(
             "shopify.update_shipping_address",
@@ -243,5 +245,7 @@ def test_response_language_checks_every_agent_message() -> None:
 
 def test_final_response_language_only_checks_the_last_message() -> None:
     said = ["Tu pedido #1234 ya ha salido con UPS.", "Sure, your order #1234 shipped with UPS."]
-    res = _check({"final_response_language": "en"}, last_agent_message=said[-1], agent_messages=said)
+    res = _check(
+        {"final_response_language": "en"}, last_agent_message=said[-1], agent_messages=said
+    )
     assert res[0].passed is True

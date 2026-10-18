@@ -352,25 +352,57 @@ class TestWebhookRateLimit:
         fake_scope_conn = AsyncMock()
         fake_scope_conn.fetchrow.side_effect = [
             None,  # find_end_customer_by_email → no existe
-            {"id": str(CUSTOMER_ID), "tenant_id": str(TENANT_ID), "email": "test@example.com",
-             "phone": None, "external_id": None, "full_name": None, "metadata": {}},
-            {"id": str(CONVERSATION_ID), "tenant_id": str(TENANT_ID),
-             "end_customer_id": str(CUSTOMER_ID), "channel": "chat", "external_id": None,
-             "subject": None, "status": "open", "assigned_user_id": None,
-             "last_message_at": None, "nudged_at": None, "created_at": "2026-01-01T00:00:00+00:00"},
-            {"id": str(INBOUND_MSG_ID), "tenant_id": str(TENANT_ID),
-             "conversation_id": str(CONVERSATION_ID), "role": "customer", "direction": "inbound",
-             "author_user_id": None, "content": "hola", "attachments": [], "metadata": {},
-             "created_at": "2026-01-01T00:00:00+00:00"},
+            {
+                "id": str(CUSTOMER_ID),
+                "tenant_id": str(TENANT_ID),
+                "email": "test@example.com",
+                "phone": None,
+                "external_id": None,
+                "full_name": None,
+                "metadata": {},
+            },
+            {
+                "id": str(CONVERSATION_ID),
+                "tenant_id": str(TENANT_ID),
+                "end_customer_id": str(CUSTOMER_ID),
+                "channel": "chat",
+                "external_id": None,
+                "subject": None,
+                "status": "open",
+                "assigned_user_id": None,
+                "last_message_at": None,
+                "nudged_at": None,
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "id": str(INBOUND_MSG_ID),
+                "tenant_id": str(TENANT_ID),
+                "conversation_id": str(CONVERSATION_ID),
+                "role": "customer",
+                "direction": "inbound",
+                "author_user_id": None,
+                "content": "hola",
+                "attachments": [],
+                "metadata": {},
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
         ]
         fake_scope_conn.execute.return_value = "UPDATE 1"
 
         outcome = AgentOutcome(
-            decision="respond", response_text="Hola, ¿en qué te ayudo?",
-            escalation_reason=None, output_message_id=str(OUTBOUND_MSG_ID),
-            escalation_id=None, resolves_on_delivery=False, trace_id="trace-abc", confidence=0.9,
-            tokens_in=100, tokens_out=50, cost_usd=0.001,
-            model_used="claude-sonnet-4-6", error=None,
+            decision="respond",
+            response_text="Hola, ¿en qué te ayudo?",
+            escalation_reason=None,
+            output_message_id=str(OUTBOUND_MSG_ID),
+            escalation_id=None,
+            resolves_on_delivery=False,
+            trace_id="trace-abc",
+            confidence=0.9,
+            tokens_in=100,
+            tokens_out=50,
+            cost_usd=0.001,
+            model_used="claude-sonnet-4-6",
+            error=None,
         )
         fake_agent_service.process_inbound = AsyncMock(return_value=outcome)
 

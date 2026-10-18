@@ -169,6 +169,8 @@ class Eligible:
     return_address: str | None
     shipping_payer: Payer
     fee: Money | None
+    # La tarifa es el coste real de la etiqueta: la pone el equipo al tramitarla.
+    fee_label_cost: bool
     refund_days: int
     refund_as: RefundPreference
     restocking_percent: Decimal
@@ -266,7 +268,8 @@ def evaluate_return(
                 f"'{line.title}' de {order.name} no tiene producto en Shopify y la política "
                 "excluye productos por etiqueta: no se puede comprobar si admite devolución.",
             )
-        hit = sorted(excluded & (line.product_tags or frozenset()))
+        tags = frozenset(t.casefold() for t in line.product_tags or ())
+        hit = sorted(excluded & tags)
         if hit:
             return Refused(
                 "product_excluded",
@@ -369,6 +372,7 @@ def evaluate_return(
         return_address=shipping.return_address,
         shipping_payer=payer,
         fee=shipping.customer_fee if payer == "customer" else None,
+        fee_label_cost=payer == "customer" and shipping.customer_fee_mode == "label_cost",
         refund_days=policy.refund_days,
         refund_as=refund_as,
         restocking_percent=policy.restocking_fee_percent.for_fault(reason.fault),
@@ -419,6 +423,7 @@ class Settlement(BaseModel):
     fee: Decimal
     # Tarifa de la política en otra moneda que el pedido: no se resta, la decide el equipo.
     fee_pending: Money | None
+    fee_label_cost: bool
     restocking_percent: Decimal
     restocking_fee: Decimal
     price_rule: PriceRule
@@ -445,7 +450,7 @@ class Settlement(BaseModel):
     def balance(self) -> Decimal | None:
         """Lo que se le devuelve al cliente (positivo, en `refund_as`) o lo que debe
         (negativo), según la política. None si falta decidir la tarifa de envío."""
-        if self.fee_pending is not None:
+        if self.fee_pending is not None or self.fee_label_cost:
             return None
         diff = self.price_difference
         if not self.exchanged:
@@ -509,7 +514,9 @@ class ReturnPlan(_Frozen):
             else "lo envía el cliente"
         )
         payer = "paga la tienda" if s.shipping_payer == "store" else "paga el cliente"
-        if s.fee_pending is not None:
+        if s.fee_label_cost:
+            fee = "; tarifa = coste real de la etiqueta: ponedlo al tramitarla"
+        elif s.fee_pending is not None:
             fee = (
                 f"; tarifa de la política {s.fee_pending.amount} {s.fee_pending.currency}, en "
                 "otra moneda que el pedido: decidid el importe"
@@ -625,6 +632,7 @@ def build_plan(
         shipping_payer=eligible.shipping_payer,
         fee=eligible.fee.amount if eligible.fee and fee_currency_matches else Decimal("0"),
         fee_pending=eligible.fee if eligible.fee and not fee_currency_matches else None,
+        fee_label_cost=eligible.fee_label_cost,
     )
     return ReturnPlan(
         policy_version=eligible.policy_version,

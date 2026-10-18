@@ -227,7 +227,7 @@ async def test_create_aop_inserts_aop_and_version() -> None:
     }[k]
 
     conn.fetchrow.side_effect = [
-        aop_insert_row,    # INSERT INTO aops RETURNING
+        aop_insert_row,  # INSERT INTO aops RETURNING
         _aop_with_content_row(),  # get_aop_by_slug internamente
     ]
     conn.execute.return_value = None
@@ -413,9 +413,7 @@ async def test_insert_classifier_run_with_alternative() -> None:
 @pytest.mark.asyncio
 async def test_insert_classifier_run_reclassification() -> None:
     conn = AsyncMock()
-    conn.fetchrow.return_value = _classifier_run_row(
-        turn_number=3, was_reclassification=True
-    )
+    conn.fetchrow.return_value = _classifier_run_row(turn_number=3, was_reclassification=True)
 
     result = await insert_intent_classifier_run(
         conn,

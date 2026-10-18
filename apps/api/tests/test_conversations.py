@@ -88,6 +88,7 @@ def _make_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setattr("apps.api.routers.conversations.tenant_scope", _fake_tenant_scope)
 
     from apps.api.core.config import get_settings
+
     app = FastAPI()
     register_exception_handlers(app)
     app.dependency_overrides[get_settings] = lambda: FakeAuthSettings()
@@ -100,7 +101,10 @@ AUTH_HDR = {"Authorization": f"Bearer {_make_jwt()}"}
 
 class TestListConversations:
     def test_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        convs = [make_conversation(), make_conversation(id=UUID("aaaaaaaa-0000-0000-0000-000000000000"))]
+        convs = [
+            make_conversation(),
+            make_conversation(id=UUID("aaaaaaaa-0000-0000-0000-000000000000")),
+        ]
 
         async def _fake_list(conn: Any, tenant_id: UUID, **kwargs: Any) -> Any:
             return convs
@@ -143,9 +147,14 @@ class TestListConversations:
 class TestGetConversation:
     def test_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         conv = make_conversation()
-        msgs = [make_message(), make_message(id=OUTBOUND_MSG_ID, role="agent_human", direction="outbound")]
+        msgs = [
+            make_message(),
+            make_message(id=OUTBOUND_MSG_ID, role="agent_human", direction="outbound"),
+        ]
 
-        async def _fake_detail(conn: Any, tenant_id: UUID, conversation_id: UUID, **kwargs: Any) -> Any:
+        async def _fake_detail(
+            conn: Any, tenant_id: UUID, conversation_id: UUID, **kwargs: Any
+        ) -> Any:
             return conv, msgs
 
         monkeypatch.setattr("apps.api.routers.conversations.get_conversation_detail", _fake_detail)
@@ -168,8 +177,14 @@ class TestGetConversation:
         conv = make_conversation(channel="whatsapp", external_id="zconv-1")
         msgs = [
             make_message(
-                attachments=[{"path": "t/c/m/0.jpg", "filename": "0.jpg", "kind": "image",
-                              "mime_type": "image/jpeg"}],
+                attachments=[
+                    {
+                        "path": "t/c/m/0.jpg",
+                        "filename": "0.jpg",
+                        "kind": "image",
+                        "mime_type": "image/jpeg",
+                    }
+                ],
                 metadata={"zernio_attachments": [{"url": "https://secret"}]},
             ),
             make_message(
@@ -194,7 +209,9 @@ class TestGetConversation:
             opened_at=datetime.now(UTC),
         )
 
-        async def _fake_detail(conn: Any, tenant_id: UUID, conversation_id: UUID, **kwargs: Any) -> Any:
+        async def _fake_detail(
+            conn: Any, tenant_id: UUID, conversation_id: UUID, **kwargs: Any
+        ) -> Any:
             return conv, msgs
 
         monkeypatch.setattr("apps.api.routers.conversations.get_conversation_detail", _fake_detail)
@@ -219,7 +236,9 @@ class TestGetConversation:
     def test_helpdesk_detail_does_not_query_handoffs(self, monkeypatch: pytest.MonkeyPatch) -> None:
         conv = make_conversation(channel="zendesk", external_id="42")
 
-        async def _fake_detail(conn: Any, tenant_id: UUID, conversation_id: UUID, **kwargs: Any) -> Any:
+        async def _fake_detail(
+            conn: Any, tenant_id: UUID, conversation_id: UUID, **kwargs: Any
+        ) -> Any:
             return conv, [make_message()]
 
         lookup = AsyncMock()
@@ -234,7 +253,9 @@ class TestGetConversation:
         lookup.assert_not_awaited()
 
     def test_not_found_returns_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        async def _fake_detail(conn: Any, tenant_id: UUID, conversation_id: UUID, **kwargs: Any) -> Any:
+        async def _fake_detail(
+            conn: Any, tenant_id: UUID, conversation_id: UUID, **kwargs: Any
+        ) -> Any:
             raise NotFoundError("not found", code="conversation_not_found")
 
         monkeypatch.setattr("apps.api.routers.conversations.get_conversation_detail", _fake_detail)
@@ -313,9 +334,13 @@ class TestAttachmentUrl:
 
 class TestReply:
     def test_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        msg = make_message(id=OUTBOUND_MSG_ID, role="agent_human", direction="outbound", content="hola agente")
+        msg = make_message(
+            id=OUTBOUND_MSG_ID, role="agent_human", direction="outbound", content="hola agente"
+        )
 
-        async def _fake_reply(conn: Any, tenant_id: UUID, conversation_id: UUID, author_user_id: UUID, content: str) -> Any:
+        async def _fake_reply(
+            conn: Any, tenant_id: UUID, conversation_id: UUID, author_user_id: UUID, content: str
+        ) -> Any:
             return msg
 
         monkeypatch.setattr("apps.api.routers.conversations.reply_to_conversation", _fake_reply)
@@ -330,7 +355,9 @@ class TestReply:
         assert resp.json()["role"] == "agent_human"
 
     def test_conversation_closed_returns_409(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        async def _fake_reply(conn: Any, tenant_id: UUID, conversation_id: UUID, author_user_id: UUID, content: str) -> Any:
+        async def _fake_reply(
+            conn: Any, tenant_id: UUID, conversation_id: UUID, author_user_id: UUID, content: str
+        ) -> Any:
             raise ConflictError("closed", code="conversation_closed")
 
         monkeypatch.setattr("apps.api.routers.conversations.reply_to_conversation", _fake_reply)
@@ -359,7 +386,9 @@ class TestEscalate:
     def test_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         escalation = make_escalation()
 
-        async def _fake_escalate(conn: Any, tenant_id: UUID, conversation_id: UUID, reason: str) -> Any:
+        async def _fake_escalate(
+            conn: Any, tenant_id: UUID, conversation_id: UUID, reason: str
+        ) -> Any:
             return escalation
 
         monkeypatch.setattr("apps.api.routers.conversations.escalate_conversation", _fake_escalate)
@@ -374,7 +403,9 @@ class TestEscalate:
         assert resp.json()["id"] == str(ESCALATION_ID)
 
     def test_already_escalated_returns_409(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        async def _fake_escalate(conn: Any, tenant_id: UUID, conversation_id: UUID, reason: str) -> Any:
+        async def _fake_escalate(
+            conn: Any, tenant_id: UUID, conversation_id: UUID, reason: str
+        ) -> Any:
             raise ConflictError("already escalated", code="already_escalated")
 
         monkeypatch.setattr("apps.api.routers.conversations.escalate_conversation", _fake_escalate)

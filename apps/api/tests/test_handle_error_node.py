@@ -59,9 +59,7 @@ async def test_new_escalation_sets_escalation_created(fake_deps, monkeypatch) ->
     monkeypatch.setattr(
         f"{MODULE}.get_open_escalation_for_conversation", AsyncMock(return_value=None)
     )
-    monkeypatch.setattr(
-        f"{MODULE}.insert_escalation", AsyncMock(return_value=make_escalation())
-    )
+    monkeypatch.setattr(f"{MODULE}.insert_escalation", AsyncMock(return_value=make_escalation()))
     monkeypatch.setattr(f"{MODULE}.update_conversation_status", AsyncMock())
     node = make_handle_error_node(fake_deps)
 

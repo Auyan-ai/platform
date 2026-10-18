@@ -75,7 +75,9 @@ class TestListActiveIntegrationSummaries:
 
 
 class TestListTenantIntegrationGroups:
-    async def test_groups_channel_helpdesk_and_commerce(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_groups_channel_helpdesk_and_commerce(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         summaries = [
             IntegrationSummary(kind="commerce", provider="shopify", is_primary=True),
             IntegrationSummary(kind="helpdesk", provider="zendesk", is_primary=True),
@@ -138,7 +140,9 @@ class TestConfigEndpointIntegrations:
         groups = [
             IntegrationGroup(
                 kind="channel",
-                integrations=[IntegrationSummary(kind="channel", provider="whatsapp", is_primary=True)],
+                integrations=[
+                    IntegrationSummary(kind="channel", provider="whatsapp", is_primary=True)
+                ],
             )
         ]
         monkeypatch.setattr("apps.api.routers.tenants.get_tenant_config", _fake_config)
@@ -154,7 +158,18 @@ class TestConfigEndpointIntegrations:
         body = resp.json()
         assert "active_channels" not in body
         assert body["integrations"] == [
-            {"kind": "channel", "integrations": [{"kind": "channel", "provider": "whatsapp", "is_primary": True, "channel": None, "label": "WhatsApp"}]}
+            {
+                "kind": "channel",
+                "integrations": [
+                    {
+                        "kind": "channel",
+                        "provider": "whatsapp",
+                        "is_primary": True,
+                        "channel": None,
+                        "label": "WhatsApp",
+                    }
+                ],
+            }
         ]
         raw = resp.text.lower()
         assert "credentials" not in raw

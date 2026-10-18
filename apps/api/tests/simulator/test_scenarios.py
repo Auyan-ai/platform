@@ -43,16 +43,24 @@ class TestScenarioStructure:
         assert len(ids) == len(set(ids)), "Duplicate scenario IDs found"
 
     def test_all_have_required_fields(self):
-        required = {"id", "name", "aop_slug", "profile", "goal", "initial_message", "expected_outcome"}
+        required = {
+            "id",
+            "name",
+            "aop_slug",
+            "profile",
+            "goal",
+            "initial_message",
+            "expected_outcome",
+        }
         for sc in ALL:
             missing = required - sc.keys()
             assert not missing, f"Scenario {sc.get('id')} missing: {missing}"
 
     def test_all_profiles_valid(self):
         for sc in ALL:
-            assert sc["profile"] in VALID_PROFILES, (
-                f"Scenario {sc['id']} references unknown profile '{sc['profile']}'"
-            )
+            assert (
+                sc["profile"] in VALID_PROFILES
+            ), f"Scenario {sc['id']} references unknown profile '{sc['profile']}'"
 
     def test_max_turns_positive(self):
         for sc in ALL:
@@ -61,15 +69,15 @@ class TestScenarioStructure:
 
     def test_assertions_are_dicts(self):
         for sc in ALL:
-            assert isinstance(sc.get("assertions", {}), dict), (
-                f"Scenario {sc['id']} assertions must be dict"
-            )
+            assert isinstance(
+                sc.get("assertions", {}), dict
+            ), f"Scenario {sc['id']} assertions must be dict"
 
     def test_mock_fixtures_are_dicts(self):
         for sc in ALL:
-            assert isinstance(sc.get("mock_fixtures", {}), dict), (
-                f"Scenario {sc['id']} mock_fixtures must be dict"
-            )
+            assert isinstance(
+                sc.get("mock_fixtures", {}), dict
+            ), f"Scenario {sc['id']} mock_fixtures must be dict"
 
 
 class TestScenarioGroups:
@@ -117,8 +125,17 @@ class TestCapabilityCatalogLinks:
     def test_the_session_84_capabilities_each_have_a_scenario(self):
         covered = {code for sc in ALL for code in sc["capabilities"]}
         wanted = {
-            "ORD-01", "ORD-04", "ORD-05", "ORD-06", "ORD-07", "IDN-01", "IDN-02",
-            "IDN-03", "QLT-01", "QLT-02", "PRD-01",
+            "ORD-01",
+            "ORD-04",
+            "ORD-05",
+            "ORD-06",
+            "ORD-07",
+            "IDN-01",
+            "IDN-02",
+            "IDN-03",
+            "QLT-01",
+            "QLT-02",
+            "PRD-01",
         }
         assert wanted - covered == set()
 
@@ -146,7 +163,11 @@ class TestCapabilityCatalogLinks:
                 assert order["email"], f"{sc['id']}: el pedido debe llevar su propio email"
 
 
-_ORDER_LIST_METHODS = ("search_orders_by_email", "search_orders_by_phone", "get_orders_by_customer_id")
+_ORDER_LIST_METHODS = (
+    "search_orders_by_email",
+    "search_orders_by_phone",
+    "get_orders_by_customer_id",
+)
 
 
 @pytest.mark.parametrize("sc", ALL, ids=lambda sc: sc["id"])
@@ -192,9 +213,15 @@ def _stale_row(name: str):
     from apps.api.db.models import SimulationScenario
 
     return SimulationScenario(
-        id=uuid4(), tenant_id=uuid4(), name=name, aop_slug="consulta_envio",
-        user_profile_id=uuid4(), expected_outcome="viejo", mock_fixtures={"shopify": {}},
-        assertions={}, max_turns=3,
+        id=uuid4(),
+        tenant_id=uuid4(),
+        name=name,
+        aop_slug="consulta_envio",
+        user_profile_id=uuid4(),
+        expected_outcome="viejo",
+        mock_fixtures={"shopify": {}},
+        assertions={},
+        max_turns=3,
     )
 
 

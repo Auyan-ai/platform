@@ -116,6 +116,7 @@ def _make_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setattr("apps.api.routers.aops.tenant_scope", _fake_tenant_scope)
 
     from apps.api.core.config import get_settings
+
     app = FastAPI()
     register_exception_handlers(app)
     app.dependency_overrides[get_settings] = lambda: FakeAuthSettings()
@@ -134,9 +135,16 @@ class TestPromoteAop:
 
         tenant_config_row = make_tenant_configuration()
 
-        monkeypatch.setattr("apps.api.routers.aops.get_aop_by_id", AsyncMock(return_value=staging_aop))
-        monkeypatch.setattr("apps.api.routers.aops.get_tenant_configuration", AsyncMock(return_value=tenant_config_row))
-        monkeypatch.setattr("apps.api.routers.aops.run_eval", lambda aop, tc: _make_eval_result(meets_gate=True))
+        monkeypatch.setattr(
+            "apps.api.routers.aops.get_aop_by_id", AsyncMock(return_value=staging_aop)
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.aops.get_tenant_configuration",
+            AsyncMock(return_value=tenant_config_row),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.aops.run_eval", lambda aop, tc: _make_eval_result(meets_gate=True)
+        )
         monkeypatch.setattr("apps.api.routers.aops.get_aop_by_slug", AsyncMock(return_value=None))
         monkeypatch.setattr("apps.api.routers.aops.create_aop", AsyncMock(return_value=prod_aop))
 
@@ -151,7 +159,9 @@ class TestPromoteAop:
         assert body["production_aop_id"] == str(PROD_AOP_ID)
         assert body["eval_pass_rate"] == 1.0
 
-    def test_promote_passes_gate_existing_production_aop(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_promote_passes_gate_existing_production_aop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Ya existe un AOP en production → se guarda nueva versión."""
         staging_aop = _make_aop_with_content()
         existing_prod = _make_aop_with_content(aop_id=PROD_AOP_ID, workspace="production")
@@ -162,9 +172,16 @@ class TestPromoteAop:
 
         get_aop_by_id_mock = AsyncMock(side_effect=[staging_aop, updated_prod])
         monkeypatch.setattr("apps.api.routers.aops.get_aop_by_id", get_aop_by_id_mock)
-        monkeypatch.setattr("apps.api.routers.aops.get_tenant_configuration", AsyncMock(return_value=tenant_config_row))
-        monkeypatch.setattr("apps.api.routers.aops.run_eval", lambda aop, tc: _make_eval_result(meets_gate=True))
-        monkeypatch.setattr("apps.api.routers.aops.get_aop_by_slug", AsyncMock(return_value=existing_prod))
+        monkeypatch.setattr(
+            "apps.api.routers.aops.get_tenant_configuration",
+            AsyncMock(return_value=tenant_config_row),
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.aops.run_eval", lambda aop, tc: _make_eval_result(meets_gate=True)
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.aops.get_aop_by_slug", AsyncMock(return_value=existing_prod)
+        )
         monkeypatch.setattr("apps.api.routers.aops.save_aop_version", AsyncMock())
 
         app = _make_app(monkeypatch)
@@ -182,8 +199,13 @@ class TestPromoteAop:
 
         tenant_config_row = make_tenant_configuration()
 
-        monkeypatch.setattr("apps.api.routers.aops.get_aop_by_id", AsyncMock(return_value=staging_aop))
-        monkeypatch.setattr("apps.api.routers.aops.get_tenant_configuration", AsyncMock(return_value=tenant_config_row))
+        monkeypatch.setattr(
+            "apps.api.routers.aops.get_aop_by_id", AsyncMock(return_value=staging_aop)
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.aops.get_tenant_configuration",
+            AsyncMock(return_value=tenant_config_row),
+        )
         monkeypatch.setattr(
             "apps.api.routers.aops.run_eval",
             lambda aop, tc: _make_eval_result(meets_gate=False, pass_rate=0.5, passed=4, total=8),
@@ -205,8 +227,13 @@ class TestPromoteAop:
 
         tenant_config_row = make_tenant_configuration()
 
-        monkeypatch.setattr("apps.api.routers.aops.get_aop_by_id", AsyncMock(return_value=staging_aop))
-        monkeypatch.setattr("apps.api.routers.aops.get_tenant_configuration", AsyncMock(return_value=tenant_config_row))
+        monkeypatch.setattr(
+            "apps.api.routers.aops.get_aop_by_id", AsyncMock(return_value=staging_aop)
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.aops.get_tenant_configuration",
+            AsyncMock(return_value=tenant_config_row),
+        )
         monkeypatch.setattr(
             "apps.api.routers.aops.run_eval",
             lambda aop, tc: _make_eval_result(meets_gate=False, pass_rate=0.0, passed=0, total=0),
@@ -228,4 +255,3 @@ class TestPromoteAop:
         resp = client.patch(f"/aops/{AOP_ID}/promote", headers=AUTH_HDR)
 
         assert resp.status_code == 404
-

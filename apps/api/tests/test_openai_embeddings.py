@@ -58,9 +58,7 @@ async def test_empty_text_raises() -> None:
 async def test_retries_on_connection_error() -> None:
     client = MagicMock()
     resp = _fake_embedding_response()
-    client.embeddings.create = AsyncMock(
-        side_effect=[_conn_error(), _conn_error(), resp]
-    )
+    client.embeddings.create = AsyncMock(side_effect=[_conn_error(), _conn_error(), resp])
 
     out = await get_query_embedding(client, "hola", max_retries=3)
 

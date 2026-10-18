@@ -572,7 +572,14 @@ _RETURNS_POLICY = {
     "policy": {
         "schema_version": 1,
         "window": {"days": 30, "starts_at": "delivery"},
-        "reasons": [{"code": "too_small", "label": "Talla pequeña", "fault": "customer"}],
+        "reasons": [
+            {
+                "code": "too_small",
+                "label": "Talla pequeña",
+                "fault": "customer",
+                "required_evidence": [],
+            }
+        ],
         "shipping": {
             "method": "customer_ships",
             "return_address": "Calle Mayor 1, Madrid",

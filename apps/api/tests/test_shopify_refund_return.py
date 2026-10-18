@@ -222,8 +222,14 @@ async def test_refund_above_what_is_left_is_rejected_and_not_posted() -> None:
         json={
             "transactions": [
                 _sale(3, "45.00"),
-                {"id": 4, "kind": "refund", "status": "success", "amount": "30.00",
-                 "currency": "GBP", "parent_id": 3},
+                {
+                    "id": 4,
+                    "kind": "refund",
+                    "status": "success",
+                    "amount": "30.00",
+                    "currency": "GBP",
+                    "parent_id": 3,
+                },
             ]
         },
     )
@@ -240,14 +246,16 @@ async def test_refund_above_what_is_left_is_rejected_and_not_posted() -> None:
 def test_refundable_balance_is_captured_minus_refunded_in_presentment_currency() -> None:
     balance = refundable_balance(
         [
-            {"id": 1, "kind": "authorization", "status": "success", "amount": "99.00",
-             "currency": "GBP"},
-            {"id": 2, "kind": "capture", "status": "success", "amount": "45.00",
-             "currency": "GBP"},
-            {"id": 3, "kind": "refund", "status": "failure", "amount": "45.00",
-             "currency": "GBP"},
-            {"id": 4, "kind": "refund", "status": "success", "amount": "10.00",
-             "currency": "GBP"},
+            {
+                "id": 1,
+                "kind": "authorization",
+                "status": "success",
+                "amount": "99.00",
+                "currency": "GBP",
+            },
+            {"id": 2, "kind": "capture", "status": "success", "amount": "45.00", "currency": "GBP"},
+            {"id": 3, "kind": "refund", "status": "failure", "amount": "45.00", "currency": "GBP"},
+            {"id": 4, "kind": "refund", "status": "success", "amount": "10.00", "currency": "GBP"},
         ]
     )
     assert balance == RefundableBalance(

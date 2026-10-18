@@ -26,7 +26,7 @@ from apps.api.skills.shopify._order_guard import ActionOutcome
 from apps.api.skills.shopify.cancel_order import (
     CancelOrder,
     CancelOrderInput,
-    )
+)
 from apps.api.skills.shopify.refund_partial import (
     RefundPartial,
     RefundPartialInput,
@@ -59,10 +59,7 @@ CTX_NO_SHOPIFY = SkillContext(
     conversation_id="22222222-2222-2222-2222-222222222222",
 )
 
-_GBP_BALANCE = RefundableBalance(
-    captured=Decimal("45.00"), refunded=Decimal("0"), currency="GBP"
-)
-
+_GBP_BALANCE = RefundableBalance(captured=Decimal("45.00"), refunded=Decimal("0"), currency="GBP")
 
 
 # ----------------------------------------------------------------
@@ -291,9 +288,7 @@ class TestCancelOrder:
 
     @pytest.mark.asyncio
     async def test_order_still_open_after_cancel_is_not_confirmed(self) -> None:
-        adapter = _adapter(
-            snapshot(transactions=[CARD_SALE]), snapshot(transactions=[CARD_SALE])
-        )
+        adapter = _adapter(snapshot(transactions=[CARD_SALE]), snapshot(transactions=[CARD_SALE]))
         out = await CancelOrder().execute(_ctx(adapter), CancelOrderInput(order_id=1001))
         assert (out.cancelled, out.outcome, out.success) == (
             False,
@@ -337,9 +332,7 @@ class TestUpdateShippingAddress:
     async def test_prepare_refuses_a_shipped_order(self) -> None:
         adapter = _adapter(snapshot(**_SHIPPED_WITH_TRACKING))
         with pytest.raises(SkillRefusal) as refused:
-            await UpdateShippingAddress().prepare(
-                _ctx(adapter), _ADDRESS_INPUT.model_dump()
-            )
+            await UpdateShippingAddress().prepare(_ctx(adapter), _ADDRESS_INPUT.model_dump())
         assert refused.value.code == "order_shipped"
         assert "no puedo cambiar la dirección" in refused.value.customer_message
         assert "#1500" in refused.value.team_reason
@@ -520,15 +513,14 @@ class TestRefundPartial:
             instance.get_refundable_balance = AsyncMock(return_value=_GBP_BALANCE)
 
             with pytest.raises(ShopifyActionError, match="refund_amount_exceeds_refundable"):
-                await RefundPartial().prepare(
-                    CTX, {"order_id": 1001, "amount": "45.01"}
-                )
+                await RefundPartial().prepare(CTX, {"order_id": 1001, "amount": "45.01"})
 
     def test_anthropic_tool_shape(self) -> None:
         tool = RefundPartial().to_anthropic_tool()
         assert tool["name"] == "shopify_refund_partial"
         assert "amount" in tool["input_schema"]["properties"]
         assert "currency" not in tool["input_schema"]["properties"]
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(

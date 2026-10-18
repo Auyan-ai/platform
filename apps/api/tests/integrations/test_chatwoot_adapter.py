@@ -116,9 +116,7 @@ class TestChatwootClient:
     async def test_update_status_uses_toggle_status_endpoint(self) -> None:
         mock_cm, mock_client = _mock_httpx({})
         with patch("apps.api.integrations.chatwoot.httpx.AsyncClient", return_value=mock_cm):
-            await ChatwootClient("https://app.chatwoot.com", "tok", 7).update_status(
-                42, "resolved"
-            )
+            await ChatwootClient("https://app.chatwoot.com", "tok", 7).update_status(42, "resolved")
 
         assert mock_client.post.call_args[0][0] == (
             "https://app.chatwoot.com/api/v1/accounts/7/conversations/42/toggle_status"
@@ -131,9 +129,7 @@ class TestChatwootClient:
         with patch("apps.api.integrations.chatwoot.httpx.AsyncClient", return_value=mock_cm):
             account = await ChatwootClient("https://app.chatwoot.com", "tok", 5).validate()
         assert account["name"] == "Marea"
-        assert mock_client.get.call_args[0][0] == (
-            "https://app.chatwoot.com/api/v1/accounts/5"
-        )
+        assert mock_client.get.call_args[0][0] == ("https://app.chatwoot.com/api/v1/accounts/5")
 
     @pytest.mark.asyncio
     async def test_list_webhooks_unwraps_payload(self) -> None:

@@ -47,6 +47,7 @@ def _policy(**overrides: Any) -> ActivePolicy:
                 "label": "Pequeña",
                 "fault": "customer",
                 "shopify_reason": "too-small",
+                "required_evidence": [],
             },
         ],
         "shipping": {

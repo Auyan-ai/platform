@@ -74,9 +74,7 @@ class TestAddOrderNote:
         skill = AddOrderNote()
         inputs = AddOrderNoteInput(order_id=1001, note="Cliente reportó paquete dañado.")
 
-        with patch(
-            "apps.api.integrations.shopify.ShopifyClient"
-        ) as MockClient:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.get_order_by_name = AsyncMock(return_value=None)
             instance.add_order_note = AsyncMock(return_value=_ORDER_WITH_NOTE)
@@ -95,9 +93,7 @@ class TestAddOrderNote:
         skill = AddOrderNote()
         inputs = AddOrderNoteInput(order_id=1001, note="Nota de prueba")
 
-        with patch(
-            "apps.api.integrations.shopify.ShopifyClient"
-        ) as MockClient:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.get_order_by_name = AsyncMock(return_value=None)
             instance.add_order_note = AsyncMock(return_value={"id": 1001})  # sin note
@@ -142,9 +138,7 @@ class TestTagOrder:
         skill = TagOrder()
         inputs = TagOrderInput(order_id=1001, tags=["return-requested", "damaged"])
 
-        with patch(
-            "apps.api.integrations.shopify.ShopifyClient"
-        ) as MockClient:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.get_order_by_name = AsyncMock(return_value=None)
             instance.tag_order = AsyncMock(return_value=_ORDER_WITH_TAGS)
@@ -164,9 +158,7 @@ class TestTagOrder:
         skill = TagOrder()
         inputs = TagOrderInput(order_id=1001, tags=["priority"])
 
-        with patch(
-            "apps.api.integrations.shopify.ShopifyClient"
-        ) as MockClient:
+        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.get_order_by_name = AsyncMock(return_value=None)
             instance.tag_order = AsyncMock(return_value={"id": 1001, "tags": ""})

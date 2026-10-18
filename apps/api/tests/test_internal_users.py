@@ -205,14 +205,18 @@ async def test_soft_delete_internal_user_not_found() -> None:
 @pytest.mark.asyncio
 async def test_user_has_permission_true() -> None:
     conn = make_conn_mock(fetchrow={"1": 1})
-    result = await user_has_permission(conn, internal_user_id=INTERNAL_USER_ID, permission="aop.edit")
+    result = await user_has_permission(
+        conn, internal_user_id=INTERNAL_USER_ID, permission="aop.edit"
+    )
     assert result is True
 
 
 @pytest.mark.asyncio
 async def test_user_has_permission_false() -> None:
     conn = make_conn_mock(fetchrow=None)
-    result = await user_has_permission(conn, internal_user_id=INTERNAL_USER_ID, permission="billing.write")
+    result = await user_has_permission(
+        conn, internal_user_id=INTERNAL_USER_ID, permission="billing.write"
+    )
     assert result is False
 
 

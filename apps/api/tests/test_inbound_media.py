@@ -249,10 +249,7 @@ def test_marker_wording() -> None:
 
 
 def test_fallback_messages_are_configurable() -> None:
-    assert (
-        fallback_message("audio_unavailable", None)
-        == fixed_text("audio_unavailable", "es")
-    )
+    assert fallback_message("audio_unavailable", None) == fixed_text("audio_unavailable", "es")
     cfg = {"media_fallback_messages": {"audio_unavailable": "Escríbenos, porfa"}}
     assert fallback_message("audio_unavailable", cfg) == "Escríbenos, porfa"
 

@@ -194,12 +194,15 @@ async def test_usage_recorder_creates_task_with_real_usage():
     async def _fake_upsert(**_kwargs):  # type: ignore[override]
         pass
 
-    with patch(
-        "apps.api.services.usage.upsert_tenant_usage_daily",
-        new=AsyncMock(side_effect=_fake_upsert),
-    ), patch(
-        "apps.api.services.usage.bootstrap_connection",
-        new=lambda: _fake_bootstrap(),
+    with (
+        patch(
+            "apps.api.services.usage.upsert_tenant_usage_daily",
+            new=AsyncMock(side_effect=_fake_upsert),
+        ),
+        patch(
+            "apps.api.services.usage.bootstrap_connection",
+            new=lambda: _fake_bootstrap(),
+        ),
     ):
         recorder.record(tenant_id=TENANT_ID, tokens_in=200, tokens_out=100, cost_usd=0.005)
         # Deja que la tarea se ejecute
@@ -211,12 +214,15 @@ async def test_usage_recorder_db_failure_is_silenced():
     """Si la inserción falla, el error es logueado y no se propaga al caller."""
     recorder = UsageRecorder()
 
-    with patch(
-        "apps.api.services.usage.upsert_tenant_usage_daily",
-        new=AsyncMock(side_effect=RuntimeError("DB down")),
-    ), patch(
-        "apps.api.services.usage.bootstrap_connection",
-        new=lambda: _fake_bootstrap(),
+    with (
+        patch(
+            "apps.api.services.usage.upsert_tenant_usage_daily",
+            new=AsyncMock(side_effect=RuntimeError("DB down")),
+        ),
+        patch(
+            "apps.api.services.usage.bootstrap_connection",
+            new=lambda: _fake_bootstrap(),
+        ),
     ):
         recorder.record(tenant_id=TENANT_ID, tokens_in=100, tokens_out=50, cost_usd=0.002)
         await asyncio.sleep(0)  # no lanza

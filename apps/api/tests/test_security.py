@@ -93,9 +93,7 @@ def _clear_cache() -> Iterator[None]:
 # ----------------------------------------------------------------
 
 
-def _make_app(
-    monkeypatch: pytest.MonkeyPatch, user_record: UserRecord | None
-) -> FastAPI:
+def _make_app(monkeypatch: pytest.MonkeyPatch, user_record: UserRecord | None) -> FastAPI:
     async def _fake_lookup(user_id: UUID, settings: Any) -> UserRecord | None:
         return user_record
 
@@ -253,9 +251,7 @@ class TestGetTenantId:
         )
         assert resp.status_code == 200
 
-    def test_tenant_admin_cross_tenant_blocked(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_tenant_admin_cross_tenant_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = UserRecord(tenant_id=TENANT_ID, role="tenant_admin", email="a@a.io")
         app = _make_app(monkeypatch, rec)
         client = TestClient(app)
@@ -269,15 +265,11 @@ class TestGetTenantId:
         assert resp.status_code == 403
         assert resp.json()["error"] == "cross_tenant_access_denied"
 
-    def test_super_admin_without_header_blocked(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_super_admin_without_header_blocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
         sa = UserRecord(tenant_id=None, role="super_admin", email="root@auyan.ai")
         app = _make_app(monkeypatch, sa)
         client = TestClient(app)
-        resp = client.get(
-            "/scoped", headers={"Authorization": f"Bearer {_make_jwt()}"}
-        )
+        resp = client.get("/scoped", headers={"Authorization": f"Bearer {_make_jwt()}"})
         assert resp.status_code == 403
         assert resp.json()["error"] == "super_admin_requires_x_tenant_id"
 
@@ -342,18 +334,14 @@ class TestUserCache:
 
     @pytest.mark.asyncio
     async def test_cache_hit_skips_db(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        fake_query = AsyncMock(
-            return_value=(TENANT_ID, "tenant_admin", "x@x.io")
-        )
+        fake_query = AsyncMock(return_value=(TENANT_ID, "tenant_admin", "x@x.io"))
         monkeypatch.setattr("apps.api.core.security.get_user_for_auth", fake_query)
 
         @asynccontextmanager
         async def _fake_bootstrap() -> AsyncIterator[Any]:
             yield AsyncMock()
 
-        monkeypatch.setattr(
-            "apps.api.core.security.bootstrap_connection", _fake_bootstrap
-        )
+        monkeypatch.setattr("apps.api.core.security.bootstrap_connection", _fake_bootstrap)
 
         settings = FakeAuthSettings()
         r1 = await _lookup_user(USER_ID, settings)  # type: ignore[arg-type]
@@ -373,9 +361,7 @@ class TestUserCache:
         async def _fake_bootstrap() -> AsyncIterator[Any]:
             yield AsyncMock()
 
-        monkeypatch.setattr(
-            "apps.api.core.security.bootstrap_connection", _fake_bootstrap
-        )
+        monkeypatch.setattr("apps.api.core.security.bootstrap_connection", _fake_bootstrap)
 
         settings = FakeAuthSettings()
         result = await _lookup_user(uuid4(), settings)  # type: ignore[arg-type]

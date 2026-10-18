@@ -49,11 +49,13 @@ def _policy(**overrides: Any) -> ActivePolicy:
                 "label": "Pequeña",
                 "fault": "customer",
                 "shopify_reason": "too-small",
+                "required_evidence": [],
             },
         ],
         "shipping": {
             "method": "store_label",
             "payer": {"store_fault": "store", "customer_fault": "customer"},
+            "customer_fee_mode": "fixed",
             "customer_fee": {"amount": "4.95", "currency": "EUR"},
         },
         "refund_days": 14,
@@ -563,3 +565,26 @@ def test_restocking_fee_follows_the_fault_and_comes_off_the_refund() -> None:
     assert plan.settlement.restocking_fee == Decimal("5.22")
     assert plan.settlement.balance == Decimal("41.98")
     assert "Reposición: 10% = 5.22 EUR" in plan.team_note()
+
+
+def test_exclusions_ignore_the_case_of_shopify_tags() -> None:
+    result = _evaluate(order=_order(_line(product_tags=frozenset({"Final-Sale"}))))
+
+    assert isinstance(result, Refused) and result.code == "product_excluded"
+
+
+def test_label_cost_leaves_the_balance_to_the_team() -> None:
+    policy = _policy(
+        shipping={
+            "method": "store_label",
+            "payer": {"store_fault": "store", "customer_fault": "customer"},
+            "customer_fee_mode": "label_cost",
+        }
+    )
+    eligible = _evaluate(policy)
+    assert isinstance(eligible, Eligible)
+
+    plan = _built(eligible, _calc("-52.15", "-9.05"), requested_at=NOW)
+
+    assert plan.settlement.balance is None
+    assert "coste real de la etiqueta" in plan.team_note()

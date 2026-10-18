@@ -269,9 +269,7 @@ class TestValidate:
 
         resp = MagicMock()
         resp.raise_for_status = MagicMock(
-            side_effect=httpx.HTTPStatusError(
-                "401", request=MagicMock(), response=MagicMock()
-            )
+            side_effect=httpx.HTTPStatusError("401", request=MagicMock(), response=MagicMock())
         )
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(return_value=resp)

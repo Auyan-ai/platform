@@ -46,7 +46,10 @@ class TestThinkingSettings:
 
     def test_sonnet_5_5_thinking_off_is_between_tools(self) -> None:
         options = thinking_settings("claude-sonnet-5-5", mode="off", effort="low").request_options()
-        assert options == {"thinking": {"type": "between_tools"}, "output_config": {"effort": "low"}}
+        assert options == {
+            "thinking": {"type": "between_tools"},
+            "output_config": {"effort": "low"},
+        }
 
     def test_sonnet_4_6_role_effort_is_sent_without_thinking(self) -> None:
         options = thinking_settings("claude-sonnet-4-6", mode=None, effort="low").request_options()
@@ -83,9 +86,9 @@ class TestThinkingSettings:
 class TestRegistryRoleSettings:
     def test_defaults_send_nothing_new_for_any_role(self, clean_env: pytest.MonkeyPatch) -> None:
         registry = ModelRegistry(_env_file=None)  # type: ignore[call-arg]
-        assert {
-            role: registry.thinking(role).request_options() for role in registry.by_role()
-        } == {role: {} for role in registry.by_role()}
+        assert {role: registry.thinking(role).request_options() for role in registry.by_role()} == {
+            role: {} for role in registry.by_role()
+        }
 
     def test_moving_a_role_to_5_5_is_an_env_change(self, clean_env: pytest.MonkeyPatch) -> None:
         clean_env.setenv("INTENT_CLASSIFIER_MODEL", "claude-sonnet-5-5")

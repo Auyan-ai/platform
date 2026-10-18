@@ -78,12 +78,20 @@ def _approval_row(**overrides: object) -> MagicMock:
 class TestGetToolPermissions:
     async def test_returns_dict_keyed_by_slug(self) -> None:
         conn = AsyncMock()
-        conn.fetch = AsyncMock(return_value=[
-            _perm_row(skill_slug="shopify.cancel_order", is_enabled=False),
-            _perm_row(skill_slug="shopify.get_order_status", is_enabled=True,
-                      human_approval_required=False, id=uuid4()),
-        ])
-        result = await get_tool_permissions(conn, TENANT_ID, ["shopify.cancel_order", "shopify.get_order_status"])
+        conn.fetch = AsyncMock(
+            return_value=[
+                _perm_row(skill_slug="shopify.cancel_order", is_enabled=False),
+                _perm_row(
+                    skill_slug="shopify.get_order_status",
+                    is_enabled=True,
+                    human_approval_required=False,
+                    id=uuid4(),
+                ),
+            ]
+        )
+        result = await get_tool_permissions(
+            conn, TENANT_ID, ["shopify.cancel_order", "shopify.get_order_status"]
+        )
         assert isinstance(result, dict)
         assert "shopify.cancel_order" in result
         assert isinstance(result["shopify.cancel_order"], TenantToolPermission)
@@ -105,7 +113,9 @@ class TestGetToolPermissions:
 class TestUpsertToolPermission:
     async def test_returns_permission_model(self) -> None:
         conn = AsyncMock()
-        conn.fetchrow = AsyncMock(return_value=_perm_row(is_enabled=True, human_approval_required=False))
+        conn.fetchrow = AsyncMock(
+            return_value=_perm_row(is_enabled=True, human_approval_required=False)
+        )
         result = await upsert_tool_permission(
             conn,
             tenant_id=TENANT_ID,
@@ -136,10 +146,12 @@ class TestUpsertToolPermission:
 class TestListToolPermissions:
     async def test_returns_list_of_permissions(self) -> None:
         conn = AsyncMock()
-        conn.fetch = AsyncMock(return_value=[
-            _perm_row(skill_slug="shopify.cancel_order"),
-            _perm_row(skill_slug="shopify.refund_partial", id=uuid4()),
-        ])
+        conn.fetch = AsyncMock(
+            return_value=[
+                _perm_row(skill_slug="shopify.cancel_order"),
+                _perm_row(skill_slug="shopify.refund_partial", id=uuid4()),
+            ]
+        )
         result = await list_tool_permissions(conn, TENANT_ID)
         assert len(result) == 2
         assert all(isinstance(p, TenantToolPermission) for p in result)
@@ -234,5 +246,3 @@ class TestListPendingApprovals:
         await list_pending_approvals(conn, TENANT_ID)
         sql = conn.fetch.call_args[0][0]
         assert "status = $2" not in sql
-
-

@@ -922,7 +922,6 @@ class TestIterationsExhausted:
     async def test_skill_call_despite_forcing_escalates_with_courtesy(
         self, fake_deps, monkeypatch
     ) -> None:
-
         from tests.conftest import FakeAnthropicResponse
 
         monkeypatch.setattr(
@@ -942,7 +941,6 @@ class TestIterationsExhausted:
         assert out["escalation_reason"] == "max_tool_iterations_exceeded (4/4)"
         assert out["agent_response"] == fixed_text("iterations_exhausted", "es")
         assert out["pending_tool_call"] is None
-
 
     @pytest.mark.asyncio
     async def test_courtesy_message_speaks_the_conversation_language(

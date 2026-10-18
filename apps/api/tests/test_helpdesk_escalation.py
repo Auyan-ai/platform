@@ -68,7 +68,11 @@ def _patch_resolution(monkeypatch, *, provider: str, config: dict[str, Any], cre
 @pytest.mark.parametrize(
     ("provider", "config", "creds"),
     [
-        ("chatwoot", {"base_url": "https://app.chatwoot.com", "account_id": "7"}, {"api_access_token": "tok"}),
+        (
+            "chatwoot",
+            {"base_url": "https://app.chatwoot.com", "account_id": "7"},
+            {"api_access_token": "tok"},
+        ),
         ("gorgias", {"domain": "acme"}, {"oauth_token": "tok"}),
         ("zendesk", {"subdomain": "acme"}, {"oauth_token": "tok"}),
     ],
@@ -123,9 +127,7 @@ async def test_returns_false_without_external_id() -> None:
 async def test_returns_false_when_no_active_integration(monkeypatch: pytest.MonkeyPatch) -> None:
     """Provider con adapter pero sin integración activa registrada → False, no lanza."""
     monkeypatch.setattr(helpdesk_escalation, "tenant_scope", make_fake_tenant_scope())
-    monkeypatch.setattr(
-        helpdesk_escalation, "get_active_integration", AsyncMock(return_value=None)
-    )
+    monkeypatch.setattr(helpdesk_escalation, "get_active_integration", AsyncMock(return_value=None))
     result = await helpdesk_escalation.push_escalation_to_helpdesk(
         tenant_id=TENANT_ID,
         conversation=make_conversation(channel="chatwoot", external_id="123"),

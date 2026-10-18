@@ -66,7 +66,10 @@ class TestBuildSystemPrompt:
     def test_current_date_injected(self) -> None:
         base = "Eres el agente de Acme."
         out = build_system_prompt(base, [], current_date="2026-05-25 14:30 (Europe/Madrid)")
-        assert "Fecha y hora actual (zona horaria de la tienda): 2026-05-25 14:30 (Europe/Madrid)" in out
+        assert (
+            "Fecha y hora actual (zona horaria de la tienda): 2026-05-25 14:30 (Europe/Madrid)"
+            in out
+        )
         assert base in out
 
     def test_current_date_none_no_injection(self) -> None:
@@ -75,7 +78,7 @@ class TestBuildSystemPrompt:
 
     def test_known_facts_injected(self) -> None:
         base = "Eres el agente de Acme."
-        facts = "- shopify.get_order_status: {\"order_number\":\"#1278\"}"
+        facts = '- shopify.get_order_status: {"order_number":"#1278"}'
         out = build_system_prompt(base, [], known_facts=facts)
         assert "Datos ya verificados en esta conversación" in out
         assert "#1278" in out
@@ -143,9 +146,7 @@ class TestBuildSystemBlocks:
 
 class TestBuildMessageHistory:
     def test_maps_customer_to_user(self) -> None:
-        msgs = build_message_history(
-            [{"role": "customer", "content": "hola"}]
-        )
+        msgs = build_message_history([{"role": "customer", "content": "hola"}])
         assert msgs == [{"role": "user", "content": "hola"}]
 
     def test_maps_agent_ai_to_assistant(self) -> None:

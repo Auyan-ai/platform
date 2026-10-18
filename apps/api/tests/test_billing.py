@@ -125,9 +125,7 @@ def _patch_queries(monkeypatch, *, sub, count) -> None:
 async def test_usage_within_included_is_just_the_floor(monkeypatch) -> None:
     _patch_queries(monkeypatch, sub=_sub(), count=600)
 
-    usage = await billing.compute_period_usage(
-        AsyncMock(), TENANT_ID, now=_dt(2026, 6, 21)
-    )
+    usage = await billing.compute_period_usage(AsyncMock(), TENANT_ID, now=_dt(2026, 6, 21))
 
     assert usage.billable_resolutions == 600
     assert usage.overage_resolutions == 0
@@ -140,9 +138,7 @@ async def test_usage_within_included_is_just_the_floor(monkeypatch) -> None:
 async def test_usage_with_overage_adds_to_floor(monkeypatch) -> None:
     _patch_queries(monkeypatch, sub=_sub(), count=1_200)
 
-    usage = await billing.compute_period_usage(
-        AsyncMock(), TENANT_ID, now=_dt(2026, 6, 21)
-    )
+    usage = await billing.compute_period_usage(AsyncMock(), TENANT_ID, now=_dt(2026, 6, 21))
 
     assert usage.overage_resolutions == 200
     assert usage.overage_cents_total == 200 * 25
@@ -157,9 +153,7 @@ async def test_usage_passes_reopen_window_to_count(monkeypatch) -> None:
         "apps.api.services.billing.get_billing_subscription",
         AsyncMock(return_value=_sub(reopen_window_days=14)),
     )
-    monkeypatch.setattr(
-        "apps.api.services.billing.count_billable_resolutions", count_mock
-    )
+    monkeypatch.setattr("apps.api.services.billing.count_billable_resolutions", count_mock)
 
     await billing.compute_period_usage(AsyncMock(), TENANT_ID, now=_dt(2026, 6, 21))
 
