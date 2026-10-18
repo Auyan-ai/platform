@@ -512,7 +512,6 @@ _STORE_FACTS = {
     "support_email": "soporte@tienda-ejemplo.es",
     "support_phone": "612 345 678",
     "business_hours": "lunes a viernes de 8 a 16h",
-    "return_window_days": 30,
 }
 
 _DELIVERED_ORDER = {
@@ -581,7 +580,6 @@ async def test_supervisor_sees_tenant_facts(fake_deps: Any) -> None:
     )
 
     sent = _sent_to_supervisor(fake_deps)
-    assert "Ventana de devoluciones (días): 30" in sent
     assert "Teléfono de soporte: 612 345 678" in sent
     assert "Horario de atención: lunes a viernes de 8 a 16h" in sent
 
@@ -711,7 +709,7 @@ async def test_agent_prompt_is_in_the_cached_prefix(fake_deps: Any) -> None:
     kwargs = fake_deps.anthropic.messages.create.call_args.kwargs
     cached = [b["text"] for b in kwargs["system"] if "cache_control" in b]
     assert len(cached) == 1
-    assert "Ventana de devoluciones (días): 30" in cached[0]
+    assert "Teléfono de soporte: 612 345 678" in cached[0]
     assert "Ya se entregó, no puedo cancelarlo." not in cached[0]
     assert "Ya se entregó, no puedo cancelarlo." in kwargs["messages"][0]["content"]
 
