@@ -27,6 +27,7 @@ from apps.api.skills.shopify.start_exchange import StartExchange
 from apps.api.skills.shopify.start_return import StartReturn, StartReturnInput
 
 NOW = datetime.now(UTC)
+UNIT = Decimal("76.95")
 FLI = "gid://shopify/FulfillmentLineItem/9001"
 
 
@@ -121,16 +122,18 @@ class FakeShopify:
         exchange: list[tuple[int, int]],
     ) -> ReturnCalculation:
         self.calls.append(("calculate_return", (lines, exchange)))
+        # Como Shopify: el subtotal de cada línea es precio unitario x cantidad.
         return ReturnCalculation(
             currency="USD",
-            returned=(
-                CalculatedLine(key=FLI, quantity=1, subtotal=Decimal("-76.95"), tax=Decimal("0")),
+            returned=tuple(
+                CalculatedLine(key=fli, quantity=q, subtotal=-UNIT * q, tax=Decimal("0"))
+                for fli, q in lines
             ),
             exchanged=tuple(
                 CalculatedLine(
                     key=f"gid://shopify/ProductVariant/{v}",
                     quantity=q,
-                    subtotal=Decimal("76.95"),
+                    subtotal=UNIT * q,
                     tax=Decimal("0"),
                 )
                 for v, q in exchange
@@ -375,3 +378,15 @@ async def test_the_same_request_reuses_its_pending_approval(skill: Any) -> None:
     assert (
         await _same_order_action({}, first, {**again, "reason_code": "defectuoso"}, skill) is False
     )
+
+
+async def test_several_units_are_settled_per_unit() -> None:
+    shopify = FakeShopify(order=_order(quantity=3))
+    raw = {**RAW, "items": [{"line_item_id": 17463441195288, "quantity": 2}]}
+
+    prepared = await StartReturn().prepare(_ctx(shopify, _policy()), raw)
+
+    plan = ReturnPlan.model_validate(prepared["plan"])
+    assert plan.settlement.returned_total == Decimal("153.90")
+    assert plan.settlement.balance == Decimal("153.90")
+    assert shopify.called("calculate_return") == [([(FLI, 2)], [])]

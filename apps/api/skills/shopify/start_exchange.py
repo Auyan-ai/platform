@@ -14,7 +14,10 @@ from pydantic import Field
 class StartExchangeInput(StartReturnInput):
     exchange_items: list[RequestedExchange] = Field(
         min_length=1,
-        description="Lo que recibe a cambio: `variant_id` de get_product_info y cantidad.",
+        description=(
+            "Lo que recibe a cambio: `variant_id` de get_product_info y cantidad, cada "
+            "variante una vez y como mucho tantas unidades como devuelve."
+        ),
     )
 
 

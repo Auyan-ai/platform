@@ -44,6 +44,8 @@ RejectionCode = Literal[
     "exchange_kind_not_allowed",
     "exchange_variant_unavailable",
     "exchange_price_higher",
+    "exchange_variant_repeated",
+    "exchange_quantity_exceeds_returned",
     "refund_preference_missing",
 ]
 # Lo que elige el cliente cuando la política le deja elegir (`refund_method = customer_choice`).
@@ -309,6 +311,21 @@ def evaluate_return(
                 "enviado ninguna imagen en esta conversación.",
             )
 
+    wanted_ids = [w.variant_id for w in exchange]
+    if len(wanted_ids) != len(set(wanted_ids)):
+        return Rejected(
+            "exchange_variant_repeated",
+            "Cada variante de cambio va una sola vez, con su cantidad total.",
+        )
+    returned_units = sum(qty for _, qty in lines)
+    wanted_units = sum(w.quantity for w in exchange)
+    if wanted_units > returned_units:
+        # Recibir más unidades de las que se devuelven es una venta, no un cambio.
+        return Rejected(
+            "exchange_quantity_exceeds_returned",
+            f"Se devuelven {returned_units} unidad(es) y se piden {wanted_units} a cambio: "
+            "como máximo tantas como se devuelven.",
+        )
     exchange_lines: list[PlanExchangeLine] = []
     returned_products = {line.product_id for line, _ in lines if line.product_id is not None}
     by_id = {v.variant_id: v for v in variants}

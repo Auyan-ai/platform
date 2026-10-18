@@ -588,3 +588,22 @@ def test_label_cost_leaves_the_balance_to_the_team() -> None:
 
     assert plan.settlement.balance is None
     assert "coste real de la etiqueta" in plan.team_note()
+
+
+def test_an_exchange_gives_back_at_most_the_returned_units() -> None:
+    five = _evaluate(
+        _exchange_policy(),
+        exchange=(RequestedExchange(variant_id=88, quantity=5),),
+        variants=(BLUSA_M,),
+    )
+    twice = _evaluate(
+        _exchange_policy(),
+        exchange=(
+            RequestedExchange(variant_id=88, quantity=1),
+            RequestedExchange(variant_id=88, quantity=1),
+        ),
+        variants=(BLUSA_M,),
+    )
+
+    assert isinstance(five, Rejected) and five.code == "exchange_quantity_exceeds_returned"
+    assert isinstance(twice, Rejected) and twice.code == "exchange_variant_repeated"
