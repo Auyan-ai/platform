@@ -47,24 +47,40 @@ que le da el código, y redacta. Sin política, rechazo tipado y escalado.**
 ### 1. Modelo de la política
 
 `services/returns_policy.py`, Pydantic estricto (`extra="forbid"`, inmutable) con
-`schema_version: Literal[1]`:
+`schema_version: Literal[1]`. **Todo lo que es una regla de negocio lo decide la tienda**
+(decisión de Kenny, s86): ningún campo de negocio tiene defecto y, si falta, la política no
+valida.
 
 | Campo | Qué decide |
 |---|---|
-| `window.days` (1–365) y `window.starts_at` (`delivery`, `shipment` u `order`) | Plazo y evento desde el que cuenta |
-| `reasons[]`: `code`, `label`, `fault` (`store` o `customer`), `required_evidence` (`photo`), `shopify_reason` (handle, opcional) | Lista cerrada de motivos, de quién es la culpa y qué pruebas exige cada uno |
+| `window.days` y `window.starts_at` (`delivery`, `shipment` u `order`) | Plazo y evento desde el que cuenta. Acaba a medianoche del último día en la zona de la tienda (`tenant_facts.timezone`). |
+| `reasons[]`: `code`, `label`, `fault` (`store` o `customer`), `required_evidence` (`[]` o `["photo"]`), `shopify_reason` (handle, opcional) | Lista cerrada de motivos, de quién es la culpa y qué pruebas exige cada uno |
 | `shipping.method` (`customer_ships` con `return_address`, o `store_label`) | Cómo vuelve el paquete |
-| `shipping.payer.store_fault` y `shipping.payer.customer_fault` (`store` o `customer`) | Quién paga el envío de vuelta según la culpa |
-| `shipping.customer_fee` (importe + moneda ISO) | Lo que se descuenta del reembolso cuando paga el cliente y la tienda pone la etiqueta |
-| `refund_days` (1–60) | Plazo de reembolso desde que la tienda recibe el artículo |
-| `excluded_product_tags[]` | Productos que no admiten devolución (por etiqueta de Shopify) |
-| `exchanges.enabled` y `exchanges.kinds` (`variant`, `product`) | Si hay cambios y de qué tipo: otra variante del mismo producto, o cualquier producto |
+| `shipping.payer.store_fault` y `shipping.payer.customer_fault` | Quién paga el envío de vuelta según la culpa |
+| `shipping.customer_fee_mode` (`fixed` con `customer_fee`, o `label_cost`) | Con etiqueta de la tienda y el cliente pagando: una tarifa fija o el coste real de la etiqueta, que pone el equipo |
+| `refund_days` | Plazo de reembolso desde que la tienda recibe el artículo |
+| `refund_method` (`original_payment`, `store_credit` o `customer_choice`) | Cómo vuelve el dinero de una devolución; con `customer_choice` el agente pregunta y lo pasa en `refund_preference` |
+| `restocking_fee_percent.store_fault` y `.customer_fault` | Porcentaje de reposición sobre el precio devuelto, según la culpa (0 = nada). Se aplica también en los cambios y se manda a Shopify (`restockingFee`). |
+| `excluded_product_tags[]` | Productos que no admiten devolución, por etiqueta de Shopify, sin distinguir mayúsculas |
+| `exchanges.enabled` y `exchanges.kinds` (`variant`, `product`) | Si hay cambios y de qué tipo |
+| `exchanges.requires_approval` | Si un cambio necesita aprobación humana |
+| `exchanges.higher_price` (`customer_pays`, `store_absorbs`, `not_allowed`) | Qué pasa si el artículo nuevo cuesta más |
+| `exchanges.lower_price` (`refund_difference`, `store_credit`, `no_refund`) | Qué pasa si cuesta menos |
+| `exchanges.ship_replacement` (`immediately`, `after_receipt`) | Cuándo sale el artículo de cambio (lo dice el texto al cliente) |
 | `returns_require_approval` | Si una devolución sin cambio necesita aprobación humana |
+| `evidence_requires_approval` | Si una devolución o un cambio con motivo que exige foto pasa por aprobación (alguien mira la foto) |
 
 Los validadores cruzados hacen ilegales los estados sin sentido: `customer_ships` exige
-dirección; `customer_fee` solo con `store_label` y cuando algún lado paga el cliente, y es
-obligatoria en ese caso; los códigos de motivo son únicos; con `exchanges.enabled`, `kinds`
-no está vacío.
+dirección y no admite tarifa; con `store_label` y el cliente pagando hace falta
+`customer_fee_mode`; los códigos de motivo son únicos; con `exchanges.enabled` hacen falta
+los tipos y las cuatro condiciones, y sin cambios no se rellenan. Los únicos topes son
+técnicos (3650 días, 50 motivos, importes de hasta 3 decimales), no reglas de negocio.
+
+**Se queda en código** porque es infraestructura o seguridad, no política: la identidad del
+dueño del pedido (ADR 0013), la moneda de presentación del pedido (#317), el fail-closed sin
+política, que un cambio dé como mucho tantas unidades como se devuelven (más sería una venta),
+que cada variante vaya una vez, el stock vendible, y que la ventana se juzgue al pedir y no al
+aprobar.
 
 ### 2. Dónde vive: tabla `tenant_returns_policies`, no `tenant_facts`
 
@@ -76,7 +92,13 @@ borrada.
 |---|---|
 | `tenant_facts.data` | El `PUT /tenants/me/facts` reemplaza todo el JSON y el formulario tiene un campo de JSON libre: una edición de los datos de contacto podría borrar o romper la política sin pasar por el validador. Solo guarda la última versión, sin historia. |
 | `tenant_configurations.extra` (como `identity_policy`) | Lo edita solo el `super_admin`, y esta política la decide el cliente. |
-| **Tabla propia, versiones solo con insert** | La política autoriza acciones sobre dinero: cada cambio queda con autor, fecha y contenido completo, y la aprobación L3 cita la versión aplicada. Concurrencia optimista con `expected_version` (409 si otro guardó antes). RLS: el tenant lee e inserta lo suyo; actualizar (soft delete) solo `super_admin`. |
+| **Tabla propia, versiones solo con insert** | La política autoriza acciones sobre dinero: cada cambio queda con autor, fecha y contenido completo, y la aprobación L3 cita la versión aplicada. Concurrencia optimista con `expected_version` (409 si otro guardó antes). Solo escribe el API: `anon` y `authenticated` no tienen insert, update ni delete, así nadie se salta el validador por PostgREST. El tenant lee lo suyo por RLS. |
+
+La vigente es la última versión, si no está borrada: borrar en blando la última deja al
+tenant **sin política** (fail-closed), nunca reactiva en silencio la anterior. En el
+historial, la tienda ve "Equipo Auyan" en las versiones de un `super_admin`. Si la tabla no se
+puede leer en un turno, `load_tenant_context` la trata como "sin política" dentro de un
+savepoint y deja el error en el log.
 
 `tenant_facts.return_window_days` deja de llegar al prompt y sale del formulario de datos y
 del onboarding: una sola fuente de verdad.
@@ -105,7 +127,9 @@ producto, `taxesIncluded`, moneda) y devuelve un plan o un rechazo tipado.
 | `reason_not_in_policy` (con la lista de códigos) | El LLM | Error tipado: elige un motivo de la lista |
 | `evidence_missing` (falta la foto en la conversación) | El LLM | Error tipado: pide la foto |
 | `item_not_returnable`, `quantity_exceeds_returnable` | El LLM | Error tipado, con las líneas devolvibles |
-| `exchange_kind_not_allowed`, `exchange_variant_unavailable` | El LLM | Error tipado: ofrece otra opción |
+| `exchange_kind_not_allowed`, `exchange_variant_unavailable` (sin stock para todas las unidades), `exchange_variant_repeated`, `exchange_quantity_exceeds_returned`, `exchange_price_higher` (cuando la tienda no lo admite) | El LLM | Error tipado: ofrece otra opción |
+| `refund_preference_missing` (la tienda deja elegir) | El LLM | Error tipado: pregunta al cliente |
+| `shopify_error` (fallo al leer, calcular o crear en Shopify) | El equipo | Texto fijo y escalado |
 
 Lo que escala usa `SkillRefusal` (texto fijo al cliente, razón al equipo). Lo que el cliente
 puede arreglar usa `SkillRejection`, nuevo: vuelve al LLM como error tipado. Los dos quedan en
@@ -119,24 +143,32 @@ algo que el código no verá. La tarjeta de aprobación lleva la referencia a ca
 
 ### 5. Liquidación
 
-`Settlement`, en la moneda de presentación del pedido, a partir de `returnCalculate`:
-artículos devueltos (subtotal más impuesto si el pedido no lo incluye), artículos de cambio,
-envío de vuelta según la culpa del motivo y neto (positivo: se le devuelve al cliente;
-negativo: el cliente debe la diferencia). Si la tarifa de la política está en otra moneda, no
-se resta ni se manda a Shopify: la liquidación lo marca para el humano. La liquidación va en
-la aprobación L3, en la salida de la skill y, tras crear la devolución, en la nota del pedido
-de Shopify (se añade a la nota que hubiera).
+`Settlement`, en la moneda de presentación del pedido y con la precisión que da Shopify, a
+partir de `returnCalculate`: artículos devueltos (subtotal más impuesto si el pedido no lo
+incluye), artículos de cambio, reposición, envío de vuelta según la culpa y `balance`
+(positivo: se le devuelve al cliente en `refund_as`; negativo: lo debe). En un cambio, la
+diferencia de precio se salda como diga `higher_price` o `lower_price`. Si la tarifa está en
+otra moneda que el pedido o es el coste real de la etiqueta, el saldo queda pendiente para el
+humano. La liquidación va en la aprobación L3, en la salida de la skill y, tras crear la
+devolución, en la nota del pedido de Shopify. Si la nota no se puede escribir, la devolución
+sigue abierta y el caso pasa al equipo para copiarla.
 
 ### 6. Aprobación
 
 `Skill.prepare_approval` pasa a `Skill.prepare` y corre en los dos caminos (con y sin
 aprobación). Así el plan de la tarjeta lo escribe siempre el código, y un `plan` que mande el
 LLM se sobrescribe. La aprobación es obligatoria si el piso L3 de hoy la exige
-(`tenant_tool_permissions`) **o** si el plan la exige: `returns_require_approval` para
-devoluciones y **siempre** para cambios, porque un cambio envía mercancía nueva. Al ejecutar,
+(`tenant_tool_permissions`, que solo se abre con `l3_autonomy_acknowledged`) **o** si el plan
+la exige según la política: `returns_require_approval`, `exchanges.requires_approval` y
+`evidence_requires_approval`. El formulario avisa de que, sin la autonomía activada por
+Auyan, la aprobación se mantiene. Una petición repetida reusa su aprobación pendiente: se
+comparan solo los datos del cliente (artículos, motivo, variantes, preferencia de reembolso),
+no la hora del plan. Al ejecutar,
 la skill vuelve a leer Shopify (líneas aún devolvibles, variante disponible, pedido no
 cancelado) y crea exactamente lo aprobado, con `requestedAt` = momento de la petición: la
-ventana se juzgó entonces, no al aprobar.
+ventana se juzgó entonces, no al aprobar. Cada plan lleva un `plan_id` que va como marca en
+la nota del motivo en Shopify: si un reintento encuentra una devolución con esa marca, la
+devuelve en vez de crear otra.
 
 ### 7. Cambios: mismo pedido
 
@@ -157,8 +189,10 @@ pagar o a devolver sale de la liquidación.
 
 `load_tenant_context` carga la política vigente. Si el AOP permite `start_return` o
 `start_exchange`, el bloque volátil del turno lleva un resumen generado en código: plazo,
-códigos y nombres de motivo, pruebas por motivo, si hay cambios y de qué tipo. Sin política,
-una línea dice que no está configurada. El AOP `returns` pierde las reglas de plazo y fechas.
+códigos y nombres de motivo, pruebas por motivo, cómo se reembolsa, si hay cambios y de qué
+tipo. Sin política, una línea dice que no está configurada. El AOP `returns` pierde las reglas
+de plazo y fechas y la lectura de la página de políticas de Shopify: si contradice a la
+política estructurada, manda la estructurada.
 
 ### 10. Qué decide el código y qué hace el LLM
 
@@ -202,6 +236,7 @@ una línea dice que no está configurada. El AOP `returns` pierde las reglas de 
 - Las pruebas por foto solo funcionan por WhatsApp hasta que los intakes de helpdesk guarden
   adjuntos.
 - Una tabla nueva y una skill nueva, que se aplican y siembran a mano.
+- La política tiene muchas decisiones obligatorias: configurarla lleva un rato, a propósito.
 
 ## Plan de implementación
 
