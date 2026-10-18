@@ -210,10 +210,18 @@ humana), ambiguity rate, fallback rate a `default`, reclassification rate.
 - **Idempotency**: key UUIDv7 generado por el grafo (NUNCA por el LLM) antes de ejecutar L2/L3;
   mismatch de `inputs_hash` = error explícito. El dedup del gate L3 incluye el `order_id`
   resuelto ([#218](https://github.com/Auyan-ai/platform/pull/218)).
-- **Pre-aprobación L3**: antes de crear el `pending_approval`, `Skill.prepare_approval` valida
-  y completa en código lo que verá el humano; si lanza, el error vuelve al LLM y no hay
-  aprobación. `refund_partial` fija ahí la moneda del pedido y rechaza importes por encima de
-  lo reembolsable (cobrado menos reembolsado, en la moneda que pagó el cliente) (#265).
+- **Preparación en código**: `Skill.prepare` corre antes de decidir si hace falta aprobación,
+  con y sin ella, y lo que devuelve sustituye a los inputs del LLM. `refund_partial` fija ahí
+  la moneda del pedido y rechaza importes por encima de lo reembolsable (#265);
+  `start_return` y `start_exchange` dejan el plan de la política con su liquidación (ADR 0014).
+  Un `SkillRefusal` escala con texto fijo; un `SkillRejection` vuelve al LLM como error tipado
+  (`skill_rejected: <code>: <detalle>`) para que pida lo que falta. La aprobación es
+  obligatoria si la exige el piso L3 o `Skill.requires_approval(prepared)`.
+- **Devoluciones y cambios** (ADR 0014): `services/returns.evaluate_return` aplica la política
+  del tenant (`tenant_returns_policies`, cargada en `load_tenant_context`) al pedido releído
+  de Shopify; sin política, rechazo y escalado. El resumen de la política entra en el bloque
+  volátil del turno. Tras ejecutar sin aprobación, las skills con `reply_from_outcome` cierran
+  el turno con el texto fijo de su resultado.
 - **Memoria de hechos del turno**: datos ya leídos se inyectan a reason+supervisor desde
   `skill_audit_log`, invalidando tras mutación ([#189](https://github.com/Auyan-ai/platform/pull/189));
   las acciones L3 completadas también van al contexto ([#192](https://github.com/Auyan-ai/platform/pull/192)).
