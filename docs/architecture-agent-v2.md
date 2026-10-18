@@ -173,8 +173,12 @@ humana), ambiguity rate, fallback rate a `default`, reclassification rate.
   corrección concreta o aprueba.
 - **Modelos**: Sonnet por defecto también para L3 (decisión de costo s63); Opus solo en casos
   críticos/calibración explícita.
-- **Sin veredicto** (refusal o sin tool): reject structural con la razón (`llm_refusal: …`), y el
-  borrador sin revisar no sale al cliente.
+- **Sin veredicto** (refusal o sin tool): reject structural con la razón (`llm_refusal: …`).
+- **Un rechazo que escala** (structural, sin veredicto o segundo tactical) mueve el borrador de
+  `agent_response` a `rejected_draft` en `supervise` (#380). El cliente recibe el acuse fijo de
+  escalado; el borrador queda en `escalations.metadata.rejected_draft` y en la nota interna del
+  helpdesk (`AgentOutcome.escalation_note`), marcado como rechazado. Si el supervisor lanza,
+  `handle_error` escala y `AgentService` no entrega el borrador.
 - Métricas: `supervisor_override_rate` (>20% = AOP flojo; por kind: structural alto = routing,
   tactical alto = AOP ambiguo), latencia, costo, y el delta honesto
   `write_error_rate` con/sin supervisor.

@@ -327,7 +327,7 @@ async def inbound(
         await push_escalation_to_helpdesk_safe(
             tenant_id=tenant.id,
             conversation=conversation,
-            reason=outcome.escalation_reason or "unspecified_escalation",
+            reason=outcome.escalation_note,
         )
 
     # Chat: si el turno escaló y no le llegó texto al cliente (p. ej. low_confidence),

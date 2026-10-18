@@ -347,7 +347,7 @@ async def _deliver_outcome(
     if outcome.escalation_created or retry_handoff:
         reason = outcome.escalation_reason or "unspecified_escalation"
         await push_escalation_to_helpdesk_safe(
-            tenant_id=job.tenant_id, conversation=conversation, reason=reason
+            tenant_id=job.tenant_id, conversation=conversation, reason=outcome.escalation_note
         )
         # En un chat nadie ve un ticket `pending`: si el turno escaló sin llegarle nada al
         # cliente, acuse fijo (haya o no handoff; si no lo hay, ya salió `handoff_unavailable`

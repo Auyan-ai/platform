@@ -13,6 +13,8 @@ al LLM. El resto lo juzga el LLM con la tool `supervisor_verdict`
   - approve → continúa al destino (respond | escalate)
   - reject + tactical → el agente puede arreglar reintentando (una sola vez)
   - reject + structural → el AOP no aplica / falta capability → escala directo
+Un rechazo que escala mueve el borrador a `rejected_draft`: el cliente recibe el acuse
+de escalado y el borrador solo llega a la nota interna (#380).
 
 Modelos: `supervisor_model_l1_l2` (L1/L2/sin tier) y `supervisor_model_l3` en core/config.py.
 
@@ -341,7 +343,6 @@ def make_supervise_node(
         tenant_id = state.get("tenant_id")
         this_in = this_out = 0
         sup_cost = 0.0
-        unreviewed_draft_dropped = False
 
         literal = _literal_verdict(state)
         if literal is not None:
@@ -379,15 +380,12 @@ def make_supervise_node(
             )
 
             if isinstance(outcome, NoDecision):
-                # Sin veredicto no hay revisión: structural → escala, y el borrador sin
-                # revisar no sale al cliente (va el acuse de escalado).
                 verdict = _Verdict(
                     verdict="reject",
                     reject_kind="structural",
                     reason=outcome.reason,
                     guardrails_violated=[],
                 )
-                unreviewed_draft_dropped = True
             else:
                 inp = outcome.block.input
                 verdict = _Verdict(
@@ -440,12 +438,13 @@ def make_supervise_node(
                 # cache-miss y pagaba todo el input de nuevo (latencia + coste).
                 result["supervisor_feedback"] = verdict.reason
             else:
-                # structural o segundo rechazo → escalar
+                # structural o segundo rechazo → escalar. El borrador sale de
+                # `agent_response` aquí mismo: escalate solo entrega lo que quede ahí.
                 result["escalation_reason"] = (
                     f"supervisor_rejected ({verdict.reject_kind}): {verdict.reason}"
                 )
-        if unreviewed_draft_dropped:
-            result["agent_response"] = None
+                result["rejected_draft"] = state.get("agent_response")
+                result["agent_response"] = None
 
         return result
 

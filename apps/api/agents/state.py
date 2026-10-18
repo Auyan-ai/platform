@@ -213,6 +213,9 @@ class AgentState(TypedDict, total=False):
     # dinámico (NO cacheado), no concatenado al system_prompt: si fuera al system_prompt
     # rompería el prefijo cacheado (#211) y el retry pagaría todo el input sin caché.
     supervisor_feedback: str | None
+    # Borrador que el supervisor rechazó y que escala (#380): sale de `agent_response`
+    # en el mismo parche del rechazo y solo llega a la nota interna del escalado.
+    rejected_draft: str | None
     supervisor_model_used: str                         # qué modelo fue el supervisor
     supervisor_tokens_in: int                          # prompt completo, incl. caché
     supervisor_tokens_out: int                         # tokens del supervisor

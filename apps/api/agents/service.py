@@ -50,11 +50,24 @@ class AgentOutcome:
     # True solo cuando se creó una escalación nueva (no al reusar una activa). El
     # caller empuja la nota interna + asignación al helpdesk solo en ese caso.
     escalation_created: bool = False
+    # Borrador que el supervisor no aprobó (#380): nunca va en `response_text`.
+    rejected_draft: str | None = None
 
     @property
     def escalated(self) -> bool:
         """El turno dejó una escalación activa: `escalate` o un fallo ya escalado."""
         return self.escalation_id is not None
+
+    @property
+    def escalation_note(self) -> str:
+        """Nota interna del escalado para el equipo del cliente."""
+        reason = self.escalation_reason or "unspecified_escalation"
+        if not self.rejected_draft:
+            return reason
+        return (
+            f"{reason}\n\nBorrador rechazado por el supervisor (no se envió al cliente):\n"
+            f"{self.rejected_draft}"
+        )
 
 
 class AgentService:
@@ -193,4 +206,5 @@ class AgentService:
             model_used=final_state.get("model_used"),
             error=error,
             escalation_created=bool(final_state.get("escalation_created", False)),
+            rejected_draft=final_state.get("rejected_draft"),
         )
