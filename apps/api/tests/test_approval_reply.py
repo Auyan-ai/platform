@@ -460,3 +460,36 @@ def test_cheaper_exchange_as_store_credit_after_receipt() -> None:
         "recibamos el artículo, te abonaremos 12,15 EUR en crédito de la tienda en un plazo "
         "de 14 días."
     )
+
+
+def test_an_exchange_the_customer_pays_never_mentions_a_refund() -> None:
+    from decimal import Decimal
+
+    from apps.api.services.approval_reply import outcome_message
+    from apps.api.services.returns import PlanExchangeLine, Settlement, SettlementLine
+
+    output = _return_output(
+        exchange_lines=(PlanExchangeLine(variant_id=9, title="Blusa M", quantity=1),),
+        ship_replacement="immediately",
+        settlement=Settlement(
+            currency="EUR",
+            returned=(SettlementLine(title="Blusa", quantity=1, amount=Decimal("52.15")),),
+            exchanged=(SettlementLine(title="Blusa M", quantity=1, amount=Decimal("52.15")),),
+            shipping_payer="customer",
+            fee=Decimal("4.95"),
+            fee_pending=None,
+            fee_label_cost=False,
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="none",
+            refund_as="original_payment",
+        ),
+    )
+
+    text = outcome_message("shopify.start_exchange", output, "es")
+
+    assert "reembolso" not in text
+    assert text.endswith(
+        "Te quedan por pagar 4,95 EUR, incluidos los gastos de la devolución; nuestro equipo "
+        "te indicará cómo hacerlo."
+    )

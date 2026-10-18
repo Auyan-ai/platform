@@ -148,8 +148,13 @@ def return_next_steps(plan: ReturnPlan, language: str, tenant_default: str) -> s
         if plan.shipping_method == "customer_ships" and plan.return_address
         else text("returns.label")
     ]
+    # En un cambio que el cliente paga no hay reembolso del que descontar: los gastos van
+    # dentro de lo que le queda por pagar.
+    owes = bool(plan.exchange_lines) and s.balance is not None and s.balance < 0
     if s.fee_pending is not None or s.fee_label_cost:
         steps.append(text("returns.shipping_fee_pending"))
+    elif s.fee and owes:
+        pass
     elif s.fee:
         steps.append(text("returns.shipping_fee", fee=_money(s.fee, s.currency, language)))
     elif s.shipping_payer == "customer":
@@ -158,7 +163,7 @@ def return_next_steps(plan: ReturnPlan, language: str, tenant_default: str) -> s
         steps.append(text("returns.shipping_reimbursed"))
     else:
         steps.append(text("returns.shipping_paid_by_store"))
-    if s.restocking_fee:
+    if s.restocking_fee and not owes:
         fee = _money(s.restocking_fee, s.currency, language)
         steps.append(text("returns.restocking_fee", fee=fee))
     days = str(plan.refund_days)
@@ -182,7 +187,12 @@ def return_next_steps(plan: ReturnPlan, language: str, tenant_default: str) -> s
         steps.append(text("returns.exchange_difference_pending"))
     elif s.balance < 0:
         owed = _money(-s.balance, s.currency, language)
-        steps.append(text("returns.exchange_you_owe", amount=owed))
+        key = (
+            "returns.exchange_you_owe_with_fees"
+            if s.fee or s.restocking_fee
+            else "returns.exchange_you_owe"
+        )
+        steps.append(text(key, amount=owed))
     elif s.balance > 0:
         amount = _money(s.balance, s.currency, language)
         key = "returns.exchange_credit" if credit else "returns.exchange_refund"

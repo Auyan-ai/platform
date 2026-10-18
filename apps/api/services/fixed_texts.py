@@ -711,14 +711,12 @@ CATALOG: dict[str, Texts] = {
         "Le renvoi est à notre charge.",
     ),
     "returns.shipping_reimbursed": _t(
-        "El envío de vuelta corre de nuestra cuenta: guarda el justificante y nuestro equipo "
-        "te indicará cómo te lo devolvemos.",
-        "Return shipping is on us: keep the receipt and our team will tell you how we'll pay "
-        "you back.",
-        "L'enviament de tornada va a càrrec nostre: guarda el justificant i el nostre equip "
-        "t'indicarà com te'l retornem.",
-        "Le renvoi est à notre charge : garde le justificatif et notre équipe t'indiquera "
-        "comment nous te le remboursons.",
+        "El envío de vuelta va a cargo de la tienda; nuestro equipo te indicará cómo se gestiona.",
+        "Return shipping is on the store; our team will tell you how it's handled.",
+        "L'enviament de tornada va a càrrec de la botiga; el nostre equip t'indicarà com es "
+        "gestiona.",
+        "Le renvoi est à la charge de la boutique ; notre équipe t'indiquera comment il est "
+        "géré.",
     ),
     "returns.shipping_paid_by_customer": _t(
         "El envío de vuelta corre de tu cuenta.",
@@ -791,6 +789,15 @@ CATALOG: dict[str, Texts] = {
         "You have {amount} left to pay; our team will tell you how.",
         "Et queden per pagar {amount}; el nostre equip t'indicarà com fer-ho.",
         "Il te reste {amount} à payer ; notre équipe t'indiquera comment faire.",
+    ),
+    "returns.exchange_you_owe_with_fees": _t(
+        "Te quedan por pagar {amount}, incluidos los gastos de la devolución; nuestro equipo "
+        "te indicará cómo hacerlo.",
+        "You have {amount} left to pay, including the return costs; our team will tell you how.",
+        "Et queden per pagar {amount}, incloses les despeses de la devolució; el nostre equip "
+        "t'indicarà com fer-ho.",
+        "Il te reste {amount} à payer, frais de retour compris ; notre équipe t'indiquera "
+        "comment faire.",
     ),
     "returns.exchange_refund": _t(
         "Cuando recibamos el artículo, te devolveremos {amount} en un plazo de {days} días.",
