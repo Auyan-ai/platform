@@ -40,7 +40,7 @@ def _patch_module(
     monkeypatch.setattr(f"{MODULE}.get_tenant_playbook", AsyncMock(return_value=playbook))
     monkeypatch.setattr(f"{MODULE}.get_tenant_facts", AsyncMock(return_value=facts))
     monkeypatch.setattr(
-        f"{MODULE}.get_current_returns_policy", AsyncMock(return_value=returns_policy)
+        f"{MODULE}.load_current_returns_policy", AsyncMock(return_value=returns_policy)
     )
     monkeypatch.setattr(
         f"{MODULE}.build_commerce_integration_ctx",

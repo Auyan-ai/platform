@@ -71,7 +71,7 @@ def _patch_all_db_and_llm(
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.load_tenant_context.get_current_returns_policy",
+        "apps.api.agents.nodes.load_tenant_context.load_current_returns_policy",
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(

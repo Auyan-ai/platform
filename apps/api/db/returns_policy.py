@@ -7,12 +7,15 @@ Solo inserciones: guardar crea la versión siguiente, y la vigente es la última
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 import asyncpg
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -65,6 +68,25 @@ async def get_current_returns_policy(
         edited_by_email=row["edited_by_email"],
         created_at=row["created_at"],
     )
+
+
+async def load_current_returns_policy(
+    conn: asyncpg.Connection, tenant_id: UUID
+) -> StoredPolicy | None:
+    """La política vigente para el turno del agente, o None si no se puede leer.
+
+    Va en un savepoint: si la lectura falla (tabla sin migrar, error de la base), la
+    transacción del turno sigue viva y el agente trata la política como no configurada
+    (rechaza y escala), en vez de fallar todos los turnos de todos los tenants.
+    """
+    try:
+        async with conn.transaction():
+            return await get_current_returns_policy(conn, tenant_id)
+    except asyncpg.PostgresError:
+        logger.error(
+            "returns_policy_read_failed", extra={"tenant_id": str(tenant_id)}, exc_info=True
+        )
+        return None
 
 
 async def list_returns_policy_versions(

@@ -20,7 +20,7 @@ from apps.api.db.queries import (
     get_tenant_playbook,
     list_tool_permissions,
 )
-from apps.api.db.returns_policy import get_current_returns_policy
+from apps.api.db.returns_policy import load_current_returns_policy
 from apps.api.services.commerce_context import build_commerce_integration_ctx
 from apps.api.services.returns_policy import ActivePolicy, parse_stored_policy
 
@@ -48,7 +48,7 @@ def make_load_tenant_context_node(
             perm_rows = await list_tool_permissions(conn, tenant_id)
             playbook = await get_tenant_playbook(conn, tenant_id)
             facts = await get_tenant_facts(conn, tenant_id)
-            stored_policy = await get_current_returns_policy(conn, tenant_id)
+            stored_policy = await load_current_returns_policy(conn, tenant_id)
 
             config_dump = config.model_dump(mode="json")
             extra = config_dump.get("extra") or {}
