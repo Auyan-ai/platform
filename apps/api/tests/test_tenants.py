@@ -1186,7 +1186,7 @@ class TestTenantOnboardingEndpoints:
         assert facts_data["business_hours"] == "L-V 9:00-18:00"
         assert facts_data["support_email"] == "hola@marea.test"
         assert facts_data["support_phone"] == "+34 910 000 001"
-        assert facts_data["return_window_days"] == "30"
+        assert "return_window_days" not in facts_data
         assert facts_data["company_name"] == "Marea Studio"
         assert facts_data["website_url"] == "https://marea.test"
         assert facts_data["primary_contact"] == "Ana Gómez"

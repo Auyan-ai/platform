@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, Save, Store } from 'lucide-react'
+import Link from 'next/link'
 import { useSaveTenantFacts, useTenantFacts } from '@/lib/api/hooks/tenant-context'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -40,13 +41,6 @@ const STANDARD_FIELDS = [
     suffix: '',
   },
   {
-    key: 'return_window_days',
-    label: 'Ventana de devolución',
-    placeholder: '30',
-    type: 'number',
-    suffix: 'días',
-  },
-  {
     key: 'return_policy_url',
     label: 'URL de devoluciones',
     placeholder: 'https://tienda.com/devoluciones',
@@ -74,6 +68,9 @@ const FIELD_HELPERS: Partial<Record<string, string>> = {
     'Se añade al final de las respuestas por correo. Si la dejas vacía, usamos "El equipo de" y el nombre de tu marca.',
 }
 
+// Lo sustituye la política de devoluciones estructurada; ya no se muestra ni se guarda.
+const RETIRED_KEY = 'return_window_days'
+
 type StandardKey = (typeof STANDARD_FIELDS)[number]['key']
 type FactsFormState = Record<StandardKey, string>
 
@@ -82,7 +79,6 @@ const EMPTY_FORM: FactsFormState = {
   support_email: '',
   support_phone: '',
   website_url: '',
-  return_window_days: '',
   return_policy_url: '',
   shipping_info: '',
   email_signature: '',
@@ -95,7 +91,11 @@ function stringifyValue(value: unknown): string {
 
 function pickCustomFacts(data: Record<string, unknown>) {
   const standard = new Set(STANDARD_FIELDS.map((field) => field.key))
-  return Object.fromEntries(Object.entries(data).filter(([key]) => !standard.has(key as StandardKey)))
+  return Object.fromEntries(
+    Object.entries(data).filter(
+      ([key]) => !standard.has(key as StandardKey) && key !== RETIRED_KEY,
+    ),
+  )
 }
 
 export function TenantFactsForm({ tenantId }: { tenantId: string }) {
@@ -113,7 +113,6 @@ export function TenantFactsForm({ tenantId }: { tenantId: string }) {
       support_email: stringifyValue(data.data.support_email),
       support_phone: stringifyValue(data.data.support_phone),
       website_url: stringifyValue(data.data.website_url),
-      return_window_days: stringifyValue(data.data.return_window_days),
       return_policy_url: stringifyValue(data.data.return_policy_url),
       shipping_info: stringifyValue(data.data.shipping_info),
       email_signature: stringifyValue(data.data.email_signature),
@@ -142,11 +141,11 @@ export function TenantFactsForm({ tenantId }: { tenantId: string }) {
     }
 
     const payload: Record<string, unknown> = { ...customFacts }
+    delete payload[RETIRED_KEY]
     for (const field of STANDARD_FIELDS) {
       const raw = form[field.key].trim()
       if (!raw) continue
-      payload[field.key] =
-        field.key === 'return_window_days' ? Number.parseInt(raw, 10) : raw
+      payload[field.key] = raw
     }
 
     try {
@@ -195,6 +194,17 @@ export function TenantFactsForm({ tenantId }: { tenantId: string }) {
             </Button>
           </div>
         </div>
+
+        <p className="mt-4 text-sm text-foreground-muted">
+          El plazo y las condiciones de devolución se configuran en{' '}
+          <Link
+            href={`/clients/${tenantId}/returns`}
+            className="text-accent underline-offset-4 hover:underline"
+          >
+            Devoluciones y cambios
+          </Link>
+          .
+        </p>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           {STANDARD_FIELDS.map((field) => (

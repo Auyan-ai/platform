@@ -306,7 +306,6 @@ _FACTS_LABEL_MAP: dict[str, str] = {
     "support_email": "Email de soporte",
     "support_phone": "Teléfono de soporte",
     "website_url": "Web",
-    "return_window_days": "Ventana de devoluciones (días)",
     "return_policy_url": "Política de devoluciones",
     "shipping_info": "Información de envíos",
 }
@@ -316,13 +315,17 @@ _FACTS_LABEL_MAP: dict[str, str] = {
 # correo la añade el código; si el LLM la viera, podría firmar por su cuenta).
 _FACTS_SYSTEM_MANAGED: frozenset[str] = frozenset({"email_signature"})
 
+# Sustituidos por la política de devoluciones estructurada (ADR 0014): un número suelto en el
+# prompt contradiría la versión que aplican las skills.
+_FACTS_SUPERSEDED: frozenset[str] = frozenset({"return_window_days"})
+
 
 def _render_tenant_facts(facts: dict[str, Any]) -> str:
     if not facts:
         return ""
     lines = []
     for key, value in facts.items():
-        if value is None or value == "" or key in _FACTS_SYSTEM_MANAGED:
+        if value is None or value == "" or key in _FACTS_SYSTEM_MANAGED | _FACTS_SUPERSEDED:
             continue
         label = _FACTS_LABEL_MAP.get(key, key.replace("_", " ").capitalize())
         lines.append(f"- {label}: {value}")

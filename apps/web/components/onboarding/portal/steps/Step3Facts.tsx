@@ -32,12 +32,6 @@ export function Step3Facts({ values, onChange, onContinue, onBack }: StepProps) 
           value={String(values.support_phone ?? '')}
           onChange={(e) => onChange('support_phone', e.target.value)}
         />
-        <WizardInput
-          label="Ventana de devolución"
-          placeholder="30 días desde la entrega"
-          value={String(values.return_window_days ?? '')}
-          onChange={(e) => onChange('return_window_days', e.target.value)}
-        />
       </div>
       <WizardStepActions onContinue={onContinue} onBack={onBack} />
     </WizardSplitLayout>

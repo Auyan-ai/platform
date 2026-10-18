@@ -622,7 +622,11 @@ def test_render_tenant_facts_known_keys() -> None:
     assert "L-V 9:00-18:00" in result
     assert "Email de soporte" in result
     assert "hola@tienda.com" in result
-    assert "30" in result
+
+
+def test_render_tenant_facts_skips_the_window_superseded_by_the_returns_policy() -> None:
+    result = _render_tenant_facts({"support_email": "hola@tienda.com", "return_window_days": 30})
+    assert result == "## Datos del cliente\n\n- Email de soporte: hola@tienda.com"
 
 
 def test_render_tenant_facts_unknown_key_rendered() -> None:
