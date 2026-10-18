@@ -233,3 +233,37 @@ class TestProcessInbound:
 
         assert outcome.decision == "respond"
         assert outcome.trace_id is None
+
+
+def _escalated(**overrides: object) -> AgentOutcome:
+    base: dict = {
+        "decision": "escalate",
+        "response_text": None,
+        "escalation_reason": "supervisor_rejected (structural): plazo sin respaldo",
+        "output_message_id": None,
+        "escalation_id": "esc-1",
+        "resolves_on_delivery": False,
+        "trace_id": None,
+        "confidence": 0.9,
+        "tokens_in": 0,
+        "tokens_out": 0,
+        "cost_usd": 0.0,
+        "model_used": None,
+        "error": None,
+    }
+    return AgentOutcome(**{**base, **overrides})
+
+
+class TestEscalationNote:
+    def test_rejected_draft_goes_to_the_note_marked_as_rejected(self) -> None:
+        outcome = _escalated(rejected_draft="Tu pedido llega mañana.")
+
+        assert outcome.escalation_note == (
+            "supervisor_rejected (structural): plazo sin respaldo\n\n"
+            "Borrador rechazado por el supervisor (no se envió al cliente):\n"
+            "Tu pedido llega mañana."
+        )
+
+    def test_without_rejected_draft_the_note_is_the_reason(self) -> None:
+        assert _escalated(escalation_reason="out_of_scope").escalation_note == "out_of_scope"
+        assert _escalated(escalation_reason=None).escalation_note == "unspecified_escalation"

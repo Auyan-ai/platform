@@ -87,6 +87,8 @@ def make_escalate_node(
         }
         if state.get("pending_approval_id"):
             metadata["pending_approval_id"] = state["pending_approval_id"]
+        if state.get("rejected_draft"):
+            metadata["rejected_draft"] = state["rejected_draft"]
 
         async with tenant_scope(tenant_id) as conn:
             existing = await get_open_escalation_for_conversation(
@@ -111,6 +113,7 @@ def make_escalate_node(
             result: dict = {
                 "escalation_id": str(esc.id),
                 "decision": "escalate",
+                "escalation_reason": reason,
                 # Pisa el borrador crudo: lo que el caller entrega es el texto
                 # normalizado que se guardó, o nada.
                 "agent_response": None,

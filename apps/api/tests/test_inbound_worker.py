@@ -228,6 +228,27 @@ async def test_escalation_pushes_note_to_helpdesk(turn_mocks: dict[str, Any]) ->
     assert kwargs["reason"] == "Pide reembolso fuera de política"
 
 
+async def test_rejected_draft_goes_only_to_the_helpdesk_note(turn_mocks: dict[str, Any]) -> None:
+    """#380: el borrador que el supervisor rechazó no se entrega; va en la nota interna."""
+    outcome = _outcome(
+        decision="escalate",
+        response_text=None,
+        resolves_on_delivery=False,
+        escalation_created=True,
+        escalation_reason="supervisor_rejected (structural): plazo sin respaldo",
+        rejected_draft="Tu pedido llega mañana.",
+    )
+    await run_inbound_turn(_job(), agent_service=_agent(outcome), settings=FakeSettings())
+
+    turn_mocks["send_agent_reply"].assert_not_awaited()
+    kwargs = turn_mocks["push_escalation_to_helpdesk_safe"].await_args.kwargs
+    assert kwargs["reason"] == (
+        "supervisor_rejected (structural): plazo sin respaldo\n\n"
+        "Borrador rechazado por el supervisor (no se envió al cliente):\n"
+        "Tu pedido llega mañana."
+    )
+
+
 def _whatsapp_escalation(
     turn_mocks: dict[str, Any], monkeypatch: pytest.MonkeyPatch, *, delivered: str
 ) -> AsyncMock:

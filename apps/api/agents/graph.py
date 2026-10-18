@@ -86,7 +86,12 @@ _NODE_OUTPUT_KEYS: dict[str, list[str]] = {
     "select_aop": ["aop_slug", "aop_version", "intent_confidence"],
     "reason": ["decision", "confidence", "pending_tool_call", "agent_response"],
     "execute_skill": ["tool_results", "pending_approval_id", "escalation_reason"],
-    "supervise": ["supervisor_verdict", "supervisor_reason", "supervisor_reject_kind"],
+    "supervise": [
+        "supervisor_verdict",
+        "supervisor_reason",
+        "supervisor_reject_kind",
+        "escalation_reason",
+    ],
     "respond": ["output_message_id", "resolves_on_delivery"],
     "escalate": ["escalation_id", "escalation_reason"],
     "handle_error": ["error"],
