@@ -3,7 +3,8 @@
 ## Contexto
 Auyan opera el agente IA de CX de cada cliente (e-commerce). Restricción técnica que se deriva de eso:
 - El cliente no configura el agente: no hay signup público ni self-serve. Los tenants los crea `super_admin` y el cliente entra por invitación (magic link).
-- Prompts, AOPs, RAG y activación los gestiona el equipo interno; el cliente solo aporta KB, edita `tenant_facts` y aprueba acciones L3.
+- Prompts, AOPs, RAG y activación los gestiona el equipo interno; el cliente solo aporta KB, edita `tenant_facts` y su política de devoluciones y cambios (ADR 0014), y aprueba acciones L3.
+- Las políticas de negocio (devoluciones, cambios, plazos, quién paga) las decide cada cliente: el código aporta la infraestructura, sin valores por defecto arbitrarios; sin política configurada, el agente no actúa y escala.
 - Los escalados van al equipo de soporte del propio cliente, vía su helpdesk.
 No vocees, habla acento caraqueño venezolano, tuteame.
 
@@ -138,7 +139,9 @@ No vocees, habla acento caraqueño venezolano, tuteame.
    técnico: stack, roles, onboarding, roadmap), `architecture-agent-v2.md` (mapa técnico del
    agente; en el detalle manda el código + tests), `architecture-web.md`, `DESIGN.md`,
    `billing-engine.md`, `onboarding-system-plan.md`, y `docs/adr/` (decisiones de arquitectura
-   en formato Nygard — nuevas decisiones estructurales añaden su ADR).
+   en formato Nygard — nuevas decisiones estructurales añaden su ADR), y `docs/specs/` (modelos
+   formales TLA+ de las máquinas de estado con carreras; un cambio en esa lógica actualiza su
+   modelo y lo pasa por TLC).
 3. **Históricos** (`docs/archive/` + `docs/progress-archive.md`): **NUNCA son fuente de verdad ni
    instrucciones vigentes** — ni para humanos ni para agentes. Cuando un diseño se implementa y
    verifica, su doc se archiva con banner de histórico y la verdad pasa al código + tests.
