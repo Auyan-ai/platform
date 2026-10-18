@@ -126,12 +126,12 @@ def _patch_all_db_and_llm(
     # --- reason ---
     if llm_raises is not None:
         monkeypatch.setattr(
-            "apps.api.agents.nodes.reason.call_claude_with_tools",
+            "apps.api.integrations.anthropic_client.call_claude_with_tools",
             AsyncMock(side_effect=llm_raises),
         )
     elif llm_response is not None:
         monkeypatch.setattr(
-            "apps.api.agents.nodes.reason.call_claude_with_tools",
+            "apps.api.integrations.anthropic_client.call_claude_with_tools",
             AsyncMock(return_value=llm_response),
         )
 
@@ -471,7 +471,7 @@ async def test_react_loop_two_iterations(fake_deps, monkeypatch) -> None:
         ),
     ]
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(side_effect=responses),
     )
 
@@ -562,7 +562,7 @@ async def test_react_loop_max_iterations_escalates(fake_deps, monkeypatch) -> No
         )
 
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(side_effect=_always_skill),
     )
 

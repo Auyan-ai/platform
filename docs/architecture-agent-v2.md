@@ -82,6 +82,15 @@ Decisiones vigentes del routing (evolucionadas post-diseño, con PR):
   DB), `AgentService` escala con el mismo `handle_error` y, si tampoco puede, re-lanza para que el
   worker reintente o el webhook de chat dé 500. `tests/test_graph_failures.py` fuerza la excepción
   en cada nodo de la tabla y falla si aparece un nodo nuevo sin escenario.
+- **Modelos por rol y traducción por modelo** (#344, #345): `ModelRegistry` (`core/config.py`)
+  fija un modelo por rol y, con `THINKING_BY_ROLE` / `EFFORT_BY_ROLE`, su thinking y esfuerzo.
+  `integrations/model_capabilities.py` dice qué acepta cada ID. Los nodos piden una decisión con
+  una tool (`call_claude_for_decision`) o un texto (`call_claude_text`) y esa pieza arma la
+  petición: tool forzada en Haiku 4.5, Sonnet 4.6 y Opus 4.7; `auto` + `strict` + instrucción,
+  thinking adaptive y esfuerzo explícito en los 5.5. Sin decisión (refusal, sin tool tras un
+  reintento, max_tokens) hay un `NoDecision` explícito: `reason` escala por `handle_error`,
+  `select_aop` cae a `default` y el supervisor rechaza como structural.
+  `tests/test_model_requests.py` fija la petición HTTP de cada nodo por modelo.
 
 ## 4. Skills framework
 
@@ -132,7 +141,8 @@ después" — mata el ciclo reject+retry del supervisor.
 
 → `apps/api/agents/nodes/select_aop.py`, tabla `intent_classifier_runs`.
 
-- Haiku con tool forzado; devuelve **top-2 candidatos + confidence + ambiguity_detected**.
+- Haiku con la tool `select_aop` (forzada donde el modelo lo acepta); devuelve **top-2
+  candidatos + confidence + ambiguity_detected**. Sin decisión del LLM → AOP `default`.
 - **Continuity-aware** (fix #5): ve el AOP previo de la conversación y aplica histéresis (ver §3).
 - Degradación resiliente: output inválido del clasificador → AOP `default`, nunca tumba el turno
   ([#216](https://github.com/Auyan-ai/platform/pull/216)).
@@ -163,6 +173,8 @@ humana), ambiguity rate, fallback rate a `default`, reclassification rate.
   corrección concreta o aprueba.
 - **Modelos**: Sonnet por defecto también para L3 (decisión de costo s63); Opus solo en casos
   críticos/calibración explícita.
+- **Sin veredicto** (refusal o sin tool): reject structural con la razón (`llm_refusal: …`), y el
+  borrador sin revisar no sale al cliente.
 - Métricas: `supervisor_override_rate` (>20% = AOP flojo; por kind: structural alto = routing,
   tactical alto = AOP ambiguo), latencia, costo, y el delta honesto
   `write_error_rate` con/sin supervisor.

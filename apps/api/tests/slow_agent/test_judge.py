@@ -36,7 +36,7 @@ def _transcript():
 
 
 def _mock_anthropic(response_json: dict) -> MagicMock:
-    content_block = MagicMock()
+    content_block = MagicMock(type="text")
     content_block.text = json.dumps(response_json)
     usage = MagicMock()
     usage.input_tokens = 500
@@ -64,7 +64,7 @@ async def test_call_judge_propose_true():
         "flag_for_opus": False,
     }
     anthropic = _mock_anthropic(payload)
-    verdict = await _call_judge(anthropic, _transcript(), get_models().slow_agent_model)
+    verdict = await _call_judge(anthropic, _transcript(), "slow_agent_model")
 
     assert verdict.should_propose is True
     assert verdict.proposal_type == "aop_edit"
@@ -80,7 +80,7 @@ async def test_call_judge_propose_true():
 async def test_call_judge_no_propose():
     payload = {"should_propose": False, "confidence": 0.9}
     anthropic = _mock_anthropic(payload)
-    verdict = await _call_judge(anthropic, _transcript(), get_models().slow_agent_model)
+    verdict = await _call_judge(anthropic, _transcript(), "slow_agent_model")
 
     assert verdict.should_propose is False
     assert verdict.proposal_type is None
@@ -89,7 +89,7 @@ async def test_call_judge_no_propose():
 
 @pytest.mark.asyncio
 async def test_call_judge_handles_json_embedded_in_text():
-    content_block = MagicMock()
+    content_block = MagicMock(type="text")
     content_block.text = (
         'Aquí está mi análisis:\n\n'
         '{"should_propose": false, "confidence": 0.8}\n\nEspero que ayude.'
@@ -103,13 +103,13 @@ async def test_call_judge_handles_json_embedded_in_text():
     anthropic = MagicMock()
     anthropic.messages.create = AsyncMock(return_value=message)
 
-    verdict = await _call_judge(anthropic, _transcript(), get_models().slow_agent_model)
+    verdict = await _call_judge(anthropic, _transcript(), "slow_agent_model")
     assert verdict.should_propose is False
 
 
 @pytest.mark.asyncio
 async def test_call_judge_handles_invalid_json():
-    content_block = MagicMock()
+    content_block = MagicMock(type="text")
     content_block.text = "No puedo analizar esto."
     usage = MagicMock()
     usage.input_tokens = 100
@@ -120,7 +120,7 @@ async def test_call_judge_handles_invalid_json():
     anthropic = MagicMock()
     anthropic.messages.create = AsyncMock(return_value=message)
 
-    verdict = await _call_judge(anthropic, _transcript(), get_models().slow_agent_model)
+    verdict = await _call_judge(anthropic, _transcript(), "slow_agent_model")
     assert verdict.should_propose is False
     assert verdict.confidence == 0.0
 
@@ -174,10 +174,10 @@ async def test_judge_conversation_escalates_to_opus_on_low_confidence():
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            content_block = MagicMock()
+            content_block = MagicMock(type="text")
             content_block.text = json.dumps(low_conf_payload)
         else:
-            content_block = MagicMock()
+            content_block = MagicMock(type="text")
             content_block.text = json.dumps(opus_payload)
         usage = MagicMock()
         usage.input_tokens = 500
@@ -220,7 +220,7 @@ async def test_judge_conversation_escalates_to_opus_on_flag():
         nonlocal call_count
         call_count += 1
         payload = flagged_payload if call_count == 1 else opus_payload
-        content_block = MagicMock()
+        content_block = MagicMock(type="text")
         content_block.text = json.dumps(payload)
         usage = MagicMock()
         usage.input_tokens = 500

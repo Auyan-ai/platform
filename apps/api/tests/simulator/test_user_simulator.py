@@ -134,7 +134,7 @@ class TestNextTurn:
     async def test_calls_anthropic_and_returns_turn(self):
         profile = _make_profile()
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(text='{"message": "vale", "goal_achieved": false, "give_up": false, "internal_reasoning": "ok"}')]
+        mock_response.content = [MagicMock(type="text", text='{"message": "vale", "goal_achieved": false, "give_up": false, "internal_reasoning": "ok"}')]
         mock_response.usage.input_tokens = 200
         mock_response.usage.output_tokens = 30
 
@@ -149,3 +149,26 @@ class TestNextTurn:
         assert turn.input_tokens == 200
         assert turn.output_tokens == 30
         anthropic.messages.create.assert_called_once()
+
+
+class TestNextTurnRequest:
+    """La petición que sale por HTTP, con el SDK real."""
+
+    @pytest.mark.asyncio
+    async def test_haiku_request_keeps_temperature(self, monkeypatch):
+        from apps.api.tests.anthropic_http import RecordingAnthropic, message, text
+
+        monkeypatch.delenv("SIMULATOR_MODEL", raising=False)
+        reply = '{"message": "vale", "goal_achieved": false, "give_up": false, "internal_reasoning": "ok"}'
+        api = RecordingAnthropic(message(text(reply), stop_reason="end_turn"))
+
+        sim = UserSimulator(profile=_make_profile(), anthropic=api.client)
+        turn = await sim.next_turn(
+            conversation_history=[{"role": "agent", "content": "¿En qué ayudo?"}], turn_number=1
+        )
+
+        assert turn.message == "vale"
+        body = api.requests[0]
+        assert body["model"] == "claude-haiku-4-5-20251001"
+        assert body["temperature"] == 0.7
+        assert body["max_tokens"] == 512

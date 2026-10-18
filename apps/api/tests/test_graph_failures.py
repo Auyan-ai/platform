@@ -188,7 +188,7 @@ async def test_node_exception_escalates_acks_logs_and_traces(
     node: str, turn: dict[str, Any], monkeypatch, caplog
 ) -> None:
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=_SCENARIOS[node]),
     )
     _, route = TURN_NODES[node]

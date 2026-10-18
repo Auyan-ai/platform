@@ -40,7 +40,7 @@ def _usage(
 
 
 def _response(text: str, usage: SimpleNamespace) -> SimpleNamespace:
-    return SimpleNamespace(content=[SimpleNamespace(text=text)], usage=usage)
+    return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)], usage=usage)
 
 
 def _anthropic() -> MagicMock:

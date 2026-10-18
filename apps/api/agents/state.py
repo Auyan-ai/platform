@@ -119,6 +119,9 @@ class AgentState(TypedDict, total=False):
     # Cada entry: {"id", "slug", "input", "output", "is_error", "error"}.
     # reason lo lee para reconstruir el contexto multi-turn de Anthropic.
     tool_results: list[dict]
+    # Thinking blocks que precedieron a cada tool_use de este turno, por id. `reason` los
+    # devuelve intactos al reconstruir el loop (solo existen con thinking encendido).
+    tool_use_thinking: dict[str, list[dict]]
 
     # Contadores del loop ReAct.
     tool_iterations: int

@@ -4,8 +4,9 @@
 2. Construye historial en formato Anthropic + ciclos tool_use/tool_result de
    iteraciones previas (loop ReAct multi-turn).
 3. Construye la lista de tools: decide tool + skills permitidas por el AOP.
-4. Llama a Claude con `tool_choice={"type":"any"}` — fuerza el uso de alguna
-   tool pero deja al LLM elegir cuál.
+4. Pide a Claude una decisión con alguna tool (`call_claude_for_decision`): forzada
+   en los modelos que lo aceptan, `auto` + instrucción en los 5.5. Sin decisión
+   (refusal, sin tool tras el reintento) → `error` explícito y `handle_error` escala.
 5. Si eligió el decide tool: valida output, aplica threshold override, setea
    `decision`/`agent_response`/`escalation_reason`.
 6. Si eligió una skill tool: setea `pending_tool_call` para que `execute_skill`
@@ -19,7 +20,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apps.api.agents.dependencies import AgentDependencies
@@ -32,8 +33,12 @@ from apps.api.agents.prompts.builder import (
 from apps.api.agents.schemas import RESPOND_OR_ESCALATE_TOOL, AgentDecisionTool
 from apps.api.agents.state import AgentState
 from apps.api.core.config import get_models
-from apps.api.integrations.anthropic_client import call_claude_with_tools
-from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
+from apps.api.integrations.anthropic_client import (
+    NoDecision,
+    ToolDecision,
+    call_claude_for_decision,
+)
+from apps.api.integrations.pricing import compute_llm_cost
 from apps.api.services.conversation_progress import no_progress_reason
 from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.identity import IdentityContext
@@ -101,26 +106,31 @@ def agent_system_blocks(state: AgentState) -> list[dict[str, Any]]:
 def _append_tool_result_blocks(
     messages: list[dict[str, Any]],
     tool_results: list[dict[str, Any]],
+    tool_use_thinking: dict[str, list[dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Appendea los ciclos tool_use/tool_result de iteraciones previas al historial.
 
     Anthropic espera, después del último mensaje user del cliente:
-        [{role: assistant, content: [tool_use block]},
+        [{role: assistant, content: [thinking blocks..., tool_use block]},
          {role: user,      content: [tool_result block]},
          ...]
+    Los thinking blocks (solo los hay con thinking encendido) vuelven intactos: con
+    thinking, la API exige que el turno del assistant previo al tool_result empiece por ellos.
     """
+    thinking_by_id = tool_use_thinking or {}
     for result in tool_results:
         anthropic_name = result["slug"].replace(".", "_")
         messages.append(
             {
                 "role": "assistant",
                 "content": [
+                    *thinking_by_id.get(result["id"], []),
                     {
                         "type": "tool_use",
                         "id": result["id"],
                         "name": anthropic_name,
                         "input": result["input"],
-                    }
+                    },
                 ],
             }
         )
@@ -144,6 +154,16 @@ def _append_tool_result_blocks(
     return messages
 
 
+ReasonRole = Literal["default_agent_model", "simple_turn_model"]
+
+
+def _reason_role(state: AgentState) -> ReasonRole:
+    """Rol del registro que fija thinking y esfuerzo de este turno (ver `_select_reason_model`)."""
+    if _visible_skills(state) or state.get("tool_results") or state.get("pending_tool_call"):
+        return "default_agent_model"
+    return "simple_turn_model"
+
+
 def _select_reason_model(state: AgentState) -> str:
     """Router por complejidad (palanca de latencia): Haiku para turnos sin riesgo.
 
@@ -158,11 +178,8 @@ def _select_reason_model(state: AgentState) -> str:
     reconstruye por cada mensaje inbound (no hay checkpointer) y un turno simple es
     de una sola vuelta, así que la elección Haiku nunca contamina el base de otro turno.
     """
-    tenant_model = state["model_used"]
-    if _visible_skills(state):
-        return tenant_model
-    if state.get("tool_results") or state.get("pending_tool_call"):
-        return tenant_model
+    if _reason_role(state) == "default_agent_model":
+        return state["model_used"]
     return get_models().simple_turn_model
 
 
@@ -294,7 +311,9 @@ def make_reason_node(
 
         system_blocks = agent_system_blocks(state)
         messages = build_message_history(state["conversation_history"])
-        messages = _append_tool_result_blocks(messages, state.get("tool_results", []))
+        messages = _append_tool_result_blocks(
+            messages, state.get("tool_results", []), state.get("tool_use_thinking")
+        )
 
         allowed_skills = _visible_skills(state)
         tools = _build_tools(allowed_skills)
@@ -303,34 +322,27 @@ def make_reason_node(
 
         # Iteraciones agotadas: último turno SOLO para decidir (respond/escalate) con
         # lo ya obtenido. Las tools siguen definidas (el historial trae tool_use de
-        # skills) pero `tool_choice` fuerza el decide tool.
+        # skills) pero la petición pide el decide tool.
         tool_iterations: int = state.get("tool_iterations", 0)
         max_iterations: int = state.get("max_tool_iterations") or 5
         iterations_exhausted = tool_iterations >= max_iterations
-        tool_choice: dict[str, Any] = (
-            {"type": "tool", "name": DECIDE_TOOL_NAME} if iterations_exhausted else {"type": "any"}
-        )
 
-        response = await call_claude_with_tools(
+        outcome = await call_claude_for_decision(
             client=deps.anthropic,
             model=model,
+            role=_reason_role(state),
             system=system_blocks,
             messages=messages,
             tools=tools,
-            tool_choice=tool_choice,
+            decision=ToolDecision(DECIDE_TOOL_NAME, any_tool=not iterations_exhausted),
             max_retries=deps.settings.llm_max_retries,
             timeout_seconds=deps.settings.llm_timeout_seconds,
             cache=True,
             trace_label="reason",
         )
 
-        # Extraer el primer tool_use block. tool_choice=any garantiza que exista.
-        tool_block = next((b for b in response.content if b.type == "tool_use"), None)
-        if tool_block is None:
-            return {"error": "claude_did_not_use_tool"}
-
         # Acumular tokens/costo con lo que ya hubiera de iteraciones previas.
-        usage = LLMUsage.from_anthropic(response.usage)
+        usage = outcome.usage
         tokens_update: dict[str, Any] = {
             "tokens_in": state.get("tokens_in", 0) + usage.prompt_tokens,
             "tokens_cache_write": state.get("tokens_cache_write", 0) + usage.cache_write_tokens,
@@ -339,7 +351,10 @@ def make_reason_node(
             "cost_usd": state.get("cost_usd", 0.0) + compute_llm_cost(model, usage),
             "model_used": model,
         }
+        if isinstance(outcome, NoDecision):
+            return {"error": outcome.reason, **tokens_update}
 
+        tool_block = outcome.block
         tool_name: str = tool_block.name
 
         if iterations_exhausted and tool_name != DECIDE_TOOL_NAME:
@@ -419,12 +434,23 @@ def make_reason_node(
                 status="pending",
             )
 
+        thinking_update: dict[str, Any] = (
+            {
+                "tool_use_thinking": {
+                    **(state.get("tool_use_thinking") or {}),
+                    tool_block.id: outcome.thinking,
+                }
+            }
+            if outcome.thinking
+            else {}
+        )
         return {
             "pending_tool_call": {
                 "id": tool_block.id,
                 "slug": slug,
                 "input": tool_block.input,
             },
+            **thinking_update,
             # Anular la decisión de la pasada anterior (espejo del caso decide):
             # si el supervisor rechazó un respond y el retry pide una tool, el
             # agent_response rechazado quedaría en el state y escalate lo

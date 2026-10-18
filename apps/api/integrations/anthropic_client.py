@@ -8,18 +8,24 @@ Caída total del proveedor (saldo agotado, 401, 403): no es transitoria ni reint
 `classify_provider_error` la detecta y `call_claude_with_tools` la relanza como
 `LLMProviderUnavailable`, para que el turno escale y se alerte (ver `services/llm_alert.py`).
 
-Soporta múltiples tools en una sola llamada (loop ReAct). El caller decide
-`tool_choice`: `{"type":"any"}` para forzar alguna tool, `{"type":"tool","name":...}`
-para forzar una específica, `None` para dejarlo libre.
+`call_claude_for_decision` es la única pieza que traduce "necesito una decisión con esta
+tool" a la petición del modelo configurado (`integrations/model_capabilities.py`): tool
+forzada donde el modelo la acepta y no piensa; `auto` + `strict` + instrucción donde no.
+Devuelve la tool llamada o un `NoDecision` explícito (refusal, sin tool, max_tokens).
+`call_claude_text` hace lo mismo para las llamadas que solo esperan texto.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal
 
 import anthropic
+from apps.api.core.config import get_models
+from apps.api.integrations.model_capabilities import capabilities_of
 from apps.api.integrations.pricing import LLMUsage
 from tenacity import (
     AsyncRetrying,
@@ -92,6 +98,7 @@ async def call_claude_with_tools(
     timeout_seconds: int = 30,
     cache: bool = False,
     trace_label: str | None = None,
+    request_options: Mapping[str, Any] | None = None,
 ) -> Message:
     """Llama a Claude con una lista de tools, con reintentos en errores transitorios.
 
@@ -111,6 +118,8 @@ async def call_claude_with_tools(
             para medir el efecto del prompt caching: el primer turno escribe cache
             (cache_w>0), los siguientes dentro del TTL lo leen (cache_r>0). Sin
             label no loguea — así solo se instrumentan los callers que lo piden.
+        request_options: campos extra de la petición (thinking, output_config,
+            extra_headers) que arma la traducción por modelo.
 
     Raises:
         LLMProviderUnavailable si Anthropic rechaza por saldo agotado, 401 o 403.
@@ -146,6 +155,8 @@ async def call_claude_with_tools(
         kwargs["tools"] = tools_param
     if tool_choice is not None:
         kwargs["tool_choice"] = tool_choice
+    if request_options:
+        kwargs.update(request_options)
 
     last_response: Message | None = None
     start = time.monotonic()
@@ -181,6 +192,264 @@ async def call_claude_with_tools(
             usage.output_tokens,
         )
     return last_response
+
+
+# Con thinking, los tokens de pensar cuentan contra `max_tokens`: un límite pensado para
+# una respuesta corta cortaría la decisión antes de la tool.
+THINKING_MIN_MAX_TOKENS = 16_000
+# Con `auto` el modelo puede contestar sin tool: un reintento con la instrucción explícita.
+NO_TOOL_RETRIES = 1
+
+
+@dataclass(frozen=True)
+class ToolDecision:
+    """Lo que pide un nodo: una llamada a `tool`, o a cualquier tool ofrecida (`any_tool`,
+    el paso del loop ReAct) cerrando con `tool`."""
+
+    tool: str
+    any_tool: bool = False
+
+
+@dataclass(frozen=True)
+class ToolCalled:
+    block: Any
+    # Thinking blocks previos a la tool, para devolverlos intactos en la siguiente vuelta.
+    thinking: list[dict[str, Any]]
+    usage: LLMUsage
+
+
+@dataclass(frozen=True)
+class NoDecision:
+    kind: Literal["refusal", "max_tokens", "tool_not_called"]
+    detail: str
+    usage: LLMUsage
+
+    @property
+    def reason(self) -> str:
+        if self.kind == "refusal":
+            return f"llm_refusal: {self.detail}"
+        suffix = f" ({self.detail})" if self.detail else ""
+        return f"llm_no_decision: {self.kind}{suffix}"
+
+
+@dataclass(frozen=True)
+class _DecisionRequest:
+    system: str | list[dict[str, Any]]
+    tools: list[dict[str, Any]]
+    tool_choice: dict[str, Any]
+    max_tokens: int
+    options: dict[str, Any]
+    forced: bool
+
+
+def _instruction(decision: ToolDecision) -> str:
+    if decision.any_tool:
+        return (
+            "Responde siempre llamando a una herramienta: usa las disponibles para consultar "
+            f"y `{decision.tool}` para cerrar el turno. No respondas solo con texto."
+        )
+    return (
+        f"Responde siempre llamando a la herramienta `{decision.tool}`. "
+        "No respondas solo con texto."
+    )
+
+
+def _with_instruction(
+    system: str | list[dict[str, Any]], instruction: str
+) -> str | list[dict[str, Any]]:
+    if isinstance(system, str):
+        return f"{system}\n\n{instruction}"
+    return [*system, {"type": "text", "text": instruction}]
+
+
+def _strict(tool: dict[str, Any]) -> dict[str, Any]:
+    schema = anthropic.transform_schema(tool["input_schema"])
+    return {**tool, "strict": True, "input_schema": schema}
+
+
+def decision_request(
+    *,
+    model: str,
+    role: str,
+    system: str | list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    decision: ToolDecision,
+    max_tokens: int,
+) -> _DecisionRequest:
+    """Traduce la decisión que pide un nodo a la petición que acepta `model`.
+
+    Modelos que aceptan tool forzada y no piensan: `tool_choice` `any`/`tool`, la petición
+    de siempre. El resto (5.5, o un rol con thinking): `auto`, la tool de decisión
+    estricta y la instrucción al final del system."""
+    caps = capabilities_of(model)
+    thinking = get_models().thinking(role, model=model)
+    options = thinking.request_options()
+    if caps.forced_tool_choice and not thinking.thinking_on:
+        choice = (
+            {"type": "any"} if decision.any_tool else {"type": "tool", "name": decision.tool}
+        )
+        return _DecisionRequest(system, tools, choice, max_tokens, options, forced=True)
+    return _DecisionRequest(
+        system=_with_instruction(system, _instruction(decision)),
+        tools=[
+            _strict(tool) if caps.strict_tools and tool["name"] == decision.tool else tool
+            for tool in tools
+        ],
+        tool_choice={"type": "auto"},
+        max_tokens=max(max_tokens, THINKING_MIN_MAX_TOKENS) if thinking.thinking_on else max_tokens,
+        options=options,
+        forced=False,
+    )
+
+
+def _as_param(block: Any) -> dict[str, Any]:
+    return block.model_dump(mode="json", exclude_none=True)  # type: ignore[no-any-return]
+
+
+def read_decision(response: Any, usage: LLMUsage) -> ToolCalled | NoDecision:
+    """Primera tool llamada, o por qué no hubo ninguna. `refusal` va antes que el contenido."""
+    stop_reason = getattr(response, "stop_reason", None)
+    if stop_reason == "refusal":
+        category = getattr(getattr(response, "stop_details", None), "category", None)
+        return NoDecision("refusal", category or "sin_categoria", usage)
+    thinking: list[dict[str, Any]] = []
+    for block in response.content:
+        block_type = getattr(block, "type", None)
+        if block_type == "tool_use":
+            return ToolCalled(block, thinking, usage)
+        if block_type in ("thinking", "redacted_thinking"):
+            thinking.append(_as_param(block))
+    if stop_reason == "max_tokens":
+        return NoDecision("max_tokens", "", usage)
+    return NoDecision("tool_not_called", str(stop_reason), usage)
+
+
+async def call_claude_for_decision(
+    *,
+    client: anthropic.AsyncAnthropic,
+    model: str,
+    role: str,
+    system: str | list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    decision: ToolDecision,
+    max_tokens: int = 1024,
+    max_retries: int = 3,
+    timeout_seconds: int = 30,
+    cache: bool = False,
+    trace_label: str | None = None,
+) -> ToolCalled | NoDecision:
+    """Pide una decisión estructurada al modelo de `role` (o `model`, si un tenant fija el
+    suyo). Sin tool tras el reintento, refusal o max_tokens → `NoDecision`, logueado como
+    error: el nodo decide cómo escalar, nunca un texto vacío al cliente.
+
+    `usage` suma todas las llamadas, reintento incluido.
+    """
+    request = decision_request(
+        model=model,
+        role=role,
+        system=system,
+        tools=tools,
+        decision=decision,
+        max_tokens=max_tokens,
+    )
+    turn = list(messages)
+    usage = LLMUsage()
+    for attempt in range(NO_TOOL_RETRIES + 1):
+        response = await call_claude_with_tools(
+            client=client,
+            model=model,
+            system=request.system,
+            messages=turn,
+            tools=request.tools,
+            tool_choice=request.tool_choice,
+            max_tokens=request.max_tokens,
+            max_retries=max_retries,
+            timeout_seconds=timeout_seconds,
+            cache=cache,
+            trace_label=trace_label,
+            request_options=request.options,
+        )
+        usage = usage + LLMUsage.from_anthropic(response.usage)
+        outcome = read_decision(response, usage)
+        if isinstance(outcome, ToolCalled):
+            return outcome
+        if request.forced or outcome.kind != "tool_not_called" or attempt == NO_TOOL_RETRIES:
+            break
+        turn = [
+            *turn,
+            {"role": "assistant", "content": [_as_param(b) for b in response.content]},
+            {
+                "role": "user",
+                "content": "Tu respuesta anterior no llamó a ninguna herramienta. "
+                + _instruction(decision),
+            },
+        ]
+    logger.error(
+        "%s label=%s role=%s model=%s attempts=%d",
+        outcome.reason,
+        trace_label,
+        role,
+        model,
+        attempt + 1,
+        extra={"role": role, "model": model, "no_decision": outcome.kind},
+    )
+    return outcome
+
+
+@dataclass(frozen=True)
+class TextReply:
+    text: str
+    usage: LLMUsage
+    stop_reason: str | None
+    refusal_category: str | None
+
+
+async def call_claude_text(
+    *,
+    client: anthropic.AsyncAnthropic,
+    role: str,
+    system: str | list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+    max_tokens: int,
+    timeout_seconds: float | None = None,
+    model: str | None = None,
+    temperature: float | None = None,
+) -> TextReply:
+    """Llamada que espera texto (jueces, simulador, mensajes al cliente) traducida para el
+    modelo del rol: thinking y esfuerzo del registro, `temperature` solo donde se acepta, y
+    el texto leído por tipo de bloque (con thinking, el primer bloque no es texto)."""
+    model = model or getattr(get_models(), role)
+    thinking = get_models().thinking(role, model=model)
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "max_tokens": max(max_tokens, THINKING_MIN_MAX_TOKENS)
+        if thinking.thinking_on
+        else max_tokens,
+        "system": system,
+        "messages": messages,
+        **thinking.request_options(),
+    }
+    if timeout_seconds is not None:
+        kwargs["timeout"] = timeout_seconds
+    if temperature is not None and capabilities_of(model).sampling_params:
+        kwargs["extra_body"] = {"temperature": temperature}
+    response = await client.messages.create(**kwargs)
+    stop_reason = getattr(response, "stop_reason", None)
+    category = None
+    if stop_reason == "refusal":
+        category = getattr(getattr(response, "stop_details", None), "category", None)
+        logger.error(
+            "llm_refusal: %s role=%s model=%s", category or "sin_categoria", role, model
+        )
+    return TextReply(
+        text="".join(
+            block.text for block in response.content if getattr(block, "type", None) == "text"
+        ),
+        usage=LLMUsage.from_anthropic(response.usage),
+        stop_reason=stop_reason,
+        refusal_category=category,
+    )
 
 
 def build_anthropic_client(api_key: str, *, timeout: float = 60.0) -> anthropic.AsyncAnthropic:

@@ -156,6 +156,44 @@ class TestComputeLlmCost:
         }
 
 
+class TestModels55Pricing:
+    """Tarifas de la tabla del skill `claude-api` (2026-09-25): la caché de cada modelo es
+    suya, así que el primer día tras el cambio se pagan escrituras."""
+
+    def test_sonnet_5_5_with_cache_write_and_read(self) -> None:
+        # 1000 in @ $2 + 1000 escritos 5m @ $2.50 + 2000 leídos @ $0.20 + 200 out @ $10
+        usage = _api_usage(input_tokens=1000, output_tokens=200, cache_write=1000, cache_read=2000)
+        assert _cost("claude-sonnet-5-5", usage) == pytest.approx(0.0069)
+
+    def test_opus_5_5_with_cache_write_and_read(self) -> None:
+        # 1000 in @ $4 + 1000 escritos 5m @ $5 + 2000 leídos @ $0.20 + 200 out @ $20
+        usage = _api_usage(input_tokens=1000, output_tokens=200, cache_write=1000, cache_read=2000)
+        assert _cost("claude-opus-5-5", usage) == pytest.approx(0.0134)
+
+    def test_opus_5_5_cache_write_1h(self) -> None:
+        # 1000 escritos 1h @ $8
+        usage = _api_usage(input_tokens=0, output_tokens=0, cache_write=1000, cache_write_1h=1000)
+        assert _cost("claude-opus-5-5", usage) == pytest.approx(0.008)
+
+    def test_5_5_models_are_cheaper_than_the_ones_they_replace(self) -> None:
+        usage = _api_usage(input_tokens=5000, output_tokens=800, cache_read=3000)
+        assert _cost("claude-sonnet-5-5", usage) < _cost("claude-sonnet-4-6", usage)
+        assert _cost("claude-opus-5-5", usage) < _cost("claude-opus-4-7", usage)
+
+
+class TestLlmUsageSum:
+    def test_adds_every_category(self) -> None:
+        a = LLMUsage(input_tokens=1, cache_write_5m_tokens=2, cache_read_tokens=3, output_tokens=4)
+        b = LLMUsage(input_tokens=10, cache_write_1h_tokens=20, cache_read_tokens=30, output_tokens=40)
+        assert a + b == LLMUsage(
+            input_tokens=11,
+            cache_write_5m_tokens=2,
+            cache_write_1h_tokens=20,
+            cache_read_tokens=33,
+            output_tokens=44,
+        )
+
+
 class TestLlmUsageFromAnthropic:
     def test_prompt_tokens_include_cache(self) -> None:
         usage = LLMUsage.from_anthropic(

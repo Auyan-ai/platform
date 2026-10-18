@@ -34,7 +34,7 @@ class ModelRates:
     output: float
 
 
-# Verificado contra la página de precios el 2026-10-12.
+# Filas 4.x verificadas contra la página de precios el 2026-10-12.
 #
 # Nota Opus 4.7: el modelo usa un tokenizer actualizado. El mismo texto puede
 # mapearse a 1.0–1.35× tokens vs. versiones previas (ver
@@ -52,6 +52,16 @@ LLM_PRICING_PER_MILLION_TOKENS: dict[str, ModelRates] = {
     ),
     "claude-haiku-4-5-20251001": ModelRates(
         input=1.0, cache_write_5m=1.25, cache_write_1h=2.0, cache_read=0.10, output=5.0
+    ),
+    # Sonnet 5.5 y Opus 5.5: skill `claude-api` (tabla de modelos del 2026-09-25 y
+    # `shared/model-migration.md`). La lectura de caché es 0,1x en Sonnet 5.5 y 0,05x en
+    # Opus 5.5. La caché no se comparte entre modelos: al pasar un rol, la primera vuelta
+    # de cada prefijo paga escritura.
+    "claude-sonnet-5-5": ModelRates(
+        input=2.0, cache_write_5m=2.50, cache_write_1h=4.0, cache_read=0.20, output=10.0
+    ),
+    "claude-opus-5-5": ModelRates(
+        input=4.0, cache_write_5m=5.0, cache_write_1h=8.0, cache_read=0.20, output=20.0
     ),
 }
 
@@ -105,6 +115,15 @@ class LLMUsage:
     cache_read_tokens: int = 0
     output_tokens: int = 0
 
+    def __add__(self, other: LLMUsage) -> LLMUsage:
+        return LLMUsage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            cache_write_5m_tokens=self.cache_write_5m_tokens + other.cache_write_5m_tokens,
+            cache_write_1h_tokens=self.cache_write_1h_tokens + other.cache_write_1h_tokens,
+            cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+        )
+
     @property
     def cache_write_tokens(self) -> int:
         return self.cache_write_5m_tokens + self.cache_write_1h_tokens
@@ -119,9 +138,9 @@ class LLMUsage:
         """Parsea `response.usage`. Un contador ausente o no entero cuenta 0: una
         respuesta sin caching no trae los campos de caché."""
         cache_write = _int_field(usage, "cache_creation_input_tokens")
-        # `cache_creation` desglosa la escritura por TTL. Con el SDK fijado (0.40)
-        # llega como dict sin tipar; si falta, toda la escritura es de 5 minutos,
-        # el TTL por defecto de `cache_control: ephemeral`.
+        # `cache_creation` desglosa la escritura por TTL (objeto tipado en el SDK 1.x,
+        # dict en respuestas armadas a mano); si falta, toda la escritura es de 5
+        # minutos, el TTL por defecto de `cache_control: ephemeral`.
         cache_write_1h = _int_field(
             getattr(usage, "cache_creation", None), "ephemeral_1h_input_tokens"
         )

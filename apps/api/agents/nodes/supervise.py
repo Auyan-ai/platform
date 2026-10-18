@@ -8,7 +8,8 @@ El supervisor ve la misma evidencia que vio `reason` (su system prompt, el bloqu
 del turno, el historial y la salida de las herramientas) y la decisión propuesta. Lo
 literal lo decide el código: un email o teléfono de la respuesta que no aparece en esa
 evidencia, o un importe que no aparece en ella con la misma moneda, se rechaza sin llamar
-al LLM. El resto lo juzga el LLM con una tool forzada:
+al LLM. El resto lo juzga el LLM con la tool `supervisor_verdict`
+(`call_claude_for_decision`); sin decisión (refusal, sin tool) se rechaza como structural:
   - approve → continúa al destino (respond | escalate)
   - reject + tactical → el agente puede arreglar reintentando (una sola vez)
   - reject + structural → el AOP no aplica / falta capability → escala directo
@@ -31,8 +32,12 @@ from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes.reason import agent_system_blocks
 from apps.api.agents.state import AgentState
 from apps.api.core.config import get_models
-from apps.api.integrations.anthropic_client import call_claude_with_tools
-from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
+from apps.api.integrations.anthropic_client import (
+    NoDecision,
+    ToolDecision,
+    call_claude_for_decision,
+)
+from apps.api.integrations.pricing import compute_llm_cost
 from apps.api.services.amount_grounding import AmountProblem, unbacked_amounts
 from apps.api.services.contact_grounding import Contact, unbacked_contacts
 from apps.api.services.identity import default_phone_region
@@ -120,18 +125,26 @@ _AGENT_PROMPT_HEADER = (
 )
 
 
-def _select_supervisor_model(state: AgentState) -> str:
-    """Elige el modelo supervisor según el tier de la skill pendiente."""
+SupervisorRole = Literal["supervisor_model_l1_l2", "supervisor_model_l3"]
+
+
+def _supervisor_role(state: AgentState) -> SupervisorRole:
+    """Rol del supervisor según el tier de la skill pendiente."""
     pending = state.get("pending_tool_call")
     if pending:
         slug = pending.get("slug", "")
         try:
-            skill_cls = SkillRegistry.get(slug)
-            if skill_cls.tier == "L3":
-                return get_models().supervisor_model_l3
+            if SkillRegistry.get(slug).tier == "L3":
+                return "supervisor_model_l3"
         except ValueError:
             pass
-    return get_models().supervisor_model_l1_l2
+    return "supervisor_model_l1_l2"
+
+
+def _select_supervisor_model(state: AgentState) -> str:
+    """Elige el modelo supervisor según el tier de la skill pendiente."""
+    model: str = getattr(get_models(), _supervisor_role(state))
+    return model
 
 
 def _supervisor_system(agent_prompt: str) -> list[dict[str, Any]]:
@@ -328,6 +341,7 @@ def make_supervise_node(
         tenant_id = state.get("tenant_id")
         this_in = this_out = 0
         sup_cost = 0.0
+        unreviewed_draft_dropped = False
 
         literal = _literal_verdict(state)
         if literal is not None:
@@ -347,15 +361,16 @@ def make_supervise_node(
                 )
             agent_prompt, *turn_blocks = agent_system_blocks(state)
             turn_context = "\n\n".join(b["text"] for b in turn_blocks)
-            response = await call_claude_with_tools(
+            outcome = await call_claude_for_decision(
                 client=deps.anthropic,
                 model=model,
+                role=_supervisor_role(state),
                 system=_supervisor_system(agent_prompt["text"]),
                 messages=[
                     {"role": "user", "content": _build_supervisor_prompt(state, turn_context)}
                 ],
                 tools=[SUPERVISOR_VERDICT_TOOL],
-                tool_choice={"type": "tool", "name": "supervisor_verdict"},
+                decision=ToolDecision(SUPERVISOR_VERDICT_TOOL["name"]),
                 max_tokens=512,
                 max_retries=deps.settings.llm_max_retries,
                 timeout_seconds=deps.settings.llm_timeout_seconds,
@@ -363,18 +378,25 @@ def make_supervise_node(
                 trace_label="supervise",
             )
 
-            tool_block = next((b for b in response.content if b.type == "tool_use"), None)
-            if tool_block is None:
-                return {"error": "supervisor_did_not_use_tool"}
-
-            inp = tool_block.input
-            verdict = _Verdict(
-                verdict=inp.get("verdict", "reject"),
-                reject_kind=inp.get("reject_kind", "structural"),
-                reason=inp.get("reason", ""),
-                guardrails_violated=inp.get("guardrails_violated", []),
-            )
-            usage = LLMUsage.from_anthropic(response.usage)
+            if isinstance(outcome, NoDecision):
+                # Sin veredicto no hay revisión: structural → escala, y el borrador sin
+                # revisar no sale al cliente (va el acuse de escalado).
+                verdict = _Verdict(
+                    verdict="reject",
+                    reject_kind="structural",
+                    reason=outcome.reason,
+                    guardrails_violated=[],
+                )
+                unreviewed_draft_dropped = True
+            else:
+                inp = outcome.block.input
+                verdict = _Verdict(
+                    verdict=inp.get("verdict", "reject"),
+                    reject_kind=inp.get("reject_kind", "structural"),
+                    reason=inp.get("reason", ""),
+                    guardrails_violated=inp.get("guardrails_violated", []),
+                )
+            usage = outcome.usage
             this_in = usage.prompt_tokens
             this_out = usage.output_tokens
             sup_cost = compute_llm_cost(model, usage)
@@ -422,6 +444,8 @@ def make_supervise_node(
                 result["escalation_reason"] = (
                     f"supervisor_rejected ({verdict.reject_kind}): {verdict.reason}"
                 )
+        if unreviewed_draft_dropped:
+            result["agent_response"] = None
 
         return result
 

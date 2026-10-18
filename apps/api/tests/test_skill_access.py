@@ -167,7 +167,7 @@ async def _tools_offered(
         )
 
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools", AsyncMock(side_effect=fake_call)
+        "apps.api.integrations.anthropic_client.call_claude_with_tools", AsyncMock(side_effect=fake_call)
     )
     state = {
         "tenant_id": "00000000-0000-0000-0000-000000000001",
@@ -224,7 +224,7 @@ async def test_the_identity_note_reaches_the_prompt(
         )
 
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools", AsyncMock(side_effect=fake_call)
+        "apps.api.integrations.anthropic_client.call_claude_with_tools", AsyncMock(side_effect=fake_call)
     )
     state = {
         "tenant_id": "00000000-0000-0000-0000-000000000001",

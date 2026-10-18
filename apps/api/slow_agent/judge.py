@@ -10,9 +10,11 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, replace
+from typing import Literal
 
 from anthropic import AsyncAnthropic
 from apps.api.core.config import get_models
+from apps.api.integrations.anthropic_client import call_claude_text
 from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.slow_agent.prompts import JUDGE_SYSTEM_PROMPT
 from apps.api.slow_agent.transcript import ConversationTranscript, format_for_judge
@@ -56,20 +58,26 @@ class JudgeVerdict:
         return [*earlier, self]
 
 
+JudgeRole = Literal["slow_agent_model", "judge_opus_model"]
+
+
 async def _call_judge(
     anthropic: AsyncAnthropic,
     transcript: ConversationTranscript,
-    model: str,
+    role: JudgeRole,
 ) -> JudgeVerdict:
     formatted = format_for_judge(transcript)
-    response = await anthropic.messages.create(
+    model: str = getattr(get_models(), role)
+    reply = await call_claude_text(
+        client=anthropic,
         model=model,
+        role=role,
         max_tokens=JUDGE_MAX_TOKENS,
         system=JUDGE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": formatted}],
     )
-    raw = response.content[0].text.strip()
-    usage = LLMUsage.from_anthropic(response.usage)
+    raw = reply.text.strip()
+    usage = reply.usage
 
     try:
         data: dict = json.loads(raw)
@@ -115,7 +123,7 @@ async def judge_conversation(
     transcript: ConversationTranscript,
 ) -> JudgeVerdict:
     """Analiza el transcript. Escalona a Opus si Sonnet duda."""
-    sonnet_verdict = await _call_judge(anthropic, transcript, get_models().slow_agent_model)
+    sonnet_verdict = await _call_judge(anthropic, transcript, "slow_agent_model")
 
     if sonnet_verdict.confidence < OPUS_CONFIDENCE_THRESHOLD or sonnet_verdict.flag_for_opus:
         logger.info(
@@ -124,7 +132,7 @@ async def judge_conversation(
             sonnet_verdict.confidence,
             sonnet_verdict.flag_for_opus,
         )
-        opus_verdict = await _call_judge(anthropic, transcript, get_models().judge_opus_model)
+        opus_verdict = await _call_judge(anthropic, transcript, "judge_opus_model")
         return replace(opus_verdict, escalated_from=sonnet_verdict)
 
     return sonnet_verdict

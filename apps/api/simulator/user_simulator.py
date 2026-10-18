@@ -1,6 +1,7 @@
 """Bot cliente sintético del simulador.
 
-Usa Haiku 4.5 con temperature=0.7: necesita coherencia, no inteligencia.
+Usa Haiku 4.5 con temperature=0.7 (en los modelos que la aceptan): necesita
+coherencia, no inteligencia.
 El system prompt se marca para prompt caching entre turnos de la misma simulación.
 """
 
@@ -13,6 +14,7 @@ from dataclasses import dataclass
 from anthropic import AsyncAnthropic
 from apps.api.core.config import get_models
 from apps.api.db.models import UserProfile
+from apps.api.integrations.anthropic_client import call_claude_text
 from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.simulator.prompts import SIMULATOR_PROMPT
 
@@ -70,8 +72,9 @@ class UserSimulator:
         # Truncar a los últimos HISTORY_TRUNCATION turnos
         history = conversation_history[-HISTORY_TRUNCATION:]
 
-        response = await self._anthropic.messages.create(
-            model=get_models().simulator_model,
+        reply = await call_claude_text(
+            client=self._anthropic,
+            role="simulator_model",
             max_tokens=SIMULATOR_MAX_TOKENS,
             temperature=SIMULATOR_TEMPERATURE,
             system=[
@@ -82,11 +85,9 @@ class UserSimulator:
                 }
             ],
             messages=_build_messages(history),
-            timeout=SIMULATOR_TIMEOUT_SECONDS,
+            timeout_seconds=SIMULATOR_TIMEOUT_SECONDS,
         )
-
-        raw = response.content[0].text.strip() if response.content else "{}"
-        return _parse_turn(raw, LLMUsage.from_anthropic(response.usage))
+        return _parse_turn(reply.text.strip() or "{}", reply.usage)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
