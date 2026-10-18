@@ -5,8 +5,9 @@ Flujo:
    turno anterior desde intent_classifier_runs (continuidad entre turnos).
 2. Si el catálogo está vacío (tenant sin AOPs), devuelve {} — degradación elegante
    al sistema de prompts legacy.
-3. Llama a Haiku con tool forzado para clasificar intent → top-2 candidatos,
-   informándole del AOP previo para que juzgue continuidad vs. pivote.
+3. Pide al clasificador la tool `select_aop` (`call_claude_for_decision`) → top-2
+   candidatos, informándole del AOP previo para que juzgue continuidad vs. pivote.
+   Sin decisión (refusal, sin tool) → AOP `default`.
 4. Routing continuity-aware con histéresis (ver _resolve_aop_slug):
    - mismo AOP que el previo → continúa.
    - saliendo de 'default' → basta intent_min_confidence.
@@ -37,7 +38,11 @@ from apps.api.db.queries import (
     get_last_intent_for_conversation,
     insert_intent_classifier_run,
 )
-from apps.api.integrations.anthropic_client import call_claude_with_tools
+from apps.api.integrations.anthropic_client import (
+    NoDecision,
+    ToolDecision,
+    call_claude_for_decision,
+)
 from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -270,35 +275,34 @@ def make_select_aop_node(
             f"Historial reciente:\n{_format_history(history)}"
         )
 
-        response = await call_claude_with_tools(
+        outcome = await call_claude_for_decision(
             client=deps.anthropic,
             model=get_models().intent_classifier_model,
+            role="intent_classifier_model",
             system=INTENT_CLASSIFIER_PROMPT,
             messages=[{"role": "user", "content": user_message}],
             tools=[SELECT_AOP_TOOL],
-            tool_choice={"type": "tool", "name": "select_aop"},
+            decision=ToolDecision(SELECT_AOP_TOOL["name"]),
             max_tokens=512,
             max_retries=deps.settings.llm_max_retries,
             timeout_seconds=deps.settings.llm_timeout_seconds,
         )
 
         # ── 3. Parsear respuesta del clasificador ────────────────────────
-        tool_block = next(
-            (b for b in response.content if getattr(b, "type", None) == "tool_use"),
-            None,
-        )
-        if tool_block is None:
+        if isinstance(outcome, NoDecision):
             logger.warning(
-                "select_aop.no_tool_block tenant_id=%s — falling back to default", tenant_id
+                "select_aop.no_decision tenant_id=%s reason=%s — falling back to default",
+                tenant_id,
+                outcome.reason,
             )
             parsed = _ClassifierOutput(
                 primary=_Candidate(slug="default", confidence=0.0),
-                reasoning="no_tool_block",
+                reasoning=outcome.reason,
                 ambiguity_detected=False,
             )
         else:
             try:
-                parsed = _ClassifierOutput.model_validate(tool_block.input)
+                parsed = _ClassifierOutput.model_validate(outcome.block.input)
             except ValidationError:
                 # Output malformado de verdad (sin primary, confidence fuera de
                 # rango). Degradar a default igual que no_tool_block — nunca

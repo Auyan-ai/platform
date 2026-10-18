@@ -21,9 +21,15 @@ from apps.api.agents.nodes.reason import make_reason_node
 from apps.api.agents.nodes.select_aop import make_select_aop_node
 from apps.api.agents.nodes.supervise import make_supervise_node
 from apps.api.core.config import ModelRegistry, get_models
+from apps.api.skills.registry import SkillRegistry
+from apps.api.skills.shopify.cancel_order import CancelOrder
+from apps.api.skills.shopify.get_shop_policies import GetShopPolicies
 from apps.api.tests.anthropic_http import (
     RecordingAnthropic,
     message,
+    refusal,
+    text,
+    thinking,
     tool_use,
 )
 from apps.api.tests.test_select_aop_node import (
@@ -57,7 +63,12 @@ def _env(monkeypatch: pytest.MonkeyPatch) -> Iterator[pytest.MonkeyPatch]:
     for name in ModelRegistry.model_fields:
         monkeypatch.delenv(name.upper(), raising=False)
     get_models.cache_clear()
+    # Otros tests vacían el registro global de skills (`SkillRegistry._reset()`).
+    saved = dict(SkillRegistry._by_slug)
+    SkillRegistry._by_slug.update({POLICIES: GetShopPolicies, CANCEL: CancelOrder})
     yield monkeypatch
+    SkillRegistry._by_slug.clear()
+    SkillRegistry._by_slug.update(saved)
     get_models.cache_clear()
 
 
@@ -213,3 +224,227 @@ async def test_current_models_send_the_same_request_as_before(
     for name, api in scenarios.items():
         golden = json.loads((GOLDEN / f"{name}.json").read_text())
         assert {"body": api.requests, "beta": api.beta_headers} == golden, name
+
+
+PRESERVED_BETA = "thinking-binding-controls-2026-08-01"
+ADAPTIVE = {"type": "adaptive", "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
+
+
+def _assert_valid_5_5_request(body: dict[str, Any], *, decision_tool: str) -> None:
+    """Lo que un 5.5 exige: sin tool_choice forzado, sin thinking apagado, esfuerzo
+    explícito y la tool de decisión estricta."""
+    assert body["tool_choice"] == {"type": "auto"}
+    assert body["thinking"] == ADAPTIVE
+    assert body["output_config"] == {"effort": "medium"}
+    assert body["max_tokens"] >= 16000
+    strict = [t for t in body["tools"] if t.get("strict")]
+    assert [t["name"] for t in strict] == [decision_tool]
+    schema = strict[0]["input_schema"]
+    assert schema["additionalProperties"] is False
+    assert _keys(schema) & {"minimum", "maximum", "minLength", "maxLength"} == set()
+
+
+def _keys(schema: Any) -> set[str]:
+    if isinstance(schema, dict):
+        return set(schema) | {k for v in schema.values() for k in _keys(v)}
+    if isinstance(schema, list):
+        return {k for v in schema for k in _keys(v)}
+    return set()
+
+
+class TestReasonOn55:
+    @pytest.mark.asyncio
+    async def test_request_is_valid_and_thinking_then_decision_is_read(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        state = _with_policies(_reason_state("claude-opus-5-5"), hops=0)
+        api, out = await run_reason(
+            fake_deps,
+            state,
+            message(thinking(), tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+        )
+
+        body = api.requests[0]
+        _assert_valid_5_5_request(body, decision_tool="respond_or_escalate")
+        assert api.beta_headers == [PRESERVED_BETA]
+        assert "respond_or_escalate" in body["system"][-1]["text"]
+        assert out["decision"] == "respond"
+        assert out["agent_response"] == "Tardan 3 días."
+        assert out["model_used"] == "claude-opus-5-5"
+        # 100 in @ $4 + 50 out @ $20
+        assert out["cost_usd"] == pytest.approx(0.0014)
+
+    @pytest.mark.asyncio
+    async def test_skill_call_replays_its_thinking_on_the_next_hop(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        state = _with_policies(_reason_state("claude-sonnet-5-5"), hops=0)
+        _, first = await run_reason(
+            fake_deps,
+            state,
+            message(
+                thinking("sig_hop0"),
+                tool_use("shopify_get_shop_policies", {}, id="toolu_hop0"),
+                model="claude-sonnet-5-5",
+            ),
+        )
+        assert first["pending_tool_call"]["slug"] == POLICIES
+
+        next_state = _with_policies(_reason_state("claude-sonnet-5-5"), hops=1)
+        next_state["tool_use_thinking"] = first["tool_use_thinking"]
+        api, _ = await run_reason(
+            fake_deps,
+            next_state,
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-sonnet-5-5"),
+        )
+
+        assistant = api.requests[0]["messages"][-2]
+        assert assistant == {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "", "signature": "sig_hop0"},
+                {"type": "tool_use", "id": "toolu_hop0", "name": "shopify_get_shop_policies", "input": {}},
+            ],
+        }
+
+    @pytest.mark.asyncio
+    async def test_exhausted_iterations_steer_to_the_decide_tool(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        state = _with_policies(_reason_state("claude-opus-5-5"), hops=3)
+        api, out = await run_reason(
+            fake_deps,
+            state,
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+        )
+        body = api.requests[0]
+        assert body["tool_choice"] == {"type": "auto"}
+        assert "`respond_or_escalate`" in body["system"][-1]["text"]
+        assert out["decision"] == "respond"
+
+    @pytest.mark.asyncio
+    async def test_refusal_escalates_with_its_category_and_charges_the_call(
+        self, fake_deps: AgentDependencies, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        state = _with_policies(_reason_state("claude-opus-5-5"), hops=0)
+        with caplog.at_level("ERROR"):
+            api, out = await run_reason(fake_deps, state, refusal("cyber"))
+
+        assert len(api.requests) == 1
+        assert out["error"] == "llm_refusal: cyber"
+        assert out["cost_usd"] == pytest.approx(0.0014)
+        assert any("llm_refusal" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_text_without_tool_retries_once_with_a_nudge(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        state = _with_policies(_reason_state("claude-opus-5-5"), hops=0)
+        api, out = await run_reason(
+            fake_deps,
+            state,
+            message(thinking(), text("Te cuento..."), stop_reason="end_turn", model="claude-opus-5-5"),
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+        )
+
+        assert len(api.requests) == 2
+        first, retry = api.requests
+        assert retry["messages"][: len(first["messages"])] == first["messages"]
+        assert retry["messages"][-2] == {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "", "signature": "sig_1"},
+                {"type": "text", "text": "Te cuento..."},
+            ],
+        }
+        assert retry["messages"][-1]["role"] == "user"
+        assert out["decision"] == "respond"
+        # Dos llamadas cobradas: 2 x (100 in @ $4 + 50 out @ $20)
+        assert out["cost_usd"] == pytest.approx(0.0028)
+
+    @pytest.mark.asyncio
+    async def test_no_tool_after_the_retry_is_an_explicit_error(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        state = _with_policies(_reason_state("claude-opus-5-5"), hops=0)
+        no_tool = message(text("..."), stop_reason="end_turn", model="claude-opus-5-5")
+        api, out = await run_reason(fake_deps, state, no_tool, no_tool)
+
+        assert len(api.requests) == 2
+        assert out["error"] == "llm_no_decision: tool_not_called (end_turn)"
+
+
+class TestSelectAopOn55:
+    @pytest.mark.asyncio
+    async def test_classifier_with_thinking_off_and_low_effort(
+        self, fake_deps: AgentDependencies, _env: pytest.MonkeyPatch
+    ) -> None:
+        _env.setenv("INTENT_CLASSIFIER_MODEL", "claude-sonnet-5-5")
+        _env.setenv("THINKING_BY_ROLE", '{"intent_classifier_model": "off"}')
+        _env.setenv("EFFORT_BY_ROLE", '{"intent_classifier_model": "low"}')
+        get_models.cache_clear()
+
+        api, out = await run_select_aop(
+            fake_deps, message(tool_use("select_aop", CLASSIFIED), model="claude-sonnet-5-5")
+        )
+
+        body = api.requests[0]
+        assert body["model"] == "claude-sonnet-5-5"
+        assert body["tool_choice"] == {"type": "auto"}
+        assert body["thinking"] == {"type": "between_tools"}
+        assert body["output_config"] == {"effort": "low"}
+        assert body["tools"][0]["strict"] is True
+        assert "`select_aop`" in body["system"]
+        assert api.beta_headers == [None]
+        assert out["aop_slug"] == "consulta_envio"
+
+    @pytest.mark.asyncio
+    async def test_refusal_falls_back_to_the_default_aop(
+        self, fake_deps: AgentDependencies, _env: pytest.MonkeyPatch
+    ) -> None:
+        _env.setenv("INTENT_CLASSIFIER_MODEL", "claude-opus-5-5")
+        get_models.cache_clear()
+
+        api, out = await run_select_aop(fake_deps, refusal("general_harms"))
+
+        _assert_valid_5_5_request(api.requests[0], decision_tool="select_aop")
+        assert out["aop_slug"] == "default"
+
+
+class TestSuperviseOn55:
+    @pytest.mark.asyncio
+    async def test_l3_request_is_valid_and_verdict_is_read(
+        self, fake_deps: AgentDependencies, _env: pytest.MonkeyPatch
+    ) -> None:
+        _env.setenv("SUPERVISOR_MODEL_L3", "claude-opus-5-5")
+        get_models.cache_clear()
+        state = _supervise_state(
+            decision=None,
+            agent_response=None,
+            pending_tool_call={"id": "toolu_c", "slug": CANCEL, "input": {"order_id": 1}},
+        )
+
+        api, out = await run_supervise(
+            fake_deps,
+            state,
+            message(thinking(), tool_use("supervisor_verdict", APPROVE), model="claude-opus-5-5"),
+        )
+
+        _assert_valid_5_5_request(api.requests[0], decision_tool="supervisor_verdict")
+        assert out["supervisor_verdict"] == "approve"
+        assert out["supervisor_model_used"] == "claude-opus-5-5"
+
+    @pytest.mark.asyncio
+    async def test_refusal_rejects_and_drops_the_unreviewed_draft(
+        self, fake_deps: AgentDependencies, _env: pytest.MonkeyPatch
+    ) -> None:
+        _env.setenv("SUPERVISOR_MODEL_L1_L2", "claude-sonnet-5-5")
+        get_models.cache_clear()
+
+        _, out = await run_supervise(fake_deps, _supervise_state(), refusal("cyber", "claude-sonnet-5-5"))
+
+        assert out["supervisor_verdict"] == "reject"
+        assert out["escalation_reason"] == "supervisor_rejected (structural): llm_refusal: cyber"
+        assert out["agent_response"] is None
+        # 100 in @ $2 + 50 out @ $10, sobre el 0,01 que ya traía el turno
+        assert out["cost_usd"] == pytest.approx(0.0107)

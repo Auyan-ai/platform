@@ -75,7 +75,7 @@ async def test_respond_happy_path(fake_deps, make_anthropic_response, monkeypatc
         }
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -106,7 +106,7 @@ async def test_threshold_override_low_confidence_respond_to_escalate(
         }
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -202,7 +202,7 @@ async def test_simple_turn_calls_claude_with_fast_model(
         {"decision": "respond", "confidence": 0.95, "response_text": "¡De nada!"}
     )
     mock_call = AsyncMock(return_value=fake_response)
-    monkeypatch.setattr("apps.api.agents.nodes.reason.call_claude_with_tools", mock_call)
+    monkeypatch.setattr("apps.api.integrations.anthropic_client.call_claude_with_tools", mock_call)
     node = make_reason_node(fake_deps)
 
     out = await node(_base_state())  # allowed_skills=[], tool_results=[]
@@ -224,7 +224,7 @@ async def test_per_aop_confidence_threshold_overrides_tenant(
         }
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -252,7 +252,7 @@ async def test_threshold_does_not_override_explicit_escalate(
         }
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -276,7 +276,7 @@ async def test_high_confidence_keeps_respond(
         }
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -294,7 +294,7 @@ async def test_invalid_tool_output_sets_error(
     """decision='respond' sin response_text → ValidationError → error en state."""
     fake_response = make_anthropic_response({"decision": "respond", "confidence": 0.9})
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -321,7 +321,7 @@ async def test_no_tool_use_block_sets_error(fake_deps, monkeypatch) -> None:
         usage = FakeUsage()
 
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=FakeResponse()),
     )
     node = make_reason_node(fake_deps)
@@ -329,7 +329,7 @@ async def test_no_tool_use_block_sets_error(fake_deps, monkeypatch) -> None:
     out = await node(_base_state())
 
     assert out.get("error") is not None
-    assert "claude_did_not_use_tool" in out["error"]
+    assert out["error"].startswith("llm_no_decision: tool_not_called")
 
 
 # ----------------------------------------------------------------
@@ -376,7 +376,7 @@ async def test_skill_tool_emits_pending_tool_call(
         tool_id="toolu_search_001",
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -414,7 +414,7 @@ async def test_decide_tool_clears_stale_pending_tool_call(
         }
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -447,7 +447,7 @@ async def test_skill_tool_clears_stale_decision_fields(
         tool_id="toolu_search_002",
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -477,7 +477,7 @@ async def test_unknown_tool_name_sets_error(
         tool_id="toolu_x",
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -501,7 +501,7 @@ async def test_tokens_accumulate_across_iterations(
         output_tokens=40,
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -534,7 +534,7 @@ async def test_cached_prompt_counts_in_tokens_and_cost(
         }
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -566,7 +566,7 @@ async def test_tool_results_appended_to_messages(
         )
 
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(side_effect=fake_call),
     )
     node = make_reason_node(fake_deps)
@@ -614,7 +614,7 @@ async def test_tool_results_with_error_propagate_to_messages(
         )
 
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(side_effect=fake_call),
     )
     node = make_reason_node(fake_deps)
@@ -654,7 +654,7 @@ async def test_tools_list_includes_decide_and_allowed_skills(
         )
 
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(side_effect=fake_call),
     )
     node = make_reason_node(fake_deps)
@@ -684,7 +684,7 @@ async def test_tools_list_skips_unregistered_skills(
         )
 
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(side_effect=fake_call),
     )
     node = make_reason_node(fake_deps)
@@ -719,7 +719,7 @@ async def test_step_entered_emitted_on_first_iteration(
         {"decision": "respond", "confidence": 0.92, "response_text": "Listo."}
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -745,7 +745,7 @@ async def test_step_entered_uses_iteration_index(
         {"decision": "respond", "confidence": 0.92, "response_text": "Listo."}
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -771,7 +771,7 @@ async def test_no_step_events_when_iteration_exceeds_steps(
         {"decision": "respond", "confidence": 0.92, "response_text": "Listo."}
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -797,7 +797,7 @@ async def test_step_completed_emitted_on_decide_tool(
         {"decision": "respond", "confidence": 0.92, "response_text": "Listo."}
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -824,7 +824,7 @@ async def test_step_completed_emitted_on_skill_call(
         tool_id="toolu_search_002",
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -850,7 +850,7 @@ async def test_no_step_events_without_aop_steps(
         {"decision": "respond", "confidence": 0.92, "response_text": "Listo."}
     )
     monkeypatch.setattr(
-        "apps.api.agents.nodes.reason.call_claude_with_tools",
+        "apps.api.integrations.anthropic_client.call_claude_with_tools",
         AsyncMock(return_value=fake_response),
     )
     node = make_reason_node(fake_deps)
@@ -892,7 +892,7 @@ class TestIterationsExhausted:
                 }
             )
         )
-        monkeypatch.setattr("apps.api.agents.nodes.reason.call_claude_with_tools", call)
+        monkeypatch.setattr("apps.api.integrations.anthropic_client.call_claude_with_tools", call)
 
         out = await make_reason_node(fake_deps)(self._exhausted_state())
 
@@ -914,7 +914,7 @@ class TestIterationsExhausted:
                 {"decision": "respond", "confidence": 0.9, "response_text": "ok"}
             )
         )
-        monkeypatch.setattr("apps.api.agents.nodes.reason.call_claude_with_tools", call)
+        monkeypatch.setattr("apps.api.integrations.anthropic_client.call_claude_with_tools", call)
         await make_reason_node(fake_deps)({**self._exhausted_state(), "tool_iterations": 1})
         assert call.await_args.kwargs["tool_choice"] == {"type": "any"}
 
@@ -926,7 +926,7 @@ class TestIterationsExhausted:
         from tests.conftest import FakeAnthropicResponse
 
         monkeypatch.setattr(
-            "apps.api.agents.nodes.reason.call_claude_with_tools",
+            "apps.api.integrations.anthropic_client.call_claude_with_tools",
             AsyncMock(
                 return_value=FakeAnthropicResponse(
                     {"order_identifier": "#1"},
@@ -951,7 +951,7 @@ class TestIterationsExhausted:
         from tests.conftest import FakeAnthropicResponse
 
         monkeypatch.setattr(
-            "apps.api.agents.nodes.reason.call_claude_with_tools",
+            "apps.api.integrations.anthropic_client.call_claude_with_tools",
             AsyncMock(
                 return_value=FakeAnthropicResponse(
                     {"order_identifier": "#1"},
