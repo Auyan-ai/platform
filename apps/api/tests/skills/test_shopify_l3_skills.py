@@ -1,5 +1,5 @@
 """Tests para las skills L3 de Shopify: cancel_order, update_shipping_address,
-refund_partial, start_return.
+refund_partial (las de devolución, en test_return_skills.py).
 
 ShopifyClient mockeado con AsyncMock — sin llamadas HTTP reales.
 """
@@ -32,11 +32,6 @@ from apps.api.skills.shopify.refund_partial import (
     RefundPartialInput,
     RefundPartialOutput,
 )
-from apps.api.skills.shopify.start_return import (
-    StartReturn,
-    StartReturnInput,
-    StartReturnOutput,
-)
 from apps.api.skills.shopify.update_shipping_address import (
     UpdateShippingAddress,
     UpdateShippingAddressInput,
@@ -68,11 +63,6 @@ _GBP_BALANCE = RefundableBalance(
     captured=Decimal("45.00"), refunded=Decimal("0"), currency="GBP"
 )
 
-_RETURN_RESPONSE = {
-    "id": 5001,
-    "status": "open",
-    "order_id": 1001,
-}
 
 
 # ----------------------------------------------------------------
@@ -130,11 +120,11 @@ class TestCancelOrder:
         assert inputs.model_dump() == {"order_id": 1001, "reason": "customer", "send_email": True}
 
     @pytest.mark.asyncio
-    async def test_prepare_approval_marks_the_refund_route_and_drops_refund_payment(
+    async def test_prepare_marks_the_refund_route_and_drops_refund_payment(
         self,
     ) -> None:
         adapter = _adapter(snapshot(transactions=[MANUAL_SALE]))
-        approved = await CancelOrder().prepare_approval(
+        approved = await CancelOrder().prepare(
             _ctx(adapter), {"order_id": 1001, "refund_payment": False}
         )
         assert approved == {
@@ -146,9 +136,9 @@ class TestCancelOrder:
         }
 
     @pytest.mark.asyncio
-    async def test_prepare_approval_names_the_automatic_gateway(self) -> None:
+    async def test_prepare_names_the_automatic_gateway(self) -> None:
         adapter = _adapter(snapshot(transactions=[CARD_SALE]))
-        approved = await CancelOrder().prepare_approval(_ctx(adapter), {"order_id": 1001})
+        approved = await CancelOrder().prepare(_ctx(adapter), {"order_id": 1001})
         assert (approved["refund_mode"], approved["refund_gateway"]) == (
             "automatic",
             "shopify_payments",
@@ -164,10 +154,10 @@ class TestCancelOrder:
         ],
         ids=["fulfilled", "partial", "tracking"],
     )
-    async def test_prepare_approval_refuses_a_shipped_order(self, order: dict) -> None:
+    async def test_prepare_refuses_a_shipped_order(self, order: dict) -> None:
         adapter = _adapter(snapshot(**order))
         with pytest.raises(SkillRefusal) as refused:
-            await CancelOrder().prepare_approval(_ctx(adapter), {"order_id": 1001})
+            await CancelOrder().prepare(_ctx(adapter), {"order_id": 1001})
         assert refused.value.code == "order_shipped"
         assert refused.value.customer_message.startswith("Tu pedido ya ha salido del almacén")
 
@@ -176,14 +166,14 @@ class TestCancelOrder:
         adapter = _adapter(
             snapshot(fulfillments=[{"status": "CANCELLED", "trackingInfo": [{"number": "X"}]}])
         )
-        approved = await CancelOrder().prepare_approval(_ctx(adapter), {"order_id": 1001})
+        approved = await CancelOrder().prepare(_ctx(adapter), {"order_id": 1001})
         assert approved["refund_mode"] == "manual"
 
     @pytest.mark.asyncio
-    async def test_prepare_approval_refuses_an_already_cancelled_order(self) -> None:
+    async def test_prepare_refuses_an_already_cancelled_order(self) -> None:
         adapter = _adapter(snapshot(cancelled=True))
         with pytest.raises(SkillRefusal) as refused:
-            await CancelOrder().prepare_approval(_ctx(adapter), {"order_id": 1001})
+            await CancelOrder().prepare(_ctx(adapter), {"order_id": 1001})
         assert refused.value.code == "order_cancelled"
 
     @pytest.mark.asyncio
@@ -338,16 +328,16 @@ class TestUpdateShippingAddress:
         assert UpdateShippingAddress.requires_idempotency is True
 
     @pytest.mark.asyncio
-    async def test_prepare_approval_passes_an_unshipped_order(self) -> None:
+    async def test_prepare_passes_an_unshipped_order(self) -> None:
         raw = _ADDRESS_INPUT.model_dump()
-        approved = await UpdateShippingAddress().prepare_approval(_ctx(_adapter(snapshot())), raw)
+        approved = await UpdateShippingAddress().prepare(_ctx(_adapter(snapshot())), raw)
         assert approved == raw
 
     @pytest.mark.asyncio
-    async def test_prepare_approval_refuses_a_shipped_order(self) -> None:
+    async def test_prepare_refuses_a_shipped_order(self) -> None:
         adapter = _adapter(snapshot(**_SHIPPED_WITH_TRACKING))
         with pytest.raises(SkillRefusal) as refused:
-            await UpdateShippingAddress().prepare_approval(
+            await UpdateShippingAddress().prepare(
                 _ctx(adapter), _ADDRESS_INPUT.model_dump()
             )
         assert refused.value.code == "order_shipped"
@@ -508,10 +498,10 @@ class TestRefundPartial:
             await skill.execute(CTX_NO_SHOPIFY, RefundPartialInput(order_id=1, amount="1.00"))
 
     @pytest.mark.asyncio
-    async def test_prepare_approval_pins_currency_and_refund_route(self) -> None:
+    async def test_prepare_pins_currency_and_refund_route(self) -> None:
         adapter = _adapter(snapshot(transactions=[MANUAL_SALE]))
         adapter.get_refundable_balance = AsyncMock(return_value=_GBP_BALANCE)
-        approved = await RefundPartial().prepare_approval(
+        approved = await RefundPartial().prepare(
             _ctx(adapter), {"order_id": 1001, "amount": "12.50", "currency": "EUR"}
         )
         assert approved == {
@@ -523,14 +513,14 @@ class TestRefundPartial:
         }
 
     @pytest.mark.asyncio
-    async def test_prepare_approval_rejects_amount_above_refundable(self) -> None:
+    async def test_prepare_rejects_amount_above_refundable(self) -> None:
         with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
             instance = MockClient.return_value
             instance.get_order_by_name = AsyncMock(return_value=None)
             instance.get_refundable_balance = AsyncMock(return_value=_GBP_BALANCE)
 
             with pytest.raises(ShopifyActionError, match="refund_amount_exceeds_refundable"):
-                await RefundPartial().prepare_approval(
+                await RefundPartial().prepare(
                     CTX, {"order_id": 1001, "amount": "45.01"}
                 )
 
@@ -539,86 +529,6 @@ class TestRefundPartial:
         assert tool["name"] == "shopify_refund_partial"
         assert "amount" in tool["input_schema"]["properties"]
         assert "currency" not in tool["input_schema"]["properties"]
-
-# ----------------------------------------------------------------
-# StartReturn
-# ----------------------------------------------------------------
-
-
-class TestStartReturn:
-    def test_tier_is_l3(self) -> None:
-        assert StartReturn.tier == "L3"
-
-    def test_slug(self) -> None:
-        assert StartReturn.slug == "shopify.start_return"
-
-    def test_requires_idempotency(self) -> None:
-        assert StartReturn.requires_idempotency is True
-
-    @pytest.mark.asyncio
-    async def test_starts_return_successfully(self) -> None:
-        skill = StartReturn()
-        inputs = StartReturnInput(order_id=1001, line_item_id=2001, quantity=1)
-
-        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
-            instance = MockClient.return_value
-            instance.get_order_by_name = AsyncMock(return_value=None)
-            instance.start_return = AsyncMock(return_value=_RETURN_RESPONSE)
-
-            result = await skill.execute(CTX, inputs)
-
-        assert isinstance(result, StartReturnOutput)
-        assert result.success is True
-        assert result.order_id == 1001
-        assert result.return_id == 5001
-        assert result.status == "open"
-        instance.start_return.assert_awaited_once_with(
-            1001, line_item_id=2001, quantity=1, reason="other"
-        )
-
-    @pytest.mark.asyncio
-    async def test_starts_return_with_custom_reason(self) -> None:
-        skill = StartReturn()
-        inputs = StartReturnInput(order_id=1001, line_item_id=2001, quantity=2, reason="defective")
-
-        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
-            instance = MockClient.return_value
-            instance.get_order_by_name = AsyncMock(return_value=None)
-            instance.start_return = AsyncMock(return_value=_RETURN_RESPONSE)
-
-            await skill.execute(CTX, inputs)
-
-        instance.start_return.assert_awaited_once_with(
-            1001, line_item_id=2001, quantity=2, reason="defective"
-        )
-
-    @pytest.mark.asyncio
-    async def test_return_id_none_if_api_omits_it(self) -> None:
-        skill = StartReturn()
-        inputs = StartReturnInput(order_id=1001, line_item_id=2001, quantity=1)
-
-        with patch("apps.api.integrations.shopify.ShopifyClient") as MockClient:
-            instance = MockClient.return_value
-            instance.get_order_by_name = AsyncMock(return_value=None)
-            instance.start_return = AsyncMock(return_value={})
-
-            result = await skill.execute(CTX, inputs)
-
-        assert result.return_id is None
-        assert result.status is None
-
-    @pytest.mark.asyncio
-    async def test_raises_if_shopify_not_configured(self) -> None:
-        skill = StartReturn()
-        with pytest.raises(ValueError, match="shopify_not_configured"):
-            await skill.execute(CTX_NO_SHOPIFY, StartReturnInput(order_id=1, line_item_id=1, quantity=1))
-
-    def test_anthropic_tool_shape(self) -> None:
-        tool = StartReturn().to_anthropic_tool()
-        assert tool["name"] == "shopify_start_return"
-        assert "line_item_id" in tool["input_schema"]["properties"]
-        assert "quantity" in tool["input_schema"]["properties"]
-
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -641,7 +551,7 @@ async def test_order_refusal_speaks_the_conversation_language(
         default_language=default,
     )
     with pytest.raises(SkillRefusal) as refused:
-        await CancelOrder().prepare_approval(ctx, {"order_id": 1001})
+        await CancelOrder().prepare(ctx, {"order_id": 1001})
     assert refused.value.customer_message.startswith(start)
     # El motivo para el equipo no cambia de idioma.
     assert refused.value.team_reason.startswith("El cliente pidió cancelar el pedido")

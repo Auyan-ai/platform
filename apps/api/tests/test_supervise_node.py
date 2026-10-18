@@ -514,6 +514,24 @@ _STORE_FACTS = {
     "business_hours": "lunes a viernes de 8 a 16h",
 }
 
+_RETURNS_POLICY = {
+    "version": 2,
+    "policy": {
+        "schema_version": 1,
+        "window": {"days": 30, "starts_at": "delivery"},
+        "reasons": [{"code": "too_small", "label": "Talla pequeña", "fault": "customer"}],
+        "shipping": {
+            "method": "customer_ships",
+            "return_address": "Calle Mayor 1, Madrid",
+            "payer": {"store_fault": "store", "customer_fault": "customer"},
+        },
+        "refund_days": 14,
+        "excluded_product_tags": [],
+        "exchanges": {"enabled": False},
+        "returns_require_approval": True,
+    },
+}
+
 _DELIVERED_ORDER = {
     "id": "toolu_1",
     "slug": "shopify.get_order_status",
@@ -549,6 +567,7 @@ def _store_state(agent_response: str) -> dict:
         "aop_slug": "order_change",
         "system_prompt": compiled.system_prompt,
         "tenant_facts": _STORE_FACTS,
+        "returns_policy": _RETURNS_POLICY,
         "tenant_config": {"extra": {}, "escalation_threshold": 0.7},
         "conversation_history": [
             {"role": "customer", "content": "Quiero cancelar el pedido #1431."}
@@ -580,6 +599,7 @@ async def test_supervisor_sees_tenant_facts(fake_deps: Any) -> None:
     )
 
     sent = _sent_to_supervisor(fake_deps)
+    assert "- Plazo: 30 días desde la entrega." in sent
     assert "Teléfono de soporte: 612 345 678" in sent
     assert "Horario de atención: lunes a viernes de 8 a 16h" in sent
 

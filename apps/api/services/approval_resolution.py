@@ -85,6 +85,8 @@ _ACTION_NAME: dict[str, str] = {
     "shopify.update_shipping_address": "El cambio de dirección",
     "shopify.cancel_order": "La cancelación",
     "shopify.refund_partial": "El reembolso parcial",
+    "shopify.start_return": "La devolución",
+    "shopify.start_exchange": "El cambio",
 }
 
 

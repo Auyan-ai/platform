@@ -43,6 +43,7 @@ from apps.api.services.conversation_progress import no_progress_reason
 from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.identity import IdentityContext
 from apps.api.services.language import state_languages
+from apps.api.services.returns_policy import ActivePolicy, policy_note
 from apps.api.services.skill_access import visible_skills
 from apps.api.skills.registry import SkillRegistry
 from pydantic import ValidationError
@@ -83,6 +84,19 @@ def _tenant_now_str(tenant_facts: dict | None) -> str:
     return f"{now.strftime('%Y-%m-%d %H:%M')} ({tz_name})"
 
 
+_RETURN_SKILLS = frozenset({"shopify.start_return", "shopify.start_exchange"})
+
+
+def _returns_policy_note(state: AgentState) -> str | None:
+    """Resumen de la política de devoluciones: cualquier AOP puede contestar por el plazo, y
+    el supervisor lo contrasta con esto. Que no está configurada solo se dice donde el AOP
+    puede abrir una devolución."""
+    active = ActivePolicy.from_state(state.get("returns_policy"))
+    if active is None and not _RETURN_SKILLS & set(state.get("allowed_skills") or []):
+        return None
+    return policy_note(active)
+
+
 def agent_system_blocks(state: AgentState) -> list[dict[str, Any]]:
     """El system de `reason`: prompt compilado (cacheado) + bloque volátil del turno.
 
@@ -99,6 +113,7 @@ def agent_system_blocks(state: AgentState) -> list[dict[str, Any]]:
         ),
         writing_surface=surface_of(state),
         identity_note=state.get("identity_note"),
+        returns_policy_note=_returns_policy_note(state),
         response_language=state.get("response_language"),
     )
 

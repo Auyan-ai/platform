@@ -991,7 +991,7 @@ class TestRefundApprovalPrecheck:
 
         entry = result["tool_results"][-1]
         assert entry["is_error"] is True
-        assert entry["error"].startswith("approval_precheck_failed: ShopifyActionError: ")
+        assert entry["error"].startswith("skill_precheck_failed: ShopifyActionError: ")
         assert "solo quedan 45.00 GBP" in entry["error"]
         assert "pending_approval_id" not in result
         self.create.assert_not_awaited()

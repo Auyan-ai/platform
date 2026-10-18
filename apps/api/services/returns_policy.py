@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -112,6 +113,66 @@ class ReturnsPolicy(_Strict):
 
     def reason(self, code: str) -> ReturnReason | None:
         return next((r for r in self.reasons if r.code == code), None)
+
+
+@dataclass(frozen=True)
+class ActivePolicy:
+    """La versión vigente de la política: las skills citan `version` en cada plan."""
+
+    version: int
+    policy: ReturnsPolicy
+
+    def to_state(self) -> dict[str, Any]:
+        return {"version": self.version, "policy": self.policy.model_dump(mode="json")}
+
+    @classmethod
+    def from_state(cls, raw: Mapping[str, Any] | None) -> ActivePolicy | None:
+        if not raw:
+            return None
+        policy = parse_stored_policy(raw.get("policy") or {})
+        return cls(version=int(raw["version"]), policy=policy) if policy else None
+
+
+_WINDOW_START_LABEL: dict[WindowStart, str] = {
+    "delivery": "la entrega",
+    "shipment": "el envío",
+    "order": "la compra",
+}
+_EXCHANGE_KIND_LABEL: dict[ExchangeKind, str] = {
+    "variant": "otra talla o color del mismo producto",
+    "product": "otro producto",
+}
+
+
+def policy_note(active: ActivePolicy | None) -> str:
+    """Resumen para el LLM del turno: qué códigos de motivo existen y qué pide cada uno.
+
+    Lo genera el código desde la política; quién puede devolver, el plazo y el envío los
+    decide `services/returns.evaluate_return`, no el LLM.
+    """
+    if active is None:
+        return (
+            "Política de devoluciones y cambios: la tienda no la ha configurado. El sistema no "
+            "abre devoluciones ni cambios; si el cliente quiere uno, pásalo al equipo."
+        )
+    policy = active.policy
+    reasons = "\n".join(
+        f"  - `{r.code}`: {r.label}"
+        + (" (exige foto del cliente)" if "photo" in r.required_evidence else "")
+        for r in policy.reasons
+    )
+    if policy.exchanges.enabled:
+        kinds = " o ".join(_EXCHANGE_KIND_LABEL[k] for k in sorted(policy.exchanges.kinds))
+        exchanges = f"Cambios: sí, por {kinds}."
+    else:
+        exchanges = "Cambios: no."
+    return (
+        f"Política de devoluciones y cambios de la tienda (versión {active.version}):\n"
+        f"- Plazo: {policy.window.days} días desde {_WINDOW_START_LABEL[policy.window.starts_at]}.\n"
+        f"- Motivos (usa el código en `reason_code`):\n{reasons}\n"
+        f"- {exchanges}\n"
+        "Plazo, pruebas, envío e importes los comprueba el sistema al pedir la acción."
+    )
 
 
 def parse_stored_policy(raw: Mapping[str, Any]) -> ReturnsPolicy | None:

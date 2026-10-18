@@ -30,6 +30,7 @@ def _patch_module(
     commerce_ctx=None,
     playbook=None,
     facts=None,
+    returns_policy=None,
 ) -> None:
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
     monkeypatch.setattr(f"{MODULE}.get_tenant_by_id", AsyncMock(return_value=tenant))
@@ -40,6 +41,9 @@ def _patch_module(
     monkeypatch.setattr(f"{MODULE}.list_tool_permissions", AsyncMock(return_value=[]))
     monkeypatch.setattr(f"{MODULE}.get_tenant_playbook", AsyncMock(return_value=playbook))
     monkeypatch.setattr(f"{MODULE}.get_tenant_facts", AsyncMock(return_value=facts))
+    monkeypatch.setattr(
+        f"{MODULE}.get_current_returns_policy", AsyncMock(return_value=returns_policy)
+    )
     monkeypatch.setattr(
         f"{MODULE}.build_commerce_integration_ctx",
         AsyncMock(return_value=commerce_ctx),
@@ -240,3 +244,65 @@ async def test_playbook_and_facts_none_when_not_configured(fake_deps, monkeypatc
 
     assert out["tenant_playbook"] is None
     assert out["tenant_facts"] is None
+
+
+_POLICY = {
+    "schema_version": 1,
+    "window": {"days": 30, "starts_at": "delivery"},
+    "reasons": [{"code": "too_small", "label": "Pequeña", "fault": "customer"}],
+    "shipping": {
+        "method": "customer_ships",
+        "return_address": "Calle Mayor 1, Madrid",
+        "payer": {"store_fault": "store", "customer_fault": "customer"},
+    },
+    "refund_days": 14,
+    "excluded_product_tags": [],
+    "exchanges": {"enabled": False},
+    "returns_require_approval": True,
+}
+
+
+@pytest.mark.asyncio
+async def test_returns_policy_is_loaded_with_its_version(fake_deps, monkeypatch) -> None:
+    from datetime import UTC, datetime
+
+    from apps.api.db.returns_policy import StoredPolicy
+
+    _patch_module(
+        monkeypatch,
+        tenant=make_tenant(),
+        config=make_tenant_configuration(),
+        system_prompt="ok",
+        returns_policy=StoredPolicy(
+            version=4, policy=_POLICY, edited_by_email=None, created_at=datetime.now(UTC)
+        ),
+    )
+
+    out = await make_load_tenant_context_node(fake_deps)(_state())
+
+    assert out["returns_policy"]["version"] == 4
+    assert out["returns_policy"]["policy"]["window"] == {"days": 30, "starts_at": "delivery"}
+
+
+@pytest.mark.asyncio
+async def test_unreadable_or_missing_policy_is_none(fake_deps, monkeypatch) -> None:
+    from datetime import UTC, datetime
+
+    from apps.api.db.returns_policy import StoredPolicy
+
+    _patch_module(
+        monkeypatch,
+        tenant=make_tenant(),
+        config=make_tenant_configuration(),
+        system_prompt="ok",
+        returns_policy=StoredPolicy(
+            version=2,
+            policy={**_POLICY, "schema_version": 9},
+            edited_by_email=None,
+            created_at=datetime.now(UTC),
+        ),
+    )
+
+    out = await make_load_tenant_context_node(fake_deps)(_state())
+
+    assert out["returns_policy"] is None

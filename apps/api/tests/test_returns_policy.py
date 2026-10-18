@@ -144,3 +144,34 @@ def test_stored_json_parses_back_and_an_unknown_schema_version_is_not_guessed() 
 
     assert parse_stored_policy(stored) == ReturnsPolicy.model_validate(_policy())
     assert parse_stored_policy({**stored, "schema_version": 2}) is None
+
+
+def _system_text(state: dict[str, Any]) -> str:
+    from apps.api.agents.nodes.reason import agent_system_blocks
+
+    return "\n".join(b["text"] for b in agent_system_blocks({"system_prompt": "AOP", **state}))
+
+
+def test_the_turn_lists_reason_codes_and_what_each_needs() -> None:
+    from apps.api.services.returns_policy import ActivePolicy
+
+    active = ActivePolicy(version=3, policy=ReturnsPolicy.model_validate(_policy()))
+
+    text = _system_text({"returns_policy": active.to_state(), "allowed_skills": []})
+
+    assert (
+        "Política de devoluciones y cambios de la tienda (versión 3):\n"
+        "- Plazo: 30 días desde la entrega.\n"
+        "- Motivos (usa el código en `reason_code`):\n"
+        "  - `defective`: Llegó defectuoso (exige foto del cliente)\n"
+        "  - `too_small`: Talla pequeña\n"
+        "- Cambios: sí, por otra talla o color del mismo producto.\n"
+    ) in text
+
+
+def test_without_policy_only_return_aops_hear_that_it_is_missing() -> None:
+    returns_aop = _system_text({"allowed_skills": ["shopify.start_return"]})
+    other_aop = _system_text({"allowed_skills": ["shopify.get_order_status"]})
+
+    assert "la tienda no la ha configurado" in returns_aop
+    assert "Política de devoluciones" not in other_aop

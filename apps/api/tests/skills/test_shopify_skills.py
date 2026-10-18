@@ -125,8 +125,8 @@ _RAW_PRODUCT = {
     "product_type": "Ropa",
     "status": "active",
     "variants": [
-        {"title": "Small", "price": "19.99", "inventory_quantity": 5},
-        {"title": "Large", "price": "19.99", "inventory_quantity": 0},
+        {"id": 3101, "title": "Small", "price": "19.99", "inventory_quantity": 5},
+        {"id": 3102, "title": "Large", "price": "19.99", "inventory_quantity": 0},
     ],
 }
 
@@ -400,6 +400,7 @@ class TestGetProductInfo:
         assert p.title == "Camiseta Auyan"
         assert p.product_type == "Ropa"
         assert len(p.variants) == 2
+        assert [v.variant_id for v in p.variants] == [3101, 3102]
         assert p.variants[0].available is True
         assert p.variants[1].available is False
         assert p.variants[0].price == Money(amount="19.99", currency="USD")

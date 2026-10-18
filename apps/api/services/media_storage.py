@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 import httpx
@@ -20,6 +20,12 @@ if TYPE_CHECKING:
     from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+
+def listed_attachments(raw: Any) -> list[dict[str, Any]]:
+    """Adjuntos de un mensaje que lista el inbox, en orden. El índice que manda la web, el
+    de una foto en una aprobación y el de la vista previa apuntan al mismo adjunto."""
+    return [a for a in (raw or []) if isinstance(a, dict) and (a.get("path") or a.get("filename"))]
 
 MEDIA_BUCKET = "conversation-media"
 MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024

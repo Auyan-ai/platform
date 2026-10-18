@@ -18,12 +18,14 @@ el idioma de la conversación y el idioma por defecto del tenant.
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from apps.api.integrations.anthropic_client import call_claude_text
 from apps.api.services.fixed_texts import CATALOG, FALLBACK_LANGUAGE, LANGUAGE_CODES, fixed_text
 from apps.api.services.language import LANGUAGE_NAMES, reply_language_mismatch
 from apps.api.services.reply_format import strip_emojis, strip_formatting
+from apps.api.services.returns import ReturnPlan
 from apps.api.skills.shopify._order_guard import ActionOutcome
 
 if TYPE_CHECKING:
@@ -119,7 +121,56 @@ def action_details(
         return fixed_text(
             "address_details", language, tenant_default=tenant_default, address=address
         )
+    if skill_slug in _RETURN_SKILLS and output.get("plan"):
+        plan = ReturnPlan.model_validate(output["plan"])
+        return return_next_steps(plan, language or tenant_default, tenant_default)
     return None
+
+
+_RETURN_SKILLS = frozenset({"shopify.start_return", "shopify.start_exchange"})
+
+
+def _money(amount: Decimal, currency: str, language: str) -> str:
+    text = f"{amount:.2f}"
+    return f"{text if language == 'en' else text.replace('.', ',')} {currency}"
+
+
+def return_next_steps(plan: ReturnPlan, language: str, tenant_default: str) -> str:
+    """Qué pasa ahora, según la política del tenant con la que se abrió: cómo vuelve el
+    paquete, quién paga el envío, la tarifa y el plazo. Nunca dice que el dinero ya vuelve."""
+
+    def text(key: str, **params: str) -> str:
+        return fixed_text(key, language, tenant_default=tenant_default, **params)
+
+    s = plan.settlement
+    steps = [
+        text("returns.ship_to", address=plan.return_address)
+        if plan.shipping_method == "customer_ships" and plan.return_address
+        else text("returns.label")
+    ]
+    if s.fee_pending is not None:
+        steps.append(text("returns.shipping_fee_pending"))
+    elif s.fee:
+        steps.append(text("returns.shipping_fee", fee=_money(s.fee, s.currency, language)))
+    elif s.shipping_payer == "customer":
+        steps.append(text("returns.shipping_paid_by_customer"))
+    elif plan.shipping_method == "customer_ships":
+        steps.append(text("returns.shipping_reimbursed"))
+    else:
+        steps.append(text("returns.shipping_paid_by_store"))
+    days = str(plan.refund_days)
+    if not plan.exchange_lines:
+        steps.append(text("returns.refund_after_receipt", days=days))
+        return " ".join(steps)
+    steps.append(text("returns.exchange_ships"))
+    if s.net is None:
+        steps.append(text("returns.exchange_difference_pending"))
+    elif s.net < 0:
+        steps.append(text("returns.exchange_you_owe", amount=_money(-s.net, s.currency, language)))
+    elif s.net > 0:
+        amount = _money(s.net, s.currency, language)
+        steps.append(text("returns.exchange_refund", amount=amount, days=days))
+    return " ".join(steps)
 
 
 def fallback_message(

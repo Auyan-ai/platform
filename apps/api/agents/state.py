@@ -40,6 +40,8 @@ class AgentState(TypedDict, total=False):
     # Ambos son None si el tenant aún no completó el onboarding.
     tenant_playbook: dict | None  # TenantPlaybook.model_dump()
     tenant_facts: dict | None     # TenantFacts.data (el JSONB plano)
+    # Política de devoluciones vigente {version, policy} o None (ADR 0014).
+    returns_policy: dict | None
 
     # --- Producido por load_conversation ---
     conversation_history: list[dict]

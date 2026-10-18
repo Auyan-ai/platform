@@ -81,9 +81,7 @@ class RefundPartial(Skill):
     identity_scope = "order"
     min_level = "guest"
 
-    async def prepare_approval(
-        self, ctx: SkillContext, raw_input: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def prepare(self, ctx: SkillContext, raw_input: dict[str, Any]) -> dict[str, Any]:
         """Rechaza un importe por encima de lo reembolsable y fija la moneda del pedido
         y por dónde vuelve el dinero, para que quien aprueba vea los datos reales."""
         inputs = RefundPartialInput.model_validate(raw_input)

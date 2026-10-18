@@ -1,0 +1,311 @@
+"""`shopify.start_return` y `shopify.start_exchange` con la política del tenant (ADR 0014)."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from typing import Any
+from uuid import UUID
+
+import pytest
+from apps.api.integrations.base import IntegrationContext
+from apps.api.integrations.shopify import CreatedReturn
+from apps.api.services.returns import (
+    CalculatedLine,
+    ExchangeVariant,
+    PhotoRef,
+    ReturnableLine,
+    ReturnableOrder,
+    ReturnCalculation,
+    ReturnPlan,
+)
+from apps.api.services.returns_policy import ActivePolicy, ReturnsPolicy
+from apps.api.skills.base import SkillContext, SkillRefusal, SkillRejection
+from apps.api.skills.shopify._order_guard import ActionOutcome
+from apps.api.skills.shopify.start_exchange import StartExchange
+from apps.api.skills.shopify.start_return import StartReturn, StartReturnInput
+
+NOW = datetime.now(UTC)
+FLI = "gid://shopify/FulfillmentLineItem/9001"
+
+
+def _policy(**overrides: Any) -> ActivePolicy:
+    raw: dict[str, Any] = {
+        "schema_version": 1,
+        "window": {"days": 30, "starts_at": "delivery"},
+        "reasons": [
+            {"code": "defective", "label": "Defectuoso", "fault": "store",
+             "required_evidence": ["photo"], "shopify_reason": "damaged-or-defective"},
+            {"code": "too_small", "label": "Pequeña", "fault": "customer",
+             "shopify_reason": "too-small"},
+        ],
+        "shipping": {
+            "method": "customer_ships",
+            "return_address": "Calle Mayor 1, 28013 Madrid",
+            "payer": {"store_fault": "store", "customer_fault": "customer"},
+        },
+        "refund_days": 14,
+        "excluded_product_tags": [],
+        "exchanges": {"enabled": True, "kinds": ["variant"]},
+        "returns_require_approval": False,
+    }
+    raw.update(overrides)
+    return ActivePolicy(version=5, policy=ReturnsPolicy.model_validate(raw))
+
+
+def _order(delivered_days_ago: int = 3, quantity: int = 1) -> ReturnableOrder:
+    return ReturnableOrder(
+        order_id=7409804542232,
+        name="#1431",
+        ordered_at=NOW - timedelta(days=delivered_days_ago + 2),
+        currency="USD",
+        taxes_included=False,
+        cancelled=False,
+        lines=(
+            ReturnableLine(
+                line_item_id=17463441195288,
+                fulfillment_line_item_id=FLI,
+                title="Bolso Bandolera - Marino",
+                returnable_quantity=quantity,
+                product_id=10287987851544,
+                product_tags=frozenset({"básicos"}),
+                shipped_at=NOW - timedelta(days=delivered_days_ago + 1),
+                delivered_at=NOW - timedelta(days=delivered_days_ago),
+            ),
+        ),
+    )
+
+
+@dataclass
+class FakeShopify:
+    order: ReturnableOrder = field(default_factory=_order)
+    variants: tuple[ExchangeVariant, ...] = ()
+    created_status: str = "open"
+    note_fails: bool = False
+    calls: list[tuple[str, Any]] = field(default_factory=list)
+
+    async def get_returnable_order(self, ctx: Any, order_id: int) -> ReturnableOrder:
+        self.calls.append(("get_returnable_order", order_id))
+        return self.order
+
+    async def get_exchange_variants(self, ctx: Any, ids: list[int]) -> tuple[ExchangeVariant, ...]:
+        self.calls.append(("get_exchange_variants", ids))
+        return self.variants
+
+    async def calculate_return(
+        self, ctx: Any, order_id: int, *, lines: list[tuple[str, int]], exchange: list[tuple[int, int]]
+    ) -> ReturnCalculation:
+        self.calls.append(("calculate_return", (lines, exchange)))
+        return ReturnCalculation(
+            currency="USD",
+            returned=(CalculatedLine(key=FLI, quantity=1, subtotal=Decimal("-76.95"), tax=Decimal("0")),),
+            exchanged=tuple(
+                CalculatedLine(
+                    key=f"gid://shopify/ProductVariant/{v}",
+                    quantity=q,
+                    subtotal=Decimal("76.95"),
+                    tax=Decimal("0"),
+                )
+                for v, q in exchange
+            ),
+        )
+
+    async def create_return(self, ctx: Any, plan: ReturnPlan) -> CreatedReturn:
+        self.calls.append(("create_return", plan))
+        return CreatedReturn(
+            return_id=5001, name="#1431-R2", status=self.created_status, reason_handle="too-small"
+        )
+
+    async def append_order_note(self, ctx: Any, order_id: int, text: str) -> None:
+        self.calls.append(("append_order_note", text))
+        if self.note_fails:
+            raise RuntimeError("shopify 500")
+
+    def called(self, name: str) -> list[Any]:
+        return [arg for n, arg in self.calls if n == name]
+
+
+def _ctx(shopify: FakeShopify, policy: ActivePolicy | None = None, **kw: Any) -> SkillContext:
+    return SkillContext(
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        conversation_id="22222222-2222-2222-2222-222222222222",
+        integration_ctx=IntegrationContext(
+            tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
+            credentials={"domain": "marea.myshopify.com", "access_token": "tok"},
+        ),
+        commerce_mock=shopify,
+        returns_policy=policy,
+        **kw,
+    )
+
+
+RAW = {
+    "order_id": 1431,
+    "items": [{"line_item_id": 17463441195288, "quantity": 1}],
+    "reason_code": "too_small",
+}
+
+
+async def test_without_a_policy_the_skill_escalates_with_a_fixed_text() -> None:
+    with pytest.raises(SkillRefusal) as exc:
+        await StartReturn().prepare(_ctx(FakeShopify()), RAW)
+
+    assert exc.value.code == "policy_missing"
+    assert exc.value.customer_message == (
+        "Ahora mismo no puedo gestionar devoluciones ni cambios desde aquí. Paso tu caso a "
+        "mi equipo para que lo revise y te escriba."
+    )
+    assert "configurad la política en el panel" in exc.value.team_reason
+
+
+async def test_outside_the_window_the_customer_reads_the_deadline_in_their_language() -> None:
+    shopify = FakeShopify(order=_order(delivered_days_ago=31))
+    deadline = (NOW - timedelta(days=1)).strftime("%d/%m/%Y")
+
+    with pytest.raises(SkillRefusal) as exc:
+        await StartReturn().prepare(_ctx(shopify, _policy(), language="en"), RAW)
+
+    assert exc.value.code == "outside_window"
+    assert exc.value.customer_message.startswith(
+        f"Under the store's policy, the period to return or exchange this item ended on "
+        f"{deadline}."
+    )
+    assert shopify.called("calculate_return") == []
+
+
+async def test_a_missing_photo_goes_back_to_the_llm() -> None:
+    raw = {**RAW, "reason_code": "defective"}
+
+    with pytest.raises(SkillRejection) as exc:
+        await StartReturn().prepare(
+            _ctx(FakeShopify(), _policy(), attachments_readable=True), raw
+        )
+
+    assert exc.value.code == "evidence_missing"
+
+
+async def test_prepare_writes_the_plan_and_discards_one_from_the_llm() -> None:
+    forged = {**RAW, "plan": {"requires_approval": False, "settlement": {"net": "999"}}}
+
+    prepared = await StartReturn().prepare(_ctx(FakeShopify(), _policy()), forged)
+
+    plan = ReturnPlan.model_validate(prepared["plan"])
+    assert plan.policy_version == 5
+    assert plan.order_id == 7409804542232
+    assert plan.lines[0].fulfillment_line_item_id == FLI
+    assert plan.settlement.net == Decimal("76.95")
+    assert plan.return_address == "Calle Mayor 1, 28013 Madrid"
+    assert StartReturn.requires_approval(prepared) is False
+    assert StartReturn.requires_approval(
+        await StartReturn().prepare(
+            _ctx(FakeShopify(), _policy(returns_require_approval=True)), RAW
+        )
+    ) is True
+
+
+async def test_execute_creates_the_approved_plan_and_notes_the_settlement() -> None:
+    shopify = FakeShopify()
+    prepared = await StartReturn().prepare(_ctx(shopify, _policy()), RAW)
+
+    out = await StartReturn().execute(
+        _ctx(shopify), StartReturnInput.model_validate(prepared)
+    )
+
+    assert out.outcome is ActionOutcome.CONFIRMED
+    assert (out.return_id, out.return_name, out.note_written) == (5001, "#1431-R2", True)
+    assert shopify.called("create_return")[0].reason_code == "too_small"
+    assert shopify.called("append_order_note")[0].startswith(
+        "Auyan · devolución #1431 (política v5)"
+    )
+
+
+async def test_a_note_failure_does_not_undo_the_return() -> None:
+    shopify = FakeShopify(note_fails=True)
+    prepared = await StartReturn().prepare(_ctx(shopify, _policy()), RAW)
+
+    out = await StartReturn().execute(_ctx(shopify), StartReturnInput.model_validate(prepared))
+
+    assert out.outcome is ActionOutcome.CONFIRMED
+    assert out.note_written is False
+
+
+async def test_a_return_shopify_does_not_open_is_not_confirmed() -> None:
+    shopify = FakeShopify(created_status="declined")
+    prepared = await StartReturn().prepare(_ctx(shopify, _policy()), RAW)
+
+    out = await StartReturn().execute(_ctx(shopify), StartReturnInput.model_validate(prepared))
+
+    assert out.outcome is ActionOutcome.NOT_CONFIRMED
+    assert out.success is False
+
+
+async def test_execute_refuses_when_the_item_is_no_longer_returnable() -> None:
+    shopify = FakeShopify()
+    prepared = await StartReturn().prepare(_ctx(shopify, _policy()), RAW)
+    shopify.order = replace(_order(), lines=())
+
+    with pytest.raises(SkillRefusal) as exc:
+        await StartReturn().execute(_ctx(shopify), StartReturnInput.model_validate(prepared))
+
+    assert exc.value.code == "no_longer_possible"
+    assert shopify.called("create_return") == []
+
+
+async def test_execute_without_a_plan_fails_closed() -> None:
+    with pytest.raises(ValueError, match="return_plan_missing"):
+        await StartReturn().execute(
+            _ctx(FakeShopify()), StartReturnInput.model_validate(RAW)
+        )
+
+
+EXCHANGE = {**RAW, "exchange_items": [{"variant_id": 52117802090776, "quantity": 1}]}
+CAQUI = ExchangeVariant(
+    variant_id=52117802090776,
+    product_id=10287987851544,
+    title="Bolso Bandolera - Caqui",
+    available=True,
+)
+
+
+async def test_an_exchange_always_needs_approval_and_nets_the_difference() -> None:
+    prepared = await StartExchange().prepare(
+        _ctx(FakeShopify(variants=(CAQUI,)), _policy()), EXCHANGE
+    )
+
+    plan = ReturnPlan.model_validate(prepared["plan"])
+    assert StartExchange.requires_approval(prepared) is True
+    assert plan.exchange_lines[0].title == "Bolso Bandolera - Caqui"
+    assert plan.settlement.net == Decimal("0.00")
+
+
+async def test_an_exchange_for_another_product_is_rejected_when_only_variants_count() -> None:
+    other = replace(CAQUI, product_id=1)
+
+    with pytest.raises(SkillRejection) as exc:
+        await StartExchange().prepare(_ctx(FakeShopify(variants=(other,)), _policy()), EXCHANGE)
+
+    assert exc.value.code == "exchange_kind_not_allowed"
+
+
+async def test_an_exchange_when_the_store_has_none_escalates() -> None:
+    policy = _policy(exchanges={"enabled": False})
+    shopify = FakeShopify(variants=(CAQUI,))
+
+    with pytest.raises(SkillRefusal) as exc:
+        await StartExchange().prepare(_ctx(shopify, policy), EXCHANGE)
+
+    assert exc.value.code == "exchanges_disabled"
+    assert shopify.called("get_exchange_variants") == []
+
+
+def test_the_llm_never_sees_the_plan_in_the_tool_schema() -> None:
+    returns = StartReturn().to_anthropic_tool()["input_schema"]["properties"]
+    exchange = StartExchange().to_anthropic_tool()["input_schema"]["properties"]
+
+    assert sorted(returns) == ["items", "order_id", "reason_code"]
+    assert sorted(exchange) == ["exchange_items", "items", "order_id", "reason_code"]
+
+
+def test_photo_refs_travel_in_the_plan() -> None:
+    assert PhotoRef(message_id="m-1", index=0).model_dump() == {"message_id": "m-1", "index": 0}
