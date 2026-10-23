@@ -11,7 +11,7 @@ cada test para no acoplar este nodo a una integración específica.
 from __future__ import annotations
 
 from collections.abc import Generator
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import AsyncMock
 
 import pytest
@@ -20,7 +20,9 @@ from apps.api.agents.nodes.execute_skill import (
     build_skill_context,
     make_execute_skill_node,
 )
+from apps.api.integrations.base import MutationNotApplied
 from apps.api.skills.base import (
+    ReconcileUnknown,
     Skill,
     SkillContext,
     SkillInput,
@@ -1344,6 +1346,92 @@ class TestPreparedSkills:
             "plan": {"approve": True},
         }
         assert PlannedSkill.seen == []
+
+
+class UnsureSkill(PlannedSkill):
+    """L3 sin aprobación cuyo `execute` falla tras enviar la mutación; `found` es lo que
+    lee `reconcile` en el proveedor."""
+
+    slug = "test.unsure"
+    requires_idempotency = True
+    error: ClassVar[Exception] = TimeoutError("read timeout")
+    found: ClassVar[Any] = None
+
+    async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
+        raise type(self).error
+
+    async def reconcile(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput | None:
+        if isinstance(type(self).found, BaseException):
+            raise type(self).found
+        return type(self).found
+
+
+def _unsure_state(error: Exception, found: Any) -> dict[str, Any]:
+    UnsureSkill.error = error
+    UnsureSkill.found = found
+    SkillRegistry.register(UnsureSkill)
+    return _base_state(
+        pending_tool_call=_pending(slug="test.unsure", input={"text": "ok"}),
+        allowed_skills=["test.unsure"],
+        tool_permissions={
+            "test.unsure": {
+                "is_enabled": True,
+                "human_approval_required": False,
+                "l3_autonomy_acknowledged": True,
+            }
+        },
+    )
+
+
+class TestOutcomeUnknownWithoutApproval:
+    """Sin aprobación, un error tras enviar la mutación no vuelve al LLM ni promete nada."""
+
+    async def test_an_error_shopify_does_not_show_applied_escalates_as_unknown(
+        self, deps: AgentDependencies
+    ) -> None:
+        result = await make_execute_skill_node(deps)(
+            _unsure_state(TimeoutError("read timeout"), ReconcileUnknown("shopify caído"))
+        )
+
+        assert result["decision"] == "escalate"
+        assert result["agent_response"].startswith(
+            "No he podido confirmar si tu solicitud ha quedado registrada."
+        )
+        reason = result["escalation_reason"]
+        assert "se lanzó sin aprobación humana" in reason
+        assert "TimeoutError: read timeout" in reason
+        assert result["tool_results"][-1]["error"] == "skill_outcome_unknown"
+        audit = deps.audit_logger.entries[-1]  # type: ignore[attr-defined]
+        assert audit["status"] == "failed"
+        assert audit["error_message"].startswith("skill_outcome_unknown")
+
+    async def test_an_error_after_the_action_landed_answers_with_its_outcome(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import unittest.mock as mock
+
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.outcome_message",
+            mock.Mock(return_value="Hemos abierto la devolución de tu pedido."),
+        )
+
+        result = await make_execute_skill_node(deps)(
+            _unsure_state(TimeoutError("read timeout"), PlanOutput(outcome="confirmed"))
+        )
+
+        assert result["decision"] == "respond"
+        assert result["agent_response"] == "Hemos abierto la devolución de tu pedido."
+        assert result["tool_results"][-1]["output"]["outcome"] == "confirmed"
+
+    async def test_an_error_before_sending_still_goes_back_to_the_llm(
+        self, deps: AgentDependencies
+    ) -> None:
+        result = await make_execute_skill_node(deps)(
+            _unsure_state(MutationNotApplied("leer el pedido: 503"), None)
+        )
+
+        assert "decision" not in result
+        assert result["tool_results"][-1]["error"].startswith("skill_failed: MutationNotApplied")
 
 
 class TestPrecheckObservability:

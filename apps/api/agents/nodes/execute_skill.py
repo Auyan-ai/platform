@@ -27,10 +27,12 @@ from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import create_pending_approval, get_recent_approval_for_skill
-from apps.api.integrations.base import IntegrationContext
+from apps.api.integrations.base import IntegrationContext, MutationNotApplied
+from apps.api.services.approval_execution import Applied, ExecutionResult, reconcile
 from apps.api.services.approval_reply import outcome_message
-from apps.api.services.approval_resolution import team_followup_reason
+from apps.api.services.approval_resolution import team_followup_reason, unknown_outcome_reason
 from apps.api.services.channel_routing import is_messaging_channel
+from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.identity import (
     Grant,
     IdentityContext,
@@ -462,6 +464,107 @@ def make_execute_skill_node(
                 )
             )
 
+        def _execution_failed(
+            exc: Exception, skill_cls: type[Skill], inputs: dict[str, Any], t0: float
+        ) -> dict[str, Any]:
+            latency = int((time.monotonic() - t0) * 1000)
+            logger.warning(
+                "skill_execution_failed",
+                extra={
+                    "tenant_id": state.get("tenant_id"),
+                    "conversation_id": state.get("conversation_id"),
+                    "slug": slug,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            error_msg = f"skill_failed: {type(exc).__name__}: {exc!s}"
+            if state.get("conversation_id") and state.get("tenant_id"):
+                tracker.emit(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    phase="decision",
+                    event_type="tool_result",
+                    label=slug,
+                    detail={"error": error_msg},
+                    status="error",
+                )
+                auditor.log(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    aop_slug=state.get("aop_slug") or "unknown",
+                    aop_version=state.get("aop_version") or 0,
+                    skill_slug=slug,
+                    skill_tier=skill_cls.tier,
+                    inputs_raw=inputs,
+                    status="failed",
+                    error_message=error_msg,
+                    latency_ms=latency,
+                    langfuse_trace_id=state.get("langfuse_trace_id"),
+                )
+            return _append_and_finish(
+                _error_entry(
+                    tool_use_id=tool_use_id,
+                    slug=slug,
+                    raw_input=inputs,
+                    error=error_msg,
+                )
+            )
+
+        def _escalate_unknown(
+            skill_cls: type[Skill], inputs: dict[str, Any], result: ExecutionResult
+        ) -> dict[str, Any]:
+            # Sin aprobación (la política no la exige y hay autonomía L3) y sin saber si
+            # Shopify aplicó la acción: texto fijo que no promete nada y caso al equipo.
+            error = getattr(result, "error", type(result).__name__)
+            reason = unknown_outcome_reason(slug, inputs, error, approved=False)
+            language, default_language = state_languages(state)
+            logger.error(
+                "skill_outcome_unknown",
+                extra={
+                    "tenant_id": state.get("tenant_id"),
+                    "conversation_id": state.get("conversation_id"),
+                    "slug": slug,
+                    "error": error,
+                },
+            )
+            if state.get("conversation_id") and state.get("tenant_id"):
+                auditor.log(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    aop_slug=state.get("aop_slug") or "unknown",
+                    aop_version=state.get("aop_version") or 0,
+                    skill_slug=slug,
+                    skill_tier=skill_cls.tier,
+                    inputs_raw=inputs,
+                    status="failed",
+                    error_message=f"skill_outcome_unknown: {error}",
+                    langfuse_trace_id=state.get("langfuse_trace_id"),
+                )
+                tracker.emit(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    phase="decision",
+                    event_type="tool_result",
+                    label=slug,
+                    detail={"outcome_unknown": error, "reason": reason},
+                    status="error",
+                )
+            return {
+                **_append_and_finish(
+                    _error_entry(
+                        tool_use_id=tool_use_id,
+                        slug=slug,
+                        raw_input=inputs,
+                        error="skill_outcome_unknown",
+                    )
+                ),
+                "decision": "escalate",
+                "agent_response": fixed_text(
+                    "refusal.outcome_unknown", language, tenant_default=default_language
+                ),
+                "escalation_reason": reason,
+            }
+
         # 1) Skill permitida por el AOP (lista vacía = ninguna, fail-safe).
         # Las skills `core` (identidad) las ofrece el código, no el AOP ni el tenant.
         is_core = SkillRegistry.is_core(slug)
@@ -730,48 +833,15 @@ def make_execute_skill_node(
         except SkillRejection as rejection:
             return _reject(rejection, skill_cls, raw_input)
         except Exception as exc:
-            latency = int((time.monotonic() - t0) * 1000)
-            logger.warning(
-                "skill_execution_failed",
-                extra={
-                    "tenant_id": state.get("tenant_id"),
-                    "conversation_id": state.get("conversation_id"),
-                    "slug": slug,
-                    "error_type": type(exc).__name__,
-                },
-            )
-            error_msg = f"skill_failed: {type(exc).__name__}: {exc!s}"
-            if state.get("conversation_id") and state.get("tenant_id"):
-                tracker.emit(
-                    tenant_id=state["tenant_id"],
-                    conversation_id=state["conversation_id"],
-                    phase="decision",
-                    event_type="tool_result",
-                    label=slug,
-                    detail={"error": error_msg},
-                    status="error",
-                )
-                auditor.log(
-                    tenant_id=state["tenant_id"],
-                    conversation_id=state["conversation_id"],
-                    aop_slug=state.get("aop_slug") or "unknown",
-                    aop_version=state.get("aop_version") or 0,
-                    skill_slug=slug,
-                    skill_tier=skill_cls.tier,
-                    inputs_raw=raw_input,
-                    status="failed",
-                    error_message=error_msg,
-                    latency_ms=latency,
-                    langfuse_trace_id=state.get("langfuse_trace_id"),
-                )
-            return _append_and_finish(
-                _error_entry(
-                    tool_use_id=tool_use_id,
-                    slug=slug,
-                    raw_input=raw_input,
-                    error=error_msg,
-                )
-            )
+            if skill_cls.requires_idempotency and not isinstance(exc, MutationNotApplied):
+                # Tras enviar la mutación no se sabe si se aplicó: se lee el proveedor y,
+                # si no consta, al equipo. Nunca vuelve al LLM ni se reintenta.
+                settled = await reconcile(skill, ctx, validated_input, exc)
+                if not isinstance(settled, Applied):
+                    return _escalate_unknown(skill_cls, raw_input, settled)
+                output = skill_cls.output_schema.model_validate(settled.output)
+            else:
+                return _execution_failed(exc, skill_cls, raw_input, t0)
 
         # 6) Éxito.
         latency = int((time.monotonic() - t0) * 1000)

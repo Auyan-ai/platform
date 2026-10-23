@@ -449,6 +449,42 @@ class TestExecutionErrors:
         assert w.insert_message.await_args.kwargs["content"] == "Hemos cancelado tu pedido."
         w.release_all.assert_awaited_once()
 
+    def test_a_return_created_before_a_timeout_closes_as_approved(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`returnCreate` llega a Shopify y la respuesta se pierde: `reconcile` encuentra la
+        devolución por la marca del plan y se cierra como aplicada, sin crear otra."""
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        shopify = _return_in_flight(monkeypatch, created_before_failing=True)
+
+        data = _approve(client).json()
+
+        assert data["approval_status"] == "approved"
+        assert data["execution_status"] == "success"
+        assert data["output"]["return_id"] == 5001
+        assert len(shopify.called("create_return")) == 1
+        assert w.insert_message.await_args.kwargs["content"].startswith(
+            "Hemos abierto la devolución"
+        )
+        w.release_all.assert_awaited_once()
+
+    def test_a_return_timeout_with_nothing_in_shopify_is_unknown(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        _return_in_flight(monkeypatch, created_before_failing=False)
+
+        data = _approve(client).json()
+
+        assert data["approval_status"] == "failed"
+        assert data["execution_status"] == "unknown"
+        reason = w.hand_off.await_args.kwargs["reason"]
+        assert reason.startswith("La devolución del pedido 1431 se aprobó, pero no se pudo")
+        assert "No se abrió nada" not in reason
+        w.insert_message.assert_not_awaited()
+
     def test_error_that_cannot_be_checked_fails_and_goes_to_the_team(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -738,6 +774,97 @@ class TestCloseAfterApproval:
         assert _approve(client).json()["team_followup"] is None
         w.release_all.assert_awaited_once()
         w.finalize.assert_awaited_once()
+
+
+def _return_in_flight(monkeypatch: pytest.MonkeyPatch, *, created_before_failing: bool) -> Any:
+    """Una devolución aprobada de verdad (`StartReturn` con su plan) cuyo `returnCreate`
+    acaba en timeout; `created_before_failing` dice si Shopify llegó a crearla."""
+    import asyncio
+
+    from apps.api.integrations.base import IntegrationContext
+    from apps.api.skills.shopify.start_return import StartReturn
+    from apps.api.tests.skills.test_return_skills import RAW, BrokenShopify, _ctx, _policy
+
+    shopify = BrokenShopify(fail_on="create_return", created_before_failing=created_before_failing)
+    prepared = asyncio.run(StartReturn().prepare(_ctx(shopify, _policy()), RAW))
+    approval = _sample_approval(skill_slug="shopify.start_return", inputs_raw=prepared)
+    executing = _sample_approval(
+        "executing", skill_slug="shopify.start_return", inputs_raw=prepared, execution_attempt=1
+    )
+    monkeypatch.setattr(f"{ROUTER}.get_pending_approval", AsyncMock(return_value=approval))
+    monkeypatch.setattr(f"{ROUTER}.claim_pending_approval", AsyncMock(return_value=executing))
+    monkeypatch.setattr(f"{ROUTER}.SkillRegistry.get", lambda slug: StartReturn)
+    monkeypatch.setattr(
+        f"{SERVICE}.build_commerce_integration_ctx",
+        AsyncMock(return_value=IntegrationContext(tenant_id=TENANT_ID, credentials={})),
+    )
+    monkeypatch.setattr("apps.api.skills.shopify.start_return.ShopifyAdapter", lambda: shopify)
+    return shopify
+
+
+class TestStaleExecutionRecovery:
+    """Un proceso murió con la devolución en `executing`: pasado `STALE_EXECUTION` la
+    recuperación lee Shopify por la marca del plan y nunca la vuelve a crear."""
+
+    @staticmethod
+    def _stale(monkeypatch: pytest.MonkeyPatch, *, in_shopify: bool) -> tuple[Wiring, Any, Any]:
+        import asyncio
+
+        from apps.api.services import approval_execution
+        from apps.api.skills.shopify.start_return import StartReturn
+        from apps.api.tests.skills.test_return_skills import RAW, FakeShopify, _ctx, _policy
+
+        w = _wire(monkeypatch)
+        shopify = _return_in_flight(monkeypatch, created_before_failing=False)
+        prepared = asyncio.run(StartReturn().prepare(_ctx(FakeShopify(), _policy()), RAW))
+        if in_shopify:
+            # El proceso murió justo después de que Shopify creara la devolución.
+            shopify = FakeShopify()
+            inputs = StartReturn.input_schema.model_validate(prepared)
+            asyncio.run(StartReturn().execute(_ctx(shopify), inputs))
+            monkeypatch.setattr(
+                "apps.api.skills.shopify.start_return.ShopifyAdapter", lambda: shopify
+            )
+        stale = _sample_approval(
+            "executing",
+            skill_slug="shopify.start_return",
+            inputs_raw=prepared,
+            execution_attempt=1,
+        )
+        listed = AsyncMock(return_value=[stale])
+
+        @asynccontextmanager
+        async def _bootstrap() -> AsyncIterator[AsyncMock]:
+            yield AsyncMock()
+
+        monkeypatch.setattr(f"{SERVICE}.bootstrap_connection", _bootstrap)
+        monkeypatch.setattr(
+            f"{SERVICE}.list_all_tenants", AsyncMock(return_value=[MagicMock(id=TENANT_ID)])
+        )
+        monkeypatch.setattr(f"{SERVICE}.list_stale_executing_approvals", listed)
+        now = NOW + approval_execution.STALE_EXECUTION
+        recovered = asyncio.run(approval_execution.recover_stale_executions(now=now))
+        assert recovered == 1
+        assert listed.await_args.kwargs["started_before"] == NOW
+        return w, shopify, stale
+
+    def test_a_return_that_landed_closes_as_approved(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        w, shopify, _ = self._stale(monkeypatch, in_shopify=True)
+
+        assert w.settle_cas.await_args.kwargs["new_status"] == "approved"
+        assert len(shopify.called("create_return")) == 1
+        assert w.insert_message.await_args.kwargs["content"].startswith(
+            "Hemos abierto la devolución"
+        )
+
+    def test_a_return_that_never_landed_reopens_without_creating_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        w, shopify, _ = self._stale(monkeypatch, in_shopify=False)
+
+        assert w.settle_cas.await_args.kwargs["new_status"] == "pending"
+        assert shopify.called("create_return") == []
+        w.insert_message.assert_not_awaited()
 
 
 def test_every_l3_skill_declares_idempotency() -> None:

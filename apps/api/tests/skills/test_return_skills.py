@@ -8,9 +8,18 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+import httpx
 import pytest
-from apps.api.integrations.base import IntegrationContext
+from apps.api.integrations.base import IntegrationContext, MutationNotApplied
 from apps.api.integrations.shopify import CreatedReturn
+from apps.api.services.approval_execution import (
+    Applied,
+    NotApplied,
+    Unknown,
+    execute_once,
+)
+from apps.api.services.approval_reply import outcome_message
+from apps.api.services.approval_resolution import team_followup_reason
 from apps.api.services.returns import (
     CalculatedLine,
     ExchangeVariant,
@@ -21,10 +30,14 @@ from apps.api.services.returns import (
     ReturnPlan,
 )
 from apps.api.services.returns_policy import ActivePolicy, ReturnsPolicy
-from apps.api.skills.base import SkillContext, SkillRefusal, SkillRejection
+from apps.api.skills.base import ReconcileUnknown, SkillContext, SkillRefusal, SkillRejection
 from apps.api.skills.shopify._order_guard import ActionOutcome
 from apps.api.skills.shopify.start_exchange import StartExchange
-from apps.api.skills.shopify.start_return import StartReturn, StartReturnInput
+from apps.api.skills.shopify.start_return import (
+    StartReturn,
+    StartReturnInput,
+    StartReturnOutput,
+)
 
 NOW = datetime.now(UTC)
 UNIT = Decimal("76.95")
@@ -104,11 +117,23 @@ class FakeShopify:
     variants: tuple[ExchangeVariant, ...] = ()
     created_status: str = "open"
     note_fails: bool = False
+    # Devoluciones que existen en Shopify, por `plan_id` (la marca de sus líneas).
+    returns: dict[str, CreatedReturn] = field(default_factory=dict)
+    find_fails: bool = False
+    order_read_fails: bool = False
     calls: list[tuple[str, Any]] = field(default_factory=list)
 
     async def get_returnable_order(self, ctx: Any, order_id: int) -> ReturnableOrder:
         self.calls.append(("get_returnable_order", order_id))
+        if self.order_read_fails:
+            raise RuntimeError("Shopify 503")
         return self.order
+
+    async def find_return(self, ctx: Any, plan: ReturnPlan) -> CreatedReturn | None:
+        self.calls.append(("find_return", plan.plan_id))
+        if self.find_fails:
+            raise RuntimeError("Shopify 502")
+        return self.returns.get(str(plan.plan_id))
 
     async def get_exchange_variants(self, ctx: Any, ids: list[int]) -> tuple[ExchangeVariant, ...]:
         self.calls.append(("get_exchange_variants", ids))
@@ -143,9 +168,11 @@ class FakeShopify:
 
     async def create_return(self, ctx: Any, plan: ReturnPlan) -> CreatedReturn:
         self.calls.append(("create_return", plan))
-        return CreatedReturn(
+        created = CreatedReturn(
             return_id=5001, name="#1431-R2", status=self.created_status, reason_handle="too-small"
         )
+        self.returns[str(plan.plan_id)] = created
+        return created
 
     async def append_order_note(self, ctx: Any, order_id: int, text: str) -> None:
         self.calls.append(("append_order_note", text))
@@ -401,6 +428,8 @@ async def test_several_units_are_settled_per_unit() -> None:
 @dataclass
 class BrokenShopify(FakeShopify):
     fail_on: str = "calculate_return"
+    # True: Shopify crea la devolución y la respuesta se pierde (timeout tras enviarla).
+    created_before_failing: bool = False
 
     async def calculate_return(self, ctx: Any, order_id: int, **kw: Any) -> ReturnCalculation:
         if self.fail_on == "calculate_return":
@@ -408,7 +437,9 @@ class BrokenShopify(FakeShopify):
         return await super().calculate_return(ctx, order_id, **kw)
 
     async def create_return(self, ctx: Any, plan: ReturnPlan) -> CreatedReturn:
-        raise RuntimeError("ReadTimeout")
+        if self.created_before_failing:
+            await super().create_return(ctx, plan)
+        raise httpx.ReadTimeout("ReadTimeout")
 
 
 async def test_a_shopify_failure_while_preparing_escalates_with_a_fixed_text() -> None:
@@ -420,12 +451,78 @@ async def test_a_shopify_failure_while_preparing_escalates_with_a_fixed_text() -
     assert "RuntimeError: Shopify 502" in exc.value.team_reason
 
 
-async def test_a_shopify_failure_while_creating_escalates_too() -> None:
-    shopify = BrokenShopify(fail_on="create_return")
+async def _approved(shopify: FakeShopify) -> StartReturnInput:
     prepared = await StartReturn().prepare(_ctx(shopify, _policy()), RAW)
+    return StartReturnInput.model_validate(prepared)
 
-    with pytest.raises(SkillRefusal) as exc:
-        await StartReturn().execute(_ctx(shopify), StartReturnInput.model_validate(prepared))
 
-    assert exc.value.code == "shopify_error"
-    assert "ReadTimeout" in exc.value.team_reason
+async def test_a_shopify_failure_while_creating_is_unknown_and_reconciled() -> None:
+    """Un timeout tras enviar `returnCreate` no dice si se creó: ni texto fijo de "no se
+    abrió nada" ni vuelta a pending; se lee Shopify y, si no aparece, al equipo."""
+    shopify = BrokenShopify(fail_on="create_return")
+    inputs = await _approved(shopify)
+
+    with pytest.raises(httpx.ReadTimeout):
+        await StartReturn().execute(_ctx(shopify), inputs)
+    result = await execute_once(StartReturn(), _ctx(shopify), inputs, earlier_attempt=False)
+
+    assert isinstance(result, Unknown)
+    assert "ReadTimeout" in result.error
+    assert shopify.called("find_return") == [inputs.plan.plan_id] * 3
+
+
+async def test_a_return_created_before_a_timeout_is_applied() -> None:
+    shopify = BrokenShopify(fail_on="create_return", created_before_failing=True)
+    inputs = await _approved(shopify)
+
+    result = await execute_once(StartReturn(), _ctx(shopify), inputs, earlier_attempt=False)
+
+    assert isinstance(result, Applied)
+    assert (result.output["return_id"], result.output["outcome"]) == (5001, "confirmed")
+    assert result.output["plan"]["plan_id"] == str(inputs.plan.plan_id)
+    assert len(shopify.called("create_return")) == 1
+    assert outcome_message("shopify.start_return", result.output, "es", "es")
+    assert team_followup_reason("shopify.start_return", result.output) is None
+
+
+async def test_a_read_failure_before_creating_is_not_applied() -> None:
+    shopify = FakeShopify()
+    inputs = await _approved(shopify)
+    shopify.order_read_fails = True
+
+    with pytest.raises(MutationNotApplied, match="leer el pedido"):
+        await StartReturn().execute(_ctx(shopify), inputs)
+    result = await execute_once(StartReturn(), _ctx(shopify), inputs, earlier_attempt=False)
+
+    assert isinstance(result, NotApplied)
+    assert shopify.called("create_return") == []
+
+
+async def test_a_retry_finds_its_own_return_before_checking_the_order() -> None:
+    """La devolución que creó el intento anterior deja la línea sin unidades devolvibles:
+    el reintento la encuentra por la marca antes de mirar el pedido y no la repite."""
+    shopify = FakeShopify()
+    inputs = await _approved(shopify)
+    await StartReturn().execute(_ctx(shopify), inputs)
+    shopify.order = replace(_order(), lines=())
+
+    result = await execute_once(StartReturn(), _ctx(shopify), inputs, earlier_attempt=True)
+
+    assert isinstance(result, Applied)
+    assert result.output["return_id"] == 5001
+    assert len(shopify.called("create_return")) == 1
+
+
+async def test_reconcile_reads_shopify_by_the_plan_marker() -> None:
+    shopify = FakeShopify()
+    inputs = await _approved(shopify)
+
+    assert await StartReturn().reconcile(_ctx(shopify), inputs) is None
+    await StartReturn().execute(_ctx(shopify), inputs)
+    found = await StartReturn().reconcile(_ctx(shopify), inputs)
+    assert isinstance(found, StartReturnOutput)
+    assert (found.return_id, found.plan, found.note_written) == (5001, inputs.plan, True)
+
+    shopify.find_fails = True
+    with pytest.raises(ReconcileUnknown):
+        await StartReturn().reconcile(_ctx(shopify), inputs)

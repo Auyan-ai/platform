@@ -13,7 +13,12 @@ from typing import Any
 import httpx
 import pytest
 import respx
-from apps.api.integrations.shopify import ShopifyActionError, ShopifyClient, return_input
+from apps.api.integrations.shopify import (
+    ShopifyActionError,
+    ShopifyClient,
+    ShopifyRejected,
+    return_input,
+)
 from apps.api.services.returns import (
     PlanExchangeLine,
     PlanLine,
@@ -309,7 +314,6 @@ async def test_create_return_uses_the_store_reason_or_falls_back_to_other() -> N
     }
     route = respx.post(GQL).mock(
         side_effect=[
-            httpx.Response(200, json={"data": {"order": {"returns": {"nodes": []}}}}),
             httpx.Response(
                 200,
                 json={
@@ -331,10 +335,10 @@ async def test_create_return_uses_the_store_reason_or_falls_back_to_other() -> N
 
     out = await _client().create_return(_plan())
 
-    assert json.loads(route.calls[1].request.content)["variables"] == {
+    assert json.loads(route.calls[0].request.content)["variables"] == {
         "handles": ["color", "other-reason"]
     }
-    mutation = json.loads(route.calls[2].request.content)["variables"]["input"]
+    mutation = json.loads(route.calls[1].request.content)["variables"]["input"]
     assert mutation["returnLineItems"][0]["returnReasonDefinitionId"] == (
         "gid://shopify/ReturnReasonDefinition/5"
     )
@@ -350,7 +354,6 @@ async def test_create_return_uses_the_store_reason_or_falls_back_to_other() -> N
 async def test_create_return_user_errors_raise() -> None:
     respx.post(GQL).mock(
         side_effect=[
-            httpx.Response(200, json={"data": {"order": {"returns": {"nodes": []}}}}),
             httpx.Response(
                 200,
                 json={
@@ -377,7 +380,7 @@ async def test_create_return_user_errors_raise() -> None:
         ]
     )
 
-    with pytest.raises(ShopifyActionError, match="return_create_failed"):
+    with pytest.raises(ShopifyRejected, match="return_create_failed"):
         await _client().create_return(_plan())
 
 
@@ -410,39 +413,107 @@ def test_return_input_sends_the_restocking_percentage() -> None:
     assert line["restockingFee"] == {"percentage": 10.0}
 
 
-@respx.mock
-async def test_create_return_is_idempotent_by_the_plan_marker() -> None:
-    plan = _plan()
-    existing = {
-        "data": {
-            "order": {
-                "returns": {
-                    "nodes": [
-                        {
-                            "id": "gid://shopify/Return/7001",
-                            "name": "#1431-R2",
-                            "status": "OPEN",
-                            "returnLineItems": {
-                                "nodes": [
-                                    {
-                                        "returnReasonNote": f"auyan:{plan.plan_id} · Color",
-                                        "quantity": 1,
-                                    }
-                                ]
-                            },
-                        }
-                    ]
+def _returns_page(nodes: list[dict[str, Any]], *, more: bool = False) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "data": {
+                "order": {
+                    "returns": {
+                        "pageInfo": {"hasNextPage": more, "endCursor": "c1" if more else None},
+                        "nodes": nodes,
+                    }
                 }
             }
-        }
+        },
+    )
+
+
+def _return_node(gid: int, note: str) -> dict[str, Any]:
+    return {
+        "id": f"gid://shopify/Return/{gid}",
+        "name": "#1431-R2",
+        "status": "OPEN",
+        "returnLineItems": {"nodes": [{"returnReasonNote": note}]},
     }
-    route = respx.post(GQL).mock(return_value=httpx.Response(200, json=existing))
 
-    out = await _client().create_return(plan)
 
+@respx.mock
+async def test_find_return_pages_until_the_plan_marker() -> None:
+    plan = _plan()
+    route = respx.post(GQL).mock(
+        side_effect=[
+            _returns_page([_return_node(6001, "Cliente devolvió en tienda")], more=True),
+            _returns_page([_return_node(7001, f"auyan:{plan.plan_id} · Color")]),
+        ]
+    )
+
+    out = await _client().find_return(plan)
+
+    assert out is not None
     assert (out.return_id, out.name, out.status) == (7001, "#1431-R2", "open")
-    assert len(route.calls) == 1
-    assert "mutation" not in json.loads(route.calls[0].request.content)["query"]
+    assert json.loads(route.calls[1].request.content)["variables"]["after"] == "c1"
+    assert all("mutation" not in json.loads(c.request.content)["query"] for c in route.calls)
+
+
+@respx.mock
+async def test_find_return_is_none_only_after_reading_every_page() -> None:
+    respx.post(GQL).mock(side_effect=[_returns_page([_return_node(6001, "otra")])])
+
+    assert await _client().find_return(_plan()) is None
+
+
+@respx.mock
+async def test_find_return_never_says_none_on_a_truncated_list() -> None:
+    respx.post(GQL).mock(return_value=_returns_page([_return_node(6001, "otra")], more=True))
+
+    with pytest.raises(ShopifyActionError, match="returns_list_truncated"):
+        await _client().find_return(_plan())
+
+
+@respx.mock
+async def test_create_return_failing_before_sending_is_rejected() -> None:
+    respx.post(GQL).mock(side_effect=httpx.ConnectError("dns"))
+
+    with pytest.raises(ShopifyRejected):
+        await _client().create_return(_plan())
+
+
+@respx.mock
+async def test_create_return_timeout_after_sending_propagates_raw() -> None:
+    """Tras enviar `returnCreate` no se sabe si se creó: ni `ShopifyRejected` ni texto."""
+    respx.post(GQL).mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "returnReasonDefinitions": {
+                            "nodes": [
+                                {"id": "gid://shopify/ReturnReasonDefinition/1", "handle": "color"}
+                            ]
+                        }
+                    }
+                },
+            ),
+            httpx.ReadTimeout("timeout"),
+        ]
+    )
+
+    with pytest.raises(httpx.ReadTimeout):
+        await _client().create_return(_plan())
+
+
+@respx.mock
+async def test_append_order_note_does_not_repeat_a_note_already_there() -> None:
+    respx.get(f"{BASE}/orders/7409804542232.json").respond(
+        200, json={"order": {"id": 7409804542232, "note": "Cliente VIP\n\nAuyan · devolución"}}
+    )
+    put = respx.put(f"{BASE}/orders/7409804542232.json").respond(200, json={"order": {}})
+
+    await _client().append_order_note(7409804542232, "Auyan · devolución")
+
+    assert put.calls.call_count == 0
 
 
 def test_return_input_carries_the_plan_marker_first() -> None:

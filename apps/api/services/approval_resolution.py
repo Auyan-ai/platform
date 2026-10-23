@@ -125,11 +125,15 @@ def team_followup_reason(skill_slug: str, output: dict[str, Any]) -> str | None:
     )
 
 
-def unknown_outcome_reason(skill_slug: str, inputs: dict[str, Any], error: str) -> str:
-    """Motivo para el equipo cuando no se puede saber si la acción aprobada se aplicó."""
+def unknown_outcome_reason(
+    skill_slug: str, inputs: dict[str, Any], error: str, *, approved: bool = True
+) -> str:
+    """Motivo para el equipo cuando no se puede saber si la acción se aplicó: tras una
+    aprobación, o lanzada sin ella en el turno (`approved=False`)."""
     action = _ACTION_NAME.get(skill_slug, f"La acción {skill_slug}")
+    how = "se aprobó" if approved else "se lanzó sin aprobación humana"
     return (
-        f"{action} del pedido {inputs.get('order_id')} se aprobó, pero no se pudo "
+        f"{action} del pedido {inputs.get('order_id')} {how}, pero no se pudo "
         f"comprobar en Shopify si se aplicó ({error}). No se reintentó: revisad el pedido "
         "en Shopify antes de volver a hacerlo y contestad al cliente."
     )

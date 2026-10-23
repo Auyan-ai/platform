@@ -324,6 +324,15 @@ CATALOG: dict[str, Texts] = {
         ),
         _PASS_TO_TEAM,
     ),
+    "refusal.outcome_unknown": _then(
+        _t(
+            "No he podido confirmar si tu solicitud ha quedado registrada.",
+            "I couldn't confirm whether your request went through.",
+            "No he pogut confirmar si la teva sol·licitud ha quedat registrada.",
+            "Je n'ai pas pu confirmer si ta demande a bien été enregistrée.",
+        ),
+        _PASS_TO_TEAM,
+    ),
     "refusal.returns.no_longer_possible": _then(
         _t(
             "No he podido abrir la devolución con los datos de tu pedido.",

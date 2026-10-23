@@ -13,7 +13,8 @@ from collections.abc import Awaitable
 from datetime import UTC, date, datetime
 from typing import Any, ClassVar, TypeVar
 
-from apps.api.integrations.shopify import ShopifyAdapter
+from apps.api.integrations.base import MutationNotApplied
+from apps.api.integrations.shopify import CreatedReturn, ShopifyAdapter
 from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.returns import (
     Eligible,
@@ -29,6 +30,7 @@ from apps.api.services.returns import (
 )
 from apps.api.services.tenant_time import tenant_zone
 from apps.api.skills.base import (
+    ReconcileUnknown,
     Skill,
     SkillContext,
     SkillInput,
@@ -203,6 +205,14 @@ class _ReturnSkill(Skill):
         return bool((prepared.get("plan") or {}).get("requires_approval", True))
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
+        """Crea en Shopify el plan aprobado, una sola vez.
+
+        Antes de enviar `returnCreate` busca la devolución con la marca del plan: si un
+        intento anterior ya la creó, la devuelve sin crear otra (y sin que el
+        `no_longer_possible` que causaría la propia devolución lo tape). Lo que falla
+        antes de enviar es `MutationNotApplied`; un error tras enviarla se propaga tal
+        cual, porque no se sabe si Shopify la creó, y lo resuelve `reconcile`.
+        """
         assert isinstance(inputs, StartReturnInput)
         if inputs.plan is None:
             raise ValueError("return_plan_missing")
@@ -210,12 +220,22 @@ class _ReturnSkill(Skill):
             raise ValueError("shopify_not_configured")
         plan = inputs.plan
         adapter = ctx.commerce_mock or ShopifyAdapter()
+        existing = await _before_sending(
+            "buscar la devolución del plan", adapter.find_return(ctx.integration_ctx, plan)
+        )
+        if existing is not None:
+            return await self._output(ctx, adapter, plan, existing)
         # La aprobación puede llevar horas: se crea lo aprobado si Shopify aún lo permite.
-        order = await adapter.get_returnable_order(ctx.integration_ctx, plan.order_id)
+        order = await _before_sending(
+            "leer el pedido", adapter.get_returnable_order(ctx.integration_ctx, plan.order_id)
+        )
         problem = _no_longer_possible(plan, order)
         if problem is None and plan.exchange_lines:
-            variants = await adapter.get_exchange_variants(
-                ctx.integration_ctx, [ln.variant_id for ln in plan.exchange_lines]
+            variants = await _before_sending(
+                "leer las variantes de cambio",
+                adapter.get_exchange_variants(
+                    ctx.integration_ctx, [ln.variant_id for ln in plan.exchange_lines]
+                ),
             )
             available = {v.variant_id for v in variants if v.available}
             gone = [ln.title for ln in plan.exchange_lines if ln.variant_id not in available]
@@ -234,9 +254,29 @@ class _ReturnSkill(Skill):
                     f"cual: {problem}. Revisad el pedido en Shopify."
                 ),
             )
-        created = await _shopify(
-            ctx, "crear la devolución", adapter.create_return(ctx.integration_ctx, plan)
-        )
+        created = await adapter.create_return(ctx.integration_ctx, plan)
+        return await self._output(ctx, adapter, plan, created)
+
+    async def reconcile(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput | None:
+        """La devolución del plan si Shopify la tiene (por su marca), None si consta que
+        no. Si Shopify no deja leer todas las devoluciones del pedido, `ReconcileUnknown`.
+
+        Solo escribe, si falta, la nota de la liquidación, que no se duplica."""
+        assert isinstance(inputs, StartReturnInput)
+        if inputs.plan is None or not ctx.integration_ctx:
+            raise ReconcileUnknown("return_plan_missing")
+        adapter = ctx.commerce_mock or ShopifyAdapter()
+        try:
+            found = await adapter.find_return(ctx.integration_ctx, inputs.plan)
+        except Exception as exc:
+            raise ReconcileUnknown(f"{type(exc).__name__}: {exc}") from exc
+        if found is None:
+            return None
+        return await self._output(ctx, adapter, inputs.plan, found)
+
+    async def _output(
+        self, ctx: SkillContext, adapter: Any, plan: ReturnPlan, created: CreatedReturn
+    ) -> StartReturnOutput:
         note_written = True
         try:
             await adapter.append_order_note(ctx.integration_ctx, plan.order_id, plan.team_note())
@@ -301,14 +341,23 @@ def _shopify_refusal(ctx: SkillContext, step: str, exc: BaseException) -> SkillR
 
 
 async def _shopify(ctx: SkillContext, step: str, call: Awaitable[T]) -> T:
-    """Una llamada a Shopify de la skill: un fallo no llega al LLM como texto crudo, pasa
-    el caso al equipo con texto fijo y la razón."""
+    """Una lectura de Shopify en `prepare`: un fallo no llega al LLM como texto crudo,
+    pasa el caso al equipo con texto fijo y la razón."""
     try:
         return await call
     except (SkillRefusal, SkillRejection):
         raise
     except Exception as exc:
         raise _shopify_refusal(ctx, step, exc) from exc
+
+
+async def _before_sending(step: str, call: Awaitable[T]) -> T:
+    """Una lectura de `execute` antes de enviar `returnCreate`: si falla, consta que la
+    devolución no se creó en esta ejecución."""
+    try:
+        return await call
+    except Exception as exc:
+        raise MutationNotApplied(f"{step}: {type(exc).__name__}: {exc}") from exc
 
 
 def _no_longer_possible(plan: ReturnPlan, order: Any) -> str | None:

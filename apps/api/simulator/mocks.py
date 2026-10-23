@@ -249,6 +249,10 @@ class MockShopifyAdapter:
             raise MockShopifyError("calculate_return_fixture_missing")
         return return_calculation_from_graphql(data)
 
+    async def find_return(self, ctx: Any, plan: ReturnPlan) -> CreatedReturn | None:
+        # En simulación no hay intentos anteriores: la devolución del plan no existe.
+        return None
+
     async def create_return(self, ctx: Any, plan: ReturnPlan) -> CreatedReturn:
         data = self._resolve("create_return", {"id": 9001, "name": "#SIM-R1", "status": "open"})
         return CreatedReturn(

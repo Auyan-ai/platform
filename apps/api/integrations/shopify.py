@@ -697,44 +697,73 @@ class ShopifyClient:
             data = await self._graphql(client, _RETURN_CALCULATE_QUERY, variables)
         return return_calculation_from_graphql(data["returnCalculate"])
 
+    async def find_return(self, plan: ReturnPlan) -> CreatedReturn | None:
+        """La devolución que creó `create_return` para este plan, por la marca
+        `return_marker(plan)` que lleva cada una de sus líneas; None si consta que no
+        existe. Pagina todas las devoluciones del pedido: si no puede leerlas enteras,
+        lanza `ShopifyActionError` en vez de decir que no existe."""
+        marker = return_marker(plan)
+        after: str | None = None
+        async with httpx.AsyncClient() as client:
+            for _ in range(_RETURN_PAGES):
+                data = await self._graphql(
+                    client,
+                    _ORDER_RETURNS_QUERY,
+                    {"id": f"gid://shopify/Order/{plan.order_id}", "after": after},
+                )
+                order = data.get("order")
+                if order is None:
+                    raise ShopifyActionError(f"order_not_found: {plan.order_id}")
+                page = order["returns"]
+                for ret in page["nodes"]:
+                    # Todas las líneas de una devolución de Auyan llevan la marca: basta
+                    # con la primera.
+                    notes = [
+                        str(n.get("returnReasonNote") or "")
+                        for n in ret["returnLineItems"]["nodes"]
+                    ]
+                    if any(note.startswith(marker) for note in notes):
+                        return CreatedReturn(
+                            return_id=_gid_int(ret["id"]),
+                            name=str(ret.get("name") or ""),
+                            status=str(ret["status"]).lower(),
+                            reason_handle=plan.shopify_reason or _FALLBACK_REASON_HANDLE,
+                        )
+                if not page["pageInfo"]["hasNextPage"]:
+                    return None
+                after = page["pageInfo"]["endCursor"]
+        raise ShopifyActionError(f"returns_list_truncated: más de {_RETURN_PAGES} páginas")
+
     async def create_return(self, plan: ReturnPlan) -> CreatedReturn:
         """Crea la devolución (y el cambio, si lo hay) aprobada en `plan`. Acción L3.
 
         `returnCreate` la deja en `OPEN`. El motivo es la definición de la librería de
         Shopify que eligió la tienda; si Shopify ya no la tiene, `other-reason`.
         Scope `write_returns`.
+
+        Lo que falla antes de enviar `returnCreate`, o sus `userErrors`, es
+        `ShopifyRejected`: consta que no se creó. Un error tras enviarla (timeout, 5xx,
+        `errors` de GraphQL) se propaga tal cual: no se sabe si se creó y quien llama lo
+        comprueba con `find_return`.
         """
         wanted = plan.shopify_reason or _FALLBACK_REASON_HANDLE
         async with httpx.AsyncClient() as client:
-            existing = await self._graphql(
-                client, _ORDER_RETURNS_QUERY, {"id": f"gid://shopify/Order/{plan.order_id}"}
-            )
-            marker = return_marker(plan)
-            for ret in ((existing.get("order") or {}).get("returns") or {}).get("nodes") or []:
-                notes = [
-                    str(n.get("returnReasonNote") or "")
-                    for n in (ret.get("returnLineItems") or {}).get("nodes") or []
-                ]
-                if any(note.startswith(marker) for note in notes):
-                    return CreatedReturn(
-                        return_id=_gid_int(ret["id"]),
-                        name=str(ret.get("name") or ""),
-                        status=str(ret["status"]).lower(),
-                        reason_handle=wanted,
-                    )
-            reasons = await self._graphql(
-                client, _RETURN_REASON_QUERY, {"handles": [wanted, _FALLBACK_REASON_HANDLE]}
-            )
+            try:
+                reasons = await self._graphql(
+                    client, _RETURN_REASON_QUERY, {"handles": [wanted, _FALLBACK_REASON_HANDLE]}
+                )
+            except (ShopifyActionError, httpx.HTTPError) as exc:
+                raise ShopifyRejected(f"{type(exc).__name__}: {exc}") from exc
             ids = {n["handle"]: n["id"] for n in reasons["returnReasonDefinitions"]["nodes"]}
             reason_id = ids.get(wanted) or ids.get(_FALLBACK_REASON_HANDLE)
             if reason_id is None:
-                raise ShopifyActionError("return_reason_definition_not_found")
+                raise ShopifyRejected("return_reason_definition_not_found")
             data = await self._graphql(
                 client, _RETURN_CREATE_MUTATION, {"input": return_input(plan, reason_id)}
             )
         result = data["returnCreate"]
         if result["userErrors"]:
-            raise ShopifyActionError(f"return_create_failed: {result['userErrors']}")
+            raise ShopifyRejected(f"return_create_failed: {result['userErrors']}")
         ret = result["return"]
         return CreatedReturn(
             return_id=int(str(ret["id"]).rsplit("/", 1)[-1]),
@@ -744,8 +773,11 @@ class ShopifyClient:
         )
 
     async def append_order_note(self, order_id: int, text: str) -> None:
-        """Añade `text` a la nota interna del pedido sin borrar lo que hubiera."""
+        """Añade `text` a la nota interna del pedido sin borrar lo que hubiera. Si la nota
+        ya lo lleva no la toca: repetirla no duplica el texto."""
         current = str((await self.get_order(order_id)).get("note") or "").strip()
+        if text.strip() in current:
+            return
         await self.add_order_note(order_id, f"{current}\n\n{text}" if current else text)
 
 
@@ -1194,11 +1226,14 @@ query ReturnableOrder($orderId: ID!) {
 }
 """
 
+_RETURN_PAGES = 10
+
 _ORDER_RETURNS_QUERY = """
-query OrderReturns($id: ID!) {
+query OrderReturns($id: ID!, $after: String) {
   order(id: $id) {
-    returns(first: 20) {
-      nodes { id name status returnLineItems(first: 50) { nodes { returnReasonNote } } }
+    returns(first: 25, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id name status returnLineItems(first: 1) { nodes { returnReasonNote } } }
     }
   }
 }
@@ -1460,6 +1495,11 @@ class ShopifyAdapter:
         exchange: list[tuple[int, int]],
     ) -> ReturnCalculation:
         return await self._client(ctx).calculate_return(order_id, lines=lines, exchange=exchange)
+
+    async def find_return(
+        self, ctx: IntegrationContext, plan: ReturnPlan
+    ) -> CreatedReturn | None:
+        return await self._client(ctx).find_return(plan)
 
     async def create_return(self, ctx: IntegrationContext, plan: ReturnPlan) -> CreatedReturn:
         return await self._client(ctx).create_return(plan)
