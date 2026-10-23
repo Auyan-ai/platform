@@ -272,7 +272,9 @@ class TenantToolPermission(_BaseModel):
 
 # ─── Pending Approvals (Sprint 10) ───────────────────────────────────────────
 
-PendingApprovalStatus = Literal["pending", "approved", "rejected"]
+# pending → executing → approved | failed | pending, y pending → rejected (#376). Las
+# transiciones las hacen los CAS de `db/queries.py`; ver la migración 20261018000003.
+PendingApprovalStatus = Literal["pending", "executing", "approved", "rejected", "failed"]
 
 
 class PendingApproval(_BaseModel):
@@ -291,6 +293,8 @@ class PendingApproval(_BaseModel):
     reviewed_at: datetime | None = None
     review_comment: str | None = None
     created_at: datetime | None = None
+    # Número de claim: identifica la ejecución en curso (ver `settle_executing_approval`).
+    execution_attempt: int = 0
 
 
 # ─── Agent Reasoning Events (Sprint 8) ───────────────────────────────────────

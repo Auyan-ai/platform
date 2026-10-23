@@ -210,11 +210,15 @@ class MockShopifyAdapter:
         *,
         amount: Decimal,
         note: str = "",
+        idempotency_key: str | None = None,
     ) -> IssuedRefund:
         refund = self._resolve("refund_partial", {})
         balance = await self.get_refundable_balance(ctx, order_id)
         balance.require(amount)
         return IssuedRefund(refund_id=refund.get("id"), amount=amount, currency=balance.currency)
+
+    async def find_refund(self, ctx: Any, order_id: int, idempotency_key: str) -> None:
+        return None
 
     async def start_return(
         self,

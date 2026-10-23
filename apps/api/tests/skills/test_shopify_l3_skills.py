@@ -6,13 +6,20 @@ ShopifyClient mockeado con AsyncMock — sin llamadas HTTP reales.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
-from apps.api.integrations.base import IntegrationContext
-from apps.api.integrations.shopify import IssuedRefund, RefundableBalance, ShopifyActionError
+from apps.api.integrations.base import IntegrationContext, MutationNotApplied
+from apps.api.integrations.shopify import (
+    IssuedRefund,
+    MarkedRefund,
+    RefundableBalance,
+    ShopifyActionError,
+    snapshot_transaction,
+)
 from apps.api.skills.base import SkillContext, SkillRefusal
 from apps.api.skills.shopify._models import Money
 from apps.api.skills.shopify._order_guard import ActionOutcome
@@ -91,6 +98,7 @@ def _adapter(*snapshots: object) -> AsyncMock:
     adapter.get_order_snapshot = AsyncMock(side_effect=list(snapshots))
     adapter.cancel_order = AsyncMock(return_value={"id": 1001})
     adapter.update_shipping_address = AsyncMock(return_value={"id": 1001})
+    adapter.find_refund = AsyncMock(return_value=None)
     return adapter
 
 
@@ -184,6 +192,21 @@ class TestCancelOrder:
         with pytest.raises(SkillRefusal):
             await CancelOrder().execute(_ctx(adapter), CancelOrderInput(order_id=1001))
         adapter.cancel_order.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_order_unreadable_before_cancelling_is_not_applied(self) -> None:
+        adapter = _adapter(ShopifyActionError("graphql_errors: THROTTLED"))
+        with pytest.raises(MutationNotApplied):
+            await CancelOrder().execute(_ctx(adapter), CancelOrderInput(order_id=1001))
+        adapter.cancel_order.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_failure_after_cancelling_is_not_marked_not_applied(self) -> None:
+        adapter = _adapter(snapshot(transactions=[CARD_SALE]), TimeoutError("read timeout"))
+        with pytest.raises(TimeoutError) as raised:
+            await CancelOrder().execute(_ctx(adapter), CancelOrderInput(order_id=1001))
+        assert not isinstance(raised.value, MutationNotApplied)
+        adapter.cancel_order.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_paid_card_order_refunds_restocks_and_confirms(self) -> None:
@@ -332,6 +355,13 @@ class TestUpdateShippingAddress:
         assert "#1500" in refused.value.team_reason
 
     @pytest.mark.asyncio
+    async def test_order_unreadable_before_the_change_is_not_applied(self) -> None:
+        adapter = _adapter(ShopifyActionError("order_not_found: 1001"))
+        with pytest.raises(MutationNotApplied):
+            await UpdateShippingAddress().execute(_ctx(adapter), _ADDRESS_INPUT)
+        adapter.update_shipping_address.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_confirms_the_address_reread_from_shopify(self) -> None:
         saved = {**_NEW_ADDRESS, "address1": "  calle nueva 42 "}
         adapter = _adapter(snapshot(), snapshot(address=saved))
@@ -390,7 +420,7 @@ class TestRefundPartial:
             return_value=IssuedRefund(refund_id=9001, amount=Decimal("12.50"), currency="GBP")
         )
         out = await RefundPartial().execute(
-            _ctx(adapter), RefundPartialInput(order_id=1001, amount="12.50")
+            replace(_ctx(adapter), idempotency_key="aprob-1"), RefundPartialInput(order_id=1001, amount="12.50")
         )
         assert isinstance(out, RefundPartialOutput)
         assert (out.refund_id, out.amount, out.outcome, out.success) == (
@@ -399,6 +429,52 @@ class TestRefundPartial:
             ActionOutcome.CONFIRMED,
             True,
         )
+
+    @pytest.mark.asyncio
+    async def test_refund_already_issued_with_this_key_is_returned_not_created_again(
+        self,
+    ) -> None:
+        """Un intento anterior ya lo creó (pasadas las 24 h Shopify ya no deduplica):
+        se devuelve el reembolso marcado con la clave sin llamar a `refundCreate`."""
+        adapter = _adapter(snapshot(transactions=[CARD_SALE, tx(2, "REFUND")]))
+        adapter.find_refund = AsyncMock(
+            return_value=MarkedRefund(
+                refund_id=9001,
+                amount=Decimal("12.50"),
+                currency="GBP",
+                transactions=(snapshot_transaction(tx(2, "REFUND")),),
+            )
+        )
+        adapter.refund_partial = AsyncMock()
+
+        out = await RefundPartial().execute(
+            replace(_ctx(adapter), idempotency_key="aprob-1"),
+            RefundPartialInput(order_id=1001, amount="12.50"),
+        )
+
+        adapter.refund_partial.assert_not_awaited()
+        adapter.find_refund.assert_awaited_once_with(
+            _SHOPIFY_INTEGRATION_CTX, 1001, "aprob-1"
+        )
+        assert isinstance(out, RefundPartialOutput)
+        assert (out.refund_id, out.amount, out.outcome) == (
+            9001,
+            Money(amount="12.50", currency="GBP"),
+            ActionOutcome.CONFIRMED,
+        )
+
+    @pytest.mark.asyncio
+    async def test_refunds_unreadable_before_refunding_is_not_applied(self) -> None:
+        adapter = _adapter(snapshot(transactions=[CARD_SALE]))
+        adapter.find_refund = AsyncMock(side_effect=TimeoutError("read timeout"))
+        adapter.refund_partial = AsyncMock()
+
+        with pytest.raises(MutationNotApplied):
+            await RefundPartial().execute(
+                replace(_ctx(adapter), idempotency_key="aprob-1"),
+                RefundPartialInput(order_id=1001, amount="12.50"),
+            )
+        adapter.refund_partial.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_manual_gateway_refund_is_reported_as_manual(self) -> None:
@@ -411,7 +487,7 @@ class TestRefundPartial:
             return_value=IssuedRefund(refund_id=9001, amount=Decimal("5"), currency="EUR")
         )
         out = await RefundPartial().execute(
-            _ctx(adapter), RefundPartialInput(order_id=1001, amount="5")
+            replace(_ctx(adapter), idempotency_key="aprob-1"), RefundPartialInput(order_id=1001, amount="5")
         )
         assert (out.outcome, out.refund_mode, out.success) == (
             ActionOutcome.REFUND_MANUAL,

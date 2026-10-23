@@ -142,7 +142,7 @@ async def test_hand_off_closes_the_gate_and_opens_an_escalation_with_the_reason(
     monkeypatch.setattr(f"{MODULE}.insert_escalation", insert)
     monkeypatch.setattr(f"{MODULE}.update_conversation_status", set_status)
 
-    result = await approval_resolution.hand_executed_action_to_team(
+    result = await approval_resolution.hand_approval_to_team(
         AsyncMock(),
         tenant_id=TENANT_ID,
         conversation_id=CONVERSATION_ID,

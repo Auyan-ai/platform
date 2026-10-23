@@ -14,11 +14,24 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from apps.api.integrations.shopify import RefundMode, ShopifyAdapter
-from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
+from apps.api.integrations.base import MutationNotApplied
+from apps.api.integrations.shopify import MarkedRefund, RefundMode, RefundRoute, ShopifyAdapter
+from apps.api.skills.base import (
+    ReconcileUnknown,
+    Skill,
+    SkillContext,
+    SkillInput,
+    SkillOutput,
+    SkillTier,
+)
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._models import Money
-from apps.api.skills.shopify._order_guard import ActionOutcome, refund_verdict
+from apps.api.skills.shopify._order_guard import (
+    ActionOutcome,
+    refund_transactions_verdict,
+    refund_verdict,
+    snapshot_before_mutation,
+)
 from pydantic import Field, computed_field
 
 
@@ -92,10 +105,28 @@ class RefundPartial(Skill):
         assert isinstance(inputs, RefundPartialInput)
         if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")
+        if not ctx.idempotency_key:
+            raise ValueError("idempotency_key_required")
         adapter = ctx.commerce_mock or ShopifyAdapter()
-        before = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
+        before = await snapshot_before_mutation(adapter, ctx, inputs.order_id)
+        # Un intento anterior de esta aprobación pudo crearlo ya: pasadas 24 h Shopify no
+        # deduplica la clave y `refundCreate` crearía otro.
+        try:
+            issued = await adapter.find_refund(
+                ctx.integration_ctx, before.order_id, ctx.idempotency_key
+            )
+        except Exception as exc:
+            raise MutationNotApplied(
+                f"lectura previa a la mutación: {type(exc).__name__}: {exc}"
+            ) from exc
+        if issued is not None:
+            return _marked_output(inputs, issued, before.refund_route)
         refund = await adapter.refund_partial(
-            ctx.integration_ctx, before.order_id, amount=inputs.amount, note=inputs.note
+            ctx.integration_ctx,
+            before.order_id,
+            amount=inputs.amount,
+            note=inputs.note,
+            idempotency_key=ctx.idempotency_key,
         )
         after = await adapter.get_order_snapshot(ctx.integration_ctx, before.order_id)
         route = before.refund_route
@@ -109,3 +140,33 @@ class RefundPartial(Skill):
             refund_mode=route.mode,
             refund_gateway=route.gateway,
         )
+
+    async def reconcile(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput | None:
+        """Busca en el pedido el reembolso con la marca de esta ejecución."""
+        assert isinstance(inputs, RefundPartialInput)
+        if not ctx.integration_ctx or not ctx.idempotency_key:
+            raise ReconcileUnknown("sin integración o sin clave de idempotencia")
+        adapter = ShopifyAdapter()
+        found = await adapter.find_refund(ctx.integration_ctx, inputs.order_id, ctx.idempotency_key)
+        if found is None:
+            return None
+        snapshot = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
+        return _marked_output(inputs, found, snapshot.refund_route)
+
+
+def _marked_output(
+    inputs: RefundPartialInput, found: MarkedRefund, route: RefundRoute
+) -> RefundPartialOutput:
+    """El resultado de un reembolso ya creado con la marca de esta aprobación."""
+    verdict = refund_transactions_verdict(
+        route, tuple(t for t in found.transactions if t.kind == "refund")
+    )
+    return RefundPartialOutput(
+        order_id=inputs.order_id,
+        refund_id=found.refund_id,
+        amount=Money(amount=str(found.amount), currency=found.currency),
+        outcome=verdict.outcome,
+        detail=verdict.detail,
+        refund_mode=route.mode,
+        refund_gateway=route.gateway,
+    )

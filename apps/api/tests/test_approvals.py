@@ -1,4 +1,8 @@
-"""Tests para routers/approvals.py y routers/tool_permissions.py."""
+"""Tests para routers/approvals.py, services/approval_execution.py y routers/tool_permissions.py.
+
+Las carreras entre peticiones se prueban contra Postgres real en `test_approvals_pg.py`.
+Aquí, con la base mockeada, cada rama del cierre de una ejecución.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +10,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
@@ -15,8 +19,17 @@ import pytest
 from apps.api.core.errors import register_exception_handlers
 from apps.api.core.security import UserRecord, reset_user_cache
 from apps.api.db.models import PendingApproval, TenantToolPermission
+from apps.api.integrations.base import MutationNotApplied
 from apps.api.routers.approvals import router as approvals_router
 from apps.api.routers.tool_permissions import router as tool_permissions_router
+from apps.api.skills.base import (
+    ReconcileUnknown,
+    Skill,
+    SkillContext,
+    SkillInput,
+    SkillOutput,
+    SkillRefusal,
+)
 from apps.api.tests.conftest import TENANT_ID
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -27,7 +40,11 @@ JWT_AUD = "authenticated"
 USER_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 CONVERSATION_ID = UUID("22222222-2222-2222-2222-222222222222")
 APPROVAL_ID = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+MESSAGE_ID = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
 NOW = datetime(2026, 5, 18, 12, 0, 0, tzinfo=UTC)
+
+ROUTER = "apps.api.routers.approvals"
+SERVICE = "apps.api.services.approval_execution"
 
 
 class _SecretWrap:
@@ -59,21 +76,67 @@ def _make_jwt() -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
 
-def _sample_approval(status: str = "pending") -> PendingApproval:
+AUTH = {"Authorization": f"Bearer {_make_jwt()}"}
+
+
+def _sample_approval(status: str = "pending", **overrides: Any) -> PendingApproval:
     return PendingApproval(
-        id=APPROVAL_ID,
-        tenant_id=TENANT_ID,
-        conversation_id=CONVERSATION_ID,
-        skill_slug="shopify.cancel_order",
-        skill_tier="L3",
-        inputs_raw={"order_id": 1001},
-        inputs_redacted={"order_id": 1001},
-        aop_slug="cancelaciones",
-        aop_version=1,
-        langfuse_trace_id=None,
-        status=status,
-        created_at=NOW,
+        **{
+            "id": APPROVAL_ID,
+            "tenant_id": TENANT_ID,
+            "conversation_id": CONVERSATION_ID,
+            "skill_slug": "shopify.cancel_order",
+            "skill_tier": "L3",
+            "inputs_raw": {"order_id": 1001},
+            "inputs_redacted": {"order_id": 1001},
+            "aop_slug": "cancelaciones",
+            "aop_version": 1,
+            "langfuse_trace_id": None,
+            "status": status,
+            "reviewed_by": USER_ID if status != "pending" else None,
+            "created_at": NOW,
+            **overrides,
+        }
     )
+
+
+class _Input(SkillInput):
+    order_id: int
+
+
+class _Output(SkillOutput):
+    cancelled: bool = True
+
+
+class FakeSkill(Skill):
+    """L3 de prueba. `outcome` decide qué hace `execute` y `found` qué ve `reconcile`."""
+
+    slug = "shopify.cancel_order"
+    description = "fake"
+    tier = "L3"
+    input_schema = _Input
+    output_schema = _Output
+    requires_idempotency = True
+    default_threshold = 0.95
+
+    outcome: ClassVar[Any] = None
+    found: ClassVar[Any] = ReconcileUnknown("sin lectura")
+    seen_ctx: ClassVar[SkillContext | None] = None
+    executions: ClassVar[int] = 0
+
+    async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
+        type(self).seen_ctx = ctx
+        type(self).executions += 1
+        if isinstance(type(self).outcome, BaseException):
+            raise type(self).outcome
+        if isinstance(type(self).outcome, dict):
+            return MagicMock(model_dump=lambda mode: type(self).outcome)  # type: ignore[return-value]
+        return _Output()
+
+    async def reconcile(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput | None:
+        if isinstance(type(self).found, BaseException):
+            raise type(self).found
+        return type(self).found
 
 
 @pytest.fixture(autouse=True)
@@ -83,63 +146,110 @@ def _clear_cache() -> None:
     reset_user_cache()
 
 
-@pytest.fixture(autouse=True)
-def _default_tenant_language(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Idioma de la conversación y config del tenant por defecto; cada test puede pisarlos."""
-    monkeypatch.setattr(
-        "apps.api.routers.approvals.get_tenant_configuration", AsyncMock(return_value=None)
-    )
-    monkeypatch.setattr(
-        "apps.api.routers.approvals.conversation_text_languages",
-        AsyncMock(return_value=("es", "es")),
-    )
+@dataclass
+class Wiring:
+    claim: AsyncMock
+    reject: AsyncMock
+    settle_cas: AsyncMock
+    insert_message: AsyncMock
+    deliver: AsyncMock
+    release_all: AsyncMock
+    release_own: AsyncMock
+    hand_off: AsyncMock
+    push: AsyncMock
+    finalize: AsyncMock
+    conversation: MagicMock
 
 
-def _make_app(
-    monkeypatch: pytest.MonkeyPatch,
-    router_under_test=None,
-) -> tuple[FastAPI, TestClient]:
-    async def _fake_lookup(user_id: UUID, settings: Any) -> UserRecord:
-        return UserRecord(tenant_id=TENANT_ID, role="tenant_admin", email="a@b.com")
-
-    monkeypatch.setattr("apps.api.core.security._lookup_user", _fake_lookup)
+def _wire(monkeypatch: pytest.MonkeyPatch, *, channel: str = "zendesk", delivered: bool = True):
+    """La base y el helpdesk mockeados para el router y el servicio."""
+    FakeSkill.outcome = None
+    FakeSkill.found = ReconcileUnknown("sin lectura")
+    FakeSkill.seen_ctx = None
+    FakeSkill.executions = 0
 
     @asynccontextmanager
     async def _fake_scope(*args: Any, **kwargs: Any) -> AsyncIterator[AsyncMock]:
         yield AsyncMock()
 
-    monkeypatch.setattr("apps.api.routers.approvals.tenant_scope", _fake_scope)
-    monkeypatch.setattr(
-        "apps.api.routers.approvals.is_simulation_conversation", AsyncMock(return_value=False)
+    conversation = MagicMock()
+    conversation.channel = channel
+    w = Wiring(
+        claim=AsyncMock(return_value=_sample_approval("executing", execution_attempt=1)),
+        reject=AsyncMock(return_value=_sample_approval("rejected")),
+        settle_cas=AsyncMock(
+            side_effect=lambda conn, *, tenant_id, approval_id, execution_attempt, new_status: (
+                _sample_approval(new_status)
+            )
+        ),
+        insert_message=AsyncMock(return_value=MagicMock(id=MESSAGE_ID)),
+        deliver=AsyncMock(return_value=delivered),
+        release_all=AsyncMock(return_value=1),
+        release_own=AsyncMock(return_value=True),
+        hand_off=AsyncMock(return_value=UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")),
+        push=AsyncMock(return_value=True),
+        finalize=AsyncMock(return_value=True),
+        conversation=conversation,
     )
-    # Defaults del cierre post-aprobación; los tests que lo verifican los sobrescriben.
-    monkeypatch.setattr(
-        "apps.api.routers.approvals.release_approval_escalation", AsyncMock(return_value=True)
-    )
-    monkeypatch.setattr(
-        "apps.api.routers.approvals.release_escalations_after_executed_action",
-        AsyncMock(return_value=1),
-    )
-    monkeypatch.setattr(
-        "apps.api.routers.approvals.finalize_agent_resolution", AsyncMock(return_value=True)
-    )
+    patches: dict[str, Any] = {
+        f"{ROUTER}.tenant_scope": _fake_scope,
+        f"{SERVICE}.tenant_scope": _fake_scope,
+        f"{ROUTER}.get_pending_approval": AsyncMock(return_value=_sample_approval()),
+        f"{ROUTER}.is_simulation_conversation": AsyncMock(return_value=False),
+        f"{ROUTER}.SkillRegistry.get": lambda slug: FakeSkill,
+        f"{ROUTER}.claim_pending_approval": w.claim,
+        f"{ROUTER}.reject_pending_approval": w.reject,
+        f"{ROUTER}.get_tenant_configuration": AsyncMock(return_value=None),
+        f"{ROUTER}.conversation_text_languages": AsyncMock(return_value=("es", "es")),
+        f"{ROUTER}.get_conversation": AsyncMock(return_value=conversation),
+        f"{ROUTER}.release_approval_escalation": w.release_own,
+        f"{SERVICE}.get_tenant_configuration": AsyncMock(return_value=None),
+        f"{SERVICE}.build_commerce_integration_ctx": AsyncMock(return_value=None),
+        f"{SERVICE}.conversation_text_languages": AsyncMock(return_value=("es", "es")),
+        f"{SERVICE}.settle_executing_approval": w.settle_cas,
+        f"{SERVICE}.insert_message": w.insert_message,
+        f"{SERVICE}.update_conversation_last_message": AsyncMock(return_value=None),
+        f"{SERVICE}.get_conversation": AsyncMock(return_value=conversation),
+        f"{SERVICE}.deliver_message_to_helpdesk": w.deliver,
+        f"{SERVICE}.release_escalations_after_executed_action": w.release_all,
+        f"{SERVICE}.hand_approval_to_team": w.hand_off,
+        f"{SERVICE}.push_escalation_to_helpdesk_safe": w.push,
+        f"{SERVICE}.finalize_agent_resolution": w.finalize,
+        f"{SERVICE}.get_settings": lambda: FakeAuthSettings(),
+    }
+    for target, value in patches.items():
+        monkeypatch.setattr(target, value)
+    return w
+
+
+def _make_app(monkeypatch: pytest.MonkeyPatch, router_under_test=None) -> tuple[FastAPI, TestClient]:
+    async def _fake_lookup(user_id: UUID, settings: Any) -> UserRecord:
+        return UserRecord(tenant_id=TENANT_ID, role="tenant_admin", email="a@b.com")
+
+    @asynccontextmanager
+    async def _fake_scope(*args: Any, **kwargs: Any) -> AsyncIterator[AsyncMock]:
+        yield AsyncMock()
+
+    monkeypatch.setattr("apps.api.core.security._lookup_user", _fake_lookup)
+    monkeypatch.setattr(f"{ROUTER}.tenant_scope", _fake_scope)
     monkeypatch.setattr("apps.api.routers.tool_permissions.tenant_scope", _fake_scope)
-    # El router llama get_settings() directo (reply_model); en tests no hay env real.
-    monkeypatch.setattr("apps.api.routers.approvals.get_settings", lambda: FakeAuthSettings())
 
     from apps.api.core.config import get_settings
 
     app = FastAPI()
     register_exception_handlers(app)
     app.dependency_overrides[get_settings] = lambda: FakeAuthSettings()
-
-    routers = [approvals_router, tool_permissions_router]
-    if router_under_test:
-        routers = [router_under_test]
-    for r in routers:
+    for r in [router_under_test] if router_under_test else [approvals_router, tool_permissions_router]:
         app.include_router(r)
-
     return app, TestClient(app, raise_server_exceptions=False)
+
+
+def _approve(client: TestClient) -> Any:
+    return client.post(f"/approvals/{APPROVAL_ID}/approve", json={"comment": "ok"}, headers=AUTH)
+
+
+def _reject(client: TestClient, comment: str = "No procede") -> Any:
+    return client.post(f"/approvals/{APPROVAL_ID}/reject", json={"comment": comment}, headers=AUTH)
 
 
 # ----------------------------------------------------------------
@@ -150,22 +260,17 @@ def _make_app(
 class TestListApprovals:
     def test_returns_list(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "apps.api.routers.approvals.list_pending_approvals",
-            AsyncMock(return_value=[_sample_approval()]),
+            f"{ROUTER}.list_pending_approvals", AsyncMock(return_value=[_sample_approval()])
         )
-
-        app, client = _make_app(monkeypatch, approvals_router)
-        resp = client.get("/approvals", headers={"Authorization": f"Bearer {_make_jwt()}"})
+        _app, client = _make_app(monkeypatch, approvals_router)
+        resp = client.get("/approvals", headers=AUTH)
 
         assert resp.status_code == 200
-        data = resp.json()
-        assert "approvals" in data
-        assert len(data["approvals"]) == 1
+        assert len(resp.json()["approvals"]) == 1
 
     def test_unauthenticated_returns_401(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        app, client = _make_app(monkeypatch, approvals_router)
-        resp = client.get("/approvals")
-        assert resp.status_code == 401
+        _app, client = _make_app(monkeypatch, approvals_router)
+        assert client.get("/approvals").status_code == 401
 
 
 # ----------------------------------------------------------------
@@ -176,15 +281,10 @@ class TestListApprovals:
 class TestGetApproval:
     def test_returns_approval(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
-            "apps.api.routers.approvals.get_pending_approval",
-            AsyncMock(return_value=_sample_approval()),
+            f"{ROUTER}.get_pending_approval", AsyncMock(return_value=_sample_approval())
         )
-
-        app, client = _make_app(monkeypatch, approvals_router)
-        resp = client.get(
-            f"/approvals/{APPROVAL_ID}",
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
+        _app, client = _make_app(monkeypatch, approvals_router)
+        resp = client.get(f"/approvals/{APPROVAL_ID}", headers=AUTH)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -194,18 +294,9 @@ class TestGetApproval:
         assert data["inputs_raw"] == {"order_id": 1001}
 
     def test_returns_404_when_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_pending_approval",
-            AsyncMock(return_value=None),
-        )
-
-        app, client = _make_app(monkeypatch, approvals_router)
-        resp = client.get(
-            f"/approvals/{APPROVAL_ID}",
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
-
-        assert resp.status_code == 404
+        monkeypatch.setattr(f"{ROUTER}.get_pending_approval", AsyncMock(return_value=None))
+        _app, client = _make_app(monkeypatch, approvals_router)
+        assert client.get(f"/approvals/{APPROVAL_ID}", headers=AUTH).status_code == 404
 
 
 # ----------------------------------------------------------------
@@ -214,248 +305,260 @@ class TestGetApproval:
 
 
 class TestApproveAction:
-    def test_approve_already_resolved_returns_403(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize("status", ["executing", "approved", "rejected", "failed"])
+    def test_approve_when_not_pending_is_409_and_runs_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, status: str
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
         monkeypatch.setattr(
-            "apps.api.routers.approvals.get_pending_approval",
-            AsyncMock(return_value=_sample_approval(status="approved")),
+            f"{ROUTER}.get_pending_approval", AsyncMock(return_value=_sample_approval(status))
         )
 
-        app, client = _make_app(monkeypatch, approvals_router)
-        resp = client.post(
-            f"/approvals/{APPROVAL_ID}/approve",
-            json={"comment": "ok"},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
+        resp = _approve(client)
 
-        assert resp.status_code == 403
+        assert resp.status_code == 409
+        assert resp.json()["error"] == "approval_not_pending"
+        w.claim.assert_not_awaited()
+        assert FakeSkill.executions == 0
 
-    def test_approve_not_found_returns_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_pending_approval",
-            AsyncMock(return_value=None),
-        )
-
-        app, client = _make_app(monkeypatch, approvals_router)
-        resp = client.post(
-            f"/approvals/{APPROVAL_ID}/approve",
-            json={},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
-
-        assert resp.status_code == 404
-
-    def test_approve_executes_skill_and_returns_success(
+    def test_losing_the_claim_is_409_and_runs_nothing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Happy-path: arma el SkillContext con integration_ctx y ejecuta la skill.
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        w.claim.return_value = None
 
-        Regresión del 500: antes construía SkillContext con kwargs obsoletos
-        (shopify_domain/shopify_token) → TypeError. Este test recorre la línea 140+.
-        """
-        from pydantic import BaseModel
+        resp = _approve(client)
 
-        captured: dict[str, Any] = {}
+        assert resp.status_code == 409
+        assert FakeSkill.executions == 0
+        w.insert_message.assert_not_awaited()
 
-        class _FakeInput(BaseModel):
-            order_id: int
+    def test_approve_not_found_returns_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        _wire(monkeypatch)
+        monkeypatch.setattr(f"{ROUTER}.get_pending_approval", AsyncMock(return_value=None))
+        assert _approve(client).status_code == 404
 
-        class _FakeOutput(BaseModel):
-            cancelled: bool = True
+    def test_success_claims_executes_with_the_approval_as_key_and_tells_the_customer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
 
-        class _FakeSkill:
-            input_schema = _FakeInput
-
-            async def execute(self, ctx: Any, inputs: Any) -> _FakeOutput:
-                captured["ctx"] = ctx
-                return _FakeOutput()
-
-        class _FakeMsg:
-            id = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
-
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_pending_approval",
-            AsyncMock(return_value=_sample_approval()),
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_tenant_configuration",
-            AsyncMock(return_value=None),
-        )
-        # No hace falta Shopify real: el helper devuelve None y la fake skill lo ignora.
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.build_commerce_integration_ctx",
-            AsyncMock(return_value=None),
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.SkillRegistry.get",
-            lambda slug: _FakeSkill,
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.resolve_pending_approval", AsyncMock(return_value=None)
-        )
-        insert_message_mock = AsyncMock(return_value=_FakeMsg())
-        monkeypatch.setattr("apps.api.routers.approvals.insert_message", insert_message_mock)
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.update_conversation_last_message",
-            AsyncMock(return_value=None),
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_conversation", AsyncMock(return_value=MagicMock())
-        )
-        deliver_mock = AsyncMock(return_value=True)
-        monkeypatch.setattr("apps.api.routers.approvals.deliver_message_to_helpdesk", deliver_mock)
-
-        app, client = _make_app(monkeypatch, approvals_router)
-        resp = client.post(
-            f"/approvals/{APPROVAL_ID}/approve",
-            json={"comment": "ok"},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
+        resp = _approve(client)
 
         assert resp.status_code == 200
         data = resp.json()
+        assert data["approval_status"] == "approved"
         assert data["execution_status"] == "success"
-        # El SkillContext se construyó bien (integration_ctx, no kwargs obsoletos).
-        assert captured["ctx"].integration_ctx is None
-        assert captured["ctx"].tenant_id == str(TENANT_ID)
-        # El mensaje 'agent_human' lleva autor (constraint messages_human_has_author).
-        assert insert_message_mock.await_args.kwargs["role"] == "agent_human"
-        assert insert_message_mock.await_args.kwargs["author_user_id"] == USER_ID
-        # Bug D: mensaje al cliente limpio (plantilla, sin agent_deps → sin LLM),
-        # nunca el slug interno ni el dict crudo del output.
-        content = insert_message_mock.await_args.kwargs["content"]
+        assert w.claim.await_args.kwargs["reviewed_by"] == USER_ID
+        assert FakeSkill.executions == 1
+        assert FakeSkill.seen_ctx is not None
+        assert FakeSkill.seen_ctx.idempotency_key == str(APPROVAL_ID)
+        assert FakeSkill.seen_ctx.tenant_id == str(TENANT_ID)
+        assert w.settle_cas.await_args.kwargs["new_status"] == "approved"
+        # 'agent_human' exige autor: lo firma quien aprobó.
+        assert w.insert_message.await_args.kwargs["author_user_id"] == USER_ID
+        content = w.insert_message.await_args.kwargs["content"]
         assert content == "Hemos cancelado tu pedido."
-        assert "shopify." not in content and "order_id" not in content
-        # Bug E: el resultado se entrega al helpdesk del cliente.
-        assert deliver_mock.await_args.kwargs["content"] == content
+        assert w.deliver.await_args.kwargs["content"] == content
+
+    def test_skill_without_idempotency_gets_no_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        _wire(monkeypatch)
+        monkeypatch.setattr(FakeSkill, "requires_idempotency", False)
+
+        _approve(client)
+
+        assert FakeSkill.seen_ctx is not None
+        assert FakeSkill.seen_ctx.idempotency_key is None
 
     def test_approve_writes_skill_audit_log(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Observabilidad: aprobar y ejecutar una skill L3 deja fila en skill_audit_log
-        (status real + latencia + outputs), no solo el gate como rejected_by_permissions."""
         from types import SimpleNamespace
 
-        from pydantic import BaseModel
-
-        class _FakeInput(BaseModel):
-            order_id: int
-
-        class _FakeOutput(BaseModel):
-            cancelled: bool = True
-
-        class _FakeSkill:
-            input_schema = _FakeInput
-
-            async def execute(self, ctx: Any, inputs: Any) -> _FakeOutput:
-                return _FakeOutput()
-
-        class _FakeMsg:
-            id = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
-
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_pending_approval",
-            AsyncMock(return_value=_sample_approval()),
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_tenant_configuration", AsyncMock(return_value=None)
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.build_commerce_integration_ctx",
-            AsyncMock(return_value=None),
-        )
-        monkeypatch.setattr("apps.api.routers.approvals.SkillRegistry.get", lambda slug: _FakeSkill)
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.resolve_pending_approval", AsyncMock(return_value=None)
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.insert_message", AsyncMock(return_value=_FakeMsg())
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.update_conversation_last_message",
-            AsyncMock(return_value=None),
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_conversation", AsyncMock(return_value=None)
-        )
-
         app, client = _make_app(monkeypatch, approvals_router)
+        _wire(monkeypatch)
         audit_logger = MagicMock()
         app.state.agent_deps = SimpleNamespace(audit_logger=audit_logger, anthropic=None)
 
-        resp = client.post(
-            f"/approvals/{APPROVAL_ID}/approve",
-            json={"comment": "ok"},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
-
-        assert resp.status_code == 200
-        audit_logger.log.assert_called_once()
+        assert _approve(client).status_code == 200
         kwargs = audit_logger.log.call_args.kwargs
         assert kwargs["status"] == "success"
         assert kwargs["skill_slug"] == "shopify.cancel_order"
-        assert kwargs["skill_tier"] == "L3"
         assert kwargs["aop_slug"] == "cancelaciones"
-        assert kwargs["latency_ms"] is not None
+        assert kwargs["idempotency_key"] == APPROVAL_ID
         assert kwargs["outputs"] == {"cancelled": True}
 
-    def test_approve_skill_failure_leaves_pending_and_sends_no_reply(
+
+class TestExecutionErrors:
+    """Tras un error la L3 nunca se repite: se lee Shopify (`reconcile`) y se cierra."""
+
+    def test_error_before_the_mutation_was_sent_reopens_the_approval(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Hallazgo 1: si la skill falla, no se resuelve ni se le confirma al cliente.
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        FakeSkill.outcome = MutationNotApplied("lectura previa: Client error '404 Not Found'")
+        FakeSkill.found = None
 
-        La aprobación queda 'pending' (reintentable), no se inserta mensaje al
-        cliente (no enmascarar el fallo) ni se entrega nada al helpdesk, y la
-        respuesta reporta execution_status='failed' con el error.
-        """
-        from pydantic import BaseModel
+        data = _approve(client).json()
 
-        class _FakeInput(BaseModel):
-            order_id: int
-
-        class _FakeSkill:
-            input_schema = _FakeInput
-
-            async def execute(self, ctx: Any, inputs: Any) -> Any:
-                raise RuntimeError("Client error '404 Not Found' for url ...")
-
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_pending_approval",
-            AsyncMock(return_value=_sample_approval()),
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_tenant_configuration",
-            AsyncMock(return_value=None),
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.build_commerce_integration_ctx",
-            AsyncMock(return_value=None),
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.SkillRegistry.get",
-            lambda slug: _FakeSkill,
-        )
-        resolve_mock = AsyncMock(return_value=None)
-        monkeypatch.setattr("apps.api.routers.approvals.resolve_pending_approval", resolve_mock)
-        insert_message_mock = AsyncMock()
-        monkeypatch.setattr("apps.api.routers.approvals.insert_message", insert_message_mock)
-        deliver_mock = AsyncMock(return_value=True)
-        monkeypatch.setattr("apps.api.routers.approvals.deliver_message_to_helpdesk", deliver_mock)
-
-        app, client = _make_app(monkeypatch, approvals_router)
-        resp = client.post(
-            f"/approvals/{APPROVAL_ID}/approve",
-            json={"comment": "ok"},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
-
-        assert resp.status_code == 200
-        data = resp.json()
+        assert data["approval_status"] == "pending"
         assert data["execution_status"] == "failed"
-        assert data["message_id"] is None
         assert "404" in data["output"]["error"]
-        # No se resuelve (queda 'pending' para reintento), no se le confirma nada
-        # al cliente ni se entrega al helpdesk.
-        resolve_mock.assert_not_awaited()
-        insert_message_mock.assert_not_awaited()
-        deliver_mock.assert_not_awaited()
+        assert w.settle_cas.await_args.kwargs["new_status"] == "pending"
+        assert FakeSkill.executions == 1
+        w.insert_message.assert_not_awaited()
+        w.deliver.assert_not_awaited()
+        w.hand_off.assert_not_awaited()
+
+    def test_error_after_the_mutation_was_sent_never_reopens_the_approval(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`orderCancel` es asíncrono y un reembolso puede seguir en curso: que Shopify
+        aún no lo muestre no prueba que no se aplicó. No se sabe: al equipo."""
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        FakeSkill.outcome = RuntimeError("poll: Server error '503 Service Unavailable'")
+        FakeSkill.found = None
+
+        data = _approve(client).json()
+
+        assert data["approval_status"] == "failed"
+        assert data["execution_status"] == "unknown"
+        assert w.settle_cas.await_args.kwargs["new_status"] == "failed"
+        assert "503" in w.hand_off.await_args.kwargs["reason"]
+        w.insert_message.assert_not_awaited()
+        w.deliver.assert_not_awaited()
+
+    def test_timeout_after_the_mutation_landed_closes_as_approved(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        FakeSkill.outcome = TimeoutError("read timeout")
+        FakeSkill.found = _Output()
+
+        data = _approve(client).json()
+
+        assert data["approval_status"] == "approved"
+        assert data["execution_status"] == "success"
+        assert FakeSkill.executions == 1
+        assert w.insert_message.await_args.kwargs["content"] == "Hemos cancelado tu pedido."
+        w.release_all.assert_awaited_once()
+
+    def test_error_that_cannot_be_checked_fails_and_goes_to_the_team(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        FakeSkill.outcome = TimeoutError("read timeout")
+        FakeSkill.found = ReconcileUnknown("shopify caído")
+
+        data = _approve(client).json()
+
+        assert data["approval_status"] == "failed"
+        assert data["execution_status"] == "unknown"
+        reason = w.hand_off.await_args.kwargs["reason"]
+        assert reason.startswith(
+            "La cancelación del pedido 1001 se aprobó, pero no se pudo comprobar en Shopify"
+        )
+        assert data["team_followup"] == reason
+        assert w.push.await_args.kwargs["reason"] == reason
+        w.insert_message.assert_not_awaited()
+        w.finalize.assert_not_awaited()
+
+    def test_refusal_tells_the_customer_and_hands_the_reason_to_the_team(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        FakeSkill.outcome = SkillRefusal(
+            "order_shipped",
+            customer_message="Tu pedido ya salió del almacén.",
+            team_reason="El pedido 1001 ya salió: revisad con el almacén.",
+        )
+        FakeSkill.found = None
+
+        data = _approve(client).json()
+
+        assert data["approval_status"] == "failed"
+        assert data["execution_status"] == "refused"
+        assert data["team_followup"] == "El pedido 1001 ya salió: revisad con el almacén."
+        assert w.settle_cas.await_args.kwargs["new_status"] == "failed"
+        assert w.insert_message.await_args.kwargs["content"] == "Tu pedido ya salió del almacén."
+        assert w.insert_message.await_args.kwargs["metadata"]["refusal_code"] == "order_shipped"
+        assert w.deliver.await_args.kwargs["content"] == "Tu pedido ya salió del almacén."
+        assert w.hand_off.await_args.kwargs["reason"] == data["team_followup"]
+        w.finalize.assert_not_awaited()
+
+    def test_refusal_of_a_skill_that_cannot_reconcile_is_still_a_refusal(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        _wire(monkeypatch)
+        FakeSkill.outcome = SkillRefusal("x", customer_message="No es posible.", team_reason="r")
+
+        assert _approve(client).json()["execution_status"] == "refused"
+
+    def test_refusal_on_the_first_attempt_is_a_refusal_even_if_shopify_shows_the_change(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """El pedido ya estaba cancelado antes de aprobar: lo canceló otro, no Auyan. Ni
+        mensaje de éxito ni audit de éxito: texto fijo al cliente y caso al equipo."""
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        FakeSkill.outcome = SkillRefusal(
+            "order_cancelled", customer_message="Ya estaba cancelado.", team_reason="r"
+        )
+        FakeSkill.found = _Output()
+
+        data = _approve(client).json()
+
+        assert data["approval_status"] == "failed"
+        assert data["execution_status"] == "refused"
+        assert w.insert_message.await_args.kwargs["content"] == "Ya estaba cancelado."
+        assert w.hand_off.await_args.kwargs["reason"] == "r"
+
+    def test_not_applied_on_the_first_attempt_ignores_what_shopify_shows(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        _wire(monkeypatch)
+        FakeSkill.outcome = MutationNotApplied("lectura previa: 404")
+        FakeSkill.found = _Output()
+
+        assert _approve(client).json()["approval_status"] == "pending"
+
+    def test_refusal_of_an_order_our_earlier_attempt_already_changed_is_applied(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Segundo claim de la aprobación: el guard ve el pedido ya cancelado y pudo
+        cancelarlo el intento anterior. Shopify manda: consta aplicada."""
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        w.claim.return_value = _sample_approval("executing", execution_attempt=2)
+        FakeSkill.outcome = SkillRefusal("order_cancelled", customer_message="m", team_reason="r")
+        FakeSkill.found = _Output()
+
+        assert _approve(client).json()["approval_status"] == "approved"
+
+    def test_losing_the_settle_cas_writes_and_delivers_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        w.settle_cas.side_effect = None
+        w.settle_cas.return_value = None
+
+        resp = _approve(client)
+
+        assert resp.status_code == 409
+        assert resp.json()["error"] == "approval_settled_elsewhere"
+        w.insert_message.assert_not_awaited()
+        w.deliver.assert_not_awaited()
 
 
 # ----------------------------------------------------------------
@@ -465,119 +568,67 @@ class TestApproveAction:
 
 class TestRejectAction:
     def test_reject_not_found_returns_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        _wire(monkeypatch)
+        monkeypatch.setattr(f"{ROUTER}.get_pending_approval", AsyncMock(return_value=None))
+        assert _reject(client).status_code == 404
+
+    @pytest.mark.parametrize("status", ["executing", "approved", "rejected"])
+    def test_reject_when_not_pending_is_409(
+        self, monkeypatch: pytest.MonkeyPatch, status: str
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
         monkeypatch.setattr(
-            "apps.api.routers.approvals.get_pending_approval",
-            AsyncMock(return_value=None),
+            f"{ROUTER}.get_pending_approval", AsyncMock(return_value=_sample_approval(status))
         )
 
-        app, client = _make_app(monkeypatch, approvals_router)
-        resp = client.post(
-            f"/approvals/{APPROVAL_ID}/reject",
-            json={"comment": "No procede"},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
+        assert _reject(client).status_code == 409
+        w.reject.assert_not_awaited()
 
-        assert resp.status_code == 404
+    def test_losing_the_reject_cas_is_409_and_tells_nobody(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        w.reject.return_value = None
 
-    def test_reject_already_resolved_returns_403(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_pending_approval",
-            AsyncMock(return_value=_sample_approval(status="rejected")),
-        )
+        assert _reject(client).status_code == 409
+        w.insert_message.assert_not_awaited()
+        w.deliver.assert_not_awaited()
+        w.release_own.assert_not_awaited()
 
-        app, client = _make_app(monkeypatch, approvals_router)
-        resp = client.post(
-            f"/approvals/{APPROVAL_ID}/reject",
-            json={"comment": "rechazado"},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
+    def test_reject_records_releases_its_escalation_and_delivers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
 
-        assert resp.status_code == 403
-
-    def test_reject_inserts_message_with_author(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """El mensaje 'agent_human' de rechazo lleva autor (constraint messages_human_has_author)."""
-
-        class _FakeMsg:
-            id = UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
-
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_pending_approval",
-            AsyncMock(return_value=_sample_approval()),
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.resolve_pending_approval", AsyncMock(return_value=None)
-        )
-        insert_message_mock = AsyncMock(return_value=_FakeMsg())
-        monkeypatch.setattr("apps.api.routers.approvals.insert_message", insert_message_mock)
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.update_conversation_last_message",
-            AsyncMock(return_value=None),
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_conversation", AsyncMock(return_value=MagicMock())
-        )
-        deliver_mock = AsyncMock(return_value=True)
-        monkeypatch.setattr("apps.api.routers.approvals.deliver_message_to_helpdesk", deliver_mock)
-
-        app, client = _make_app(monkeypatch, approvals_router)
-        resp = client.post(
-            f"/approvals/{APPROVAL_ID}/reject",
-            json={"comment": "No procede"},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
+        resp = _reject(client, "fuera de plazo")
 
         assert resp.status_code == 200
-        assert resp.json()["execution_status"] == "rejected"
-        assert insert_message_mock.await_args.kwargs["author_user_id"] == USER_ID
-        # Bug E: el rechazo se entrega al helpdesk del cliente.
-        assert (
-            deliver_mock.await_args.kwargs["content"]
-            == insert_message_mock.await_args.kwargs["content"]
+        assert resp.json()["approval_status"] == "rejected"
+        assert w.reject.await_args.kwargs["reviewed_by"] == USER_ID
+        assert w.insert_message.await_args.kwargs["author_user_id"] == USER_ID
+        assert w.deliver.await_args.kwargs["content"] == w.insert_message.await_args.kwargs[
+            "content"
+        ]
+        # Solo se cierra la escalación del gate; la acción no se hizo.
+        assert w.release_own.await_args.kwargs["approval_id"] == APPROVAL_ID
+        w.release_all.assert_not_awaited()
+        w.finalize.assert_not_awaited()
+
+    def test_rejection_is_written_in_the_conversation_language(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        monkeypatch.setattr(
+            f"{ROUTER}.conversation_text_languages", AsyncMock(return_value=("en", "es"))
         )
 
-
-class TestApprovalRepliesSpeakTheConversationLanguage:
-    def _wire(self, monkeypatch, language: str):
-        class _FakeMsg:
-            id = UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
-
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_pending_approval",
-            AsyncMock(return_value=_sample_approval()),
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.resolve_pending_approval", AsyncMock(return_value=None)
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.conversation_text_languages",
-            AsyncMock(return_value=(language, "es")),
-        )
-        insert_message_mock = AsyncMock(return_value=_FakeMsg())
-        monkeypatch.setattr("apps.api.routers.approvals.insert_message", insert_message_mock)
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.update_conversation_last_message",
-            AsyncMock(return_value=None),
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.get_conversation", AsyncMock(return_value=MagicMock())
-        )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.deliver_message_to_helpdesk", AsyncMock(return_value=True)
-        )
-        return insert_message_mock
-
-    def test_rejection_is_written_in_the_conversation_language(self, monkeypatch) -> None:
-        insert_message_mock = self._wire(monkeypatch, "en")
-        _, client = _make_app(monkeypatch, approvals_router)
-
-        resp = client.post(
-            f"/approvals/{APPROVAL_ID}/reject",
-            json={"comment": "No procede"},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
-
-        assert resp.status_code == 200
-        content = insert_message_mock.await_args.kwargs["content"]
+        assert _reject(client).status_code == 200
+        content = w.insert_message.await_args.kwargs["content"]
         assert content.startswith("We've reviewed your request")
         assert content.endswith("No procede")
 
@@ -590,35 +641,123 @@ class TestSimulatedApproval:
         self, monkeypatch: pytest.MonkeyPatch, action: str
     ) -> None:
         _app, client = _make_app(monkeypatch, approvals_router)
-        skill = MagicMock()
-        skill.return_value.execute = AsyncMock()
-        resolve = AsyncMock()
-        insert_message_mock = AsyncMock()
-        deliver_mock = AsyncMock()
+        w = _wire(monkeypatch)
         monkeypatch.setattr(
-            "apps.api.routers.approvals.get_pending_approval",
-            AsyncMock(return_value=_sample_approval()),
+            f"{ROUTER}.is_simulation_conversation", AsyncMock(return_value=True)
         )
-        monkeypatch.setattr(
-            "apps.api.routers.approvals.is_simulation_conversation", AsyncMock(return_value=True)
-        )
-        monkeypatch.setattr("apps.api.routers.approvals.SkillRegistry.get", lambda slug: skill)
-        monkeypatch.setattr("apps.api.routers.approvals.resolve_pending_approval", resolve)
-        monkeypatch.setattr("apps.api.routers.approvals.insert_message", insert_message_mock)
-        monkeypatch.setattr("apps.api.routers.approvals.deliver_message_to_helpdesk", deliver_mock)
 
         resp = client.post(
-            f"/approvals/{APPROVAL_ID}/{action}",
-            json={"comment": "desde el panel"},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            f"/approvals/{APPROVAL_ID}/{action}", json={"comment": "desde el panel"}, headers=AUTH
         )
 
         assert resp.status_code == 403
         assert resp.json()["error"] == "simulated_approval"
-        skill.return_value.execute.assert_not_awaited()
-        resolve.assert_not_awaited()
-        insert_message_mock.assert_not_awaited()
-        deliver_mock.assert_not_awaited()
+        assert FakeSkill.executions == 0
+        w.claim.assert_not_awaited()
+        w.reject.assert_not_awaited()
+        w.insert_message.assert_not_awaited()
+
+
+# ----------------------------------------------------------------
+# Cierre de la escalación tras aprobar (E2E pedido #1428)
+# ----------------------------------------------------------------
+
+
+class TestCloseAfterApproval:
+    def test_success_delivered_releases_escalation_and_resolves(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch, channel="zendesk", delivered=True)
+
+        assert _approve(client).status_code == 200
+        # Acción ejecutada → se cierran TODAS las escalaciones de la conversación
+        # (tickets #29/#31 del E2E A4 quedaban 'pending' por un escalado previo).
+        assert w.release_all.await_args.kwargs["conversation_id"] == CONVERSATION_ID
+        assert w.finalize.await_args.kwargs["delivered"] is True
+
+    def test_success_undelivered_does_not_resolve(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch, channel="zendesk", delivered=False)
+
+        _approve(client)
+
+        assert w.finalize.await_args.kwargs["delivered"] is False
+
+    def test_channel_without_helpdesk_counts_as_delivered(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch, channel="chat", delivered=False)
+
+        _approve(client)
+
+        assert w.finalize.await_args.kwargs["delivered"] is True
+
+    def test_manual_refund_hands_the_case_to_the_team(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cancelación ejecutada con pasarela manual (#318): el cliente recibe la
+        plantilla fija, la conversación queda escalada con el motivo para el equipo y
+        no hay resolución autónoma."""
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        FakeSkill.outcome = {
+            "order_id": 1001,
+            "cancelled": True,
+            "outcome": "refund_manual",
+            "detail": None,
+            "refund_mode": "manual",
+            "refund_gateway": "Transferencia",
+            "success": False,
+        }
+
+        resp = _approve(client)
+
+        expected_reason = (
+            "La cancelación del pedido 1001 se ejecutó en Shopify, pero el cobro es de una "
+            "pasarela manual (Transferencia) o no consta en Shopify: Shopify no devuelve el "
+            "dinero. Haced el reembolso a mano si el cliente pagó y confirmádselo."
+        )
+        assert resp.json()["team_followup"] == expected_reason
+        assert w.hand_off.await_args.kwargs["reason"] == expected_reason
+        assert w.push.await_args.kwargs["reason"] == expected_reason
+        assert w.insert_message.await_args.kwargs["content"] == (
+            "Hemos cancelado tu pedido. Si ya realizaste el pago, la tienda te devolverá el "
+            "importe por el mismo medio con el que pagaste. Nuestro equipo ya está avisado y "
+            "te escribirá en cuanto lo tenga resuelto."
+        )
+        w.release_all.assert_not_awaited()
+        w.finalize.assert_not_awaited()
+
+    def test_confirmed_outcome_resolves_as_before(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        FakeSkill.outcome = {"order_id": 1001, "outcome": "confirmed", "success": True}
+
+        assert _approve(client).json()["team_followup"] is None
+        w.release_all.assert_awaited_once()
+        w.finalize.assert_awaited_once()
+
+
+def test_every_l3_skill_declares_idempotency() -> None:
+    """Una L3 sin `requires_idempotency` no recibe clave ni sabe reconciliar (#376)."""
+    import importlib
+    import inspect
+    import pkgutil
+
+    import apps.api.skills.shopify as shopify_skills
+
+    l3 = [
+        cls
+        for info in pkgutil.iter_modules(shopify_skills.__path__)
+        for _, cls in inspect.getmembers(
+            importlib.import_module(f"{shopify_skills.__name__}.{info.name}"), inspect.isclass
+        )
+        if issubclass(cls, Skill) and cls is not Skill and getattr(cls, "tier", None) == "L3"
+    ]
+    assert {s.slug for s in l3} >= {"shopify.cancel_order", "shopify.refund_partial"}
+    assert [s.slug for s in l3 if not s.requires_idempotency] == []
 
 
 # ----------------------------------------------------------------
@@ -641,21 +780,15 @@ class TestListToolPermissions:
             AsyncMock(return_value=[perm]),
         )
 
-        app, client = _make_app(monkeypatch, tool_permissions_router)
-        resp = client.get(
-            "/tenants/me/tool-permissions",
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
+        _app, client = _make_app(monkeypatch, tool_permissions_router)
+        resp = client.get("/tenants/me/tool-permissions", headers=AUTH)
 
         assert resp.status_code == 200
-        data = resp.json()
-        assert "permissions" in data
-        assert data["permissions"][0]["skill_slug"] == "shopify.get_order"
+        assert resp.json()["permissions"][0]["skill_slug"] == "shopify.get_order"
 
     def test_unauthenticated_returns_401(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        app, client = _make_app(monkeypatch, tool_permissions_router)
-        resp = client.get("/tenants/me/tool-permissions")
-        assert resp.status_code == 401
+        _app, client = _make_app(monkeypatch, tool_permissions_router)
+        assert client.get("/tenants/me/tool-permissions").status_code == 401
 
 
 # ----------------------------------------------------------------
@@ -665,216 +798,10 @@ class TestListToolPermissions:
 
 class TestUpdateToolPermission:
     def test_skill_not_found_returns_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        app, client = _make_app(monkeypatch, tool_permissions_router)
+        _app, client = _make_app(monkeypatch, tool_permissions_router)
         resp = client.put(
             "/tenants/me/tool-permissions/skill.no_existe",
             json={"is_enabled": True, "human_approval_required": False},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            headers=AUTH,
         )
-
         assert resp.status_code == 404
-
-
-# ----------------------------------------------------------------
-# Cierre de la escalación tras aprobar / rechazar (E2E pedido #1428)
-# ----------------------------------------------------------------
-
-
-def _patch_success_path(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    channel: str,
-    delivered: bool,
-    output: dict[str, Any] | None = None,
-) -> tuple[AsyncMock, AsyncMock]:
-    from pydantic import BaseModel
-
-    class _FakeInput(BaseModel):
-        order_id: int
-
-    class _FakeOutput(BaseModel):
-        cancelled: bool = True
-
-    class _FakeSkill:
-        input_schema = _FakeInput
-
-        async def execute(self, ctx: Any, inputs: Any) -> Any:
-            if output is not None:
-                return MagicMock(model_dump=lambda mode: output)
-            return _FakeOutput()
-
-    class _FakeMsg:
-        id = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
-
-    conversation = MagicMock()
-    conversation.channel = channel
-    for name, value in {
-        "get_pending_approval": AsyncMock(return_value=_sample_approval()),
-        "get_tenant_configuration": AsyncMock(return_value=None),
-        "build_commerce_integration_ctx": AsyncMock(return_value=None),
-        "resolve_pending_approval": AsyncMock(return_value=None),
-        "insert_message": AsyncMock(return_value=_FakeMsg()),
-        "update_conversation_last_message": AsyncMock(return_value=None),
-        "get_conversation": AsyncMock(return_value=conversation),
-        "deliver_message_to_helpdesk": AsyncMock(return_value=delivered),
-    }.items():
-        monkeypatch.setattr(f"apps.api.routers.approvals.{name}", value)
-    monkeypatch.setattr("apps.api.routers.approvals.SkillRegistry.get", lambda slug: _FakeSkill)
-    release = AsyncMock(return_value=1)
-    finalize = AsyncMock(return_value=True)
-    monkeypatch.setattr(
-        "apps.api.routers.approvals.release_escalations_after_executed_action", release
-    )
-    monkeypatch.setattr("apps.api.routers.approvals.finalize_agent_resolution", finalize)
-    return release, finalize
-
-
-class TestCloseAfterApproval:
-    def _client(self, monkeypatch: pytest.MonkeyPatch) -> TestClient:
-        # _make_app instala mocks por defecto: la app va primero, los parches después.
-        _app, client = _make_app(monkeypatch, approvals_router)
-        return client
-
-    def _approve(self, client: TestClient) -> Any:
-        return client.post(
-            f"/approvals/{APPROVAL_ID}/approve",
-            json={},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
-
-    def test_success_delivered_releases_escalation_and_resolves(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        client = self._client(monkeypatch)
-        release, finalize = _patch_success_path(monkeypatch, channel="zendesk", delivered=True)
-
-        resp = self._approve(client)
-
-        assert resp.status_code == 200
-        # Acción ejecutada → se cierran TODAS las escalaciones de la conversación
-        # (tickets #29/#31 del E2E A4 quedaban 'pending' por un escalado previo).
-        release.assert_awaited_once()
-        assert release.await_args.kwargs["conversation_id"] == _sample_approval().conversation_id
-        finalize.assert_awaited_once()
-        assert finalize.await_args.kwargs["delivered"] is True
-
-    def test_success_undelivered_does_not_resolve(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Confirmación sin entregar al helpdesk → no se resuelve ni se cierra el ticket."""
-        client = self._client(monkeypatch)
-        _release, finalize = _patch_success_path(monkeypatch, channel="zendesk", delivered=False)
-
-        self._approve(client)
-
-        assert finalize.await_args.kwargs["delivered"] is False
-
-    def test_channel_without_helpdesk_counts_as_delivered(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        client = self._client(monkeypatch)
-        _release, finalize = _patch_success_path(monkeypatch, channel="chat", delivered=False)
-
-        self._approve(client)
-
-        assert finalize.await_args.kwargs["delivered"] is True
-
-    def test_manual_refund_hands_the_case_to_the_team(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Cancelación ejecutada con pasarela manual (#318): el cliente recibe la
-        plantilla fija, la conversación queda escalada con el motivo para el equipo y
-        no hay resolución autónoma."""
-        client = self._client(monkeypatch)
-        release, finalize = _patch_success_path(
-            monkeypatch,
-            channel="zendesk",
-            delivered=True,
-            output={
-                "order_id": 1001,
-                "cancelled": True,
-                "outcome": "refund_manual",
-                "detail": None,
-                "refund_mode": "manual",
-                "refund_gateway": "Transferencia",
-                "success": False,
-            },
-        )
-        hand_off = AsyncMock(return_value=UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"))
-        push = AsyncMock(return_value=True)
-        monkeypatch.setattr("apps.api.routers.approvals.hand_executed_action_to_team", hand_off)
-        monkeypatch.setattr("apps.api.routers.approvals.push_escalation_to_helpdesk_safe", push)
-
-        resp = self._approve(client)
-
-        expected_reason = (
-            "La cancelación del pedido 1001 se ejecutó en Shopify, pero el cobro es de una "
-            "pasarela manual (Transferencia) o no consta en Shopify: Shopify no devuelve el "
-            "dinero. Haced el reembolso a mano si el cliente pagó y confirmádselo."
-        )
-        assert resp.json()["team_followup"] == expected_reason
-        assert hand_off.await_args.kwargs["reason"] == expected_reason
-        assert push.await_args.kwargs["reason"] == expected_reason
-        from apps.api.routers import approvals as approvals_module
-
-        sent = approvals_module.insert_message.await_args.kwargs["content"]  # type: ignore[attr-defined]
-        assert sent == (
-            "Hemos cancelado tu pedido. Si ya realizaste el pago, la tienda te devolverá el "
-            "importe por el mismo medio con el que pagaste. Nuestro equipo ya está avisado y "
-            "te escribirá en cuanto lo tenga resuelto."
-        )
-        release.assert_not_awaited()
-        finalize.assert_not_awaited()
-
-    def test_confirmed_outcome_resolves_as_before(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        client = self._client(monkeypatch)
-        release, finalize = _patch_success_path(
-            monkeypatch,
-            channel="zendesk",
-            delivered=True,
-            output={"order_id": 1001, "outcome": "confirmed", "success": True},
-        )
-
-        resp = self._approve(client)
-
-        assert resp.json()["team_followup"] is None
-        release.assert_awaited_once()
-        finalize.assert_awaited_once()
-
-    def test_execution_failure_keeps_escalation(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        client = self._client(monkeypatch)
-        release, finalize = _patch_success_path(monkeypatch, channel="zendesk", delivered=True)
-
-        class _Boom:
-            input_schema = MagicMock(model_validate=lambda raw: raw)
-
-            async def execute(self, ctx: Any, inputs: Any) -> Any:
-                raise RuntimeError("shopify 500")
-
-        monkeypatch.setattr("apps.api.routers.approvals.SkillRegistry.get", lambda slug: _Boom)
-
-        resp = self._approve(client)
-
-        assert resp.json()["execution_status"] == "failed"
-        release.assert_not_awaited()
-        finalize.assert_not_awaited()
-
-    def test_reject_releases_escalation_without_resolving(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        client = self._client(monkeypatch)
-        release_all, finalize = _patch_success_path(monkeypatch, channel="zendesk", delivered=True)
-        release_own = AsyncMock(return_value=True)
-        monkeypatch.setattr("apps.api.routers.approvals.release_approval_escalation", release_own)
-
-        resp = client.post(
-            f"/approvals/{APPROVAL_ID}/reject",
-            json={"comment": "fuera de plazo"},
-            headers={"Authorization": f"Bearer {_make_jwt()}"},
-        )
-
-        assert resp.status_code == 200
-        # Rechazo: solo se cierra la escalación del gate; la acción no se hizo, así
-        # que un escalado previo sigue abierto para el equipo.
-        release_own.assert_awaited_once()
-        assert release_own.await_args.kwargs["approval_id"] == APPROVAL_ID
-        release_all.assert_not_awaited()
-        finalize.assert_not_awaited()

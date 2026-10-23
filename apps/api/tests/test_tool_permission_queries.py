@@ -13,7 +13,6 @@ from apps.api.db.queries import (
     get_tool_permissions,
     list_pending_approvals,
     list_tool_permissions,
-    resolve_pending_approval,
     upsert_tool_permission,
 )
 from apps.api.tests.conftest import TENANT_ID
@@ -237,42 +236,3 @@ class TestListPendingApprovals:
         assert "status = $2" not in sql
 
 
-class TestResolvePendingApproval:
-    async def test_approve_returns_updated_model(self) -> None:
-        conn = AsyncMock()
-        conn.fetchrow = AsyncMock(return_value=_approval_row(status="approved", reviewed_by=USER_ID))
-        result = await resolve_pending_approval(
-            conn,
-            tenant_id=TENANT_ID,
-            approval_id=APPROVAL_ID,
-            new_status="approved",
-            reviewed_by=USER_ID,
-        )
-        assert isinstance(result, PendingApproval)
-        assert result.status == "approved"
-
-    async def test_reject_returns_updated_model(self) -> None:
-        conn = AsyncMock()
-        conn.fetchrow = AsyncMock(return_value=_approval_row(status="rejected", reviewed_by=USER_ID))
-        result = await resolve_pending_approval(
-            conn,
-            tenant_id=TENANT_ID,
-            approval_id=APPROVAL_ID,
-            new_status="rejected",
-            reviewed_by=USER_ID,
-            review_comment="Pedido ya enviado",
-        )
-        assert result is not None
-        assert result.status == "rejected"
-
-    async def test_returns_none_if_not_pending(self) -> None:
-        conn = AsyncMock()
-        conn.fetchrow = AsyncMock(return_value=None)
-        result = await resolve_pending_approval(
-            conn,
-            tenant_id=TENANT_ID,
-            approval_id=APPROVAL_ID,
-            new_status="approved",
-            reviewed_by=USER_ID,
-        )
-        assert result is None

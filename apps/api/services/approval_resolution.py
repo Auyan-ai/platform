@@ -16,7 +16,9 @@ conversación 'escalated'. Al decidir el operador:
 - Ejecutada pero sin cerrar (reembolso manual o fallido, cambio que no aparece al
   releer el pedido) → la aprobación queda aprobada, sus escalaciones se cierran y se
   abre una nueva con el motivo para el equipo; la conversación sigue 'escalated' y
-  no hay resolución autónoma (`hand_executed_action_to_team`).
+  no hay resolución autónoma (`hand_approval_to_team`).
+- Rechazada al ejecutar por una regla en código, o sin saber si se aplicó (#376) → la
+  aprobación queda 'failed' y el caso pasa al equipo con la razón (`hand_approval_to_team`).
 Si el cliente vuelve a escribir, `reopen_if_resolved` reabre como en cualquier
 resolución autónoma.
 """
@@ -114,7 +116,17 @@ def team_followup_reason(skill_slug: str, output: dict[str, Any]) -> str | None:
     )
 
 
-async def hand_executed_action_to_team(
+def unknown_outcome_reason(skill_slug: str, inputs: dict[str, Any], error: str) -> str:
+    """Motivo para el equipo cuando no se puede saber si la acción aprobada se aplicó."""
+    action = _ACTION_NAME.get(skill_slug, f"La acción {skill_slug}")
+    return (
+        f"{action} del pedido {inputs.get('order_id')} se aprobó, pero no se pudo "
+        f"comprobar en Shopify si se aplicó ({error}). No se reintentó: revisad el pedido "
+        "en Shopify antes de volver a hacerlo y contestad al cliente."
+    )
+
+
+async def hand_approval_to_team(
     conn: asyncpg.Connection,
     *,
     tenant_id: UUID,
@@ -122,9 +134,10 @@ async def hand_executed_action_to_team(
     approval_id: UUID,
     reason: str,
 ) -> UUID:
-    """La acción se ejecutó pero el equipo tiene que rematarla: se cierran las
-    escalaciones abiertas (la del gate ya no aplica) y se abre una con `reason`. La
-    conversación queda 'escalated'. Devuelve el id de la escalación nueva."""
+    """El equipo tiene que rematar la aprobación (ejecutada sin cerrar, rechazada por una
+    regla o con resultado desconocido): se cierran las escalaciones abiertas (la del gate
+    ya no aplica) y se abre una con `reason`. La conversación queda 'escalated'. Devuelve
+    el id de la escalación nueva."""
     await resolve_open_escalations_for_conversation(conn, tenant_id, conversation_id)
     escalation = await insert_escalation(
         conn,

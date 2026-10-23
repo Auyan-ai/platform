@@ -5,7 +5,7 @@ import { getToken } from '@/lib/api/get-token'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
 
-export type ApprovalStatus = 'pending' | 'approved' | 'rejected'
+export type ApprovalStatus = 'pending' | 'executing' | 'approved' | 'rejected' | 'failed'
 
 export interface ApprovalOut {
   id: string
@@ -26,11 +26,15 @@ export interface ApprovalOut {
 
 export interface ApproveResult {
   approval_id: string
-  execution_status: 'success' | 'failed'
+  // Estado de la aprobación tras aprobar: 'pending' si Shopify confirma que no se aplicó.
+  approval_status: ApprovalStatus
+  // success: aplicada. failed: no se aplicó (reintentable). refused: una regla la impide.
+  // unknown: no se pudo comprobar si se aplicó.
+  execution_status: 'success' | 'failed' | 'refused' | 'unknown'
   message_id: string | null
   output: Record<string, unknown>
-  // Ejecutada pero sin cerrar (reembolso manual o fallido, cambio no confirmado):
-  // motivo con el que quedó escalada al equipo. Ausente si falló la ejecución.
+  // Motivo con el que quedó escalada al equipo (ejecutada sin cerrar, rechazada por una
+  // regla o con resultado desconocido). None si no hizo falta.
   team_followup?: string | null
 }
 

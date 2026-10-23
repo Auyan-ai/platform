@@ -16,6 +16,7 @@ Errores realmente inesperados los atrapa `guarded` (build_graph) y rutean a
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -636,6 +637,8 @@ def make_execute_skill_node(
 
         # 5) Ejecutar con tracking de latencia.
         ctx = build_skill_context(state)
+        if skill_cls.requires_idempotency:
+            ctx = dataclasses.replace(ctx, idempotency_key=tool_use_id)
         skill = skill_cls()
         t0 = time.monotonic()
         try:

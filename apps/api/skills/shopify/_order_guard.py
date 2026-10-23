@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
-from apps.api.integrations.shopify import OrderSnapshot, RefundRoute
+from apps.api.integrations.base import MutationNotApplied
+from apps.api.integrations.shopify import OrderSnapshot, RefundRoute, SnapshotTransaction
 from apps.api.services.fixed_texts import fixed_text
 from apps.api.skills.base import SkillContext, SkillRefusal
 
@@ -47,6 +48,17 @@ _ACTION_LABEL: dict[OrderAction, str] = {
     "address": "cambiar la dirección de envío del pedido",
     "cancel": "cancelar el pedido",
 }
+
+
+async def snapshot_before_mutation(adapter: Any, ctx: SkillContext, order_id: int) -> OrderSnapshot:
+    """El pedido antes de mutarlo. Si no se puede leer, la mutación no llegó a enviarse."""
+    try:
+        snapshot: OrderSnapshot = await adapter.get_order_snapshot(ctx.integration_ctx, order_id)
+    except Exception as exc:
+        raise MutationNotApplied(
+            f"lectura previa a la mutación: {type(exc).__name__}: {exc}"
+        ) from exc
+    return snapshot
 
 
 def ensure_order_changeable(
@@ -89,9 +101,15 @@ def refund_verdict(route: RefundRoute, before: OrderSnapshot, after: OrderSnapsh
     Con pasarela manual Shopify marca el REFUND como SUCCESS sin mover dinero (visto
     en Marea), así que su estado no dice nada: devuelve la tienda.
     """
+    return refund_transactions_verdict(route, after.refunds_since(before))
+
+
+def refund_transactions_verdict(
+    route: RefundRoute, refunds: tuple[SnapshotTransaction, ...]
+) -> Verdict:
+    """Estado de un reembolso a partir de sus transacciones de tipo `refund`."""
     if route.mode == "manual":
         return Verdict(ActionOutcome.REFUND_MANUAL)
-    refunds = after.refunds_since(before)
     if not refunds:
         return Verdict(ActionOutcome.REFUND_FAILED, "refund_transaction_missing")
     failed = [t for t in refunds if t.status in ("failure", "error")]

@@ -41,6 +41,10 @@ class SkillRefusal(Exception):
         self.team_reason = team_reason
 
 
+class ReconcileUnknown(Exception):
+    """No se puede saber, leyendo el proveedor, si una ejecución ya se aplicó."""
+
+
 class SkillInput(BaseModel):
     """Base para los inputs de cualquier skill. Subclasear por skill concreto."""
 
@@ -81,6 +85,9 @@ class SkillContext:
     # (`services/fixed_texts.py`) salen en este idioma.
     language: str = field(default="es")
     default_language: str = field(default="es")
+    # Clave estable de esta ejecución (el id de la aprobación L3, o el del tool call del
+    # turno). Solo llega a las skills con `requires_idempotency`.
+    idempotency_key: str | None = field(default=None)
 
     def order_claims(self, order: dict[str, Any]) -> frozenset[ClaimHash]:
         return order_claims(order, salt=self.claim_salt, region=self.phone_region)
@@ -105,6 +112,8 @@ class Skill(ABC):
     tier: ClassVar[SkillTier]
     input_schema: ClassVar[type[SkillInput]]
     output_schema: ClassVar[type[SkillOutput]]
+    # True: `execute` usa `ctx.idempotency_key` donde el proveedor admite clave y
+    # `reconcile` sabe leer del proveedor si esa ejecución ya se aplicó (#376).
     requires_idempotency: ClassVar[bool] = False
     default_threshold: ClassVar[float]
     # Identidad que exige (ADR 0013 §5). `public` no toca datos de un cliente. `order` actúa
@@ -121,6 +130,14 @@ class Skill(ABC):
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         """Ejecutar la skill. Debe ser idempotente si requires_idempotency=True."""
         ...
+
+    async def reconcile(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput | None:
+        """Lee el proveedor tras una ejecución interrumpida o con error: el output si la
+        acción consta aplicada, None si consta que no. Nunca ejecuta nada.
+
+        Lanza `ReconcileUnknown` si no se puede saber; es lo que hace por defecto.
+        """
+        raise ReconcileUnknown(f"{self.slug} no sabe reconciliar")
 
     async def prepare_approval(
         self, ctx: SkillContext, raw_input: dict[str, Any]

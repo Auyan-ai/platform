@@ -24,23 +24,35 @@ import { useState } from 'react'
 
 const STATUS_VARIANT: Record<ApprovalStatus, BadgeProps['variant']> = {
   pending: 'warning',
+  executing: 'default',
   approved: 'success',
   rejected: 'danger',
+  failed: 'danger',
 }
 
 const STATUS_LABELS: Record<ApprovalStatus, string> = {
   pending: 'Pendiente',
+  executing: 'Ejecutando',
   approved: 'Aprobada',
   rejected: 'Rechazada',
+  failed: 'Fallida',
 }
 
-const STATUS_FILTERS: Array<ApprovalStatus | 'all'> = ['pending', 'approved', 'rejected', 'all']
+const STATUS_FILTERS: Array<ApprovalStatus | 'all'> = [
+  'pending',
+  'approved',
+  'rejected',
+  'failed',
+  'all',
+]
 
 const FILTER_LABELS: Record<ApprovalStatus | 'all', string> = {
   all: 'Todas',
   pending: 'Pendientes',
+  executing: 'Ejecutando',
   approved: 'Aprobadas',
   rejected: 'Rechazadas',
+  failed: 'Fallidas',
 }
 
 function relativeTime(dateStr: string | null | undefined): string {
@@ -230,7 +242,9 @@ function ApprovalRow({
         </Badge>
 
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-foreground-body">{skillLabel(approval.skill_slug)}</p>
+          <p className="text-sm font-medium text-foreground-body">
+            {skillLabel(approval.skill_slug)}
+          </p>
           <p className="mt-0.5 text-xs text-foreground-muted truncate">
             {formatInputs(approval.inputs_raw)}
           </p>
@@ -324,13 +338,17 @@ export function ApprovalQueue({
     setActionError(null)
     try {
       const result = await approveMutation.mutateAsync({ approvalId: id })
-      // La ejecución de la skill puede fallar aunque el endpoint responda 200:
-      // la aprobación sigue pendiente para reintentar y no se le confirma nada
-      // al cliente. Mostramos el fallo en vez de tratarlo como éxito silencioso.
+      // El endpoint responde 200 aunque la acción no se haga. Si Shopify confirma que
+      // no se aplicó, la aprobación vuelve a pendiente y se puede reintentar; si una
+      // regla la impide o no se puede saber, queda fallida y escalada al equipo.
+      const detail =
+        typeof result.output?.error === 'string' ? result.output.error : 'error desconocido'
       if (result.execution_status === 'failed') {
-        const detail =
-          typeof result.output?.error === 'string' ? result.output.error : 'error desconocido'
         setActionError(`No se pudo ejecutar la acción: ${detail}. Sigue pendiente, reintenta.`)
+      } else if (result.execution_status === 'refused' || result.execution_status === 'unknown') {
+        setActionError(
+          `La acción no se completó y queda escalada al equipo: ${result.team_followup}`,
+        )
       } else if (result.team_followup) {
         setActionError(`Acción ejecutada, pero queda escalada al equipo: ${result.team_followup}`)
       }
