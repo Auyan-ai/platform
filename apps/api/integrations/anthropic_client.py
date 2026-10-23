@@ -264,7 +264,7 @@ class ToolCalled:
 
 @dataclass(frozen=True)
 class NoDecision:
-    kind: Literal["refusal", "max_tokens", "tool_not_called"]
+    kind: Literal["refusal", "max_tokens", "tool_not_called", "call_failed"]
     detail: str
     usage: LLMUsage
 
@@ -400,20 +400,36 @@ async def call_claude_for_decision(
     turn = list(messages)
     usage = LLMUsage()
     for attempt in range(NO_TOOL_RETRIES + 1):
-        response = await call_claude_with_tools(
-            client=client,
-            model=model,
-            system=request.system,
-            messages=turn,
-            tools=request.tools,
-            tool_choice=request.tool_choice,
-            max_tokens=request.max_tokens,
-            max_retries=max_retries,
-            timeout_seconds=timeout_seconds,
-            cache=cache,
-            trace_label=trace_label,
-            request_options=request.options,
-        )
+        try:
+            response = await call_claude_with_tools(
+                client=client,
+                model=model,
+                system=request.system,
+                messages=turn,
+                tools=request.tools,
+                tool_choice=request.tool_choice,
+                max_tokens=request.max_tokens,
+                max_retries=max_retries,
+                timeout_seconds=timeout_seconds,
+                cache=cache,
+                trace_label=trace_label,
+                request_options=request.options,
+            )
+        except anthropic.APIError as exc:
+            if attempt == 0:
+                raise
+            # La primera llamada ya se cobró: sin esto su usage se perdía con la excepción.
+            outcome = NoDecision("call_failed", type(exc).__name__, usage)
+            logger.error(
+                "%s label=%s role=%s model=%s",
+                outcome.reason,
+                trace_label,
+                role,
+                model,
+                exc_info=True,
+                extra={"role": role, "model": model, "no_decision": outcome.kind},
+            )
+            return outcome
         usage = usage + LLMUsage.from_anthropic(response.usage)
         outcome = read_decision(response, usage)
         if isinstance(outcome, ToolCalled):

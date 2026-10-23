@@ -369,6 +369,35 @@ class TestTruncatedDecision:
         assert "pending_tool_call" not in out
 
 
+@pytest.mark.asyncio
+async def test_a_failed_nudge_retry_keeps_the_cost_of_the_first_call(
+    fake_deps: AgentDependencies, _env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sonnet 4.6 con thinking por rol: sin tool forzada, la primera llamada contesta solo
+    texto y el reintento con la instrucción falla. La primera llamada ya se cobró."""
+    from apps.api.tests.anthropic_http import api_error
+
+    async def _no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("asyncio.sleep", _no_sleep)
+    _env.setenv("THINKING_BY_ROLE", '{"default_agent_model": "adaptive"}')
+    get_models.cache_clear()
+    state = _with_policies(_reason_state("claude-sonnet-4-6"), hops=0)
+
+    _, out = await run_reason(
+        fake_deps,
+        state,
+        message(thinking(), text("Te cuento..."), stop_reason="end_turn"),
+        *[api_error(500)] * 3,
+    )
+
+    assert out["error"] == "llm_no_decision: call_failed (InternalServerError)"
+    # 100 in @ $3 + 50 out @ $15 (Sonnet 4.6), solo la primera llamada.
+    assert out["cost_usd"] == pytest.approx(0.00105)
+    assert out["tokens_out"] == 50
+
+
 PRESERVED_BETA = "thinking-binding-controls-2026-08-01"
 ADAPTIVE = {"type": "adaptive", "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
 
