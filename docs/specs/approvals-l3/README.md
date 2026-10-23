@@ -10,7 +10,10 @@ cambia el código de un paso de la tabla de abajo, hay que revisar su acción.
 | `ApprovalsL3.tla` | El modelo: variables, una acción por paso atómico del código, invariantes y propiedades. |
 | `ApprovalsL3.cfg` | Configuración de seguridad que TLC puede agotar. |
 | `ApprovalsL3Liveness.cfg` | Configuración de liveness, sin simetría. |
-| `../run_tlc.sh` | Corre SANY y TLC (`parse`, `safety`, `each`, `liveness`). |
+| `mutants/*.patch` | Mutantes y bocetos de arreglos, cada uno con su resultado esperado en la cabecera. |
+| `../run_tlc.sh` | Corre SANY y TLC (`parse`, `full`, `safety`, `each`, `liveness`, `trace`). |
+| `../run_mutants.sh` | Aplica cada mutante a una copia y compara el resultado de TLC con lo esperado. |
+| `../tlc_trace.py` | Resume una traza de TLC: una línea por paso con lo que cambió. |
 
 Está en `docs/specs/` y no en `apps/api/` porque no es código de runtime ni un
 test de pytest. Es documentación técnica que se ejecuta con una herramienta
@@ -20,17 +23,58 @@ comprueba TLC.
 
 ## Cómo correrlo
 
+Hace falta `tla2tools.jar` de la release estable **v1.7.4** de
+[github.com/tlaplus/tlaplus](https://github.com/tlaplus/tlaplus/releases/tag/v1.7.4)
+(2.274.532 bytes, sha256
+`936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88`) y Java 11 o
+superior. El jar va fuera del repo y nunca en git.
+
 ```bash
-export TLA2TOOLS_JAR=/ruta/a/tla2tools.jar   # release oficial: github.com/tlaplus/tlaplus/releases
-docs/specs/run_tlc.sh parse      # sintaxis
+mkdir -p ~/.cache/tlaplus/v1.7.4
+curl -fsSL -o ~/.cache/tlaplus/v1.7.4/tla2tools.jar \
+  https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+sha256sum ~/.cache/tlaplus/v1.7.4/tla2tools.jar
+export TLA2TOOLS_JAR=~/.cache/tlaplus/v1.7.4/tla2tools.jar
+
+docs/specs/run_tlc.sh parse      # sintaxis (SANY)
+docs/specs/run_tlc.sh full       # espacio de estados completo, solo TypeOK
 docs/specs/run_tlc.sh each       # un TLC por invariante: tabla OK / VIOLADA
-docs/specs/run_tlc.sh liveness
+docs/specs/run_tlc.sh liveness   # un TLC por propiedad temporal
+docs/specs/run_tlc.sh trace docs/specs/approvals-l3 ExecAtMostOnce   # traza mínima resumida
+docs/specs/run_mutants.sh        # mutantes y bocetos contra lo esperado (unos 8 min)
 ```
 
-TLC para en la primera violación. Por eso `each` lanza una corrida por invariante
-y así salen todos los contraejemplos. TLC corre sobre una copia en un directorio
-temporal, así que el repo no se ensucia. Los logs con las trazas quedan en
-`$TLC_OUT`.
+TLC para en la primera violación. Por eso `each` y `liveness` lanzan una corrida
+por nombre y así salen todos los contraejemplos. `trace` corre con un solo worker
+para que la traza sea la más corta. `OVERRIDE="MaxFaults=0 Skills={\"refund\"}"`
+cambia constantes y `ONLY=A,B` limita `each` y `liveness` a esos nombres. TLC
+corre sobre una copia en un directorio temporal, así que el repo no se ensucia.
+Los logs quedan en `$TLC_OUT`.
+
+## Resultados (TLC v1.7.4, `ApprovalsL3.cfg`)
+
+El espacio completo tiene 1.106.249 estados generados y 426.304 distintos, con
+simetría entre operadores y entre workers. Su profundidad es 32 y `TypeOK` se
+cumple en todos. TLC lo agota en unos 15 s. La liveness se comprueba sin
+simetría, sobre 1.548.089 estados distintos.
+
+| Invariante o propiedad | Resultado | Issue |
+|---|---|---|
+| `OneTurnAtATime` | OK | |
+| `ExecAtMostOnce` | VIOLADA | #376 |
+| `OneExecPerOrder` | VIOLADA | #376 |
+| `NoExecOnClosedOrder` | VIOLADA | #376 (TOCTOU) |
+| `RejectedNeverExecuted` | VIOLADA | #376 |
+| `OneOutcomePerApproval` | VIOLADA | #376 |
+| `OutcomeIsTruthful` | VIOLADA | #376 |
+| `NoWaitingAfterOutcome` | VIOLADA | #376 (punto 5), #377 (punto 2) |
+| `NoOrphanEscalation` | VIOLADA | #377, #390 |
+| `ExecutedIsApproved` | VIOLADA | #376 |
+| `MessagesTaken` | OK | |
+| `ApprovalEventuallyFinal` | VIOLADA | sin issue: no hay caducidad (decisión de producto) |
+
+Las trazas mínimas están en los comentarios de #376 y #377 y en el cuerpo de
+#390.
 
 ## Qué se modela
 
@@ -106,7 +150,9 @@ cliente se queda.
 
 | Nombre | Enunciado |
 |---|---|
+| `OneTurnAtATime` | Nunca hay dos turnos a la vez sobre la conversación (ADR 0008). |
 | `ExecAtMostOnce` | Una aprobación produce como mucho una mutación aceptada por Shopify. |
+| `OneExecPerOrder` | El pedido recibe como mucho una mutación L3, aunque haya varias aprobaciones. |
 | `NoExecOnClosedOrder` | cancel y address nunca mutan un pedido enviado o cancelado. refund queda fuera porque reembolsar un pedido enviado es legítimo. |
 | `RejectedNeverExecuted` | Una aprobación `rejected` no tiene ninguna ejecución. No existe la caducidad. |
 | `OneOutcomePerApproval` | El cliente recibe como mucho un resultado (`done` o `rejected`) por aprobación. |
@@ -117,45 +163,110 @@ cliente se queda.
 | `MessagesTaken` (liveness) | Todo mensaje del cliente acaba reclamado por un turno. |
 | `ApprovalEventuallyFinal` (liveness) | Toda aprobación acaba en `approved` o `rejected`. **Se espera que falle**, porque no hay caducidad y nada obliga a un operador a decidir. |
 
-## Sospechas de carrera leídas en el código
+## Contraejemplos
 
-Son lo que TLC debería confirmar o descartar. Cada una indica la invariante que
-la cubre.
+Todos salieron con TLC tal como se habían leído en el código. Cada uno indica la
+invariante que lo encuentra.
 
-1. **Doble ejecución con dos aprobadores** (`ExecAtMostOnce`). La comprobación
-   de `pending` (`approvals.py:174`) y el CAS (`:277`) están en transacciones
-   distintas, con la skill ejecutándose entre medias. Si dos operadores aprueban
-   a la vez, los dos ejecutan, los dos entregan "hecho" y solo uno cambia el
-   status. En refund es un doble reembolso. En address son dos escrituras
-   iguales y dos mensajes. En cancel, Shopify probablemente rechaza la segunda
+1. **Doble ejecución con dos aprobadores** (`ExecAtMostOnce`, #376). La
+   comprobación de `pending` (`approvals.py:174`) y el CAS (`:277`) están en
+   transacciones distintas, con la skill ejecutándose entre medias. En refund es
+   un doble reembolso. En cancel, Shopify probablemente rechaza la segunda
    (supuesto `CancelRefusedIn`, sin verificar).
 2. **Se ejecuta una aprobación rechazada** (`RejectedNeverExecuted`,
-   `OutcomeIsTruthful`, `OneOutcomePerApproval`). Mientras la skill aprobada
-   corre, otro operador rechaza. El CAS del rechazo gana, y el de la aprobación
-   no hace nada pero se ignora. El cliente recibe "rechazada" y "hecho", y la
-   acción está hecha. Al revés pasa lo mismo: el rechazo ignora su CAS fallido y
-   manda "rechazada" tras un "hecho".
-3. **Ejecutada pero pendiente** (`ExecutedIsApproved`, `ExecAtMostOnce`). Si la
-   petición muere entre la mutación en Shopify y el COMMIT, la aprobación sigue
-   `pending`. Un segundo clic la ejecuta otra vez. Como la entrega está dentro de
-   la transacción, el cliente puede haber recibido ya el "hecho".
-4. **Pedido enviado entre el guard y la mutación** (`NoExecOnClosedOrder`). Es
-   un TOCTOU contra Shopify (`cancel_order.py:90-92`). La ventana es corta, pero
-   el código no la cierra y no puede cerrarla sin una precondición en la propia
-   mutación de Shopify.
-5. **"Sigue en revisión" después del resultado** (`NoWaitingAfterOutcome`). Un
-   turno lee `pending` en el gate, el panel aprueba y entrega, y luego el turno
-   entrega "sigue en revisión".
-6. **Escalación huérfana** (`NoOrphanEscalation`). Puede pasar incluso sin
-   concurrencia. Si tras aprobarse el cliente vuelve a escribir y el LLM repite
-   la L3, el gate reutiliza la aprobación `approved` y `escalate` abre una
-   escalación nueva `awaiting_human_approval:<id>` (`escalate.py:91-104`). Nadie
-   puede cerrarla desde el panel (`_reviewable_approval` da 403) y la
-   conversación queda `escalated`. Con carrera ocurre lo mismo si el turno
-   escala justo después de que el panel cierre las escalaciones.
-7. **Rechazo bloqueado** (sin invariante: no hay caducidad). Si el pedido sale
-   antes de aprobar, cada intento de aprobar devuelve `failed` y la aprobación
-   sigue `pending` para siempre, salvo que alguien la rechace.
+   `OutcomeIsTruthful`, #376). Los dos endpoints ignoran el resultado del CAS. El
+   cliente recibe "rechazada" y "hecho", y la acción queda hecha.
+3. **Ejecutada pero pendiente** (`ExecutedIsApproved`, #376). La petición muere
+   entre la mutación en Shopify y el COMMIT, y un segundo clic la ejecuta otra
+   vez.
+4. **Dos "rechazada" por una caída** (`OneOutcomePerApproval`, #376). La
+   entrega al helpdesk va dentro de la transacción, antes del COMMIT. Si el
+   rechazo muere después de entregar, la aprobación vuelve a `pending` y un
+   segundo rechazo vuelve a entregar.
+5. **Pedido enviado entre el guard y la mutación** (`NoExecOnClosedOrder`,
+   #376). Es un TOCTOU contra Shopify (`cancel_order.py:90-92`) que el código
+   no puede cerrar sin una precondición en la propia mutación.
+6. **"Sigue en revisión" después del resultado** (`NoWaitingAfterOutcome`,
+   #376 y #377). Un turno lee `pending` en el gate y entrega después del
+   resultado. La traza más corta pasa por un reintento que repite el turno
+   entero, porque el acuse de `escalate` no lleva `inbound_message_id`.
+7. **Escalación huérfana** (`NoOrphanEscalation`). Tiene dos causas. La primera
+   es secuencial (#377): el gate reutiliza una aprobación `approved` y `escalate`
+   abre `awaiting_human_approval:<id>`. La segunda es una carrera (#390): la
+   aprobación se ve en el panel antes de que exista su escalación, y un rechazo
+   en ese hueco no la cierra.
+8. **Aprobación que nunca termina** (`ApprovalEventuallyFinal`). Si el pedido
+   sale antes de aprobar, cada intento de aprobar devuelve `failed` y la
+   aprobación sigue `pending` para siempre, salvo que alguien la rechace. No hay
+   caducidad.
+
+Con `LeaseCanExpire = TRUE` (mutante `lease-vence`), `OneTurnAtATime` también
+falla. Si el heartbeat no renueva el lease durante `lease_seconds`, otro slot
+reclama el mismo job y corren dos turnos a la vez. Es la semántica de un lease y
+ADR 0008 ya la asume, por eso no tiene issue.
+
+## Mutantes: el modelo no es trivial
+
+Solo `OneTurnAtATime` y `MessagesTaken` se cumplen en el modelo actual. Cada una
+tiene un mutante que rompe el lock que la sostiene, y TLC encuentra la
+violación. `run_mutants.sh` lo comprueba.
+
+| Mutante | Qué rompe | Esperado |
+|---|---|---|
+| `00-modelo` | Nada: fija los resultados del modelo actual. | la tabla de arriba |
+| `claim-sin-exclusion` | `Claim` no mira si otro turno tiene el lease vigente. | `OneTurnAtATime` VIOLADA |
+| `lease-nunca-se-suelta` | El turno acaba sin soltar `locked_until` y el lease no vence. | `MessagesTaken` VIOLADA |
+| `lease-vence` | El heartbeat no renueva a tiempo. | `OneTurnAtATime` VIOLADA |
+
+## Comprobar el arreglo de #376
+
+`mutants/arreglo-376.patch` es un boceto del diseño de #376. Estas son las
+acciones que cambian y cómo:
+
+- **`ApproveClick`.** Es un CAS `pending → executing` comprobado, en una
+  sola sentencia. Si se pierde, devuelve 409.
+- **`ApproveSnapshot` y `ApproveMutate`.** Si el guard se niega o Shopify
+  rechaza, la aprobación vuelve a `pending`.
+- **`Cas`.** Lleva el estado de origen: `executing` al aprobar y `pending`
+  al rechazar. Un CAS perdido acaba sin mensaje.
+- **`ApproveRelease`, `RejectRelease`, `Commit`, `ApproveDeliver` y
+  `RejectDeliver`.** La entrega pasa a después del COMMIT.
+- **`Reconcile`, que es nueva.** Una `executing` sin dueño se relee de Shopify:
+  pasa a `approved` si se ejecutó y a `pending` si no. Nunca se re-ejecuta.
+- **`LiveAppr` y `Quiescent`.** `executing` cuenta como viva en el gate, y en
+  reposo no queda ninguna.
+
+Con el boceto pasan a OK `ExecAtMostOnce`, `OneExecPerOrder`,
+`RejectedNeverExecuted`, `OneOutcomePerApproval`, `OutcomeIsTruthful` y
+`ExecutedIsApproved`, sobre 193.736 estados distintos. Siguen VIOLADAS
+`NoExecOnClosedOrder` (TOCTOU), `NoWaitingAfterOutcome` (el turno lee en el gate
+y entrega después) y `NoOrphanEscalation` (#377 y #390). El mutante
+`arreglo-376-gate-sin-executing` muestra por qué el gate tiene que ver las
+`executing`. Si no las ve, crea otra aprobación del mismo pedido y
+`OneExecPerOrder` falla.
+
+Cuando el arreglo esté en `develop`, estos son los pasos:
+
+1. Cambiar esas acciones en `ApprovalsL3.tla` para que reflejen el código real.
+   El boceto sirve de punto de partida.
+2. Actualizar la cabecera de `00-modelo.patch` con los nuevos resultados.
+3. Borrar `arreglo-376*.patch`, que ya no aplicarán.
+4. Correr `run_tlc.sh each` y `run_mutants.sh`.
+
+## Comprobar el arreglo de #377 y #390
+
+`escalate` solo debe abrir la escalación del gate si la aprobación sigue
+`pending`, releída en su misma transacción. Eso cubre #377. Además hace falta
+una de estas dos:
+
+- **Opción A.** El gate crea la aprobación y su escalación en una transacción
+  (`arreglo-escalacion-huerfana`).
+- **Opción B.** `escalate` hace `FOR UPDATE` de la aprobación
+  (`arreglo-escalacion-huerfana-for-update`).
+
+Con cualquiera de las dos, `NoOrphanEscalation` pasa a OK. Cada parte por
+separado falla (`-solo-pending`, `-solo-transaccion`). Las acciones que cambian
+son `Escalate` y, en la opción A, `GateCreate`.
 
 ## Abstracciones y lo que no se modela
 
