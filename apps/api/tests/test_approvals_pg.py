@@ -25,6 +25,7 @@ from apps.api.core.errors import register_exception_handlers
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
 from apps.api.db import client as db_client
 from apps.api.db.queries import claim_pending_approval, settle_executing_approval
+from apps.api.integrations.base import MutationNotApplied
 from apps.api.routers.approvals import router as approvals_router
 from apps.api.services.approval_execution import recover_stale_executions
 from apps.api.skills.base import (
@@ -90,7 +91,7 @@ class FakeL3(Skill):
     entered: ClassVar[asyncio.Event]
     gate: ClassVar[asyncio.Event]
     die_after_mutation: ClassVar[bool] = False
-    refusal: ClassVar[SkillRefusal | None] = None
+    refusal: ClassVar[BaseException | None] = None
     # Lo que `reconcile` lee del "proveedor": el contador, o que no se puede saber.
     reconcile_unknown: ClassVar[bool] = False
     keys: ClassVar[list[str | None]] = []
@@ -512,3 +513,26 @@ async def test_a_late_settle_never_closes_a_later_execution(pool: asyncpg.Pool) 
         )
         assert again is None, "una ejecución ya cerrada se cerró otra vez"
     assert await _status(pool, s) == "approved"
+
+
+async def test_a_refusal_is_reconciled_only_after_an_earlier_attempt(
+    pool: asyncpg.Pool, fake_skill: type[FakeL3]
+) -> None:
+    """Primer claim: no llega a enviar la mutación y vuelve a pendiente. Segundo claim:
+    el guard rechaza porque ya ve el cambio, y como hubo un intento anterior se lee el
+    proveedor y consta aplicada. El número de claim viaja por la base real."""
+    s = await _seed(pool)
+    fake_skill.gate.set()
+    fake_skill.refusal = MutationNotApplied("lectura previa: 503")
+    async with _client(s) as c:
+        first = await _approve(c, s)
+        assert first.json()["approval_status"] == "pending"
+        fake_skill.mutations = 1  # el proveedor ya muestra el cambio
+        fake_skill.refusal = SkillRefusal(
+            "order_cancelled", customer_message="Ya estaba cancelado.", team_reason="r"
+        )
+        second = await _approve(c, s)
+
+    assert second.json()["approval_status"] == "approved"
+    assert await _status(pool, s) == "approved"
+    assert await _outcome_messages(pool, s) == ["success"]

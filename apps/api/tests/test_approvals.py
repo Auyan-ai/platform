@@ -175,7 +175,7 @@ def _wire(monkeypatch: pytest.MonkeyPatch, *, channel: str = "zendesk", delivere
     conversation = MagicMock()
     conversation.channel = channel
     w = Wiring(
-        claim=AsyncMock(return_value=_sample_approval("executing")),
+        claim=AsyncMock(return_value=_sample_approval("executing", execution_attempt=1)),
         reject=AsyncMock(return_value=_sample_approval("rejected")),
         settle_cas=AsyncMock(
             side_effect=lambda conn, *, tenant_id, approval_id, execution_attempt, new_status: (
@@ -503,13 +503,43 @@ class TestExecutionErrors:
 
         assert _approve(client).json()["execution_status"] == "refused"
 
+    def test_refusal_on_the_first_attempt_is_a_refusal_even_if_shopify_shows_the_change(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """El pedido ya estaba cancelado antes de aprobar: lo canceló otro, no Auyan. Ni
+        mensaje de éxito ni audit de éxito: texto fijo al cliente y caso al equipo."""
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        FakeSkill.outcome = SkillRefusal(
+            "order_cancelled", customer_message="Ya estaba cancelado.", team_reason="r"
+        )
+        FakeSkill.found = _Output()
+
+        data = _approve(client).json()
+
+        assert data["approval_status"] == "failed"
+        assert data["execution_status"] == "refused"
+        assert w.insert_message.await_args.kwargs["content"] == "Ya estaba cancelado."
+        assert w.hand_off.await_args.kwargs["reason"] == "r"
+
+    def test_not_applied_on_the_first_attempt_ignores_what_shopify_shows(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _app, client = _make_app(monkeypatch, approvals_router)
+        _wire(monkeypatch)
+        FakeSkill.outcome = MutationNotApplied("lectura previa: 404")
+        FakeSkill.found = _Output()
+
+        assert _approve(client).json()["approval_status"] == "pending"
+
     def test_refusal_of_an_order_our_earlier_attempt_already_changed_is_applied(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Reintento tras un error ambiguo: el guard ve el pedido ya cancelado, pero lo
-        canceló el primer intento. Shopify manda: consta aplicada."""
+        """Segundo claim de la aprobación: el guard ve el pedido ya cancelado y pudo
+        cancelarlo el intento anterior. Shopify manda: consta aplicada."""
         _app, client = _make_app(monkeypatch, approvals_router)
-        _wire(monkeypatch)
+        w = _wire(monkeypatch)
+        w.claim.return_value = _sample_approval("executing", execution_attempt=2)
         FakeSkill.outcome = SkillRefusal("order_cancelled", customer_message="m", team_reason="r")
         FakeSkill.found = _Output()
 

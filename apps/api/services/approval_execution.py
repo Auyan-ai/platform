@@ -134,8 +134,15 @@ async def load_execution_context(
     return ExecutionContext(skill_ctx, language, tenant_default)
 
 
-async def execute_once(skill: Skill, ctx: SkillContext, inputs: SkillInput) -> ExecutionResult:
-    """Ejecuta la skill. Si falla, no se sabe si la mutación llegó: se reconcilia."""
+async def execute_once(
+    skill: Skill, ctx: SkillContext, inputs: SkillInput, *, earlier_attempt: bool
+) -> ExecutionResult:
+    """Ejecuta la skill. Si falla, no se sabe si la mutación llegó: se reconcilia.
+
+    Un rechazo o un `MutationNotApplied` dicen que esta ejecución no tocó el proveedor.
+    Si es el primer claim de la aprobación, lo que el proveedor muestre ya hecho lo hizo
+    otro (el pedido ya estaba cancelado): no se reconcilia. Solo tras un intento anterior
+    (`earlier_attempt`) puede ser obra de Auyan."""
     try:
         output = await skill.execute(ctx, inputs)
     except Exception as exc:
@@ -148,6 +155,10 @@ async def execute_once(skill: Skill, ctx: SkillContext, inputs: SkillInput) -> E
                 "error": f"{type(exc).__name__}: {exc}",
             },
         )
+        if not earlier_attempt and isinstance(exc, SkillRefusal):
+            return Refused(exc)
+        if not earlier_attempt and isinstance(exc, MutationNotApplied):
+            return NotApplied(f"{type(exc).__name__}: {exc}")
         return await reconcile(skill, ctx, inputs, exc)
     return Applied(output.model_dump(mode="json"))
 

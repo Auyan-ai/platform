@@ -213,7 +213,9 @@ async def approve_action(
         run = await load_execution_context(conn, tenant_id, claimed, skill_cls)
 
     t0 = time.monotonic()
-    result = await execute_once(skill_cls(), run.skill_ctx, inputs)
+    result = await execute_once(
+        skill_cls(), run.skill_ctx, inputs, earlier_attempt=claimed.execution_attempt > 1
+    )
     latency_ms = int((time.monotonic() - t0) * 1000)
 
     # Observabilidad: la ejecución real de la L3 queda en skill_audit_log con su
