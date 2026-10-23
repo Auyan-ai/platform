@@ -10,10 +10,12 @@ fuerza tool ni apaga el thinking, y la respuesta se lee igual con thinking, sin 
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 from apps.api.agents.dependencies import AgentDependencies
@@ -206,13 +208,115 @@ async def current_model_scenarios(
         ),
         message(tool_use("supervisor_verdict", APPROVE), model="claude-opus-4-7"),
     )
+    first_hop, _ = await run_reason(
+        fake_deps,
+        _with_policies(_reason_state("claude-sonnet-4-6"), hops=0),
+        message(tool_use("shopify_get_shop_policies", {}, id="toolu_hop0")),
+    )
+    failed_state = _with_policies(_reason_state("claude-sonnet-4-6"), hops=1)
+    failed_state["tool_results"][0].update(
+        output=None, is_error=True, error="shopify_unavailable: 503"
+    )
+    tool_error, _ = await run_reason(
+        fake_deps, failed_state, message(tool_use("respond_or_escalate", RESPOND))
+    )
     return {
         "reason_simple_haiku": simple,
         "reason_loop_sonnet_4_6": loop,
         "reason_exhausted_sonnet_4_6": exhausted,
+        "reason_first_hop_skills_sonnet_4_6": first_hop,
+        "reason_tool_error_sonnet_4_6": tool_error,
         "select_aop_haiku": classifier,
         "supervise_l1_l2_sonnet_4_6": supervisor_l1_l2,
         "supervise_l3_opus_4_7": supervisor_l3,
+        **await text_role_scenarios(),
+    }
+
+
+SIM_JUDGE_REPLY = json.dumps(
+    {
+        "reasoning_score": 8,
+        "knowledge_score": 8,
+        "tools_score": 8,
+        "brand_voice_score": 8,
+        "overall_score": 8.0,
+        "verdict": "pass",
+        "judge_goal_achieved": True,
+    }
+)
+
+
+def _sim_transcript() -> Any:
+    from apps.api.db.models import SimulationScenario
+    from apps.api.simulator.transcript import SimulatorTranscript, TranscriptTurn
+
+    scenario = SimulationScenario(
+        id=UUID(int=1),
+        tenant_id=UUID(int=2),
+        name="CE-01",
+        aop_slug="consulta_envio",
+        user_profile_id=UUID(int=3),
+        expected_outcome="El agente da el plazo de envío.",
+        mock_fixtures={"goal": "saber el plazo"},
+        assertions={},
+        max_turns=8,
+    )
+    transcript = SimulatorTranscript(
+        scenario=scenario, profile_name="cooperativo", termination_reason="goal_achieved"
+    )
+    transcript.turns.append(TranscriptTurn(role="customer", content="¿Cuánto tarda?", turn_number=0))
+    transcript.turns.append(TranscriptTurn(role="agent", content="Tardan 3 días.", turn_number=1))
+    return transcript
+
+
+async def text_role_scenarios() -> dict[str, RecordingAnthropic]:
+    """Jueces, slow agent, mensaje tras aprobar una L3 y simulador, con sus modelos de hoy."""
+    from apps.api.services.approval_reply import generate_customer_reply
+    from apps.api.simulator.judge import judge_simulation
+    from apps.api.simulator.user_simulator import UserSimulator
+    from apps.api.slow_agent.judge import _call_judge
+    from apps.api.slow_agent.transcript import build_transcript
+    from apps.api.tests.simulator.test_user_simulator import _make_profile
+    from apps.api.tests.slow_agent.test_judge import _conv
+
+    end_turn = {"stop_reason": "end_turn"}
+    sim_judges = {}
+    for alias, model in (("sonnet", "claude-sonnet-4-6"), ("opus", "claude-opus-4-7")):
+        api = RecordingAnthropic(message(text(SIM_JUDGE_REPLY), model=model, **end_turn))
+        await judge_simulation(api.client, _sim_transcript(), _sim_transcript().scenario, judge_model=alias)
+        sim_judges[f"sim_judge_{alias}"] = api
+
+    slow_agent = RecordingAnthropic(
+        message(text('{"should_propose": false, "confidence": 0.9}'), **end_turn)
+    )
+    conversation = _conv().model_copy(update={"id": UUID(int=4), "end_customer_id": UUID(int=5)})
+    await _call_judge(
+        slow_agent.client,
+        build_transcript(conversation, [], [], None, None, "salt"),
+        "slow_agent_model",
+    )
+
+    approval = RecordingAnthropic(
+        message(text("Listo, tu pedido está cancelado."), model="claude-haiku-4-5-20251001", **end_turn)
+    )
+    await generate_customer_reply(approval.client, CANCEL, success=True, language="es")
+
+    simulator = RecordingAnthropic(
+        message(
+            text('{"message": "vale", "goal_achieved": false, "give_up": false}'),
+            model="claude-haiku-4-5-20251001",
+            **end_turn,
+        )
+    )
+    await UserSimulator(profile=_make_profile(), anthropic=simulator.client).next_turn(
+        conversation_history=[{"role": "agent", "content": "¿En qué ayudo?"}], turn_number=1
+    )
+    return {
+        "sim_judge_sonnet_4_6": sim_judges["sim_judge_sonnet"],
+        "sim_judge_opus_4_7": sim_judges["sim_judge_opus"],
+        "slow_agent_judge_sonnet_4_6": slow_agent,
+        "approval_reply_haiku": approval,
+        "user_simulator_haiku": simulator,
     }
 
 
@@ -220,10 +324,14 @@ async def current_model_scenarios(
 async def test_current_models_send_the_same_request_as_before(
     fake_deps: AgentDependencies,
 ) -> None:
+    """`UPDATE_GOLDEN_REQUESTS=1` reescribe los JSON: solo con un cambio de petición buscado."""
     scenarios = await current_model_scenarios(fake_deps)
     for name, api in scenarios.items():
-        golden = json.loads((GOLDEN / f"{name}.json").read_text())
-        assert {"body": api.requests, "beta": api.beta_headers} == golden, name
+        recorded = {"body": api.requests, "beta": api.beta_headers}
+        path = GOLDEN / f"{name}.json"
+        if os.environ.get("UPDATE_GOLDEN_REQUESTS") == "1":
+            path.write_text(json.dumps(recorded, ensure_ascii=False, indent=2) + "\n")
+        assert recorded == json.loads(path.read_text()), name
 
 
 PRESERVED_BETA = "thinking-binding-controls-2026-08-01"

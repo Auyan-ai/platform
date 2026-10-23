@@ -1,0 +1,123 @@
+{
+  "body": [
+    {
+      "max_tokens": 1024,
+      "messages": [
+        {
+          "role": "user",
+          "content": "¿Cuánto tarda el envío?"
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_use",
+              "id": "toolu_hop0",
+              "name": "shopify_get_shop_policies",
+              "input": {}
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "tool_result",
+              "tool_use_id": "toolu_hop0",
+              "content": "shopify_unavailable: 503",
+              "is_error": true
+            }
+          ]
+        }
+      ],
+      "model": "claude-sonnet-4-6",
+      "system": [
+        {
+          "type": "text",
+          "text": "Eres el agente de Acme.",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        },
+        {
+          "type": "text",
+          "text": "Fecha y hora actual (zona horaria de la tienda): 2026-10-17 10:00 (Europe/Madrid). Úsala como 'ahora' para cualquier cálculo de fechas: días transcurridos desde la fecha de un pedido (`created_at`), ventanas de devolución, plazos. Convierte `created_at` a esta zona antes de comparar. NUNCA asumas otra fecha/zona ni confíes en la estimación del cliente sobre cuánto tiempo ha pasado.\n\n---\n\n## Contexto de la conversación\n\nEs tu PRIMERA respuesta en esta conversación: empieza con un saludo breve y a continuación responde a lo que pide el cliente.\n\n---\n\n## Reglas del canal\n\nCanal: chat. Responde en 1 a 3 frases, directo, sin saludo formal ni despedida."
+        }
+      ],
+      "tool_choice": {
+        "type": "any"
+      },
+      "tools": [
+        {
+          "name": "respond_or_escalate",
+          "description": "Decide cómo manejar el mensaje del cliente: responder directamente o escalar a un agente humano. SIEMPRE usa esta herramienta — no contestes en texto plano.",
+          "input_schema": {
+            "type": "object",
+            "required": [
+              "decision",
+              "confidence",
+              "response_text"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "respond",
+                  "escalate"
+                ],
+                "description": "'respond' = el agente AI responde al cliente. 'escalate' = se pasa a un agente humano."
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "description": "Tu confianza en esta decisión, en [0,1]. Si dudas o el contexto es insuficiente, pon un valor bajo y considera escalar."
+              },
+              "response_text": {
+                "type": "string",
+                "description": "Mensaje visible para el cliente. OBLIGATORIO siempre. Si decision='respond' → la respuesta. Si decision='escalate' → mensaje de cortesía explicando que se pasa con un agente humano (NUNCA dejar al cliente sin respuesta). Tono profesional, breve, en el idioma del cliente. No inventes información."
+              },
+              "escalation_reason": {
+                "type": "string",
+                "description": "Razón interna del escalado (NO visible para el cliente). OBLIGATORIO cuando decision='escalate'. Ejemplos: 'customer_requested_human', 'out_of_scope_refund_policy', 'insufficient_context_in_knowledge_base'."
+              },
+              "awaiting_customer_reply": {
+                "type": "boolean",
+                "description": "true SOLO si tu response_text le pide al cliente más información o una aclaración para poder continuar (p.ej. pedirle el nº de pedido, preguntarle qué artículo, confirmar una dirección). false si tu respuesta resuelve o cierra la consulta. Por defecto false. Se usa para no cerrar el ticket cuando aún esperas al cliente."
+              }
+            }
+          }
+        },
+        {
+          "name": "shopify_get_shop_policies",
+          "description": "Devuelve las políticas oficiales de la tienda (devolución, envío, privacidad, términos). Úsala cuando el cliente pregunte por garantías, devoluciones o condiciones de compra. Puedes filtrar por tipo pasando policy_type (ej. 'refund-policy').",
+          "input_schema": {
+            "properties": {
+              "policy_type": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Policy Type"
+              }
+            },
+            "title": "GetShopPoliciesInput",
+            "type": "object"
+          },
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ]
+    }
+  ],
+  "beta": [
+    null
+  ]
+}

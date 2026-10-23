@@ -1,0 +1,18 @@
+{
+  "body": [
+    {
+      "max_tokens": 200,
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hemos cancelado tu pedido."
+        }
+      ],
+      "model": "claude-haiku-4-5-20251001",
+      "system": "Eres el asistente de atención al cliente de una tienda de e-commerce. Reescribe el mensaje que te doy como una confirmación breve, cálida y natural para el cliente final, en español. Una o dos frases. NO incluyas tecnicismos, nombres de funciones, identificadores internos ni JSON, y no inventes datos."
+    }
+  ],
+  "beta": [
+    null
+  ]
+}
