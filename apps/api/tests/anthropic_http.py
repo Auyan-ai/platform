@@ -7,16 +7,47 @@ el JSON y las cabeceras que habrían salido y decide qué devuelve la API.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from typing import Any
 
 import anthropic
 import httpx2
 
 
+@dataclass(frozen=True)
+class ApiError:
+    """Respuesta de error de la API: el SDK la convierte en su clase de error real."""
+
+    status: int
+    headers: dict[str, str] = field(default_factory=dict)
+
+
+class ConnectionDrop:
+    """La conexión se cae antes de la respuesta: el SDK lanza `APIConnectionError`."""
+
+
+def overloaded() -> ApiError:
+    return ApiError(529)
+
+
+def api_error(status: int, **headers: str) -> ApiError:
+    return ApiError(status, headers)
+
+
+_ERROR_TYPES = {
+    400: "invalid_request_error",
+    401: "authentication_error",
+    429: "rate_limit_error",
+    529: "overloaded_error",
+}
+
+
 class RecordingAnthropic:
-    def __init__(self, *responses: dict[str, Any]) -> None:
+    def __init__(self, *responses: dict[str, Any] | ApiError | ConnectionDrop) -> None:
         self.requests: list[dict[str, Any]] = []
         self.beta_headers: list[str | None] = []
+        # Timeout de lectura con el que salió cada intento (`timeout=` de la petición).
+        self.read_timeouts: list[float | None] = []
         self._responses = list(responses)
         self.client = anthropic.AsyncAnthropic(
             api_key="test-key",
@@ -27,7 +58,18 @@ class RecordingAnthropic:
     def _handle(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(json.loads(request.content))
         self.beta_headers.append(request.headers.get("anthropic-beta"))
-        return httpx2.Response(200, json=self._responses.pop(0))
+        self.read_timeouts.append(request.extensions.get("timeout", {}).get("read"))
+        response = self._responses.pop(0)
+        if isinstance(response, ConnectionDrop):
+            raise httpx2.ConnectError("connection reset", request=request)
+        if isinstance(response, ApiError):
+            error_type = _ERROR_TYPES.get(response.status, "api_error")
+            return httpx2.Response(
+                response.status,
+                headers=response.headers,
+                json={"type": "error", "error": {"type": error_type, "message": error_type}},
+            )
+        return httpx2.Response(200, json=response)
 
 
 def message(

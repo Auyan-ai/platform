@@ -1,8 +1,10 @@
 """Wrapper para llamadas a Claude con tools y reintentos.
 
-Reintentos: backoff exponencial sobre errores transitorios
-(`APIConnectionError`, `APITimeoutError`, `RateLimitError`, `InternalServerError`).
-Los errores 4xx no-rate-limited NO se reintentan — son problemas nuestros.
+Reintentos: backoff exponencial sobre errores transitorios (`is_transient`): conexión,
+timeout y los códigos que el propio SDK reintenta (408, 409, 429, 5xx, 529 incluido). Se
+decide por código de estado, no por clase: en el SDK 1.x el 529 es `OverloadedError`, que
+ya no hereda de `InternalServerError`. El resto de 4xx NO se reintenta — son problemas
+nuestros.
 
 Caída total del proveedor (saldo agotado, 401, 403): no es transitoria ni reintentable.
 `classify_provider_error` la detecta y `call_claude_with_tools` la relanza como
@@ -29,7 +31,7 @@ from apps.api.integrations.model_capabilities import capabilities_of
 from apps.api.integrations.pricing import LLMUsage
 from tenacity import (
     AsyncRetrying,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
@@ -39,12 +41,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-RETRYABLE_ERRORS: tuple[type[Exception], ...] = (
-    anthropic.APIConnectionError,
-    anthropic.APITimeoutError,
-    anthropic.RateLimitError,
-    anthropic.InternalServerError,
-)
+_TRANSIENT_STATUSES = frozenset({408, 409, 429})
+
+
+def is_transient(exc: BaseException) -> bool:
+    """Error que puede salir bien al repetir la misma petición. Misma política que el SDK
+    (`x-should-retry` manda si viene), para que no dependa de la jerarquía de clases."""
+    if isinstance(exc, anthropic.APIConnectionError):
+        return True
+    if not isinstance(exc, anthropic.APIStatusError):
+        return False
+    should_retry = exc.response.headers.get("x-should-retry")
+    if should_retry in ("true", "false"):
+        return should_retry == "true"
+    return exc.status_code in _TRANSIENT_STATUSES or exc.status_code >= 500
 
 
 PROVIDER_UNAVAILABLE_CATEGORY = "llm_provider_unavailable"
@@ -164,7 +174,7 @@ async def call_claude_with_tools(
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(max_retries),
             wait=wait_exponential(multiplier=1, min=1, max=10),
-            retry=retry_if_exception_type(RETRYABLE_ERRORS),
+            retry=retry_if_exception(is_transient),
             reraise=True,
         ):
             with attempt:
