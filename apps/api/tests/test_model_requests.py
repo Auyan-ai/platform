@@ -424,6 +424,32 @@ def _keys(schema: Any) -> set[str]:
     return set()
 
 
+@pytest.mark.asyncio
+async def test_the_turn_clock_is_read_once_so_the_system_does_not_change_between_hops(
+    fake_deps: AgentDependencies, _env: pytest.MonkeyPatch
+) -> None:
+    """Con thinking preservado, un system distinto entre vueltas invalida los thinking blocks
+    replayados. La hora del turno se fija en la primera vuelta."""
+    minutes = iter(["10:00", "10:01"])
+    _env.setattr(
+        "apps.api.agents.nodes.reason._tenant_now_str",
+        lambda _facts: f"2026-10-17 {next(minutes)} (Europe/Madrid)",
+    )
+    first_hop, first = await run_reason(
+        fake_deps,
+        _with_policies(_reason_state("claude-opus-5-5"), hops=0),
+        message(thinking(), tool_use("shopify_get_shop_policies", {}, id="toolu_hop0")),
+    )
+    next_state = {**_with_policies(_reason_state("claude-opus-5-5"), hops=1), **first}
+    next_state.pop("pending_tool_call")
+    second_hop, _ = await run_reason(
+        fake_deps, next_state, message(tool_use("respond_or_escalate", RESPOND))
+    )
+
+    assert first["turn_now"] == "2026-10-17 10:00 (Europe/Madrid)"
+    assert second_hop.requests[0]["system"] == first_hop.requests[0]["system"]
+
+
 class TestReasonOn55:
     @pytest.mark.asyncio
     async def test_request_is_valid_and_thinking_then_decision_is_read(
