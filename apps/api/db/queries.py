@@ -2913,17 +2913,19 @@ async def claim_pending_approval(
     review_comment: str | None,
 ) -> PendingApproval | None:
     """CAS `pending → executing`: quien lo gana es el único que ejecuta la L3. None si
-    la aprobación ya no estaba pendiente (otro operador, un doble clic o un rechazo)."""
+    la aprobación ya no estaba pendiente (otro operador, un doble clic o un rechazo).
+    Cada claim suma uno a `execution_attempt`, que identifica esta ejecución al cerrarla."""
     row = await conn.fetchrow(
         """
         UPDATE pending_approvals
            SET status = 'executing', reviewed_by = $3, reviewed_at = NOW(),
-               review_comment = $4, updated_at = NOW()
+               review_comment = $4, execution_attempt = execution_attempt + 1,
+               updated_at = NOW()
          WHERE tenant_id = $1 AND id = $2 AND status = 'pending' AND deleted_at IS NULL
         RETURNING id, tenant_id, conversation_id, skill_slug, skill_tier,
                   inputs_raw, inputs_redacted, aop_slug, aop_version,
                   langfuse_trace_id, status, reviewed_by, reviewed_at,
-                  review_comment, created_at
+                  review_comment, created_at, execution_attempt
         """,
         tenant_id,
         approval_id,
@@ -2966,11 +2968,13 @@ async def settle_executing_approval(
     *,
     tenant_id: UUID,
     approval_id: UUID,
+    execution_attempt: int,
     new_status: Literal["approved", "failed", "pending"],
 ) -> PendingApproval | None:
-    """CAS desde `executing` al resultado de la ejecución. None si otro (la recuperación
-    de colgadas o una petición lenta) ya la cerró. Volver a `pending` borra la revisión:
-    consta que no se aplicó y el operador decide otra vez."""
+    """CAS desde `executing` al resultado de la ejecución `execution_attempt` (el número
+    que devolvió su claim). None si otro (la recuperación de colgadas o una petición
+    lenta) ya la cerró, o si la aprobación se reabrió y la ejecuta otro claim. Volver a
+    `pending` borra la revisión: consta que no se aplicó y el operador decide otra vez."""
     row = await conn.fetchrow(
         """
         UPDATE pending_approvals
@@ -2979,15 +2983,17 @@ async def settle_executing_approval(
                reviewed_at    = CASE WHEN $3 = 'pending' THEN NULL ELSE reviewed_at END,
                review_comment = CASE WHEN $3 = 'pending' THEN NULL ELSE review_comment END,
                updated_at = NOW()
-         WHERE tenant_id = $1 AND id = $2 AND status = 'executing' AND deleted_at IS NULL
+         WHERE tenant_id = $1 AND id = $2 AND status = 'executing'
+           AND execution_attempt = $4 AND deleted_at IS NULL
         RETURNING id, tenant_id, conversation_id, skill_slug, skill_tier,
                   inputs_raw, inputs_redacted, aop_slug, aop_version,
                   langfuse_trace_id, status, reviewed_by, reviewed_at,
-                  review_comment, created_at
+                  review_comment, created_at, execution_attempt
         """,
         tenant_id,
         approval_id,
         new_status,
+        execution_attempt,
     )
     return PendingApproval(**dict(row)) if row else None
 
@@ -3004,7 +3010,7 @@ async def list_stale_executing_approvals(
         SELECT id, tenant_id, conversation_id, skill_slug, skill_tier,
                inputs_raw, inputs_redacted, aop_slug, aop_version,
                langfuse_trace_id, status, reviewed_by, reviewed_at,
-               review_comment, created_at
+               review_comment, created_at, execution_attempt
           FROM pending_approvals
          WHERE tenant_id = $1 AND status = 'executing' AND reviewed_at < $2
            AND deleted_at IS NULL

@@ -177,8 +177,8 @@ def _wire(monkeypatch: pytest.MonkeyPatch, *, channel: str = "zendesk", delivere
         claim=AsyncMock(return_value=_sample_approval("executing")),
         reject=AsyncMock(return_value=_sample_approval("rejected")),
         settle_cas=AsyncMock(
-            side_effect=lambda conn, *, tenant_id, approval_id, new_status: _sample_approval(
-                new_status
+            side_effect=lambda conn, *, tenant_id, approval_id, execution_attempt, new_status: (
+                _sample_approval(new_status)
             )
         ),
         insert_message=AsyncMock(return_value=MagicMock(id=MESSAGE_ID)),

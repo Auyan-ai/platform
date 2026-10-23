@@ -24,6 +24,7 @@ from apps.api.core.config import get_settings
 from apps.api.core.errors import register_exception_handlers
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
 from apps.api.db import client as db_client
+from apps.api.db.queries import claim_pending_approval, settle_executing_approval
 from apps.api.routers.approvals import router as approvals_router
 from apps.api.services.approval_execution import recover_stale_executions
 from apps.api.skills.base import (
@@ -473,3 +474,41 @@ async def test_the_approval_is_the_idempotency_key(
         await _approve(c, s)
 
     assert fake_skill.keys == [str(s.approval_id)]
+
+
+async def test_a_late_settle_never_closes_a_later_execution(pool: asyncpg.Pool) -> None:
+    """La ejecución A tarda más que `STALE_EXECUTION`: la recuperación la reabre y el
+    operador aprueba otra vez (B). El cierre tardío de A no puede cerrar B, y cada
+    ejecución se cierra una sola vez."""
+    s = await _seed(pool)
+    ids = {"tenant_id": s.tenant_id, "approval_id": s.approval_id}
+    async with pool.acquire() as conn:
+        a = await claim_pending_approval(
+            conn, **ids, reviewed_by=s.user_id, review_comment=None
+        )
+        assert a is not None
+        reopened = await settle_executing_approval(
+            conn, **ids, execution_attempt=a.execution_attempt, new_status="pending"
+        )
+        assert reopened is not None
+        b = await claim_pending_approval(
+            conn, **ids, reviewed_by=s.user_id, review_comment=None
+        )
+        assert b is not None
+        assert b.execution_attempt != a.execution_attempt
+
+        late = await settle_executing_approval(
+            conn, **ids, execution_attempt=a.execution_attempt, new_status="approved"
+        )
+        assert late is None, "el cierre tardío de A cerró la ejecución B"
+        assert await _status(pool, s) == "executing"
+
+        closed = await settle_executing_approval(
+            conn, **ids, execution_attempt=b.execution_attempt, new_status="approved"
+        )
+        assert closed is not None
+        again = await settle_executing_approval(
+            conn, **ids, execution_attempt=b.execution_attempt, new_status="failed"
+        )
+        assert again is None, "una ejecución ya cerrada se cerró otra vez"
+    assert await _status(pool, s) == "approved"

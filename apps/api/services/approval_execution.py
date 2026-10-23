@@ -185,7 +185,11 @@ async def settle(
         case NotApplied(error=error):
             async with tenant_scope(tenant_id) as conn:
                 reopened = await settle_executing_approval(
-                    conn, tenant_id=tenant_id, approval_id=approval.id, new_status="pending"
+                    conn,
+                    tenant_id=tenant_id,
+                    approval_id=approval.id,
+                    execution_attempt=approval.execution_attempt,
+                    new_status="pending",
                 )
             if reopened is None:
                 return None
@@ -215,7 +219,11 @@ async def _settle_applied(
     )
     async with tenant_scope(tenant_id) as conn:
         settled = await settle_executing_approval(
-            conn, tenant_id=tenant_id, approval_id=approval.id, new_status="approved"
+            conn,
+            tenant_id=tenant_id,
+            approval_id=approval.id,
+            execution_attempt=approval.execution_attempt,
+            new_status="approved",
         )
         if settled is None:
             return None
@@ -272,7 +280,11 @@ async def _settle_refused(
     el cliente recibe el texto fijo de la regla y el equipo, su razón."""
     async with tenant_scope(tenant_id) as conn:
         settled = await settle_executing_approval(
-            conn, tenant_id=tenant_id, approval_id=approval.id, new_status="failed"
+            conn,
+            tenant_id=tenant_id,
+            approval_id=approval.id,
+            execution_attempt=approval.execution_attempt,
+            new_status="failed",
         )
         if settled is None:
             return None
@@ -309,7 +321,11 @@ async def _settle_unknown(
     reason = unknown_outcome_reason(approval.skill_slug, approval.inputs_raw, error)
     async with tenant_scope(tenant_id) as conn:
         settled = await settle_executing_approval(
-            conn, tenant_id=tenant_id, approval_id=approval.id, new_status="failed"
+            conn,
+            tenant_id=tenant_id,
+            approval_id=approval.id,
+            execution_attempt=approval.execution_attempt,
+            new_status="failed",
         )
         if settled is None:
             return None

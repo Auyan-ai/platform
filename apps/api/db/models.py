@@ -293,6 +293,8 @@ class PendingApproval(_BaseModel):
     reviewed_at: datetime | None = None
     review_comment: str | None = None
     created_at: datetime | None = None
+    # Número de claim: identifica la ejecución en curso (ver `settle_executing_approval`).
+    execution_attempt: int = 0
 
 
 # ─── Agent Reasoning Events (Sprint 8) ───────────────────────────────────────
