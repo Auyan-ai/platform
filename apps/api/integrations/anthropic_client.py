@@ -349,11 +349,15 @@ def _as_param(block: Any) -> dict[str, Any]:
 
 
 def read_decision(response: Any, usage: LLMUsage) -> ToolCalled | NoDecision:
-    """Primera tool llamada, o por qué no hubo ninguna. `refusal` va antes que el contenido."""
+    """Primera tool llamada, o por qué no hubo ninguna. `refusal` y `max_tokens` van antes
+    que el contenido: un `tool_use` cortado trae un `input` a medias (un `response_text`
+    truncado que llegaría al cliente)."""
     stop_reason = getattr(response, "stop_reason", None)
     if stop_reason == "refusal":
         category = getattr(getattr(response, "stop_details", None), "category", None)
         return NoDecision("refusal", category or "sin_categoria", usage)
+    if stop_reason == "max_tokens":
+        return NoDecision("max_tokens", "", usage)
     thinking: list[dict[str, Any]] = []
     for block in response.content:
         block_type = getattr(block, "type", None)
@@ -361,8 +365,6 @@ def read_decision(response: Any, usage: LLMUsage) -> ToolCalled | NoDecision:
             return ToolCalled(block, thinking, usage)
         if block_type in ("thinking", "redacted_thinking"):
             thinking.append(_as_param(block))
-    if stop_reason == "max_tokens":
-        return NoDecision("max_tokens", "", usage)
     return NoDecision("tool_not_called", str(stop_reason), usage)
 
 

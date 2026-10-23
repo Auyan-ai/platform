@@ -334,6 +334,41 @@ async def test_current_models_send_the_same_request_as_before(
         assert recorded == json.loads(path.read_text()), name
 
 
+class TestTruncatedDecision:
+    """Un `tool_use` cortado por `max_tokens` trae un `input` a medias: nunca se lee."""
+
+    @pytest.mark.asyncio
+    async def test_truncated_reply_is_an_explicit_error_not_a_reply(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        cut = {"decision": "respond", "confidence": 0.9, "response_text": "Tu pedido sal"}
+        _, out = await run_reason(
+            fake_deps,
+            _reason_state("claude-sonnet-4-6"),
+            message(
+                tool_use("respond_or_escalate", cut),
+                stop_reason="max_tokens",
+                model="claude-haiku-4-5-20251001",
+            ),
+        )
+
+        assert out["error"] == "llm_no_decision: max_tokens"
+        assert "agent_response" not in out
+        # 100 in @ $1 + 50 out @ $5 (Haiku): la llamada se cobra igual.
+        assert out["cost_usd"] == pytest.approx(0.00035)
+
+    @pytest.mark.asyncio
+    async def test_truncated_skill_call_is_not_executed(self, fake_deps: AgentDependencies) -> None:
+        _, out = await run_reason(
+            fake_deps,
+            _with_policies(_reason_state("claude-sonnet-4-6"), hops=0),
+            message(tool_use("shopify_get_shop_policies", {}), stop_reason="max_tokens"),
+        )
+
+        assert out["error"] == "llm_no_decision: max_tokens"
+        assert "pending_tool_call" not in out
+
+
 PRESERVED_BETA = "thinking-binding-controls-2026-08-01"
 ADAPTIVE = {"type": "adaptive", "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
 
