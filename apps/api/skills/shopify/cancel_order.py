@@ -28,6 +28,7 @@ from apps.api.skills.shopify._order_guard import (
     cancellation_verdict,
     ensure_order_changeable,
     refund_transactions_verdict,
+    snapshot_before_mutation,
 )
 from pydantic import computed_field
 
@@ -95,7 +96,7 @@ class CancelOrder(Skill):
             raise ValueError("shopify_not_configured")
         adapter = ctx.commerce_mock or ShopifyAdapter()
         # La aprobación puede llevar horas en cola: el pedido pudo salir entretanto.
-        before = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
+        before = await snapshot_before_mutation(adapter, ctx, inputs.order_id)
         ensure_order_changeable(before, "cancel", ctx)
         await adapter.cancel_order(
             ctx.integration_ctx,

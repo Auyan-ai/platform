@@ -19,6 +19,7 @@ import pytest
 from apps.api.core.errors import register_exception_handlers
 from apps.api.core.security import UserRecord, reset_user_cache
 from apps.api.db.models import PendingApproval, TenantToolPermission
+from apps.api.integrations.base import MutationNotApplied
 from apps.api.routers.approvals import router as approvals_router
 from apps.api.routers.tool_permissions import router as tool_permissions_router
 from apps.api.skills.base import (
@@ -394,12 +395,12 @@ class TestApproveAction:
 class TestExecutionErrors:
     """Tras un error la L3 nunca se repite: se lee Shopify (`reconcile`) y se cierra."""
 
-    def test_error_and_shopify_shows_nothing_reopens_the_approval(
+    def test_error_before_the_mutation_was_sent_reopens_the_approval(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _app, client = _make_app(monkeypatch, approvals_router)
         w = _wire(monkeypatch)
-        FakeSkill.outcome = RuntimeError("Client error '404 Not Found'")
+        FakeSkill.outcome = MutationNotApplied("lectura previa: Client error '404 Not Found'")
         FakeSkill.found = None
 
         data = _approve(client).json()
@@ -412,6 +413,25 @@ class TestExecutionErrors:
         w.insert_message.assert_not_awaited()
         w.deliver.assert_not_awaited()
         w.hand_off.assert_not_awaited()
+
+    def test_error_after_the_mutation_was_sent_never_reopens_the_approval(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`orderCancel` es asíncrono y un reembolso puede seguir en curso: que Shopify
+        aún no lo muestre no prueba que no se aplicó. No se sabe: al equipo."""
+        _app, client = _make_app(monkeypatch, approvals_router)
+        w = _wire(monkeypatch)
+        FakeSkill.outcome = RuntimeError("poll: Server error '503 Service Unavailable'")
+        FakeSkill.found = None
+
+        data = _approve(client).json()
+
+        assert data["approval_status"] == "failed"
+        assert data["execution_status"] == "unknown"
+        assert w.settle_cas.await_args.kwargs["new_status"] == "failed"
+        assert "503" in w.hand_off.await_args.kwargs["reason"]
+        w.insert_message.assert_not_awaited()
+        w.deliver.assert_not_awaited()
 
     def test_timeout_after_the_mutation_landed_closes_as_approved(
         self, monkeypatch: pytest.MonkeyPatch

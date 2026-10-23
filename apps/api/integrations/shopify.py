@@ -23,7 +23,11 @@ from typing import Any, Literal
 from uuid import UUID
 
 import httpx
-from apps.api.integrations.base import CommerceProvider, IntegrationContext
+from apps.api.integrations.base import (
+    CommerceProvider,
+    IntegrationContext,
+    MutationNotApplied,
+)
 from apps.api.integrations.registry import IntegrationRegistry
 
 logger = logging.getLogger(__name__)
@@ -414,7 +418,7 @@ class ShopifyClient:
             data = await self._graphql(client, _ORDER_CANCEL_MUTATION, variables)
             errors = data["orderCancel"]["orderCancelUserErrors"]
             if errors:
-                raise ShopifyActionError(f"order_cancel_failed: {errors}")
+                raise ShopifyRejected(f"order_cancel_failed: {errors}")
             for attempt in range(_CANCEL_POLL_ATTEMPTS):
                 response = await client.get(
                     f"{self._base_url}/orders/{order_id}.json",
@@ -477,7 +481,13 @@ class ShopifyClient:
                 json={"order": {"id": order_id, "shipping_address": shipping_address}},
                 timeout=15,
             )
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                # Un 4xx es Shopify rechazando el cambio; un 5xx no dice si se guardó.
+                if exc.response.is_client_error:
+                    raise ShopifyRejected(f"address_update_rejected: {exc}") from exc
+                raise
             return response.json()["order"]  # type: ignore[no-any-return]
 
     async def _get_transactions(
@@ -533,9 +543,15 @@ class ShopifyClient:
         """
         order_gid = f"gid://shopify/Order/{order_id}"
         async with httpx.AsyncClient() as client:
-            transactions = await self._get_transactions(client, order_id)
-            balance = refundable_balance(transactions)
-            balance.require(amount)
+            try:
+                transactions = await self._get_transactions(client, order_id)
+                balance = refundable_balance(transactions)
+                balance.require(amount)
+            except ShopifyActionError as exc:
+                # Antes de `refundCreate`: el reembolso no llegó a pedirse.
+                raise ShopifyRejected(str(exc)) from exc
+            except httpx.HTTPError as exc:
+                raise ShopifyRejected(f"{type(exc).__name__}: {exc}") from exc
             parent = _successful(transactions, _PAYMENT_KINDS)[-1]
             refund_input = {
                 "orderId": order_gid,
@@ -558,7 +574,7 @@ class ShopifyClient:
             )
         result = data["refundCreate"]
         if result["userErrors"]:
-            raise ShopifyActionError(f"refund_create_failed: {result['userErrors']}")
+            raise ShopifyRejected(f"refund_create_failed: {result['userErrors']}")
         return IssuedRefund(
             refund_id=int(result["refund"]["legacyResourceId"]),
             amount=amount,
@@ -695,6 +711,10 @@ class ShopifyClient:
 
 class ShopifyActionError(RuntimeError):
     """Shopify no permite la acción con el estado actual del pedido."""
+
+
+class ShopifyRejected(ShopifyActionError, MutationNotApplied):
+    """La mutación no se aplicó: Shopify la rechazó o no llegó a enviarse."""
 
 
 _PAYMENT_KINDS = ("sale", "capture")

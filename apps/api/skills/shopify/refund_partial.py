@@ -29,6 +29,7 @@ from apps.api.skills.shopify._order_guard import (
     ActionOutcome,
     refund_transactions_verdict,
     refund_verdict,
+    snapshot_before_mutation,
 )
 from pydantic import Field, computed_field
 
@@ -106,7 +107,7 @@ class RefundPartial(Skill):
         if not ctx.idempotency_key:
             raise ValueError("idempotency_key_required")
         adapter = ctx.commerce_mock or ShopifyAdapter()
-        before = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
+        before = await snapshot_before_mutation(adapter, ctx, inputs.order_id)
         refund = await adapter.refund_partial(
             ctx.integration_ctx,
             before.order_id,

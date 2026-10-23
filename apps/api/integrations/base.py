@@ -143,6 +143,12 @@ class HelpdeskProvider(MessageProvider, Protocol):
     ) -> ExternalTicketRef: ...
 
 
+class MutationNotApplied(Exception):
+    """Consta que una mutación no se aplicó: falló antes de enviarse o el proveedor la
+    rechazó. Cualquier otro error tras enviarla deja el resultado sin saber: el
+    proveedor pudo aplicarla, o seguir aplicándola."""
+
+
 class CommerceProvider(Protocol):
     """Plataforma commerce: lectura de pedidos, clientes, productos."""
 

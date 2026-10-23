@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 import respx
+from apps.api.integrations.base import MutationNotApplied
 from apps.api.integrations.shopify import (
     IssuedRefund,
     RefundableBalance,
@@ -118,7 +119,7 @@ async def test_refund_user_errors_raise_without_retrying() -> None:
                                         "userErrors": [{"field": None, "message": "nope"}]}}},
     )
 
-    with pytest.raises(ShopifyActionError, match="refund_create_failed"):
+    with pytest.raises(MutationNotApplied, match="refund_create_failed"):
         await _client().refund_partial(1001, amount=Decimal("5"), idempotency_key=KEY)
     assert graphql.call_count == 1
 
@@ -163,7 +164,7 @@ async def test_refund_without_payment_raises_and_does_not_post() -> None:
     respx.get(f"{BASE}/orders/1001/transactions.json").respond(200, json={"transactions": []})
     refund = respx.post(f"{BASE}/graphql.json")
 
-    with pytest.raises(ShopifyActionError, match="order_has_no_refundable_payment"):
+    with pytest.raises(MutationNotApplied, match="order_has_no_refundable_payment"):
         await _client().refund_partial(1001, amount=Decimal("1.00"), idempotency_key=KEY)
     assert not refund.called
 
@@ -183,7 +184,7 @@ async def test_refund_above_what_is_left_is_rejected_and_not_posted() -> None:
     refund = respx.post(f"{BASE}/graphql.json")
 
     with pytest.raises(
-        ShopifyActionError,
+        MutationNotApplied,
         match="refund_amount_exceeds_refundable: .*20.00 GBP .*solo quedan 15.00 GBP",
     ):
         await _client().refund_partial(1001, amount=Decimal("20.00"), idempotency_key=KEY)
@@ -464,7 +465,7 @@ async def test_cancel_user_errors_raise_without_polling() -> None:
         },
     )
     poll = respx.get(f"{BASE}/orders/9.json")
-    with pytest.raises(ShopifyActionError, match="order_cancel_failed"):
+    with pytest.raises(MutationNotApplied, match="order_cancel_failed"):
         await _client().cancel_order(9, refund=True, restock=True)
     assert not poll.called
 
@@ -479,3 +480,22 @@ async def test_cancel_still_processing_reports_not_cancelled(
     respx.get(f"{BASE}/orders/9.json").respond(200, json={"order": {"id": 9, "cancelled_at": None}})
     order = await _client().cancel_order(9, refund=True, restock=True)
     assert order["cancelled_at"] is None
+
+
+_ADDRESS = {"address1": "Calle Nueva 42", "city": "Madrid", "province": "M", "country": None,
+            "zip_code": "28001"}
+
+
+@respx.mock
+async def test_address_rejected_by_shopify_is_not_applied() -> None:
+    respx.put(f"{BASE}/orders/9.json").respond(422, json={"errors": {"zip": ["invalid"]}})
+    with pytest.raises(MutationNotApplied):
+        await _client().update_shipping_address(9, **_ADDRESS)
+
+
+@respx.mock
+async def test_address_server_error_is_not_marked_not_applied() -> None:
+    respx.put(f"{BASE}/orders/9.json").respond(503)
+    with pytest.raises(httpx.HTTPStatusError) as raised:
+        await _client().update_shipping_address(9, **_ADDRESS)
+    assert not isinstance(raised.value, MutationNotApplied)

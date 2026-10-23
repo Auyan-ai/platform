@@ -10,8 +10,14 @@ Estados de `pending_approvals.status` (migración 20261018000003):
 
 Solo ejecuta quien gana el CAS `pending → executing`. Tras un error, o si el proceso
 murió con la aprobación en `executing`, se lee el proveedor (`Skill.reconcile`) y nunca
-se repite a ciegas. El mensaje al cliente se entrega después del COMMIT que lo registra:
-el cliente no recibe "hecho" de algo que la base acabe revirtiendo.
+se repite a ciegas. Vuelve a `pending` solo lo que consta no aplicado: la mutación no
+llegó a enviarse o el proveedor la rechazó (`MutationNotApplied`), o la recuperación lee
+el proveedor pasado `STALE_EXECUTION`, cuando ya nada sigue en curso. Un error tras
+enviarla con el proveedor sin mostrarla aplicada es `Unknown`: `orderCancel` es
+asíncrono y un reembolso puede seguir en curso.
+
+El mensaje al cliente se entrega después del COMMIT que lo registra: el cliente no
+recibe "hecho" de algo que la base acabe revirtiendo.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ from apps.api.db.queries import (
     settle_executing_approval,
     update_conversation_last_message,
 )
+from apps.api.integrations.base import MutationNotApplied
 from apps.api.services.agent_resolution import finalize_agent_resolution
 from apps.api.services.approval_reply import generate_customer_reply
 from apps.api.services.approval_resolution import (
@@ -149,19 +156,24 @@ async def reconcile(
     skill: Skill, ctx: SkillContext, inputs: SkillInput, cause: Exception | None
 ) -> ExecutionResult:
     """Qué pasó con la ejecución, leído del proveedor. `cause` es el error de la
-    ejecución, o None si el proceso murió a mitad."""
+    ejecución, o None si el proceso murió a mitad (lo reconcilia la recuperación, pasado
+    `STALE_EXECUTION`)."""
     error = f"{type(cause).__name__}: {cause}" if cause else "ejecución interrumpida"
     try:
         found = await skill.reconcile(ctx, inputs)
     except Exception as exc:
         if isinstance(cause, SkillRefusal):
             return Refused(cause)
+        if isinstance(cause, MutationNotApplied):
+            return NotApplied(error)
         return Unknown(f"{error}; al comprobarlo: {type(exc).__name__}: {exc}")
     if found is not None:
         return Applied(found.model_dump(mode="json"))
     if isinstance(cause, SkillRefusal):
         return Refused(cause)
-    return NotApplied(error)
+    if cause is None or isinstance(cause, MutationNotApplied):
+        return NotApplied(error)
+    return Unknown(f"{error}; tras enviarla, el proveedor aún no la muestra aplicada")
 
 
 async def settle(

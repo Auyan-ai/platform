@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
-from apps.api.integrations.base import IntegrationContext
+from apps.api.integrations.base import IntegrationContext, MutationNotApplied
 from apps.api.integrations.shopify import IssuedRefund, RefundableBalance, ShopifyActionError
 from apps.api.skills.base import SkillContext, SkillRefusal
 from apps.api.skills.shopify._models import Money
@@ -187,6 +187,21 @@ class TestCancelOrder:
         adapter.cancel_order.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_order_unreadable_before_cancelling_is_not_applied(self) -> None:
+        adapter = _adapter(ShopifyActionError("graphql_errors: THROTTLED"))
+        with pytest.raises(MutationNotApplied):
+            await CancelOrder().execute(_ctx(adapter), CancelOrderInput(order_id=1001))
+        adapter.cancel_order.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_failure_after_cancelling_is_not_marked_not_applied(self) -> None:
+        adapter = _adapter(snapshot(transactions=[CARD_SALE]), TimeoutError("read timeout"))
+        with pytest.raises(TimeoutError) as raised:
+            await CancelOrder().execute(_ctx(adapter), CancelOrderInput(order_id=1001))
+        assert not isinstance(raised.value, MutationNotApplied)
+        adapter.cancel_order.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_paid_card_order_refunds_restocks_and_confirms(self) -> None:
         adapter = _adapter(
             snapshot(transactions=[CARD_SALE]),
@@ -331,6 +346,13 @@ class TestUpdateShippingAddress:
         assert refused.value.code == "order_shipped"
         assert "no puedo cambiar la dirección" in refused.value.customer_message
         assert "#1500" in refused.value.team_reason
+
+    @pytest.mark.asyncio
+    async def test_order_unreadable_before_the_change_is_not_applied(self) -> None:
+        adapter = _adapter(ShopifyActionError("order_not_found: 1001"))
+        with pytest.raises(MutationNotApplied):
+            await UpdateShippingAddress().execute(_ctx(adapter), _ADDRESS_INPUT)
+        adapter.update_shipping_address.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_confirms_the_address_reread_from_shopify(self) -> None:
