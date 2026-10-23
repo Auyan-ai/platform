@@ -25,7 +25,7 @@ from apps.api.integrations.anthropic_client import call_claude_text
 from apps.api.services.fixed_texts import CATALOG, FALLBACK_LANGUAGE, LANGUAGE_CODES, fixed_text
 from apps.api.services.language import LANGUAGE_NAMES, reply_language_mismatch
 from apps.api.services.reply_format import strip_emojis, strip_formatting
-from apps.api.services.returns import ReturnPlan
+from apps.api.services.returns import ReturnPlan, currency_decimals
 from apps.api.skills.shopify._order_guard import ActionOutcome
 
 if TYPE_CHECKING:
@@ -131,7 +131,7 @@ _RETURN_SKILLS = frozenset({"shopify.start_return", "shopify.start_exchange"})
 
 
 def _money(amount: Decimal, currency: str, language: str) -> str:
-    text = f"{amount:.2f}"
+    text = f"{amount:.{currency_decimals(currency)}f}"
     return f"{text if language == 'en' else text.replace('.', ',')} {currency}"
 
 

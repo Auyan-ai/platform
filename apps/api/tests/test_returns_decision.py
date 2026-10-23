@@ -697,3 +697,45 @@ def test_three_decimal_currencies_keep_their_precision() -> None:
 
     assert plan.settlement.returned_total == Decimal("12.345")
     assert plan.settlement.restocking_fee == Decimal("1.235")
+
+
+def _restocking(currency: str, subtotal: str, percent: str) -> ReturnPlan:
+    eligible = _evaluate(
+        _policy(restocking_fee_percent={"store_fault": "0", "customer_fault": percent}),
+        order=_order(currency=currency, taxes_included=True),
+    )
+    assert isinstance(eligible, Eligible)
+    return _built(
+        eligible,
+        ReturnCalculation(
+            currency=currency,
+            returned=(
+                CalculatedLine(
+                    key="gid://shopify/FulfillmentLineItem/9001",
+                    quantity=1,
+                    subtotal=Decimal(subtotal),
+                    tax=Decimal("0"),
+                ),
+            ),
+            exchanged=(),
+        ),
+        requested_at=NOW,
+    )
+
+
+@pytest.mark.parametrize(
+    ("currency", "subtotal", "percent", "fee"),
+    [
+        # Sin decimales: 1005 x 10% = 100.5 → 101 yenes, nunca 100.50.
+        ("JPY", "-1005", "10", "101"),
+        # Tres decimales aunque Shopify mande el importe con uno: 12.5 x 7% = 0.875.
+        ("KWD", "-12.5", "7", "0.875"),
+        ("EUR", "-52.15", "10", "5.22"),
+    ],
+)
+def test_the_restocking_fee_rounds_to_the_decimals_of_the_currency(
+    currency: str, subtotal: str, percent: str, fee: str
+) -> None:
+    plan = _restocking(currency, subtotal, percent)
+
+    assert str(plan.settlement.restocking_fee) == fee

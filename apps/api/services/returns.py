@@ -412,6 +412,24 @@ def evaluate_return(
 
 # ─── Liquidación ──────────────────────────────────────────────────────────────
 
+# Decimales de las monedas que no usan 2 (ISO 4217).
+_CURRENCY_DECIMALS: dict[str, int] = {
+    **dict.fromkeys(
+        "BIF CLP DJF GNF ISK JPY KMF KRW PYG RWF UGX UYI VND VUV XAF XOF XPF".split(), 0
+    ),
+    **dict.fromkeys("BHD IQD JOD KWD LYD OMR TND".split(), 3),
+    **dict.fromkeys("CLF UYW".split(), 4),
+}
+
+
+def currency_decimals(currency: str) -> int:
+    return _CURRENCY_DECIMALS.get(currency.upper(), 2)
+
+
+def round_money(amount: Decimal, currency: str) -> Decimal:
+    """`amount` redondeado a los decimales de la moneda (JPY 0, EUR 2, KWD 3)."""
+    return amount.quantize(Decimal(1).scaleb(-currency_decimals(currency)), ROUND_HALF_UP)
+
 
 @dataclass(frozen=True)
 class CalculatedLine:
@@ -599,7 +617,6 @@ def _price_rule(eligible: Eligible, difference: Decimal) -> PriceRule:
 
 
 def _amount(line: CalculatedLine, *, taxes_included: bool) -> Decimal:
-    # Con la precisión que da Shopify para la moneda (0, 2 o 3 decimales).
     return abs(line.subtotal) + (Decimal("0") if taxes_included else abs(line.tax))
 
 
@@ -648,9 +665,8 @@ def build_plan(
             "variante del mismo precio o más barata.",
         )
     rule = _price_rule(eligible, difference)
-    step = Decimal(1).scaleb(min(int(returned_total.as_tuple().exponent), -2))
-    restocking = (returned_total * eligible.restocking_percent / 100).quantize(
-        step, rounding=ROUND_HALF_UP
+    restocking = round_money(
+        returned_total * eligible.restocking_percent / 100, calculation.currency
     )
     settlement = Settlement(
         currency=calculation.currency,

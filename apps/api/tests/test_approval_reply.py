@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from apps.api.services.approval_reply import (
     done_followup_message,
     fallback_message,
@@ -493,3 +494,22 @@ def test_an_exchange_the_customer_pays_never_mentions_a_refund() -> None:
         "Te quedan por pagar 4,95 EUR, incluidos los gastos de la devolución; nuestro equipo "
         "te indicará cómo hacerlo."
     )
+
+
+@pytest.mark.parametrize(
+    ("currency", "amount", "language", "text"),
+    [
+        ("JPY", "500", "es", "500 JPY"),
+        ("KWD", "0.875", "es", "0,875 KWD"),
+        ("EUR", "4.95", "en", "4.95 EUR"),
+        ("EUR", "5", "es", "5,00 EUR"),
+    ],
+)
+def test_money_is_written_with_the_decimals_of_the_currency(
+    currency: str, amount: str, language: str, text: str
+) -> None:
+    from decimal import Decimal
+
+    from apps.api.services.approval_reply import _money
+
+    assert _money(Decimal(amount), currency, language) == text
