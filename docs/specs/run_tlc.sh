@@ -9,6 +9,8 @@
 #   safety    TLC con <Modulo>.cfg (todas las invariantes; para en la primera violación)
 #   each      un TLC por invariante de <Modulo>.cfg y una tabla final
 #   liveness  un TLC por propiedad de <Modulo>Liveness.cfg y una tabla final
+#   trace     run_tlc.sh trace <spec_dir> <Invariante>: traza mínima (1 worker) y resumida.
+#             OVERRIDE="MaxFaults=0 Skills={\"refund\"}" cambia constantes; HIDE oculta variables.
 #
 # ONLY=A,B limita each y liveness a esos nombres.
 # spec_dir por defecto: docs/specs/approvals-l3. El módulo es el único .tla del directorio.
@@ -107,6 +109,18 @@ case "$mode" in
     grep -E "states generated|depth of the complete|No error|violated" "$log"
     echo "TLC salió con $status: $(verdict "$log"). Log en $log"
     ;;
+  trace)
+    name="${3:?falta el nombre de la invariante}"
+    header="$(awk '$1=="INVARIANTS"{exit} {print}' "$work/$module.cfg")"
+    printf '%s\nINVARIANTS\n    TypeOK\n    %s\n' "$header" "$name" >"$work/trace.cfg"
+    for kv in ${OVERRIDE:-}; do
+      sed -i "s/^\( *${kv%%=*} = \).*/\1${kv#*=}/" "$work/trace.cfg"
+    done
+    log="$out/trace-$name.log"
+    (cd "$work" && "${java_cmd[@]}" tlc2.TLC -workers 1 -cleanup -metadir "$work/states-trace" \
+        -config trace.cfg "$module.tla") >"$log" 2>&1 || true
+    python3 "$here/tlc_trace.py" "$log" --hide "${HIDE:-lease,hClicks,arrived,unclaimed,tAppr,faults,hTent,hRel,lockedBy,tKind}"
+    ;;
   safety)
     log="$out/safety.log"
     status="$(run_tlc "$module.cfg" "$log")"
@@ -121,7 +135,7 @@ case "$mode" in
     one_by_one "${module}Liveness.cfg" PROPERTIES propiedad
     ;;
   *)
-    sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
     exit 2
     ;;
 esac
