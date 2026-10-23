@@ -19,6 +19,7 @@ from apps.api.integrations.anthropic_client import (
     call_claude_with_tools,
 )
 from apps.api.integrations.chatwoot import ChatwootClient
+from apps.api.integrations.llm_ledger import open_ledger
 from apps.api.integrations.shopify import ShopifyClient, ensure_shopify_access_token
 from apps.api.integrations.zendesk import ZendeskClient
 from apps.api.integrations.zendesk_triggers import (
@@ -515,16 +516,20 @@ async def llm_provider_check(client: Any, model: str) -> DoctorCheck:
     """
     title = "Anthropic: credencial y saldo"
     try:
-        await call_claude_with_tools(
-            client=client,
-            model=model,
-            system="ping",
-            messages=[{"role": "user", "content": "ping"}],
-            tools=[],
-            max_tokens=1,
-            max_retries=1,
-            timeout_seconds=LIVE_TIMEOUT_S,
-        )
+        # Gasto de plataforma de un token, no de un tenant: su ledger no se persiste.
+        with open_ledger():
+            await call_claude_with_tools(
+                client=client,
+                model=model,
+                role="intent_classifier_model",
+                trace_label="doctor_ping",
+                system="ping",
+                messages=[{"role": "user", "content": "ping"}],
+                tools=[],
+                max_tokens=1,
+                max_retries=1,
+                timeout_seconds=LIVE_TIMEOUT_S,
+            )
     except LLMProviderUnavailable as exc:
         return DoctorCheck(
             id="platform.llm_provider",

@@ -286,10 +286,13 @@ def make_select_aop_node(
             max_tokens=512,
             max_retries=deps.settings.llm_max_retries,
             timeout_seconds=deps.settings.llm_timeout_seconds,
+            trace_label="select_aop",
         )
 
         # ── 3. Parsear respuesta del clasificador ────────────────────────
+        fallback_reason: str | None = None
         if isinstance(outcome, NoDecision):
+            fallback_reason = outcome.reason
             logger.warning(
                 "select_aop.no_decision tenant_id=%s reason=%s — falling back to default",
                 tenant_id,
@@ -313,6 +316,7 @@ def make_select_aop_node(
                     "falling back to default",
                     tenant_id,
                 )
+                fallback_reason = "invalid_classifier_output"
                 parsed = _ClassifierOutput(
                     primary=_Candidate(slug="default", confidence=0.0),
                     reasoning="invalid_classifier_output",
@@ -379,6 +383,7 @@ def make_select_aop_node(
                 alternative_confidence=alt.confidence if alt else None,
                 ambiguity_detected=parsed.ambiguity_detected,
                 was_reclassification=was_reclassification,
+                fallback_reason=fallback_reason,
             )
 
         out: dict = {
@@ -396,6 +401,9 @@ def make_select_aop_node(
                 for s in compiled.steps
             ],
         }
+
+        if fallback_reason is not None:
+            out["classifier_fallback_reason"] = fallback_reason
 
         # Señal de multi-intent: persistir el slug alternativo para el próximo turno.
         if parsed.ambiguity_detected and alt and alt.confidence >= 0.60:

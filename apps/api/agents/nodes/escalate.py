@@ -24,6 +24,7 @@ from apps.api.db.queries import (
     update_conversation_last_message,
     update_conversation_status,
 )
+from apps.api.integrations.llm_ledger import turn_usage_metadata
 from apps.api.services.approval_reply import (
     done_followup_message,
     gate_message,
@@ -130,11 +131,7 @@ def make_escalate_node(
                     metadata={
                         "langfuse_trace_id": state.get("langfuse_trace_id"),
                         "model": state.get("model_used"),
-                        "prompt_tokens": state.get("tokens_in", 0),
-                        "cache_write_tokens": state.get("tokens_cache_write", 0),
-                        "cache_read_tokens": state.get("tokens_cache_read", 0),
-                        "completion_tokens": state.get("tokens_out", 0),
-                        "cost_usd": state.get("cost_usd", 0.0),
+                        **turn_usage_metadata(),
                         "confidence": state.get("confidence"),
                         "writing_surface": surface,
                     },

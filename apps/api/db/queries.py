@@ -14,9 +14,10 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import UUID, uuid4
 
+import asyncpg
 from apps.api.core.errors import ConflictError
 from apps.api.db.models import (
     AgentReasoningEvent,
@@ -77,9 +78,6 @@ from apps.api.db.models import (
     WeeklyReport,
     WeeklyReportStatus,
 )
-
-if TYPE_CHECKING:
-    import asyncpg
 
 logger = logging.getLogger(__name__)
 
@@ -2018,24 +2016,16 @@ async def insert_intent_classifier_run(
     alternative_confidence: float | None = None,
     ambiguity_detected: bool,
     was_reclassification: bool,
+    fallback_reason: str | None = None,
 ) -> IntentClassifierRun:
     """Registra una ejecución del clasificador de intent. Siempre se persiste, incluso
     cuando se cae al AOP 'default' — eso es exactamente lo que queremos auditar.
+
+    `fallback_reason` dice por qué cayó a `default` sin decidir (refusal, sin tool). Su
+    columna llega con la migración 20261019000001; sin ella la fila se guarda sin la razón
+    y se loguea como error, para no tumbar el turno.
     """
-    row = await conn.fetchrow(
-        """
-        INSERT INTO intent_classifier_runs (
-            tenant_id, conversation_id, turn_number,
-            primary_slug, primary_confidence,
-            alternative_slug, alternative_confidence,
-            ambiguity_detected, was_reclassification
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING id, tenant_id, conversation_id, turn_number,
-                  primary_slug, primary_confidence::float,
-                  alternative_slug, alternative_confidence::float,
-                  ambiguity_detected, was_reclassification,
-                  human_correction, created_at
-        """,
+    params = (
         tenant_id,
         conversation_id,
         turn_number,
@@ -2046,6 +2036,50 @@ async def insert_intent_classifier_run(
         ambiguity_detected,
         was_reclassification,
     )
+    row = None
+    if fallback_reason is not None:
+        try:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO intent_classifier_runs (
+                        tenant_id, conversation_id, turn_number,
+                        primary_slug, primary_confidence,
+                        alternative_slug, alternative_confidence,
+                        ambiguity_detected, was_reclassification, fallback_reason
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    RETURNING id, tenant_id, conversation_id, turn_number,
+                              primary_slug, primary_confidence::float,
+                              alternative_slug, alternative_confidence::float,
+                              ambiguity_detected, was_reclassification,
+                              human_correction, created_at
+                    """,
+                    *params,
+                    fallback_reason,
+                )
+        except asyncpg.UndefinedColumnError:
+            logger.error(
+                "intent_classifier_runs_fallback_reason_missing: aplica la migración "
+                "20261019000001_add_llm_calls.sql; fila guardada sin la razón (%s)",
+                fallback_reason,
+            )
+    if row is None:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO intent_classifier_runs (
+                tenant_id, conversation_id, turn_number,
+                primary_slug, primary_confidence,
+                alternative_slug, alternative_confidence,
+                ambiguity_detected, was_reclassification
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING id, tenant_id, conversation_id, turn_number,
+                      primary_slug, primary_confidence::float,
+                      alternative_slug, alternative_confidence::float,
+                      ambiguity_detected, was_reclassification,
+                      human_correction, created_at
+            """,
+            *params,
+        )
     assert row is not None
     return IntentClassifierRun(**dict(row))
 

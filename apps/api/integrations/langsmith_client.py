@@ -13,11 +13,15 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
+from apps.api.integrations.llm_ledger import usage_by_role
+from apps.api.integrations.pricing import LLMUsage
 from langsmith import Client
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from apps.api.core.config import Settings
-    from apps.api.integrations.pricing import LLMUsage
+    from apps.api.integrations.llm_ledger import LLMCall
 
 logger = logging.getLogger(__name__)
 
@@ -152,73 +156,6 @@ class LangSmithClient:
         except Exception:
             logger.exception("langsmith_standalone_run_failed name=%s", name)
 
-    def _record_model_usage_run(
-        self,
-        trace: LangSmithTrace,
-        *,
-        decision: str | None,
-        confidence: float | None,
-        response_text: str | None,
-        tokens_in: int,
-        tokens_cache_write: int,
-        tokens_cache_read: int,
-        tokens_out: int,
-        cost_usd: float,
-        model: str | None,
-    ) -> None:
-        if self._client is None:
-            return
-        if tokens_in <= 0 and tokens_out <= 0 and cost_usd <= 0:
-            return
-
-        run_id = uuid4()
-        start_time = datetime.now(UTC)
-        dotted_order = f"{trace.dotted_order}.{self._dotted_order_segment(start_time, run_id)}"
-        usage_metadata = self._usage_metadata(
-            tokens_in=tokens_in,
-            tokens_cache_write=tokens_cache_write,
-            tokens_cache_read=tokens_cache_read,
-            tokens_out=tokens_out,
-            cost_usd=cost_usd,
-        )
-
-        self._client.create_run(
-            id=run_id,
-            trace_id=trace.root_id,
-            parent_run_id=trace.run_id,
-            dotted_order=dotted_order,
-            project_name=self._project_name,
-            name="agent_model_call",
-            run_type="llm",
-            inputs={"model": model, "aggregate_usage": True},
-            start_time=start_time,
-            tags=["source:agent_service", "usage:aggregate"],
-            extra={
-                "metadata": {
-                    "model": model,
-                    "decision": decision,
-                    "confidence": confidence,
-                    "usage_metadata": usage_metadata,
-                    "aggregate_usage": True,
-                }
-            },
-        )
-        self._client.update_run(
-            run_id,
-            trace_id=trace.root_id,
-            parent_run_id=trace.run_id,
-            dotted_order=dotted_order,
-            end_time=datetime.now(UTC),
-            outputs={"response_text": response_text},
-            extra={
-                "metadata": {
-                    "model": model,
-                    "usage_metadata": usage_metadata,
-                    "aggregate_usage": True,
-                }
-            },
-        )
-
     def start_conversation_trace(
         self,
         *,
@@ -284,33 +221,19 @@ class LangSmithClient:
         confidence: float | None,
         response_text: str | None,
         escalation_reason: str | None,
-        tokens_in: int,
-        tokens_cache_write: int,
-        tokens_cache_read: int,
-        tokens_out: int,
-        cost_usd: float,
+        calls: Sequence[LLMCall],
         model: str | None,
         error: str | None,
     ) -> None:
+        """Cierra el turno: un run `llm` hijo por cada llamada al LLM (nombre = rol) y los
+        totales con su desglose por rol en la metadata del run raíz."""
         if self._client is None or trace is None:
             return
 
-        try:
-            self._record_model_usage_run(
-                trace,
-                decision=decision,
-                confidence=confidence,
-                response_text=response_text,
-                tokens_in=tokens_in,
-                tokens_cache_write=tokens_cache_write,
-                tokens_cache_read=tokens_cache_read,
-                tokens_out=tokens_out,
-                cost_usd=cost_usd,
-                model=model,
-            )
-        except Exception:
-            logger.exception("langsmith_model_usage_run_failed")
+        for call in calls:
+            self.record_llm_call(trace, call, source="agent_service")
 
+        usage = sum((c.usage for c in calls), LLMUsage())
         try:
             self._client.update_run(
                 trace.run_id,
@@ -328,11 +251,12 @@ class LangSmithClient:
                     "metadata": {
                         **trace.metadata,
                         "confidence": confidence,
-                        "tokens_in": tokens_in,
-                        "tokens_cache_write": tokens_cache_write,
-                        "tokens_cache_read": tokens_cache_read,
-                        "tokens_out": tokens_out,
-                        "cost_usd": cost_usd,
+                        "tokens_in": usage.prompt_tokens,
+                        "tokens_cache_write": usage.cache_write_tokens,
+                        "tokens_cache_read": usage.cache_read_tokens,
+                        "tokens_out": usage.output_tokens,
+                        "cost_usd": sum(c.cost_usd for c in calls),
+                        "usage_by_role": usage_by_role(calls),
                         "model": model,
                         "had_error": bool(error),
                     }
@@ -419,10 +343,71 @@ class LangSmithClient:
         error: str | None = None,
     ) -> None:
         """Run hijo de tipo llm con su usage y coste (cliente simulado, judge)."""
-        if self._client is None or trace is None:
+        if trace is None:
+            return
+        self._create_llm_run(
+            trace,
+            name=name,
+            model=model,
+            usage=usage,
+            cost_usd=cost_usd,
+            start_time=start_time,
+            end_time=end_time,
+            outputs=outputs,
+            error=error,
+            source="simulator",
+            metadata={},
+        )
+
+    def record_llm_call(
+        self,
+        trace: LangSmithTrace | None,
+        call: LLMCall,
+        *,
+        source: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Run `llm` de una llamada del ledger (nombre = rol) con modelo, tokens, coste y
+        latencia reales. Sin `trace`, es un run raíz con `metadata` de correlación (el
+        mensaje tras una L3, que no pertenece a ningún turno)."""
+        self._create_llm_run(
+            trace,
+            name=call.role,
+            model=call.model,
+            usage=call.usage,
+            cost_usd=call.cost_usd,
+            start_time=call.started_at,
+            end_time=call.ended_at,
+            outputs={"stop_reason": call.stop_reason},
+            error=None,
+            source=source,
+            metadata={
+                **(metadata or {}),
+                "role": call.role,
+                "label": call.label,
+                "latency_ms": call.latency_ms,
+            },
+        )
+
+    def _create_llm_run(
+        self,
+        parent: LangSmithTrace | None,
+        *,
+        name: str,
+        model: str,
+        usage: LLMUsage,
+        cost_usd: float,
+        start_time: datetime,
+        end_time: datetime,
+        outputs: dict[str, Any] | None,
+        error: str | None,
+        source: str,
+        metadata: dict[str, Any],
+    ) -> None:
+        if self._client is None:
             return
         run_id = uuid4()
-        dotted_order = f"{trace.dotted_order}.{self._dotted_order_segment(start_time, run_id)}"
+        segment = self._dotted_order_segment(start_time, run_id)
         usage_metadata = self._usage_metadata(
             tokens_in=usage.prompt_tokens,
             tokens_cache_write=usage.cache_write_tokens,
@@ -433,9 +418,9 @@ class LangSmithClient:
         try:
             self._client.create_run(
                 id=run_id,
-                trace_id=trace.root_id,
-                parent_run_id=trace.run_id,
-                dotted_order=dotted_order,
+                trace_id=parent.root_id if parent else run_id,
+                parent_run_id=parent.run_id if parent else None,
+                dotted_order=f"{parent.dotted_order}.{segment}" if parent else segment,
                 project_name=self._project_name,
                 name=name,
                 run_type="llm",
@@ -444,8 +429,10 @@ class LangSmithClient:
                 end_time=end_time,
                 outputs=outputs or {},
                 error=error,
-                tags=["source:simulator", name],
-                extra={"metadata": {"model": model, "usage_metadata": usage_metadata}},
+                tags=[f"source:{source}", name],
+                extra={
+                    "metadata": {**metadata, "model": model, "usage_metadata": usage_metadata}
+                },
             )
         except Exception:
             logger.exception("langsmith_llm_run_failed name=%s", name)

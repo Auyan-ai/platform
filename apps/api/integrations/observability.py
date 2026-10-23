@@ -11,12 +11,14 @@ va por IDs (tenant_id, conversation_id) en metadata.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from apps.api.integrations.langfuse_client import LangfuseClient
 from apps.api.integrations.langsmith_client import LangSmithClient, LangSmithTrace
+from apps.api.integrations.llm_ledger import LLMCall
 from apps.api.integrations.pricing import LLMUsage
 from apps.api.services.pii import mask_free_text_pii, mask_pii_recursive
 
@@ -145,11 +147,7 @@ class ObservabilityClient:
         confidence: float | None,
         response_text: str | None,
         escalation_reason: str | None,
-        tokens_in: int,
-        tokens_cache_write: int,
-        tokens_cache_read: int,
-        tokens_out: int,
-        cost_usd: float,
+        calls: Sequence[LLMCall],
         model: str | None,
         error: str | None,
     ) -> None:
@@ -162,29 +160,37 @@ class ObservabilityClient:
             confidence=confidence,
             response_text=response_text,
             escalation_reason=escalation_reason,
-            tokens_in=tokens_in,
-            tokens_cache_write=tokens_cache_write,
-            tokens_cache_read=tokens_cache_read,
-            tokens_out=tokens_out,
-            cost_usd=cost_usd,
+            calls=calls,
             model=model,
             error=error,
         )
         if self._mirror is not None:
+            usage = sum((c.usage for c in calls), LLMUsage())
             self._mirror.finalize_trace(
                 trace.mirror,
                 decision=decision,
                 confidence=confidence,
                 response_text=response_text,
                 escalation_reason=escalation_reason,
-                tokens_in=tokens_in,
-                tokens_cache_write=tokens_cache_write,
-                tokens_cache_read=tokens_cache_read,
-                tokens_out=tokens_out,
-                cost_usd=cost_usd,
+                tokens_in=usage.prompt_tokens,
+                tokens_cache_write=usage.cache_write_tokens,
+                tokens_cache_read=usage.cache_read_tokens,
+                tokens_out=usage.output_tokens,
+                cost_usd=sum(c.cost_usd for c in calls),
                 model=model,
                 error=error,
             )
+
+    def record_llm_call(
+        self,
+        trace: LangSmithTrace | None,
+        call: LLMCall,
+        *,
+        source: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Run `llm` de una llamada del ledger, hijo de `trace` o raíz con `metadata`."""
+        self._primary.record_llm_call(trace, call, source=source, metadata=metadata)
 
     def record_node_run(
         self,

@@ -37,7 +37,6 @@ from apps.api.integrations.anthropic_client import (
     ToolDecision,
     call_claude_for_decision,
 )
-from apps.api.integrations.pricing import compute_llm_cost
 from apps.api.services.amount_grounding import AmountProblem, unbacked_amounts
 from apps.api.services.contact_grounding import Contact, unbacked_contacts
 from apps.api.services.identity import default_phone_region
@@ -339,8 +338,6 @@ def make_supervise_node(
     async def _node(state: AgentState) -> dict[str, Any]:
         conv_id = state.get("conversation_id")
         tenant_id = state.get("tenant_id")
-        this_in = this_out = 0
-        sup_cost = 0.0
         unreviewed_draft_dropped = False
 
         literal = _literal_verdict(state)
@@ -396,10 +393,6 @@ def make_supervise_node(
                     reason=inp.get("reason", ""),
                     guardrails_violated=inp.get("guardrails_violated", []),
                 )
-            usage = outcome.usage
-            this_in = usage.prompt_tokens
-            this_out = usage.output_tokens
-            sup_cost = compute_llm_cost(model, usage)
 
         if conv_id and tenant_id:
             tracker.emit(
@@ -425,9 +418,6 @@ def make_supervise_node(
                 verdict.reject_kind if verdict.verdict == "reject" else "n/a"
             ),
             "supervisor_model_used": model,
-            "supervisor_tokens_in": state.get("supervisor_tokens_in", 0) + this_in,
-            "supervisor_tokens_out": state.get("supervisor_tokens_out", 0) + this_out,
-            "cost_usd": state.get("cost_usd", 0.0) + sup_cost,
         }
 
         if verdict.verdict == "reject":

@@ -20,9 +20,10 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from apps.api.agents.state import AgentState
+from apps.api.integrations.llm_ledger import LLMCall, LLMLedger, open_ledger
 
 if TYPE_CHECKING:
-    from apps.api.integrations.observability import ObservabilityClient
+    from apps.api.integrations.observability import ObservabilityClient, ObservabilityTrace
     from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
@@ -42,14 +43,25 @@ class AgentOutcome:
     resolves_on_delivery: bool
     trace_id: str | None
     confidence: float | None
-    tokens_in: int
-    tokens_out: int
-    cost_usd: float
     model_used: str | None
     error: str | None
     # True solo cuando se creó una escalación nueva (no al reusar una activa). El
     # caller empuja la nota interna + asignación al helpdesk solo en ese caso.
     escalation_created: bool = False
+    # Cada llamada al LLM del turno, con su rol: la única fuente de tokens y coste.
+    llm_calls: tuple[LLMCall, ...] = ()
+
+    @property
+    def tokens_in(self) -> int:
+        return sum(c.usage.prompt_tokens for c in self.llm_calls)
+
+    @property
+    def tokens_out(self) -> int:
+        return sum(c.usage.output_tokens for c in self.llm_calls)
+
+    @property
+    def cost_usd(self) -> float:
+        return sum(c.cost_usd for c in self.llm_calls)
 
     @property
     def escalated(self) -> bool:
@@ -117,41 +129,8 @@ class AgentService:
             "allowed_skills": [],
         }
 
-        try:
-            final_state: AgentState = await self._graph.ainvoke(initial_state)
-        except Exception as exc:
-            logger.exception(
-                "graph_invocation_failed",
-                extra={"tenant_id": str(tenant_id), "conversation_id": str(conversation_id)},
-            )
-            final_state = {
-                **initial_state,
-                "error": f"unhandled_graph_exception: {type(exc).__name__}: {exc!s}",
-            }
-            try:
-                final_state.update(await self._handle_error(final_state))
-            except Exception:
-                # Sin escalación no hay turno cerrado: se re-lanza para que el worker
-                # reintente el job o el webhook de chat responda 500.
-                logger.exception(
-                    "graph_failure_escalation_failed",
-                    extra={"tenant_id": str(tenant_id), "conversation_id": str(conversation_id)},
-                )
-                self._observability.finalize_trace(
-                    trace,
-                    decision="error",
-                    confidence=None,
-                    response_text=None,
-                    escalation_reason=None,
-                    tokens_in=0,
-                    tokens_cache_write=0,
-                    tokens_cache_read=0,
-                    tokens_out=0,
-                    cost_usd=0.0,
-                    model=None,
-                    error=final_state["error"],
-                )
-                raise
+        with open_ledger() as ledger:
+            final_state = await self._invoke(initial_state, trace, ledger)
 
         error = final_state.get("error")
         decision = "error" if error else final_state.get("decision", "error")
@@ -165,11 +144,7 @@ class AgentService:
             confidence=final_state.get("confidence"),
             response_text=response_text,
             escalation_reason=final_state.get("escalation_reason"),
-            tokens_in=final_state.get("tokens_in", 0),
-            tokens_cache_write=final_state.get("tokens_cache_write", 0),
-            tokens_cache_read=final_state.get("tokens_cache_read", 0),
-            tokens_out=final_state.get("tokens_out", 0),
-            cost_usd=final_state.get("cost_usd", 0.0),
+            calls=ledger.calls,
             model=final_state.get("model_used"),
             error=error,
         )
@@ -187,10 +162,51 @@ class AgentService:
             ),
             trace_id=trace_id,
             confidence=final_state.get("confidence"),
-            tokens_in=final_state.get("tokens_in", 0),
-            tokens_out=final_state.get("tokens_out", 0),
-            cost_usd=final_state.get("cost_usd", 0.0),
             model_used=final_state.get("model_used"),
             error=error,
             escalation_created=bool(final_state.get("escalation_created", False)),
+            llm_calls=ledger.calls,
         )
+
+    async def _invoke(
+        self, initial_state: AgentState, trace: ObservabilityTrace, ledger: LLMLedger
+    ) -> AgentState:
+        try:
+            final_state: AgentState = await self._graph.ainvoke(initial_state)
+            return final_state
+        except Exception as exc:
+            logger.exception(
+                "graph_invocation_failed",
+                extra={
+                    "tenant_id": initial_state["tenant_id"],
+                    "conversation_id": initial_state["conversation_id"],
+                },
+            )
+            failed: AgentState = {
+                **initial_state,
+                "error": f"unhandled_graph_exception: {type(exc).__name__}: {exc!s}",
+            }
+        try:
+            failed.update(await self._handle_error(failed))
+        except Exception:
+            # Sin escalación no hay turno cerrado: se re-lanza para que el worker
+            # reintente el job o el webhook de chat responda 500.
+            logger.exception(
+                "graph_failure_escalation_failed",
+                extra={
+                    "tenant_id": initial_state["tenant_id"],
+                    "conversation_id": initial_state["conversation_id"],
+                },
+            )
+            self._observability.finalize_trace(
+                trace,
+                decision="error",
+                confidence=None,
+                response_text=None,
+                escalation_reason=None,
+                calls=ledger.calls,
+                model=None,
+                error=failed["error"],
+            )
+            raise
+        return failed

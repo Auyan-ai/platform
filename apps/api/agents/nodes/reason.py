@@ -38,7 +38,6 @@ from apps.api.integrations.anthropic_client import (
     ToolDecision,
     call_claude_for_decision,
 )
-from apps.api.integrations.pricing import compute_llm_cost
 from apps.api.services.conversation_progress import no_progress_reason
 from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.identity import IdentityContext
@@ -223,13 +222,13 @@ def _slug_from_anthropic_name(tool_name: str, allowed_skills: list[str]) -> str 
 def _handle_decide_tool(
     tool_input: dict[str, Any],
     state: AgentState,
-    tokens_update: dict[str, Any],
+    model_update: dict[str, Any],
 ) -> dict[str, Any]:
     """Procesa el output del decide tool: respond/escalate + threshold override."""
     try:
         parsed = AgentDecisionTool.model_validate(tool_input)
     except ValidationError as exc:
-        return {"error": f"invalid_tool_output: {exc.errors()}", **tokens_update}
+        return {"error": f"invalid_tool_output: {exc.errors()}", **model_update}
 
     decision = parsed.decision
     escalation_reason: str | None = parsed.escalation_reason
@@ -261,7 +260,7 @@ def _handle_decide_tool(
         # sin este None, route_after_reason prioriza la tool residual y re-procesa
         # la acción YA rechazada en vez de la decisión nueva de este retry.
         "pending_tool_call": None,
-        **tokens_update,
+        **model_update,
     }
 
 
@@ -341,18 +340,10 @@ def make_reason_node(
             trace_label="reason",
         )
 
-        # Acumular tokens/costo con lo que ya hubiera de iteraciones previas.
-        usage = outcome.usage
-        tokens_update: dict[str, Any] = {
-            "tokens_in": state.get("tokens_in", 0) + usage.prompt_tokens,
-            "tokens_cache_write": state.get("tokens_cache_write", 0) + usage.cache_write_tokens,
-            "tokens_cache_read": state.get("tokens_cache_read", 0) + usage.cache_read_tokens,
-            "tokens_out": state.get("tokens_out", 0) + usage.output_tokens,
-            "cost_usd": state.get("cost_usd", 0.0) + compute_llm_cost(model, usage),
-            "model_used": model,
-        }
+        # Tokens y coste no van al state: el cliente los anota en el ledger del turno.
+        model_update: dict[str, Any] = {"model_used": model}
         if isinstance(outcome, NoDecision):
-            return {"error": outcome.reason, **tokens_update}
+            return {"error": outcome.reason, **model_update}
 
         tool_block = outcome.block
         tool_name: str = tool_block.name
@@ -368,12 +359,12 @@ def make_reason_node(
                 ),
                 "agent_response": _fixed_reply(state, "iterations_exhausted"),
                 "pending_tool_call": None,
-                **tokens_update,
+                **model_update,
             }
 
         # ¿Decide tool o skill tool?
         if tool_name == DECIDE_TOOL_NAME:
-            result = _handle_decide_tool(tool_block.input, state, tokens_update)
+            result = _handle_decide_tool(tool_block.input, state, model_update)
             if conv_id and tenant_id and not result.get("error"):
                 decision = result.get("decision", "unknown")
                 # Emitir step_completed antes del choice event.
@@ -408,7 +399,7 @@ def make_reason_node(
         if slug is None:
             return {
                 "error": f"llm_chose_unknown_tool: {tool_name}",
-                **tokens_update,
+                **model_update,
             }
 
         if conv_id and tenant_id:
@@ -458,7 +449,7 @@ def make_reason_node(
             "decision": None,
             "agent_response": None,
             "escalation_reason": None,
-            **tokens_update,
+            **model_update,
         }
 
     return _node

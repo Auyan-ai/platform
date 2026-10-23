@@ -83,7 +83,7 @@ GRAPH_RECURSION_LIMIT = 50
 # NUNCA agregar aquí keys que carguen secretos: commerce_integration_ctx, tenant_config.
 _NODE_OUTPUT_KEYS: dict[str, list[str]] = {
     "resolve_identity": ["identity_summary", "identity_error"],
-    "select_aop": ["aop_slug", "aop_version", "intent_confidence"],
+    "select_aop": ["aop_slug", "aop_version", "intent_confidence", "classifier_fallback_reason"],
     "reason": ["decision", "confidence", "pending_tool_call", "agent_response"],
     "execute_skill": ["tool_results", "pending_approval_id", "escalation_reason"],
     "supervise": ["supervisor_verdict", "supervisor_reason", "supervisor_reject_kind"],
