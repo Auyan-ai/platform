@@ -829,3 +829,26 @@ def test_a_partial_exchange_asks_how_to_refund_when_the_store_lets_choose() -> N
     assert isinstance(chosen, ReturnPlan)
     # 52.15 de la blusa que solo se devuelve, menos la tarifa de 4.95 de la etiqueta.
     assert chosen.settlement.payouts == {"store_credit": Decimal("47.20")}
+
+
+def test_a_return_whose_fees_exceed_what_comes_back_is_not_opened() -> None:
+    """Tarifa 4.95 + reposición 10% sobre un artículo de 3.00: el saldo sería negativo. No
+    se abre: se escala al equipo con la razón, sin prometer dinero."""
+    eligible = _evaluate(
+        _policy(restocking_fee_percent={"store_fault": "0", "customer_fault": "10"})
+    )
+    assert isinstance(eligible, Eligible)
+
+    result = build_plan(eligible, _calc("-3.00", "0"), requested_at=NOW)
+
+    assert isinstance(result, Refused)
+    assert result.code == "fees_exceed_refund"
+    assert "3.00 EUR" in result.team_reason
+    assert "tarifa de envío 4.95 EUR" in result.team_reason
+    assert "reposición 0.30 EUR" in result.team_reason
+
+
+def test_an_exchange_the_customer_pays_is_still_opened() -> None:
+    plan = _swap(_exchange_policy(higher_price="customer_pays"), "60.00")
+
+    assert isinstance(plan, ReturnPlan) and plan.settlement.balance == Decimal("-7.85")

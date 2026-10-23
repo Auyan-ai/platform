@@ -36,6 +36,7 @@ RefusalCode = Literal[
     "delivery_date_unknown",
     "outside_window",
     "evidence_unreadable",
+    "fees_exceed_refund",
 ]
 RejectionCode = Literal[
     "reason_not_in_policy",
@@ -694,9 +695,10 @@ def build_plan(
     *,
     requested_at: datetime,
     plan_id: str | None = None,
-) -> ReturnPlan | Rejected:
+) -> ReturnPlan | Rejected | Refused:
     """Plan con la liquidación, a partir de los importes de `returnCalculate`. Rechaza el
-    cambio a un artículo más caro si la política no lo admite."""
+    cambio a un artículo más caro si la política no lo admite. Una devolución sin cambio
+    cuyos gastos superan lo que se devuelve no se abre: pasa al equipo."""
     returned = {c.key: c for c in calculation.returned}
     exchanged = {c.key: c for c in calculation.exchanged}
     fee_currency_matches = (
@@ -752,6 +754,16 @@ def build_plan(
         fee_pending=eligible.fee if eligible.fee and not fee_currency_matches else None,
         fee_label_cost=eligible.fee_label_cost,
     )
+    if not exchanged_lines and settlement.balance is not None and settlement.balance < 0:
+        cur = calculation.currency
+        costs = settlement.fee + settlement.restocking_fee
+        return Refused(
+            "fees_exceed_refund",
+            f"La devolución de {eligible.order_name} devuelve {returned_total} {cur} y los "
+            f"gastos suman {costs} {cur} (tarifa de envío {settlement.fee} {cur}, reposición "
+            f"{settlement.restocking_fee} {cur}): el saldo sería negativo. No se abrió la "
+            "devolución; hablad con el cliente y decidid si se tramita igualmente.",
+        )
     return ReturnPlan(
         plan_id=plan_id or uuid4().hex,
         policy_version=eligible.policy_version,

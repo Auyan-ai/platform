@@ -526,3 +526,25 @@ async def test_reconcile_reads_shopify_by_the_plan_marker() -> None:
     shopify.find_fails = True
     with pytest.raises(ReconcileUnknown):
         await StartReturn().reconcile(_ctx(shopify), inputs)
+
+
+async def test_fees_above_the_refund_escalate_with_a_fixed_text_and_no_amount() -> None:
+    shopify = FakeShopify()
+    policy = _policy(
+        shipping={
+            "method": "store_label",
+            "payer": {"store_fault": "store", "customer_fault": "customer"},
+            "customer_fee_mode": "fixed",
+            "customer_fee": {"amount": "100.00", "currency": "USD"},
+        }
+    )
+
+    with pytest.raises(SkillRefusal) as exc:
+        await StartReturn().prepare(_ctx(shopify, policy), RAW)
+
+    assert exc.value.code == "fees_exceed_refund"
+    assert exc.value.customer_message.startswith(
+        "Los gastos de la devolución superan el importe de lo que devuelves"
+    )
+    assert "USD" not in exc.value.customer_message
+    assert "76.95 USD" in exc.value.team_reason

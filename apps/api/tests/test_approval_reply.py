@@ -558,3 +558,33 @@ def test_a_partial_exchange_tells_the_refund_and_the_credit_apart() -> None:
         "Cuando recibamos el artículo, te abonaremos 12,15 EUR en crédito de la tienda en un "
         "plazo de 14 días."
     )
+
+
+def test_a_return_with_nothing_left_after_fees_promises_no_money() -> None:
+    from decimal import Decimal
+
+    from apps.api.services.approval_reply import outcome_message
+    from apps.api.services.returns import Settlement, SettlementLine
+
+    output = _return_output(
+        settlement=Settlement(
+            currency="EUR",
+            returned=(SettlementLine(title="Blusa", quantity=1, amount=Decimal("4.95")),),
+            exchanged=(),
+            shipping_payer="customer",
+            fee=Decimal("4.95"),
+            fee_pending=None,
+            fee_label_cost=False,
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="none",
+            refund_as="original_payment",
+        ),
+    )
+
+    text = outcome_message("shopify.start_return", output, "es")
+
+    assert "te devolveremos" not in text
+    assert text.endswith(
+        "Con los gastos de la devolución descontados, no queda importe por devolverte."
+    )

@@ -169,6 +169,10 @@ def return_next_steps(plan: ReturnPlan, language: str, tenant_default: str) -> s
     days = str(plan.refund_days)
     credit = s.refund_as == "store_credit"
     if not plan.exchange_lines:
+        # Un saldo negativo no llega aquí: esa devolución no se abre (`fees_exceed_refund`).
+        if s.balance is not None and s.balance <= 0:
+            steps.append(text("returns.nothing_to_refund"))
+            return " ".join(steps)
         key = "returns.credit_after_receipt" if credit else "returns.refund_after_receipt"
         steps.append(text(key, days=days))
         return " ".join(steps)

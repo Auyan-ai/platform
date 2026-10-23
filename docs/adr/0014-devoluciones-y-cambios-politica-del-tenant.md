@@ -124,6 +124,7 @@ producto, `taxesIncluded`, moneda) y devuelve un plan o un rechazo tipado.
 | `product_excluded` o `product_unknown` | El equipo | Texto fijo y escalado |
 | `exchanges_disabled` | El equipo | Texto fijo y escalado |
 | `evidence_unreadable` (exige foto y el canal no trae adjuntos a Auyan) | El equipo | Texto fijo y escalado |
+| `fees_exceed_refund` (devolución sin cambio cuyos gastos, tarifa y reposición, superan lo que se devuelve) | El equipo | No se abre; texto fijo sin importes y escalado con el desglose |
 | `reason_not_in_policy` (con la lista de códigos) | El LLM | Error tipado: elige un motivo de la lista |
 | `evidence_missing` (falta la foto en la conversación) | El LLM | Error tipado: pide la foto |
 | `item_not_returnable`, `quantity_exceeds_returnable` | El LLM | Error tipado, con las líneas devolvibles |
@@ -150,7 +151,8 @@ pedido no lo incluye), artículos de cambio, reposición, envío de vuelta segú
 diferencia de precio entre lo que se recibe y las unidades devueltas a cambio se salda como
 diga `higher_price` o `lower_price`. En un cambio parcial, las unidades devueltas que no se
 cambian se reembolsan como en una devolución, según `refund_method` (`refund_as`), y no
-entran en `lower_price`; `payouts` reparte el saldo entre las dos formas. Si la tarifa está en
+entran en `lower_price`; `payouts` reparte el saldo entre las dos formas. Una devolución sin
+cambio con saldo negativo no se abre (`fees_exceed_refund`). Si la tarifa está en
 otra moneda que el pedido o es el coste real de la etiqueta, el saldo queda pendiente para el
 humano. La liquidación va en la aprobación L3, en la salida de la skill y, tras crear la
 devolución, en la nota del pedido de Shopify. Si la nota no se puede escribir, la devolución

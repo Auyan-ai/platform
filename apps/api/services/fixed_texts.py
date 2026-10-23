@@ -315,6 +315,19 @@ CATALOG: dict[str, Texts] = {
         ),
         _PASS_TO_TEAM,
     ),
+    "refusal.returns.fees_exceed_refund": _then(
+        _t(
+            "Los gastos de la devolución superan el importe de lo que devuelves, así que no "
+            "puedo abrirla desde aquí.",
+            "The return costs are higher than the value of what you're returning, so I can't "
+            "open it from here.",
+            "Les despeses de la devolució superen l'import del que tornes, així que no la puc "
+            "obrir des d'aquí.",
+            "Les frais de retour dépassent le montant de ce que tu retournes, donc je ne peux "
+            "pas l'ouvrir d'ici.",
+        ),
+        _PASS_TO_TEAM,
+    ),
     "refusal.returns.shopify_error": _then(
         _t(
             "No he podido preparar la devolución con los datos de la tienda en este momento.",
@@ -758,6 +771,12 @@ CATALOG: dict[str, Texts] = {
         "We'll deduct {fee} from the refund as a restocking fee.",
         "Per despeses de reposició descomptarem {fee} del reemborsament.",
         "Nous déduirons {fee} du remboursement pour frais de remise en stock.",
+    ),
+    "returns.nothing_to_refund": _t(
+        "Con los gastos de la devolución descontados, no queda importe por devolverte.",
+        "Once the return costs are deducted, there's no amount left to refund you.",
+        "Amb les despeses de la devolució descomptades, no queda import per retornar-te.",
+        "Une fois les frais de retour déduits, il ne reste aucun montant à te rembourser.",
     ),
     "returns.credit_after_receipt": _t(
         "Cuando recibamos el artículo y lo revisemos, te abonaremos el importe en crédito de "

@@ -178,6 +178,8 @@ class _ReturnSkill(Skill):
             plan = build_plan(decision, calculation, requested_at=now)
         except KeyError as exc:
             raise _shopify_refusal(ctx, "cuadrar el cálculo de Shopify con el pedido", exc) from exc
+        if isinstance(plan, Refused):
+            raise self._refusal(ctx, plan)
         if isinstance(plan, Rejected):
             raise SkillRejection(plan.code, plan.detail)
         return {
