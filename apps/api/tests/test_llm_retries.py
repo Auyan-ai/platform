@@ -11,10 +11,13 @@ from collections.abc import Iterator
 import anthropic
 import pytest
 from apps.api.agents.schemas import RESPOND_OR_ESCALATE_TOOL
+from apps.api.core.config import LLM_CALL_BUDGET_SECONDS, Settings
 from apps.api.integrations.anthropic_client import (
     ToolCalled,
     ToolDecision,
+    build_anthropic_client,
     call_claude_for_decision,
+    call_claude_text,
 )
 from apps.api.tests.anthropic_http import (
     ConnectionDrop,
@@ -22,6 +25,7 @@ from apps.api.tests.anthropic_http import (
     api_error,
     message,
     overloaded,
+    text,
     tool_use,
 )
 
@@ -95,3 +99,107 @@ async def test_bad_request_is_not_retried() -> None:
         await _decide(api)
 
     assert len(api.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_text_calls_retry_an_overload_too() -> None:
+    api = RecordingAnthropic(overloaded(), message(text("hola"), stop_reason="end_turn"))
+
+    reply = await call_claude_text(
+        client=api.client,
+        role="judge_sonnet_model",
+        system="s",
+        messages=[{"role": "user", "content": "m"}],
+        max_tokens=100,
+    )
+
+    assert reply.text == "hola"
+    assert len(api.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_the_production_client_does_not_retry_on_its_own() -> None:
+    """Una sola capa de reintentos: con `max_retries=1` sale una petición, no tres."""
+    api = RecordingAnthropic(*[overloaded()] * 3, base=build_anthropic_client("test-key"))
+
+    with pytest.raises(anthropic.APIStatusError):
+        await _decide(api, max_retries=1)
+
+    assert len(api.requests) == 1
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.mark.asyncio
+async def test_retries_stay_inside_the_call_budget(
+    monkeypatch: pytest.MonkeyPatch, _no_backoff: list[float]
+) -> None:
+    """Cada intento tarda 40 s en devolver un 529. Con 60 s por intento y un presupuesto de
+    90 s, el segundo intento se corta a lo que queda y el tercero no cabe entero."""
+    clock = _Clock()
+    monkeypatch.setattr("apps.api.integrations.anthropic_client.time.monotonic", clock)
+
+    async def _sleep(seconds: float) -> None:
+        _no_backoff.append(seconds)
+        clock.now += seconds
+
+    monkeypatch.setattr("asyncio.sleep", _sleep)
+
+    def _slow_api(read_timeout: float | None) -> None:
+        clock.now += min(40, read_timeout or 40)
+
+    api = RecordingAnthropic(*[overloaded()] * 3, on_request=_slow_api)
+
+    with pytest.raises(anthropic.APIStatusError):
+        await call_claude_for_decision(
+            client=api.client,
+            model="claude-sonnet-4-6",
+            role="default_agent_model",
+            system="s",
+            messages=[{"role": "user", "content": "m"}],
+            tools=[RESPOND_OR_ESCALATE_TOOL],
+            decision=ToolDecision("respond_or_escalate", any_tool=True),
+            max_retries=3,
+            timeout_seconds=60,
+        )
+
+    assert api.read_timeouts == [60, 49, 7]
+    assert _no_backoff == [1, 2]
+    assert clock.now - 1000.0 <= LLM_CALL_BUDGET_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_retry_after_from_the_api_is_honoured(_no_backoff: list[float]) -> None:
+    api = RecordingAnthropic(
+        api_error(429, **{"retry-after": "7"}), message(tool_use("respond_or_escalate", RESPOND))
+    )
+
+    await _decide(api)
+
+    assert _no_backoff == [7.0]
+
+
+def test_the_call_budget_fits_inside_the_inbound_worker_lease() -> None:
+    lease = Settings.model_fields["inbound_worker_lease_seconds"].default
+    assert LLM_CALL_BUDGET_SECONDS < lease
+
+
+def test_settings_reject_a_lease_shorter_than_the_call_budget() -> None:
+    with pytest.raises(ValueError, match="inbound_worker_lease_seconds"):
+        Settings(
+            _env_file=None,  # type: ignore[call-arg]
+            database_url="postgresql://u:p@localhost:5432/db",
+            supabase_url="https://x.supabase.co",
+            supabase_service_role_key="k",
+            supabase_anon_key="k",
+            anthropic_api_key="k",
+            openai_api_key="k",
+            webhook_secret="k",
+            inbound_worker_lease_seconds=int(LLM_CALL_BUDGET_SECONDS),
+        )

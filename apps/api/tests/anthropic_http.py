@@ -7,6 +7,7 @@ el JSON y las cabeceras que habrían salido y decide qué devuelve la API.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -43,22 +44,34 @@ _ERROR_TYPES = {
 
 
 class RecordingAnthropic:
-    def __init__(self, *responses: dict[str, Any] | ApiError | ConnectionDrop) -> None:
+    def __init__(
+        self,
+        *responses: dict[str, Any] | ApiError | ConnectionDrop,
+        base: anthropic.AsyncAnthropic | None = None,
+        on_request: Callable[[float | None], None] | None = None,
+    ) -> None:
+        """`base`: un cliente de producción (p. ej. `build_anthropic_client`) del que se
+        conserva todo salvo el transporte. `on_request`: corre en cada intento (un reloj
+        falso que avanza lo que tarda la API)."""
         self.requests: list[dict[str, Any]] = []
         self.beta_headers: list[str | None] = []
         # Timeout de lectura con el que salió cada intento (`timeout=` de la petición).
         self.read_timeouts: list[float | None] = []
         self._responses = list(responses)
-        self.client = anthropic.AsyncAnthropic(
-            api_key="test-key",
-            max_retries=0,
-            http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(self._handle)),
+        self._on_request = on_request
+        http_client = httpx2.AsyncClient(transport=httpx2.MockTransport(self._handle))
+        self.client = (
+            base.copy(http_client=http_client)
+            if base is not None
+            else anthropic.AsyncAnthropic(api_key="test-key", max_retries=0, http_client=http_client)
         )
 
     def _handle(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(json.loads(request.content))
         self.beta_headers.append(request.headers.get("anthropic-beta"))
         self.read_timeouts.append(request.extensions.get("timeout", {}).get("read"))
+        if self._on_request is not None:
+            self._on_request(self.read_timeouts[-1])
         response = self._responses.pop(0)
         if isinstance(response, ConnectionDrop):
             raise httpx2.ConnectError("connection reset", request=request)

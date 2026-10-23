@@ -19,6 +19,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 AppEnv = Literal["development", "staging", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 
+# Tope de una llamada a Claude, reintentos y esperas incluidos. Por debajo del lease de
+# `inbound_jobs`: un turno colgado en el LLM no debe dejar que otro worker retome el job.
+LLM_CALL_BUDGET_SECONDS = 90.0
+
 
 class Settings(BaseSettings):
     """Settings cargadas desde .env o variables de entorno del SO.
@@ -134,6 +138,7 @@ class Settings(BaseSettings):
     rag_top_k: int = 5
     rag_min_similarity: float = 0.6
     history_limit: int = 20
+    # Intentos por llamada y tope de cada intento; el total lo acota LLM_CALL_BUDGET_SECONDS.
     llm_max_retries: int = 3
     llm_timeout_seconds: int = 30
 
@@ -201,6 +206,15 @@ class Settings(BaseSettings):
                 "— el schema de Supabase está fijado a ese tamaño"
             )
         return v
+
+    @model_validator(mode="after")
+    def _validate_lease_covers_llm_call(self) -> Self:
+        if self.inbound_worker_lease_seconds <= LLM_CALL_BUDGET_SECONDS:
+            raise ValueError(
+                f"inbound_worker_lease_seconds ({self.inbound_worker_lease_seconds}) debe "
+                f"superar el presupuesto de una llamada al LLM ({LLM_CALL_BUDGET_SECONDS:.0f} s)"
+            )
+        return self
 
 
 @lru_cache(maxsize=1)
