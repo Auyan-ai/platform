@@ -5535,7 +5535,7 @@ export interface operations {
     list_approvals_approvals_get: {
         parameters: {
             query?: {
-                status?: ("pending" | "approved" | "rejected") | null;
+                status?: ("pending" | "executing" | "approved" | "rejected" | "failed") | null;
                 limit?: number;
                 offset?: number;
             };
