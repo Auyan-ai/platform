@@ -108,6 +108,53 @@ async def test_refund_retries_a_lost_response_with_the_same_key(
     assert keys == [KEY, KEY, KEY]
 
 
+_CONCURRENT = {
+    "errors": [
+        {
+            "message": "A request with this idempotency key is currently being processed.",
+            "extensions": {"code": "IDEMPOTENCY_CONCURRENT_REQUEST"},
+        }
+    ]
+}
+
+
+@respx.mock
+async def test_refund_waits_for_the_original_request_still_in_flight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shopify sigue procesando el reembolso original: se espera y se repite con la
+    misma clave hasta recibir su resultado, en vez de darlo por no aplicado."""
+    monkeypatch.setattr("apps.api.integrations.shopify._IDEMPOTENT_RETRY_SECONDS", 0)
+    respx.get(f"{BASE}/orders/1001/transactions.json").respond(
+        200, json={"transactions": [_sale(3, "45.00")]}
+    )
+    graphql = respx.post(f"{BASE}/graphql.json").mock(
+        side_effect=[httpx.Response(200, json=_CONCURRENT), httpx.Response(200, json=_CREATED)]
+    )
+
+    out = await _client().refund_partial(1001, amount=Decimal("5"), idempotency_key=KEY)
+
+    assert out.refund_id == 77
+    assert graphql.call_count == 2
+
+
+@respx.mock
+async def test_refund_still_in_flight_after_every_retry_is_not_marked_not_applied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("apps.api.integrations.shopify._IDEMPOTENT_RETRY_SECONDS", 0)
+    respx.get(f"{BASE}/orders/1001/transactions.json").respond(
+        200, json={"transactions": [_sale(3, "45.00")]}
+    )
+    graphql = respx.post(f"{BASE}/graphql.json").respond(200, json=_CONCURRENT)
+
+    with pytest.raises(ShopifyActionError, match="IDEMPOTENCY_CONCURRENT_REQUEST") as raised:
+        await _client().refund_partial(1001, amount=Decimal("5"), idempotency_key=KEY)
+
+    assert not isinstance(raised.value, MutationNotApplied)
+    assert graphql.call_count > 2
+
+
 @respx.mock
 async def test_refund_user_errors_raise_without_retrying() -> None:
     respx.get(f"{BASE}/orders/1001/transactions.json").respond(

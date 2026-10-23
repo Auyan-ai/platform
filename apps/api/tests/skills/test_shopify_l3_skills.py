@@ -13,7 +13,13 @@ from uuid import UUID
 
 import pytest
 from apps.api.integrations.base import IntegrationContext, MutationNotApplied
-from apps.api.integrations.shopify import IssuedRefund, RefundableBalance, ShopifyActionError
+from apps.api.integrations.shopify import (
+    IssuedRefund,
+    MarkedRefund,
+    RefundableBalance,
+    ShopifyActionError,
+    snapshot_transaction,
+)
 from apps.api.skills.base import SkillContext, SkillRefusal
 from apps.api.skills.shopify._models import Money
 from apps.api.skills.shopify._order_guard import ActionOutcome
@@ -92,6 +98,7 @@ def _adapter(*snapshots: object) -> AsyncMock:
     adapter.get_order_snapshot = AsyncMock(side_effect=list(snapshots))
     adapter.cancel_order = AsyncMock(return_value={"id": 1001})
     adapter.update_shipping_address = AsyncMock(return_value={"id": 1001})
+    adapter.find_refund = AsyncMock(return_value=None)
     return adapter
 
 
@@ -422,6 +429,52 @@ class TestRefundPartial:
             ActionOutcome.CONFIRMED,
             True,
         )
+
+    @pytest.mark.asyncio
+    async def test_refund_already_issued_with_this_key_is_returned_not_created_again(
+        self,
+    ) -> None:
+        """Un intento anterior ya lo creó (pasadas las 24 h Shopify ya no deduplica):
+        se devuelve el reembolso marcado con la clave sin llamar a `refundCreate`."""
+        adapter = _adapter(snapshot(transactions=[CARD_SALE, tx(2, "REFUND")]))
+        adapter.find_refund = AsyncMock(
+            return_value=MarkedRefund(
+                refund_id=9001,
+                amount=Decimal("12.50"),
+                currency="GBP",
+                transactions=(snapshot_transaction(tx(2, "REFUND")),),
+            )
+        )
+        adapter.refund_partial = AsyncMock()
+
+        out = await RefundPartial().execute(
+            replace(_ctx(adapter), idempotency_key="aprob-1"),
+            RefundPartialInput(order_id=1001, amount="12.50"),
+        )
+
+        adapter.refund_partial.assert_not_awaited()
+        adapter.find_refund.assert_awaited_once_with(
+            _SHOPIFY_INTEGRATION_CTX, 1001, "aprob-1"
+        )
+        assert isinstance(out, RefundPartialOutput)
+        assert (out.refund_id, out.amount, out.outcome) == (
+            9001,
+            Money(amount="12.50", currency="GBP"),
+            ActionOutcome.CONFIRMED,
+        )
+
+    @pytest.mark.asyncio
+    async def test_refunds_unreadable_before_refunding_is_not_applied(self) -> None:
+        adapter = _adapter(snapshot(transactions=[CARD_SALE]))
+        adapter.find_refund = AsyncMock(side_effect=TimeoutError("read timeout"))
+        adapter.refund_partial = AsyncMock()
+
+        with pytest.raises(MutationNotApplied):
+            await RefundPartial().execute(
+                replace(_ctx(adapter), idempotency_key="aprob-1"),
+                RefundPartialInput(order_id=1001, amount="12.50"),
+            )
+        adapter.refund_partial.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_manual_gateway_refund_is_reported_as_manual(self) -> None:

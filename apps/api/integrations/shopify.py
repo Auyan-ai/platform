@@ -607,7 +607,9 @@ class ShopifyClient:
         self, client: httpx.AsyncClient, query: str, variables: dict[str, Any]
     ) -> dict[str, Any]:
         """Una mutación con `@idempotent`. Ante un corte de red o un 5xx no se sabe si
-        llegó: se repite con la misma clave y Shopify devuelve el resultado original."""
+        llegó, y con `IDEMPOTENCY_CONCURRENT_REQUEST` la original sigue en curso: se
+        repite con la misma clave y Shopify devuelve el resultado original. Agotados los
+        intentos se propaga el último error, que no dice si se aplicó."""
         for attempt in range(1, _IDEMPOTENT_ATTEMPTS + 1):
             try:
                 return await self._graphql(client, query, variables)
@@ -617,8 +619,11 @@ class ShopifyClient:
             except httpx.TransportError:
                 if attempt == _IDEMPOTENT_ATTEMPTS:
                     raise
+            except ShopifyGraphQLError as exc:
+                if _IDEMPOTENCY_CONCURRENT not in exc.codes or attempt == _IDEMPOTENT_ATTEMPTS:
+                    raise
             logger.warning("shopify.idempotent_retry attempt=%d", attempt)
-            await asyncio.sleep(_IDEMPOTENT_RETRY_SECONDS * attempt)
+            await asyncio.sleep(_IDEMPOTENT_RETRY_SECONDS * 2 ** (attempt - 1))
         raise AssertionError("unreachable")
 
     async def _graphql(
@@ -633,7 +638,7 @@ class ShopifyClient:
         response.raise_for_status()
         body = response.json()
         if body.get("errors"):
-            raise ShopifyActionError(f"graphql_errors: {body['errors']}")
+            raise ShopifyGraphQLError(body["errors"])
         return body["data"]  # type: ignore[no-any-return]
 
     async def start_return(
@@ -711,6 +716,16 @@ class ShopifyClient:
 
 class ShopifyActionError(RuntimeError):
     """Shopify no permite la acción con el estado actual del pedido."""
+
+
+class ShopifyGraphQLError(ShopifyActionError):
+    """Errores de nivel superior de la respuesta GraphQL (`errors`), con sus códigos."""
+
+    def __init__(self, errors: list[dict[str, Any]]) -> None:
+        super().__init__(f"graphql_errors: {errors}")
+        self.codes = frozenset(
+            str((e.get("extensions") or {}).get("code")) for e in errors if isinstance(e, dict)
+        )
 
 
 class ShopifyRejected(ShopifyActionError, MutationNotApplied):
@@ -962,8 +977,11 @@ mutation OrderCancel(
 }
 """
 
-_IDEMPOTENT_ATTEMPTS = 3
+# Esperas de 1, 2, 4 y 8 s: da tiempo a que termine una petición original en curso.
+_IDEMPOTENT_ATTEMPTS = 5
 _IDEMPOTENT_RETRY_SECONDS = 1.0
+# Shopify aún procesa la petición original con esta clave: repetirla devolverá su resultado.
+_IDEMPOTENCY_CONCURRENT = "IDEMPOTENCY_CONCURRENT_REQUEST"
 
 _REFUND_CREATE_MUTATION = """
 mutation RefundCreate($input: RefundInput!, $idempotencyKey: String!) {

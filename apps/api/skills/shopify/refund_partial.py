@@ -14,7 +14,8 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from apps.api.integrations.shopify import RefundMode, ShopifyAdapter
+from apps.api.integrations.base import MutationNotApplied
+from apps.api.integrations.shopify import MarkedRefund, RefundMode, RefundRoute, ShopifyAdapter
 from apps.api.skills.base import (
     ReconcileUnknown,
     Skill,
@@ -108,6 +109,18 @@ class RefundPartial(Skill):
             raise ValueError("idempotency_key_required")
         adapter = ctx.commerce_mock or ShopifyAdapter()
         before = await snapshot_before_mutation(adapter, ctx, inputs.order_id)
+        # Un intento anterior de esta aprobación pudo crearlo ya: pasadas 24 h Shopify no
+        # deduplica la clave y `refundCreate` crearía otro.
+        try:
+            issued = await adapter.find_refund(
+                ctx.integration_ctx, before.order_id, ctx.idempotency_key
+            )
+        except Exception as exc:
+            raise MutationNotApplied(
+                f"lectura previa a la mutación: {type(exc).__name__}: {exc}"
+            ) from exc
+        if issued is not None:
+            return _marked_output(inputs, issued, before.refund_route)
         refund = await adapter.refund_partial(
             ctx.integration_ctx,
             before.order_id,
@@ -138,16 +151,22 @@ class RefundPartial(Skill):
         if found is None:
             return None
         snapshot = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
-        route = snapshot.refund_route
-        verdict = refund_transactions_verdict(
-            route, tuple(t for t in found.transactions if t.kind == "refund")
-        )
-        return RefundPartialOutput(
-            order_id=inputs.order_id,
-            refund_id=found.refund_id,
-            amount=Money(amount=str(found.amount), currency=found.currency),
-            outcome=verdict.outcome,
-            detail=verdict.detail,
-            refund_mode=route.mode,
-            refund_gateway=route.gateway,
-        )
+        return _marked_output(inputs, found, snapshot.refund_route)
+
+
+def _marked_output(
+    inputs: RefundPartialInput, found: MarkedRefund, route: RefundRoute
+) -> RefundPartialOutput:
+    """El resultado de un reembolso ya creado con la marca de esta aprobación."""
+    verdict = refund_transactions_verdict(
+        route, tuple(t for t in found.transactions if t.kind == "refund")
+    )
+    return RefundPartialOutput(
+        order_id=inputs.order_id,
+        refund_id=found.refund_id,
+        amount=Money(amount=str(found.amount), currency=found.currency),
+        outcome=verdict.outcome,
+        detail=verdict.detail,
+        refund_mode=route.mode,
+        refund_gateway=route.gateway,
+    )

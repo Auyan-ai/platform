@@ -217,6 +217,9 @@ class MockShopifyAdapter:
         balance.require(amount)
         return IssuedRefund(refund_id=refund.get("id"), amount=amount, currency=balance.currency)
 
+    async def find_refund(self, ctx: Any, order_id: int, idempotency_key: str) -> None:
+        return None
+
     async def start_return(
         self,
         ctx: Any,
