@@ -143,11 +143,14 @@ algo que el código no verá. La tarjeta de aprobación lleva la referencia a ca
 
 ### 5. Liquidación
 
-`Settlement`, en la moneda de presentación del pedido y con la precisión que da Shopify, a
-partir de `returnCalculate`: artículos devueltos (subtotal más impuesto si el pedido no lo
-incluye), artículos de cambio, reposición, envío de vuelta según la culpa y `balance`
-(positivo: se le devuelve al cliente en `refund_as`; negativo: lo debe). En un cambio, la
-diferencia de precio se salda como diga `higher_price` o `lower_price`. Si la tarifa está en
+`Settlement`, en la moneda de presentación del pedido y redondeado a los decimales ISO 4217
+de esa moneda, a partir de `returnCalculate`: artículos devueltos (subtotal más impuesto si el
+pedido no lo incluye), artículos de cambio, reposición, envío de vuelta según la culpa y
+`balance` (positivo: se le devuelve al cliente; negativo: lo debe). En un cambio, la
+diferencia de precio entre lo que se recibe y las unidades devueltas a cambio se salda como
+diga `higher_price` o `lower_price`. En un cambio parcial, las unidades devueltas que no se
+cambian se reembolsan como en una devolución, según `refund_method` (`refund_as`), y no
+entran en `lower_price`; `payouts` reparte el saldo entre las dos formas. Si la tarifa está en
 otra moneda que el pedido o es el coste real de la etiqueta, el saldo queda pendiente para el
 humano. La liquidación va en la aprobación L3, en la salida de la skill y, tras crear la
 devolución, en la nota del pedido de Shopify. Si la nota no se puede escribir, la devolución

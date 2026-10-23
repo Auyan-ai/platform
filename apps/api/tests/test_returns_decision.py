@@ -739,3 +739,93 @@ def test_the_restocking_fee_rounds_to_the_decimals_of_the_currency(
     plan = _restocking(currency, subtotal, percent)
 
     assert str(plan.settlement.restocking_fee) == fee
+
+
+def _partial_swap(policy: ActivePolicy, exchanged: str, **kw: Any) -> ReturnPlan | Rejected:
+    """Devuelve 2 blusas (52.15 cada una) y pide 1 a cambio por `exchanged`."""
+    eligible = evaluate_return(
+        policy,
+        _order(),
+        reason_code="too_small",
+        items=(RequestedItem(line_item_id=501, quantity=2),),
+        exchange=SWAP,
+        variants=(BLUSA_M,),
+        evidence=NO_PHOTOS,
+        now=NOW,
+        **kw,
+    )
+    assert isinstance(eligible, Eligible), eligible
+    calculation = ReturnCalculation(
+        currency="EUR",
+        returned=(
+            CalculatedLine(
+                key="gid://shopify/FulfillmentLineItem/9001",
+                quantity=2,
+                subtotal=Decimal("-104.30"),
+                tax=Decimal("0"),
+            ),
+        ),
+        exchanged=(
+            CalculatedLine(
+                key="gid://shopify/ProductVariant/88",
+                quantity=1,
+                subtotal=Decimal(exchanged),
+                tax=Decimal("0"),
+            ),
+        ),
+    )
+    return build_plan(eligible, calculation, requested_at=NOW)
+
+
+def test_returned_units_not_exchanged_are_refunded_by_the_refund_method() -> None:
+    """Un cambio parcial no mete en `lower_price` las unidades que solo se devuelven: se
+    reembolsan como una devolución, según `refund_method`."""
+    plan = _partial_swap(_exchange_policy(lower_price="no_refund"), "52.15")
+
+    assert isinstance(plan, ReturnPlan)
+    s = plan.settlement
+    assert (s.exchanged_value, s.price_difference, s.price_rule) == (
+        Decimal("52.15"),
+        Decimal("0"),
+        "none",
+    )
+    assert s.balance == Decimal("52.15")
+    assert s.payouts == {"original_payment": Decimal("52.15")}
+    assert "A devolver al recibir: 52.15 EUR, al método de pago original" in plan.team_note()
+
+
+def test_a_partial_cheaper_exchange_splits_the_refund_and_the_credit() -> None:
+    plan = _partial_swap(_exchange_policy(lower_price="store_credit"), "40.00")
+
+    assert isinstance(plan, ReturnPlan)
+    assert plan.settlement.price_difference == Decimal("-12.15")
+    assert plan.settlement.balance == Decimal("64.30")
+    assert plan.settlement.payouts == {
+        "original_payment": Decimal("52.15"),
+        "store_credit": Decimal("12.15"),
+    }
+
+
+def test_a_partial_exchange_asks_how_to_refund_when_the_store_lets_choose() -> None:
+    policy = _policy(
+        refund_method="customer_choice",
+        exchanges=_exchange_policy().policy.exchanges.model_dump(),
+    )
+    ask = evaluate_return(
+        policy,
+        _order(),
+        reason_code="too_small",
+        items=(RequestedItem(line_item_id=501, quantity=2),),
+        exchange=SWAP,
+        variants=(BLUSA_M,),
+        evidence=NO_PHOTOS,
+        now=NOW,
+    )
+    full = _evaluate(policy, exchange=SWAP, variants=(BLUSA_M,))
+    chosen = _partial_swap(policy, "52.15", refund_preference="store_credit")
+
+    assert isinstance(ask, Rejected) and ask.code == "refund_preference_missing"
+    assert isinstance(full, Eligible)
+    assert isinstance(chosen, ReturnPlan)
+    # 52.15 de la blusa que solo se devuelve, menos la tarifa de 4.95 de la etiqueta.
+    assert chosen.settlement.payouts == {"store_credit": Decimal("47.20")}

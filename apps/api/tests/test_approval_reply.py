@@ -439,7 +439,11 @@ def test_cheaper_exchange_as_store_credit_after_receipt() -> None:
         ship_replacement="after_receipt",
         settlement=Settlement(
             currency="EUR",
-            returned=(SettlementLine(title="Blusa", quantity=1, amount=Decimal("52.15")),),
+            returned=(
+                SettlementLine(
+                    title="Blusa", quantity=1, amount=Decimal("52.15"), exchanged_quantity=1
+                ),
+            ),
             exchanged=(SettlementLine(title="Blusa M", quantity=1, amount=Decimal("40.00")),),
             shipping_payer="store",
             fee=Decimal("0"),
@@ -474,7 +478,11 @@ def test_an_exchange_the_customer_pays_never_mentions_a_refund() -> None:
         ship_replacement="immediately",
         settlement=Settlement(
             currency="EUR",
-            returned=(SettlementLine(title="Blusa", quantity=1, amount=Decimal("52.15")),),
+            returned=(
+                SettlementLine(
+                    title="Blusa", quantity=1, amount=Decimal("52.15"), exchanged_quantity=1
+                ),
+            ),
             exchanged=(SettlementLine(title="Blusa M", quantity=1, amount=Decimal("52.15")),),
             shipping_payer="customer",
             fee=Decimal("4.95"),
@@ -513,3 +521,40 @@ def test_money_is_written_with_the_decimals_of_the_currency(
     from apps.api.services.approval_reply import _money
 
     assert _money(Decimal(amount), currency, language) == text
+
+
+def test_a_partial_exchange_tells_the_refund_and_the_credit_apart() -> None:
+    from decimal import Decimal
+
+    from apps.api.services.approval_reply import outcome_message
+    from apps.api.services.returns import PlanExchangeLine, Settlement, SettlementLine
+
+    output = _return_output(
+        exchange_lines=(PlanExchangeLine(variant_id=9, title="Blusa M", quantity=1),),
+        ship_replacement="after_receipt",
+        settlement=Settlement(
+            currency="EUR",
+            returned=(
+                SettlementLine(
+                    title="Blusa", quantity=2, amount=Decimal("104.30"), exchanged_quantity=1
+                ),
+            ),
+            exchanged=(SettlementLine(title="Blusa M", quantity=1, amount=Decimal("40.00")),),
+            shipping_payer="store",
+            fee=Decimal("0"),
+            fee_pending=None,
+            fee_label_cost=False,
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="store_credit",
+            refund_as="original_payment",
+        ),
+    )
+
+    text = outcome_message("shopify.start_exchange", output, "es")
+
+    assert text.endswith(
+        "Cuando recibamos el artículo, te devolveremos 52,15 EUR en un plazo de 14 días. "
+        "Cuando recibamos el artículo, te abonaremos 12,15 EUR en crédito de la tienda en un "
+        "plazo de 14 días."
+    )

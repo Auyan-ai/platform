@@ -193,10 +193,12 @@ def return_next_steps(plan: ReturnPlan, language: str, tenant_default: str) -> s
             else "returns.exchange_you_owe"
         )
         steps.append(text(key, amount=owed))
-    elif s.balance > 0:
-        amount = _money(s.balance, s.currency, language)
-        key = "returns.exchange_credit" if credit else "returns.exchange_refund"
-        steps.append(text(key, amount=amount, days=days))
+    else:
+        # Lo que solo se devuelve, en `refund_as`; la diferencia, como diga la tienda.
+        for form, value in s.payouts.items():
+            amount = _money(value, s.currency, language)
+            key = "returns.exchange_credit" if form == "store_credit" else "returns.exchange_refund"
+            steps.append(text(key, amount=amount, days=days))
     return " ".join(steps)
 
 

@@ -151,6 +151,8 @@ class PlanLine(_Frozen):
     fulfillment_line_item_id: str
     title: str
     quantity: int
+    # De `quantity`, las unidades que se devuelven a cambio de otra; el resto se reembolsa.
+    exchanged_quantity: int = Field(default=0, ge=0)
 
 
 class PlanExchangeLine(_Frozen):
@@ -356,7 +358,9 @@ def evaluate_return(
         )
 
     terms = policy.exchanges
-    if exchange_lines:
+    # Las unidades que solo se devuelven se reembolsan como en una devolución
+    # (`refund_method`); en un cambio completo solo queda la diferencia (`lower_price`).
+    if exchange_lines and wanted_units == returned_units:
         refund_as: RefundPreference = (
             "store_credit" if terms.lower_price == "store_credit" else "original_payment"
         )
@@ -387,8 +391,11 @@ def evaluate_return(
                 fulfillment_line_item_id=line.fulfillment_line_item_id,
                 title=line.title,
                 quantity=qty,
+                exchanged_quantity=swapped,
             )
-            for line, qty in lines
+            for (line, qty), swapped in zip(
+                lines, _exchanged_units(lines, exchange_lines, by_id), strict=True
+            )
         ),
         exchange_lines=tuple(exchange_lines),
         evidence=evidence.photos if "photo" in reason.required_evidence else (),
@@ -408,6 +415,24 @@ def evaluate_return(
         )
         or ("photo" in reason.required_evidence and policy.evidence_requires_approval),
     )
+
+
+def _exchanged_units(
+    lines: list[tuple[ReturnableLine, int]],
+    exchange_lines: list[PlanExchangeLine],
+    variants: Mapping[int, ExchangeVariant],
+) -> list[int]:
+    """Cuántas unidades de cada línea devuelta van a cambio de las pedidas: primero las
+    del mismo producto que la variante, luego el resto en el orden del pedido."""
+    left = [qty for _, qty in lines]
+    for wanted in exchange_lines:
+        product = variants[wanted.variant_id].product_id
+        need = wanted.quantity
+        for i in sorted(range(len(lines)), key=lambda i: lines[i][0].product_id != product):
+            take = min(need, left[i])
+            left[i] -= take
+            need -= take
+    return [qty - rest for (_, qty), rest in zip(lines, left, strict=True)]
 
 
 # ─── Liquidación ──────────────────────────────────────────────────────────────
@@ -453,6 +478,19 @@ class SettlementLine(_Frozen):
     title: str
     quantity: int
     amount: Decimal
+    # Solo en lo devuelto: unidades que van a cambio de otra (el resto se reembolsa).
+    exchanged_quantity: int = 0
+
+
+def _exchanged_value(returned: Iterable[SettlementLine], currency: str) -> Decimal:
+    return sum(
+        (
+            round_money(ln.amount * ln.exchanged_quantity / ln.quantity, currency)
+            for ln in returned
+            if ln.exchanged_quantity
+        ),
+        Decimal("0"),
+    )
 
 
 class Settlement(BaseModel):
@@ -484,27 +522,54 @@ class Settlement(BaseModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
+    def exchanged_value(self) -> Decimal:
+        """Lo que vale lo devuelto que va a cambio de otra cosa."""
+        return _exchanged_value(self.returned, self.currency)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def price_difference(self) -> Decimal:
-        """Positivo: el artículo de cambio cuesta más que lo devuelto."""
-        return self.exchanged_total - self.returned_total if self.exchanged else Decimal("0")
+        """Positivo: lo que se recibe a cambio cuesta más que lo que se da por ello."""
+        return self.exchanged_total - self.exchanged_value if self.exchanged else Decimal("0")
+
+    @property
+    def difference_as(self) -> RefundPreference:
+        """Cómo se devuelve la diferencia de un cambio más barato (`lower_price`)."""
+        return "store_credit" if self.price_rule == "store_credit" else "original_payment"
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def balance(self) -> Decimal | None:
-        """Lo que se le devuelve al cliente (positivo, en `refund_as`) o lo que debe
-        (negativo), según la política. None si falta decidir la tarifa de envío."""
+        """Lo que se le devuelve al cliente (positivo) o lo que debe (negativo), según la
+        política. None si falta decidir la tarifa de envío. Cómo se le devuelve, en
+        `payouts`."""
+        payouts = self._pots()
+        return None if payouts is None else sum(payouts.values(), Decimal("0"))
+
+    @property
+    def payouts(self) -> dict[RefundPreference, Decimal]:
+        """El saldo por forma de devolverlo: las unidades que solo se devuelven en
+        `refund_as` y la diferencia de un cambio más barato en `difference_as`. Vacío si el
+        saldo no es positivo o está pendiente."""
+        pots = self._pots()
+        if pots is None or sum(pots.values(), Decimal("0")) <= 0:
+            return {}
+        return {form: amount for form, amount in pots.items() if amount}
+
+    def _pots(self) -> dict[RefundPreference, Decimal] | None:
         if self.fee_pending is not None or self.fee_label_cost:
             return None
         diff = self.price_difference
-        if not self.exchanged:
-            items = self.returned_total
-        elif diff < 0 and self.price_rule in ("refund_difference", "store_credit"):
-            items = -diff
-        elif diff > 0 and self.price_rule == "customer_pays":
-            items = -diff
-        else:
-            items = Decimal("0")
-        return items - self.restocking_fee - self.fee
+        owed = diff if diff > 0 and self.price_rule == "customer_pays" else Decimal("0")
+        refunded = self.returned_total - self.exchanged_value
+        pots = {self.refund_as: refunded - owed - self.restocking_fee - self.fee}
+        if diff < 0 and self.price_rule in ("refund_difference", "store_credit"):
+            pots[self.difference_as] = pots.get(self.difference_as, Decimal("0")) - diff
+        # Los gastos salen primero del reembolso; si no alcanza, de la diferencia.
+        if len(pots) == 2 and pots[self.refund_as] < 0:
+            pots[self.difference_as] += pots[self.refund_as]
+            pots[self.refund_as] = Decimal("0")
+        return pots
 
 
 class ReturnPlan(_Frozen):
@@ -548,7 +613,9 @@ class ReturnPlan(_Frozen):
             f"Motivo: {self.reason_label} [{self.reason_code}], culpa {_FAULT_LABEL[self.fault]}",
         ]
         rows += [
-            f"Devuelve: {ln.quantity} x {ln.title} = {ln.amount} {s.currency}" for ln in s.returned
+            f"Devuelve: {ln.quantity} x {ln.title} = {ln.amount} {s.currency}"
+            + (f" ({ln.exchanged_quantity} a cambio)" if ln.exchanged_quantity else "")
+            for ln in s.returned
         ]
         rows += [
             f"Envía: {ln.quantity} x {ln.title} = {ln.amount} {s.currency}" for ln in s.exchanged
@@ -583,8 +650,9 @@ class ReturnPlan(_Frozen):
         if s.balance is None:
             rows.append("Saldo: pendiente de la tarifa de envío")
         elif s.balance >= 0:
-            how = _REFUND_LABEL[s.refund_as]
-            rows.append(f"A devolver al recibir: {s.balance} {s.currency}, {how}")
+            for form, amount in (s.payouts or {s.refund_as: s.balance}).items():
+                how = _REFUND_LABEL[form]
+                rows.append(f"A devolver al recibir: {amount} {s.currency}, {how}")
         else:
             rows.append(f"A cobrar al cliente: {-s.balance} {s.currency}")
         return "\n".join(rows)
@@ -641,6 +709,7 @@ def build_plan(
             amount=_amount(
                 returned[ln.fulfillment_line_item_id], taxes_included=eligible.taxes_included
             ),
+            exchanged_quantity=ln.exchanged_quantity,
         )
         for ln in eligible.lines
     )
@@ -656,7 +725,9 @@ def build_plan(
         for ln in eligible.exchange_lines
     )
     returned_total = sum((ln.amount for ln in returned_lines), Decimal("0"))
-    difference = sum((ln.amount for ln in exchanged_lines), Decimal("0")) - returned_total
+    difference = sum((ln.amount for ln in exchanged_lines), Decimal("0")) - _exchanged_value(
+        returned_lines, calculation.currency
+    )
     if eligible.exchange_lines and difference > 0 and eligible.higher_price == "not_allowed":
         return Rejected(
             "exchange_price_higher",
