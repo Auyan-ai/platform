@@ -754,7 +754,9 @@ def test_every_l3_skill_declares_idempotency() -> None:
         for _, cls in inspect.getmembers(
             importlib.import_module(f"{shopify_skills.__name__}.{info.name}"), inspect.isclass
         )
-        if issubclass(cls, Skill) and cls is not Skill and getattr(cls, "tier", None) == "L3"
+        if issubclass(cls, Skill)
+        and hasattr(cls, "slug")  # sin slug es una base común (p. ej. _ReturnSkill)
+        and getattr(cls, "tier", None) == "L3"
     ]
     assert {s.slug for s in l3} >= {"shopify.cancel_order", "shopify.refund_partial"}
     assert [s.slug for s in l3 if not s.requires_idempotency] == []
