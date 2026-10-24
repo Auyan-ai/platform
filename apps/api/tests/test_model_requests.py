@@ -495,7 +495,7 @@ class TestReasonOn55:
         assert first["pending_tool_call"]["slug"] == POLICIES
 
         next_state = _with_policies(_reason_state("claude-sonnet-5-5"), hops=1)
-        next_state["tool_use_thinking"] = first["tool_use_thinking"]
+        next_state["assistant_turns"] = first["assistant_turns"]
         api, _ = await run_reason(
             fake_deps,
             next_state,
@@ -515,6 +515,42 @@ class TestReasonOn55:
                 },
             ],
         }
+
+    @pytest.mark.asyncio
+    async def test_the_whole_assistant_turn_is_replayed_and_unrun_tools_get_a_result(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        """Texto entre tools y `tool_use` en paralelo vuelven tal cual: el turno replayado es
+        el que escribió el modelo. Se ejecuta una tool por vuelta; las demás reciben un
+        `tool_result` de error que lo dice (la API exige un resultado por `tool_use`)."""
+        turn = [
+            thinking("sig_hop0"),
+            text("Miro las políticas."),
+            tool_use("shopify_get_shop_policies", {}, id="toolu_hop0"),
+            tool_use("shopify_get_shop_policies", {"topic": "returns"}, id="toolu_extra"),
+        ]
+        _, first = await run_reason(
+            fake_deps,
+            _with_policies(_reason_state("claude-sonnet-5-5"), hops=0),
+            message(*turn, model="claude-sonnet-5-5"),
+        )
+        assert first["pending_tool_call"]["id"] == "toolu_hop0"
+
+        next_state = _with_policies(_reason_state("claude-sonnet-5-5"), hops=1)
+        next_state["assistant_turns"] = first["assistant_turns"]
+        api, _ = await run_reason(
+            fake_deps,
+            next_state,
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-sonnet-5-5"),
+        )
+
+        assistant, results = api.requests[0]["messages"][-2:]
+        assert assistant == {"role": "assistant", "content": turn}
+        assert [r["tool_use_id"] for r in results["content"]] == ["toolu_hop0", "toolu_extra"]
+        executed, unrun = results["content"]
+        assert executed["is_error"] is False
+        assert unrun["is_error"] is True
+        assert "no se ejecutó" in unrun["content"]
 
     @pytest.mark.asyncio
     async def test_exhausted_iterations_steer_to_the_decide_tool(

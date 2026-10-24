@@ -255,9 +255,11 @@ class ToolDecision:
 
 @dataclass(frozen=True)
 class ToolCalled:
+    # La primera tool llamada: la que se ejecuta.
     block: Any
-    # Thinking blocks previos a la tool, para devolverlos intactos en la siguiente vuelta.
-    thinking: list[dict[str, Any]]
+    # El turno del assistant entero (thinking, texto, `tool_use` en paralelo), para
+    # devolverlo intacto en la siguiente vuelta del loop.
+    content: list[dict[str, Any]]
     usage: LLMUsage
 
 
@@ -361,13 +363,9 @@ def read_decision(response: Any, usage: LLMUsage) -> ToolCalled | NoDecision:
         return NoDecision("refusal", category or "sin_categoria", usage)
     if stop_reason == "max_tokens":
         return NoDecision("max_tokens", "", usage)
-    thinking: list[dict[str, Any]] = []
     for block in response.content:
-        block_type = getattr(block, "type", None)
-        if block_type == "tool_use":
-            return ToolCalled(block, thinking, usage)
-        if block_type in ("thinking", "redacted_thinking"):
-            thinking.append(_as_param(block))
+        if getattr(block, "type", None) == "tool_use":
+            return ToolCalled(block, [_as_param(b) for b in response.content], usage)
     return NoDecision("tool_not_called", str(stop_reason), usage)
 
 

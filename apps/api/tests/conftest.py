@@ -177,6 +177,10 @@ class _ToolUseBlock:
         self.name = name
         self.id = id
 
+    def model_dump(self, **_kwargs: Any) -> dict[str, Any]:
+        """Como el bloque del SDK: `reason` guarda el turno del assistant para replayarlo."""
+        return {"type": self.type, "id": self.id, "name": self.name, "input": self.input}
+
 
 class _Usage:
     def __init__(self, input_tokens: int, output_tokens: int) -> None:

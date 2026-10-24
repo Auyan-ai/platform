@@ -112,51 +112,71 @@ def agent_system_blocks(state: AgentState) -> list[dict[str, Any]]:
     )
 
 
+UNRUN_TOOL_RESULT = (
+    "Esta herramienta no se ejecutó: se ejecuta una por vuelta. "
+    "Si todavía la necesitas, vuelve a pedirla."
+)
+
+
+def _tool_result_block(result: dict[str, Any]) -> dict[str, Any]:
+    if result["is_error"]:
+        text = result.get("error") or "unknown_error"
+    else:
+        text = json.dumps(result["output"], ensure_ascii=False)
+    return {
+        "type": "tool_result",
+        "tool_use_id": result["id"],
+        "content": text,
+        "is_error": result["is_error"],
+    }
+
+
 def _append_tool_result_blocks(
     messages: list[dict[str, Any]],
     tool_results: list[dict[str, Any]],
-    tool_use_thinking: dict[str, list[dict[str, Any]]] | None = None,
+    assistant_turns: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Appendea los ciclos tool_use/tool_result de iteraciones previas al historial.
 
     Anthropic espera, después del último mensaje user del cliente:
-        [{role: assistant, content: [thinking blocks..., tool_use block]},
-         {role: user,      content: [tool_result block]},
+        [{role: assistant, content: [thinking..., texto..., tool_use...]},
+         {role: user,      content: [un tool_result por tool_use]},
          ...]
-    Los thinking blocks (solo los hay con thinking encendido) vuelven intactos: con
-    thinking, la API exige que el turno del assistant previo al tool_result empiece por ellos.
+    El turno del assistant vuelve tal como lo escribió el modelo (`assistant_turns`, por id
+    de la tool ejecutada): con thinking preservado, cambiarlo invalida sus thinking blocks.
+    Se ejecuta una tool por vuelta; un `tool_use` en paralelo que no corrió recibe un
+    `tool_result` de error que lo dice. Sin turno guardado se reconstruye el `tool_use`.
     """
-    thinking_by_id = tool_use_thinking or {}
+    turns = assistant_turns or {}
     for result in tool_results:
-        anthropic_name = result["slug"].replace(".", "_")
-        messages.append(
-            {
-                "role": "assistant",
-                "content": [
-                    *thinking_by_id.get(result["id"], []),
-                    {
-                        "type": "tool_use",
-                        "id": result["id"],
-                        "name": anthropic_name,
-                        "input": result["input"],
-                    },
-                ],
-            }
+        stored = turns.get(result["id"])
+        content: list[dict[str, Any]] = (
+            stored["content"]
+            if stored
+            else [
+                {
+                    "type": "tool_use",
+                    "id": result["id"],
+                    "name": result["slug"].replace(".", "_"),
+                    "input": result["input"],
+                }
+            ]
         )
-        if result["is_error"]:
-            tool_result_text = result.get("error") or "unknown_error"
-        else:
-            tool_result_text = json.dumps(result["output"], ensure_ascii=False)
+        messages.append({"role": "assistant", "content": content})
         messages.append(
             {
                 "role": "user",
                 "content": [
-                    {
+                    _tool_result_block(result)
+                    if block["id"] == result["id"]
+                    else {
                         "type": "tool_result",
-                        "tool_use_id": result["id"],
-                        "content": tool_result_text,
-                        "is_error": result["is_error"],
+                        "tool_use_id": block["id"],
+                        "content": UNRUN_TOOL_RESULT,
+                        "is_error": True,
                     }
+                    for block in content
+                    if block.get("type") == "tool_use"
                 ],
             }
         )
@@ -322,7 +342,7 @@ def make_reason_node(
         system_blocks = agent_system_blocks(state)
         messages = build_message_history(state["conversation_history"])
         messages = _append_tool_result_blocks(
-            messages, state.get("tool_results", []), state.get("tool_use_thinking")
+            messages, state.get("tool_results", []), state.get("assistant_turns")
         )
 
         allowed_skills = _visible_skills(state)
@@ -445,23 +465,16 @@ def make_reason_node(
                 status="pending",
             )
 
-        thinking_update: dict[str, Any] = (
-            {
-                "tool_use_thinking": {
-                    **(state.get("tool_use_thinking") or {}),
-                    tool_block.id: outcome.thinking,
-                }
-            }
-            if outcome.thinking
-            else {}
-        )
         return {
             "pending_tool_call": {
                 "id": tool_block.id,
                 "slug": slug,
                 "input": tool_block.input,
             },
-            **thinking_update,
+            "assistant_turns": {
+                **(state.get("assistant_turns") or {}),
+                tool_block.id: {"content": outcome.content},
+            },
             # Anular la decisión de la pasada anterior (espejo del caso decide):
             # si el supervisor rechazó un respond y el retry pide una tool, el
             # agent_response rechazado quedaría en el state y escalate lo
