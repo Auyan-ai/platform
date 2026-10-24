@@ -191,15 +191,18 @@ class _ReturnSkill(Skill):
     @classmethod
     def approval_key(cls, inputs: dict[str, Any]) -> dict[str, Any]:
         # Solo lo que pidió el cliente: el plan lleva la hora de la petición y la nota,
-        # que cambian en cada intento de la misma devolución.
+        # que cambian en cada intento de la misma devolución. La forma del reembolso es la
+        # que resolvió la política (`refund_as`), no la preferencia cruda del LLM, que la
+        # política puede ignorar; sin plan (antes de `prepare`), la preferencia.
         def rows(key: str, id_field: str) -> list[tuple[Any, Any]]:
             return sorted((r.get(id_field), r.get("quantity")) for r in inputs.get(key) or [])
 
+        plan = inputs.get("plan")
         return {
             "items": rows("items", "line_item_id"),
             "exchange_items": rows("exchange_items", "variant_id"),
             "reason_code": inputs.get("reason_code"),
-            "refund_preference": inputs.get("refund_preference"),
+            "refund": plan["settlement"]["refund_as"] if plan else inputs.get("refund_preference"),
         }
 
     @classmethod

@@ -548,3 +548,26 @@ async def test_fees_above_the_refund_escalate_with_a_fixed_text_and_no_amount() 
     )
     assert "USD" not in exc.value.customer_message
     assert "76.95 USD" in exc.value.team_reason
+
+
+async def test_the_approval_key_uses_the_resolved_refund_form() -> None:
+    """Una preferencia que la política ignora no distingue dos peticiones; con
+    `customer_choice`, sí."""
+    from apps.api.agents.nodes.execute_skill import _same_order_action
+
+    shopify = FakeShopify()
+    fixed = _policy(refund_method="original_payment")
+    silent = await StartReturn().prepare(_ctx(shopify, fixed), RAW)
+    ignored = await StartReturn().prepare(
+        _ctx(shopify, fixed), {**RAW, "refund_preference": "store_credit"}
+    )
+    choice = _policy(refund_method="customer_choice")
+    money = await StartReturn().prepare(
+        _ctx(shopify, choice), {**RAW, "refund_preference": "original_payment"}
+    )
+    credit = await StartReturn().prepare(
+        _ctx(shopify, choice), {**RAW, "refund_preference": "store_credit"}
+    )
+
+    assert await _same_order_action({}, silent, ignored, StartReturn) is True
+    assert await _same_order_action({}, money, credit, StartReturn) is False
