@@ -633,6 +633,27 @@ class TestTenantModelIncompatibleWithRoleSettings:
         assert out["decision"] == "respond"
 
 
+@pytest.mark.asyncio
+async def test_between_tools_loop_has_room_for_progress_notes(
+    fake_deps: AgentDependencies, _env: pytest.MonkeyPatch
+) -> None:
+    """Con `between_tools` el modelo escribe notas de progreso (thinking blocks) antes de la
+    tool: con 1024 tokens la decisión se cortaba en `NoDecision("max_tokens")`."""
+    _env.setenv("THINKING_BY_ROLE", '{"default_agent_model": "off"}')
+    get_models.cache_clear()
+    state = _with_policies(_reason_state("claude-sonnet-5-5"), hops=0)
+
+    api, _ = await run_reason(
+        fake_deps,
+        state,
+        message(tool_use("respond_or_escalate", RESPOND), model="claude-sonnet-5-5"),
+    )
+
+    body = api.requests[0]
+    assert body["thinking"] == {"type": "between_tools"}
+    assert body["max_tokens"] >= 16000
+
+
 class TestSelectAopOn55:
     @pytest.mark.asyncio
     async def test_classifier_with_thinking_off_and_low_effort(

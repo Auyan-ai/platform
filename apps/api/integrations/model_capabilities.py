@@ -155,6 +155,12 @@ class ThinkingSettings:
     def thinking_on(self) -> bool:
         return self.thinking is not None and self.thinking["type"] == "adaptive"
 
+    @property
+    def writes_thinking_blocks(self) -> bool:
+        """Adaptive piensa; `between_tools` no piensa, pero escribe notas de progreso como
+        thinking blocks antes de cada tool. Las dos cuentan contra `max_tokens`."""
+        return self.thinking is not None
+
     def request_options(self) -> dict[str, Any]:
         """Campos de `messages.create`. Vacío en los modelos actuales sin elección por rol."""
         options: dict[str, Any] = {}

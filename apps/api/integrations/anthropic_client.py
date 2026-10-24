@@ -236,8 +236,9 @@ async def call_claude_with_tools(
     return last_response
 
 
-# Con thinking, los tokens de pensar cuentan contra `max_tokens`: un límite pensado para
-# una respuesta corta cortaría la decisión antes de la tool.
+# Con thinking (adaptive, o las notas de progreso de `between_tools`), esos tokens cuentan
+# contra `max_tokens`: un límite pensado para una respuesta corta cortaría la decisión
+# antes de la tool.
 THINKING_MIN_MAX_TOKENS = 16_000
 # Con `auto` el modelo puede contestar sin tool: un reintento con la instrucción explícita.
 NO_TOOL_RETRIES = 1
@@ -336,7 +337,11 @@ def decision_request(
             for tool in tools
         ],
         tool_choice={"type": "auto"},
-        max_tokens=max(max_tokens, THINKING_MIN_MAX_TOKENS) if thinking.thinking_on else max_tokens,
+        max_tokens=(
+            max(max_tokens, THINKING_MIN_MAX_TOKENS)
+            if thinking.writes_thinking_blocks
+            else max_tokens
+        ),
         options=options,
         forced=False,
     )
@@ -484,7 +489,7 @@ async def call_claude_text(
     kwargs: dict[str, Any] = {
         "model": model,
         "max_tokens": max(max_tokens, THINKING_MIN_MAX_TOKENS)
-        if thinking.thinking_on
+        if thinking.writes_thinking_blocks
         else max_tokens,
         "system": system,
         "messages": messages,
