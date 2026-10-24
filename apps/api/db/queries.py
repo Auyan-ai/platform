@@ -1238,6 +1238,39 @@ async def resolve_open_escalations_for_conversation(
     return int(result.split()[-1])
 
 
+async def resolve_open_escalations_for_approval(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID, approval_id: UUID
+) -> int:
+    """Al cerrar la aprobación `approval_id`: resuelve las escalaciones activas de la
+    conversación salvo las de OTRA aprobación (#393). De otra aprobación son el gate
+    `awaiting_human_approval:<id>` de una que sigue pending/executing y el seguimiento
+    del equipo (`metadata.approval_id`). Las demás, incluida una escalación previa del
+    agente por la misma petición (tickets #29/#31), se cierran. Devuelve cuántas cerró."""
+    result = await conn.execute(
+        """
+        UPDATE escalations e
+           SET status = 'resolved'::escalation_status
+         WHERE e.tenant_id = $1 AND e.conversation_id = $2
+           AND e.status IN ('pending', 'claimed')
+           AND e.deleted_at IS NULL
+           AND coalesce(e.metadata->>'approval_id', $3::uuid::text) = $3::uuid::text
+           AND NOT EXISTS (
+               SELECT 1 FROM pending_approvals pa
+                WHERE pa.tenant_id = e.tenant_id
+                  AND pa.conversation_id = e.conversation_id
+                  AND pa.id <> $3::uuid
+                  AND pa.status IN ('pending', 'executing')
+                  AND pa.deleted_at IS NULL
+                  AND e.reason = 'awaiting_human_approval:' || pa.id::text
+           )
+        """,
+        tenant_id,
+        conversation_id,
+        approval_id,
+    )
+    return int(result.split()[-1])
+
+
 async def reactivate_escalated_conversation(
     conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID
 ) -> bool:

@@ -22,6 +22,7 @@ from apps.api.agents.nodes.execute_skill import make_execute_skill_node
 from apps.api.agents.nodes.respond import make_respond_node
 from apps.api.db.inbound_jobs import inbound_already_answered
 from apps.api.services.approval_reply import done_followup_message
+from apps.api.skills.base import SkillRefusal
 
 from tests.test_approvals_pg import (  # noqa: F401
     DSN,
@@ -255,3 +256,69 @@ async def test_a_decision_between_the_gate_and_escalate_leaves_no_orphan_escalat
 
     assert await _open_escalations(pool, s) == [], "escalación del gate huérfana"
     assert await _conversation_status(pool, s) == conversation
+
+
+# ----------------------------------------------------------------
+# #393
+# ----------------------------------------------------------------
+
+
+async def _escalate_earlier(pool: asyncpg.Pool, s: Seeded, reason: str) -> None:
+    """Una escalación previa del agente que no es de ninguna aprobación."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "insert into escalations (tenant_id, conversation_id, reason) values ($1, $2, $3)",
+            s.tenant_id,
+            s.conversation_id,
+            reason,
+        )
+        await conn.execute(
+            "update conversations set status = 'escalated' where id = $1", s.conversation_id
+        )
+
+
+@pytest.mark.parametrize("refused", [False, True], ids=["ejecutada", "rechazada_por_regla"])
+async def test_settling_one_approval_keeps_the_gate_of_another_pending_one(
+    pool: asyncpg.Pool, fake_skill: type[FakeL3], fake_deps: AgentDependencies, refused: bool
+) -> None:
+    """#393: dos aprobaciones pendientes en la conversación. Cerrar una no cierra la
+    escalación del gate de la otra y la conversación sigue escalada. Una escalación previa
+    que no es de ninguna aprobación sí se cierra al ejecutar (tickets #29/#31)."""
+    s = await _seed_conversation(pool)
+    await _escalate_earlier(pool, s, "pedido_no_entregado")
+    first = uuid.UUID((await _turn(pool, fake_deps, s, order_id=1001))["pending_approval_id"])
+    second = uuid.UUID((await _turn(pool, fake_deps, s, order_id=1002))["pending_approval_id"])
+    assert await _open_escalations(pool, s) == [
+        "pedido_no_entregado",
+        f"awaiting_human_approval:{first}",
+        f"awaiting_human_approval:{second}",
+    ]
+    fake_skill.gate.set()
+    team_reason = "El pedido 1001 salió mientras esperaba la aprobación."
+    if refused:
+        fake_skill.refusal = SkillRefusal(
+            "order_shipped", customer_message="Tu pedido ya salió.", team_reason=team_reason
+        )
+
+    async with _client(s) as c:
+        assert (await c.post(f"/approvals/{first}/approve", json={})).status_code == 200
+
+    gate_of_second = f"awaiting_human_approval:{second}"
+    if refused:
+        assert await _open_escalations(pool, s) == [gate_of_second, team_reason]
+    else:
+        assert await _open_escalations(pool, s) == [gate_of_second]
+    assert await _conversation_status(pool, s) == "escalated"
+    assert dict(await _approvals(pool, s))[second] == "pending"
+
+    fake_skill.refusal = None
+    async with _client(s) as c:
+        assert (await c.post(f"/approvals/{second}/approve", json={})).status_code == 200
+    if refused:
+        # El seguimiento del equipo es de la primera aprobación: aprobar la segunda no
+        # lo cierra.
+        assert await _open_escalations(pool, s) == [team_reason]
+        assert await _conversation_status(pool, s) == "escalated"
+    else:
+        assert await _open_escalations(pool, s) == []
+        assert await _conversation_status(pool, s) == "resolved"

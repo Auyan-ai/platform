@@ -258,7 +258,10 @@ async def _settle_applied(
         )
         if followup is None:
             await release_escalations_after_executed_action(
-                conn, tenant_id=tenant_id, conversation_id=approval.conversation_id
+                conn,
+                tenant_id=tenant_id,
+                conversation_id=approval.conversation_id,
+                approval_id=approval.id,
             )
         else:
             await hand_approval_to_team(
