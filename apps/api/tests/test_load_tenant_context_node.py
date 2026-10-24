@@ -67,6 +67,33 @@ async def test_happy_path(fake_deps, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_model_without_capabilities_row_falls_back_to_the_default(
+    fake_deps, monkeypatch, caplog
+) -> None:
+    """`tenant_configurations.agent_model` se escribe por SQL: un ID sin fila (alias, typo)
+    no tumba los turnos del tenant ni se cobra a tarifa máxima. Corre el modelo por defecto
+    y queda un error con el tenant y el ID."""
+    from apps.api.core.config import get_models
+
+    _patch_module(
+        monkeypatch,
+        tenant=make_tenant(),
+        config=make_tenant_configuration(agent_model="claude-haiku-4-5"),
+        system_prompt="Eres el agente de Acme.",
+    )
+    node = make_load_tenant_context_node(fake_deps)
+
+    with caplog.at_level("ERROR"):
+        out = await node(_state())
+
+    assert out["model_used"] == get_models().default_agent_model
+    assert any(
+        "tenant_agent_model_unsupported" in r.getMessage() and "claude-haiku-4-5" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+@pytest.mark.asyncio
 async def test_tenant_not_found(fake_deps, monkeypatch) -> None:
     _patch_module(monkeypatch, tenant=None, config=None, system_prompt=None)
     node = make_load_tenant_context_node(fake_deps)

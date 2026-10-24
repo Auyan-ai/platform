@@ -585,6 +585,54 @@ class TestReasonOn55:
         assert out["error"] == "llm_no_decision: tool_not_called (end_turn)"
 
 
+class TestTenantModelIncompatibleWithRoleSettings:
+    """El thinking/esfuerzo por rol se valida al cargar contra el modelo del rol, no contra
+    el `agent_model` que fije un tenant. Un tenant incompatible no escala cada turno: la
+    petición degrada al ajuste por defecto de su modelo y queda un error."""
+
+    @pytest.mark.asyncio
+    async def test_opus_5_5_with_thinking_off_by_role_degrades_to_its_default(
+        self,
+        fake_deps: AgentDependencies,
+        _env: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        _env.setenv("THINKING_BY_ROLE", '{"default_agent_model": "off"}')
+        get_models.cache_clear()
+        state = _with_policies(_reason_state("claude-opus-5-5"), hops=0)
+
+        with caplog.at_level("ERROR"):
+            api, out = await run_reason(
+                fake_deps,
+                state,
+                message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+            )
+
+        _assert_valid_5_5_request(api.requests[0], decision_tool="respond_or_escalate")
+        assert out["decision"] == "respond"
+        assert any(
+            "model_setting_degraded" in r.getMessage() and "claude-opus-5-5" in r.getMessage()
+            for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_haiku_with_effort_by_role_drops_the_effort(
+        self, fake_deps: AgentDependencies, _env: pytest.MonkeyPatch
+    ) -> None:
+        _env.setenv("EFFORT_BY_ROLE", '{"default_agent_model": "low"}')
+        get_models.cache_clear()
+        state = _with_policies(_reason_state("claude-haiku-4-5-20251001"), hops=0)
+
+        api, out = await run_reason(
+            fake_deps,
+            state,
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-haiku-4-5-20251001"),
+        )
+
+        assert "output_config" not in api.requests[0]
+        assert out["decision"] == "respond"
+
+
 class TestSelectAopOn55:
     @pytest.mark.asyncio
     async def test_classifier_with_thinking_off_and_low_effort(

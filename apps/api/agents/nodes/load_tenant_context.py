@@ -11,6 +11,7 @@ from uuid import UUID
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.state import AgentState
+from apps.api.core.config import get_models
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import (
     get_active_system_prompt,
@@ -97,7 +98,7 @@ def make_load_tenant_context_node(
             "tenant_config": config_dump,
             "tenant_name": tenant.name,
             "system_prompt": system_prompt,
-            "model_used": config.agent_model,
+            "model_used": get_models().agent_model_for(config.agent_model),
             "tool_permissions": tool_permissions,
             "commerce_integration_ctx": commerce_integration_ctx,
             "tenant_playbook": playbook.model_dump(mode="json") if playbook else None,
