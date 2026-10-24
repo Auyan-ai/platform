@@ -8,6 +8,7 @@ from functools import lru_cache
 from typing import Literal, Self
 
 from apps.api.integrations.model_capabilities import (
+    MODEL_CAPABILITIES,
     Effort,
     ThinkingMode,
     ThinkingSettings,
@@ -287,8 +288,19 @@ class ModelRegistry(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_role_settings(self) -> Self:
-        """Falla al cargar si un rol pide algo que su modelo rechazaría con un 400."""
+        """Falla al cargar si un rol usa un modelo sin fila en la tabla de capacidades (la
+        petición cambiaría y se cobraría a la tarifa máxima) o pide algo que su modelo
+        rechazaría con un 400. En Cloud Run, la revisión no arranca y no se promueve."""
         roles = self.by_role()
+        unknown_models = {
+            role: model for role, model in roles.items() if model not in MODEL_CAPABILITIES
+        }
+        if unknown_models:
+            listed = ", ".join(f"{role}={model}" for role, model in sorted(unknown_models.items()))
+            raise ValueError(
+                f"modelos sin fila en integrations/model_capabilities.py: {listed}. "
+                f"IDs válidos: {sorted(MODEL_CAPABILITIES)}"
+            )
         unknown = (set(self.thinking_by_role) | set(self.effort_by_role)) - set(roles)
         if unknown:
             raise ValueError(f"roles desconocidos en thinking/effort_by_role: {sorted(unknown)}")
