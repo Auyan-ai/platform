@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from typing import Any, ClassVar
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 from apps.api.agents.dependencies import AgentDependencies
@@ -31,6 +32,7 @@ from apps.api.skills.base import (
     SkillTier,
 )
 from apps.api.skills.registry import SkillRegistry
+from pydantic.json_schema import SkipJsonSchema
 
 # ----------------------------------------------------------------
 # Skill dummy
@@ -105,6 +107,23 @@ def _registry() -> Generator[None, None, None]:
 @pytest.fixture
 def deps(fake_deps: AgentDependencies) -> AgentDependencies:
     return fake_deps
+
+
+@pytest.fixture(autouse=True)
+def _no_live_approval(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Por defecto la conversación no tiene aprobaciones: una L3 consulta la última antes
+    de `prepare`. Los tests del gate la sustituyen con la suya."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _scope(*args: Any, **kwargs: Any) -> Any:
+        yield AsyncMock()
+
+    monkeypatch.setattr("apps.api.agents.nodes.execute_skill.tenant_scope", _scope)
+    monkeypatch.setattr(
+        "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
+        AsyncMock(return_value=None),
+    )
 
 
 def _base_state(**overrides: Any) -> dict[str, Any]:
@@ -1216,7 +1235,8 @@ class TestAuditLog:
 
 class PlanInput(SkillInput):
     text: str
-    plan: dict[str, Any] | None = None
+    # Como en las skills reales: lo escribe `prepare`, el LLM no lo ve.
+    plan: SkipJsonSchema[dict[str, Any] | None] = None
 
 
 class PlanOutput(SkillOutput):
@@ -1346,6 +1366,80 @@ class TestPreparedSkills:
             "plan": {"approve": True},
         }
         assert PlannedSkill.seen == []
+
+
+class TestRepeatedRequestBeforePrepare:
+    """Repetir una acción ya aprobada reusa su aprobación aunque `prepare` ya no la deje
+    pasar (p. ej. la devolución ya está abierta y los artículos no son devolvibles)."""
+
+    @staticmethod
+    def _gate(monkeypatch: pytest.MonkeyPatch, existing: Any) -> Any:
+        import unittest.mock as mock
+
+        scope = mock.MagicMock()
+        scope.__aenter__ = mock.AsyncMock(
+            return_value=mock.AsyncMock(fetchrow=mock.AsyncMock(return_value={"pii_salt": "s"}))
+        )
+        scope.__aexit__ = mock.AsyncMock(return_value=False)
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.tenant_scope", lambda *a, **kw: scope
+        )
+        create = mock.AsyncMock()
+        monkeypatch.setattr("apps.api.agents.nodes.execute_skill.create_pending_approval", create)
+        monkeypatch.setattr(
+            "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
+            mock.AsyncMock(return_value=existing),
+        )
+        monkeypatch.setattr("apps.api.agents.nodes.execute_skill.redact_inputs", lambda i, s: i)
+        return create
+
+    @staticmethod
+    def _state(text: str) -> dict[str, Any]:
+        SkillRegistry.register(PlannedSkill)
+        return _base_state(
+            pending_tool_call=_pending(slug="test.planned", input={"text": text}),
+            allowed_skills=["test.planned"],
+            tool_permissions={
+                "test.planned": {"is_enabled": True, "human_approval_required": True}
+            },
+        )
+
+    async def test_the_same_request_reuses_the_approval_without_preparing(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import unittest.mock as mock
+
+        existing_id = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
+        existing = mock.MagicMock(
+            id=existing_id,
+            status="approved",
+            inputs_raw={"text": "sin foto", "plan": {"approve": True}},
+        )
+        create = self._gate(monkeypatch, existing)
+
+        result = await make_execute_skill_node(deps)(self._state("sin foto"))
+
+        assert result["pending_approval_id"] == str(existing_id)
+        assert result["pending_approval_is_repeat"] is True
+        assert result["pending_approval_reused_status"] == "approved"
+        create.assert_not_awaited()
+
+    async def test_another_request_still_goes_through_prepare(
+        self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import unittest.mock as mock
+
+        existing = mock.MagicMock(
+            id=UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+            status="approved",
+            inputs_raw={"text": "otra cosa", "plan": {"approve": True}},
+        )
+        self._gate(monkeypatch, existing)
+
+        result = await make_execute_skill_node(deps)(self._state("sin foto"))
+
+        assert "pending_approval_id" not in result
+        assert result["tool_results"][-1]["error"].startswith("skill_rejected: evidence_missing")
 
 
 class UnsureSkill(PlannedSkill):

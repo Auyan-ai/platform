@@ -165,6 +165,17 @@ async def _refs_point_to_same_order(state: AgentState, ref_a: str, ref_b: str) -
         return False
 
 
+def _requested(skill_cls: type[Skill], inputs: dict[str, Any] | None) -> dict[str, Any]:
+    """Solo los campos que pide el LLM y el pedido: sin lo que añade `prepare` (p. ej. el
+    plan de una devolución)."""
+    fields = {
+        *skill_cls.input_schema.model_json_schema().get("properties", {}),
+        skill_cls.order_input_field,
+        "order_id",
+    }
+    return {k: v for k, v in (inputs or {}).items() if k in fields}
+
+
 async def _same_order_action(
     state: AgentState, existing_inputs: dict, new_inputs: dict, skill_cls: type[Skill]
 ) -> bool:
@@ -565,6 +576,60 @@ def make_execute_skill_node(
                 "escalation_reason": reason,
             }
 
+        def _awaiting_approval(
+            skill_cls: type[Skill],
+            inputs: dict[str, Any],
+            approval_id: UUID,
+            *,
+            is_repeat: bool,
+            status: str | None,
+        ) -> dict[str, Any]:
+            # Señal al state: route_after_execute_skill detecta pending_approval_id y rutea
+            # a escalate. `status` es el de la aprobación reusada (None si es nueva): el
+            # mensaje al cliente depende de él.
+            auditor.log(
+                tenant_id=state["tenant_id"],
+                conversation_id=state["conversation_id"],
+                aop_slug=state.get("aop_slug") or "unknown",
+                aop_version=state.get("aop_version") or 0,
+                skill_slug=slug,
+                skill_tier=skill_cls.tier,
+                inputs_raw=inputs,
+                status="rejected_by_permissions",
+                error_message="awaiting_human_approval",
+                langfuse_trace_id=state.get("langfuse_trace_id"),
+            )
+            tracker.emit(
+                tenant_id=state["tenant_id"],
+                conversation_id=state["conversation_id"],
+                phase="decision",
+                event_type="tool_result",
+                label=slug,
+                detail={"approval_id": str(approval_id), "status": "awaiting_human_approval"},
+                status="pending",
+            )
+            return {
+                "tool_results": [
+                    *existing_results,
+                    {
+                        "id": tool_use_id,
+                        "slug": slug,
+                        "input": inputs,
+                        "output": None,
+                        "is_error": False,
+                        "error": None,
+                        "awaiting_approval": True,
+                    },
+                ],
+                "pending_tool_call": None,
+                "tool_iterations": iter_count + 1,
+                "pending_approval_id": str(approval_id),
+                "pending_approval_skill_slug": slug,
+                "pending_approval_is_repeat": is_repeat,
+                "pending_approval_reused_status": status,
+                "escalation_reason": f"awaiting_human_approval:{approval_id}",
+            }
+
         # 1) Skill permitida por el AOP (lista vacía = ninguna, fail-safe).
         # Las skills `core` (identidad) las ofrece el código, no el AOP ni el tenant.
         is_core = SkillRegistry.is_core(slug)
@@ -652,6 +717,24 @@ def make_execute_skill_node(
                     error=identity_error,
                 )
             )
+
+        # La misma petición con una aprobación viva (pending, executing o approved) la
+        # reusa antes de `prepare`: si ya se ejecutó, `prepare` la rechazaría (p. ej. los
+        # artículos de una devolución abierta ya no son devolvibles).
+        if skill_cls.tier == "L3" and state.get("conversation_id") and state.get("tenant_id"):
+            async with tenant_scope(UUID(state["tenant_id"])) as conn:
+                live = await get_recent_approval_for_skill(
+                    conn, UUID(state["tenant_id"]), UUID(state["conversation_id"]), slug
+                )
+            if live is not None and await _same_order_action(
+                state,
+                _requested(skill_cls, live.inputs_raw),
+                _requested(skill_cls, raw_input),
+                skill_cls,
+            ):
+                return _awaiting_approval(
+                    skill_cls, raw_input, live.id, is_repeat=True, status=live.status
+                )
 
         # El código completa y valida los inputs en los dos caminos, con y sin aprobación
         # (p. ej. refund_partial: tope y moneda; start_return: el plan de la política).
@@ -752,52 +835,9 @@ def make_execute_skill_node(
                             langfuse_trace_id=state.get("langfuse_trace_id"),
                         )
 
-                auditor.log(
-                    tenant_id=state["tenant_id"],
-                    conversation_id=state["conversation_id"],
-                    aop_slug=state.get("aop_slug") or "unknown",
-                    aop_version=state.get("aop_version") or 0,
-                    skill_slug=slug,
-                    skill_tier=skill_cls.tier,
-                    inputs_raw=raw_input,
-                    status="rejected_by_permissions",
-                    error_message="awaiting_human_approval",
-                    langfuse_trace_id=state.get("langfuse_trace_id"),
+                return _awaiting_approval(
+                    skill_cls, raw_input, approval_id, is_repeat=is_repeat, status=reused_status
                 )
-                tracker.emit(
-                    tenant_id=state["tenant_id"],
-                    conversation_id=state["conversation_id"],
-                    phase="decision",
-                    event_type="tool_result",
-                    label=slug,
-                    detail={"approval_id": str(approval_id), "status": "awaiting_human_approval"},
-                    status="pending",
-                )
-
-                # Devolver señal especial al state — route_after_execute_skill
-                # detecta pending_approval_id y rutea a escalate.
-                new_iter = iter_count + 1
-                return {
-                    "tool_results": [
-                        *existing_results,
-                        {
-                            "id": tool_use_id,
-                            "slug": slug,
-                            "input": raw_input,
-                            "output": None,
-                            "is_error": False,
-                            "error": None,
-                            "awaiting_approval": True,
-                        },
-                    ],
-                    "pending_tool_call": None,
-                    "tool_iterations": new_iter,
-                    "pending_approval_id": str(approval_id),
-                    "pending_approval_skill_slug": slug,
-                    "pending_approval_is_repeat": is_repeat,
-                    "pending_approval_reused_status": reused_status,
-                    "escalation_reason": f"awaiting_human_approval:{approval_id}",
-                }
             # Sin tenant/conversation en state (no debería pasar en prod) → error.
             return _append_and_finish(
                 _error_entry(
