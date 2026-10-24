@@ -71,23 +71,28 @@ async def test_no_matching_escalation_is_noop(q: dict[str, AsyncMock]) -> None:
 
 
 @pytest.mark.asyncio
-async def test_executed_action_closes_all_open_escalations(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(("still_open", "reactivated"), [(None, True), (object(), False)])
+async def test_executed_action_closes_its_escalations_and_reopens_only_if_none_remain(
+    monkeypatch: pytest.MonkeyPatch, still_open: object, reactivated: bool
 ) -> None:
-    """Acción ejecutada: se cierran todas (incluido un escalado previo por la misma
-    petición que el gate reutilizó) y la conversación vuelve a 'open'."""
-    resolve_all = AsyncMock(return_value=2)
+    """Acción ejecutada: se cierran las escalaciones salvo las de otra aprobación (la
+    consulta va contra Postgres en `test_approval_gate_pg.py`). La conversación vuelve a
+    'open' solo si no queda ninguna abierta, p. ej. el gate de otra aprobación (#393)."""
+    resolve = AsyncMock(return_value=2)
     reactivate = AsyncMock(return_value=True)
-    monkeypatch.setattr(f"{MODULE}.resolve_open_escalations_for_conversation", resolve_all)
+    monkeypatch.setattr(f"{MODULE}.resolve_open_escalations_for_approval", resolve)
+    monkeypatch.setattr(
+        f"{MODULE}.get_open_escalation_for_conversation", AsyncMock(return_value=still_open)
+    )
     monkeypatch.setattr(f"{MODULE}.reactivate_escalated_conversation", reactivate)
 
     closed = await approval_resolution.release_escalations_after_executed_action(
-        AsyncMock(), tenant_id=TENANT_ID, conversation_id=CONVERSATION_ID
+        AsyncMock(), tenant_id=TENANT_ID, conversation_id=CONVERSATION_ID, approval_id=APPROVAL_ID
     )
 
     assert closed == 2
-    resolve_all.assert_awaited_once_with(ANY, TENANT_ID, CONVERSATION_ID)
-    reactivate.assert_awaited_once_with(ANY, TENANT_ID, CONVERSATION_ID)
+    resolve.assert_awaited_once_with(ANY, TENANT_ID, CONVERSATION_ID, APPROVAL_ID)
+    assert reactivate.await_count == int(reactivated)
 
 
 class TestReplyDelivered:
@@ -138,7 +143,7 @@ async def test_hand_off_closes_the_gate_and_opens_an_escalation_with_the_reason(
     resolve_all = AsyncMock(return_value=1)
     insert = AsyncMock(return_value=type("Esc", (), {"id": escalation_id})())
     set_status = AsyncMock()
-    monkeypatch.setattr(f"{MODULE}.resolve_open_escalations_for_conversation", resolve_all)
+    monkeypatch.setattr(f"{MODULE}.resolve_open_escalations_for_approval", resolve_all)
     monkeypatch.setattr(f"{MODULE}.insert_escalation", insert)
     monkeypatch.setattr(f"{MODULE}.update_conversation_status", set_status)
 
@@ -151,7 +156,7 @@ async def test_hand_off_closes_the_gate_and_opens_an_escalation_with_the_reason(
     )
 
     assert result == escalation_id
-    resolve_all.assert_awaited_once_with(ANY, TENANT_ID, CONVERSATION_ID)
+    resolve_all.assert_awaited_once_with(ANY, TENANT_ID, CONVERSATION_ID, APPROVAL_ID)
     assert insert.await_args.kwargs == {
         "tenant_id": TENANT_ID,
         "conversation_id": CONVERSATION_ID,

@@ -1,11 +1,13 @@
-"""Cierre de la escalación de una aprobación L3 tras aprobar o rechazar.
+"""La escalación de una aprobación L3: se abre en el gate y se cierra al decidir.
 
-El gate L3 crea una escalación `awaiting_human_approval:{approval_id}` y deja la
-conversación 'escalated'. Al decidir el operador:
-- Aprobada + ejecutada → se resuelven TODAS las escalaciones abiertas de la
-  conversación (no solo la del gate): si el agente ya había escalado antes por la
-  misma petición (error, "pedido no entregado"…), el gate reutilizó esa escalación
-  y el ticket quedaba 'pending' para siempre (tickets #29/#31 del E2E A4). La
+El gate L3 abre la escalación `awaiting_human_approval:{approval_id}` en la misma
+transacción que crea la aprobación, y deja la conversación 'escalated'
+(`open_gate_escalation`, #390). Al decidir el operador:
+- Aprobada + ejecutada → se resuelven las escalaciones abiertas de la conversación
+  (no solo la del gate): si el agente ya había escalado antes por la misma petición
+  (error, "pedido no entregado"…), el ticket quedaba 'pending' para siempre (tickets
+  #29/#31 del E2E A4). Nunca las de otra aprobación: el gate de una que sigue
+  pendiente ni el seguimiento del equipo de otra (#393). Si no queda ninguna, la
   conversación vuelve a 'open' y, con la confirmación entregada, se materializa la
   resolución autónoma
   (`services.agent_resolution.finalize_agent_resolution`: resolved + resolution
@@ -25,15 +27,18 @@ resolución autónoma.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from apps.api.db.queries import (
+    get_open_escalation_by_reason,
     get_open_escalation_for_conversation,
     insert_escalation,
+    lock_approval_status,
     reactivate_escalated_conversation,
     resolve_escalation_by_reason,
-    resolve_open_escalations_for_conversation,
+    resolve_open_escalations_for_approval,
     update_conversation_status,
 )
 from apps.api.services.channel_routing import delivery_route
@@ -46,6 +51,49 @@ if TYPE_CHECKING:
 def approval_escalation_reason(approval_id: UUID) -> str:
     """Mismo formato con el que `execute_skill` crea la escalación del gate L3."""
     return f"awaiting_human_approval:{approval_id}"
+
+
+@dataclass(frozen=True)
+class ApprovalGate:
+    """La aprobación vista con su fila bloqueada y la escalación del gate, si sigue viva."""
+
+    status: str | None
+    escalation_id: UUID | None = None
+    escalation_created: bool = False
+
+
+async def open_gate_escalation(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    conversation_id: UUID,
+    approval_id: UUID,
+    triggered_by_message_id: UUID | None,
+    metadata: dict[str, Any],
+) -> ApprovalGate:
+    """Abre o reutiliza la escalación del gate de la aprobación, en la transacción del
+    caller, solo si la aprobación sigue `pending` o `executing` (#377, #390).
+
+    Bloquea la fila de la aprobación: aprobar, rechazar y cerrar una ejecución la
+    actualizan y cierran su escalación en esa misma transacción. O ven la escalación
+    que se abre aquí, o esta función ve la aprobación ya resuelta y no abre nada."""
+    status = await lock_approval_status(conn, tenant_id, approval_id)
+    if status not in ("pending", "executing"):
+        return ApprovalGate(status)
+    reason = approval_escalation_reason(approval_id)
+    existing = await get_open_escalation_by_reason(conn, tenant_id, conversation_id, reason)
+    if existing is not None:
+        return ApprovalGate(status, existing.id)
+    escalation = await insert_escalation(
+        conn,
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        reason=reason,
+        triggered_by_message_id=triggered_by_message_id,
+        metadata={**metadata, "pending_approval_id": str(approval_id)},
+    )
+    await update_conversation_status(conn, tenant_id, conversation_id, "escalated")
+    return ApprovalGate(status, escalation.id, escalation_created=True)
 
 
 async def release_approval_escalation(
@@ -72,12 +120,16 @@ async def release_escalations_after_executed_action(
     *,
     tenant_id: UUID,
     conversation_id: UUID,
+    approval_id: UUID,
 ) -> int:
     """Acción L3 aprobada y ejecutada: el humano revisó la conversación y la petición
-    quedó atendida → se cierran todas sus escalaciones abiertas y vuelve a 'open'.
-    Devuelve cuántas escalaciones cerró."""
-    closed = await resolve_open_escalations_for_conversation(conn, tenant_id, conversation_id)
-    await reactivate_escalated_conversation(conn, tenant_id, conversation_id)
+    quedó atendida → se cierran sus escalaciones abiertas salvo las de otra aprobación
+    (#393), y vuelve a 'open' si no queda ninguna. Devuelve cuántas escalaciones cerró."""
+    closed = await resolve_open_escalations_for_approval(
+        conn, tenant_id, conversation_id, approval_id
+    )
+    if await get_open_escalation_for_conversation(conn, tenant_id, conversation_id) is None:
+        await reactivate_escalated_conversation(conn, tenant_id, conversation_id)
     return closed
 
 
@@ -148,10 +200,10 @@ async def hand_approval_to_team(
     reason: str,
 ) -> UUID:
     """El equipo tiene que rematar la aprobación (ejecutada sin cerrar, rechazada por una
-    regla o con resultado desconocido): se cierran las escalaciones abiertas (la del gate
-    ya no aplica) y se abre una con `reason`. La conversación queda 'escalated'. Devuelve
-    el id de la escalación nueva."""
-    await resolve_open_escalations_for_conversation(conn, tenant_id, conversation_id)
+    regla o con resultado desconocido): se cierran las escalaciones abiertas salvo las de
+    otra aprobación (la del gate ya no aplica, #393) y se abre una con `reason`. La
+    conversación queda 'escalated'. Devuelve el id de la escalación nueva."""
+    await resolve_open_escalations_for_approval(conn, tenant_id, conversation_id, approval_id)
     escalation = await insert_escalation(
         conn,
         tenant_id=tenant_id,

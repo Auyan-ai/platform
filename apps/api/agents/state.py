@@ -181,10 +181,6 @@ class AgentState(TypedDict, total=False):
     # lectura previas), inyectado por load_conversation en el contexto de reason y
     # del supervisor para no re-consultar lo mismo cada turno. "" si no hay.
     known_facts: str
-    # Status del approval reusado en un re-disparo ("pending" | "approved" | None).
-    # escalate elige el mensaje: "sigue en revisión" si pending, "ya aplicado" si
-    # approved (no contradecir un cambio ya confirmado).
-    pending_approval_reused_status: str | None
 
     # --- LangSmith node-level tracing ---
     _trace_run_id: str | None
