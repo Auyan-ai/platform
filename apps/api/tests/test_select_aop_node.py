@@ -639,3 +639,113 @@ async def test_select_aop_no_pending_intent_when_alt_low_confidence(fake_deps: A
         result = await node(BASE_STATE)
 
     assert "pending_intent" not in result
+
+
+# ─── #378: coste del clasificador y razón del fallback ───────────────────────
+
+
+def _usage(input_tokens: int, output_tokens: int) -> Any:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_input_tokens=0,
+        cache_creation_input_tokens=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_select_aop_cost_lands_in_the_turn_ledger_under_its_role(
+    fake_deps: Any, caplog: Any
+) -> None:
+    """El clasificador deja sus tokens y su coste en el libro del turno, con su etiqueta."""
+    import logging
+
+    from apps.api.integrations.llm_ledger import open_ledger
+    from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
+
+    response = _make_classifier_response("consulta_envio", 0.92)
+    response.usage = _usage(2000, 150)
+    response.stop_reason = "tool_use"
+    fake_deps.anthropic.messages.create = AsyncMock(return_value=response)
+    node = make_select_aop_node(fake_deps)
+
+    with (
+        caplog.at_level(logging.INFO, logger="apps.api.integrations.anthropic_client"),
+        open_ledger() as ledger,
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope()),
+        _patch_previous(None),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO),
+        patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", AsyncMock()),
+    ):
+        await node(BASE_STATE)
+
+    model = fake_deps.anthropic.messages.create.await_args.kwargs["model"]
+    assert [c.role for c in ledger.calls] == ["intent_classifier_model"]
+    assert ledger.usage.prompt_tokens == 2000
+    assert ledger.cost_usd == pytest.approx(
+        compute_llm_cost(model, LLMUsage(input_tokens=2000, output_tokens=150))
+    )
+    assert ledger.cost_usd > 0
+    assert any("llm_call label=select_aop" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_select_aop_fallback_reason_is_persisted_and_in_the_node_output(
+    fake_deps: Any,
+) -> None:
+    """Sin decisión (refusal) el turno cae a default y la razón queda en la fila y en el
+    output del nodo (LangSmith)."""
+    response = MagicMock()
+    response.content = []
+    response.stop_reason = "refusal"
+    response.stop_details = MagicMock(category="cyber")
+    response.usage = _usage(10, 1)
+    fake_deps.anthropic.messages.create = AsyncMock(return_value=response)
+    node = make_select_aop_node(fake_deps)
+    insert = AsyncMock()
+
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope()),
+        _patch_previous(None),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch("apps.api.agents.nodes.select_aop.load_aop", return_value=DEFAULT_AOP),
+        patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", insert),
+    ):
+        result = await node(BASE_STATE)
+
+    assert result["aop_slug"] == "default"
+    assert result["classifier_fallback_reason"] == "llm_refusal: cyber"
+    assert insert.await_args.kwargs["fallback_reason"] == "llm_refusal: cyber"
+
+
+@pytest.mark.asyncio
+async def test_select_aop_without_fallback_persists_no_reason(fake_deps: Any) -> None:
+    fake_deps.anthropic.messages.create = AsyncMock(
+        return_value=_make_classifier_response("consulta_envio", 0.92)
+    )
+    node = make_select_aop_node(fake_deps)
+    insert = AsyncMock()
+
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope()),
+        _patch_previous(None),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO),
+        patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", insert),
+    ):
+        result = await node(BASE_STATE)
+
+    assert result["classifier_fallback_reason"] is None
+    assert insert.await_args.kwargs["fallback_reason"] is None

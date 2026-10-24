@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from apps.api.agents.state import AgentState
+from apps.api.integrations.llm_ledger import open_ledger
 
 if TYPE_CHECKING:
     from apps.api.integrations.observability import ObservabilityClient
@@ -130,41 +131,49 @@ class AgentService:
             "allowed_skills": [],
         }
 
-        try:
-            final_state: AgentState = await self._graph.ainvoke(initial_state)
-        except Exception as exc:
-            logger.exception(
-                "graph_invocation_failed",
-                extra={"tenant_id": str(tenant_id), "conversation_id": str(conversation_id)},
-            )
-            final_state = {
-                **initial_state,
-                "error": f"unhandled_graph_exception: {type(exc).__name__}: {exc!s}",
-            }
+        # El libro del turno anota cada llamada al LLM del grafo con su rol (#378, #379):
+        # de él salen los totales, no de lo que cada nodo sume a mano.
+        with open_ledger() as ledger:
             try:
-                final_state.update(await self._handle_error(final_state))
-            except Exception:
-                # Sin escalación no hay turno cerrado: se re-lanza para que el worker
-                # reintente el job o el webhook de chat responda 500.
+                final_state: AgentState = await self._graph.ainvoke(initial_state)
+            except Exception as exc:
                 logger.exception(
-                    "graph_failure_escalation_failed",
+                    "graph_invocation_failed",
                     extra={"tenant_id": str(tenant_id), "conversation_id": str(conversation_id)},
                 )
-                self._observability.finalize_trace(
-                    trace,
-                    decision="error",
-                    confidence=None,
-                    response_text=None,
-                    escalation_reason=None,
-                    tokens_in=0,
-                    tokens_cache_write=0,
-                    tokens_cache_read=0,
-                    tokens_out=0,
-                    cost_usd=0.0,
-                    model=None,
-                    error=final_state["error"],
-                )
-                raise
+                final_state = {
+                    **initial_state,
+                    "error": f"unhandled_graph_exception: {type(exc).__name__}: {exc!s}",
+                }
+                try:
+                    final_state.update(await self._handle_error(final_state))
+                except Exception:
+                    # Sin escalación no hay turno cerrado: se re-lanza para que el worker
+                    # reintente el job o el webhook de chat responda 500.
+                    logger.exception(
+                        "graph_failure_escalation_failed",
+                        extra={
+                            "tenant_id": str(tenant_id),
+                            "conversation_id": str(conversation_id),
+                        },
+                    )
+                    self._observability.finalize_trace(
+                        trace,
+                        decision="error",
+                        confidence=None,
+                        response_text=None,
+                        escalation_reason=None,
+                        tokens_in=ledger.usage.prompt_tokens,
+                        tokens_cache_write=ledger.usage.cache_write_tokens,
+                        tokens_cache_read=ledger.usage.cache_read_tokens,
+                        tokens_out=ledger.usage.output_tokens,
+                        cost_usd=ledger.cost_usd,
+                        model=None,
+                        error=final_state["error"],
+                        llm_calls=ledger.calls,
+                    )
+                    raise
+        final_state = ledger.overlay(final_state)  # type: ignore[assignment]
 
         error = final_state.get("error")
         decision = "error" if error else final_state.get("decision", "error")
@@ -185,6 +194,7 @@ class AgentService:
             cost_usd=final_state.get("cost_usd", 0.0),
             model=final_state.get("model_used"),
             error=error,
+            llm_calls=ledger.calls,
         )
 
         return AgentOutcome(

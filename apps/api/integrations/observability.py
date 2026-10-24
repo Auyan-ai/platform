@@ -11,12 +11,14 @@ va por IDs (tenant_id, conversation_id) en metadata.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from apps.api.integrations.langfuse_client import LangfuseClient
 from apps.api.integrations.langsmith_client import LangSmithClient, LangSmithTrace
+from apps.api.integrations.llm_ledger import LLMCall
 from apps.api.integrations.pricing import LLMUsage
 from apps.api.services.pii import mask_free_text_pii, mask_pii_recursive
 
@@ -154,6 +156,7 @@ class ObservabilityClient:
         cost_usd: float,
         model: str | None,
         error: str | None,
+        llm_calls: Sequence[LLMCall] | None = None,
     ) -> None:
         response_text = mask_free_text_pii(response_text) if response_text else response_text
         if escalation_reason:
@@ -171,6 +174,7 @@ class ObservabilityClient:
             cost_usd=cost_usd,
             model=model,
             error=error,
+            llm_calls=llm_calls,
         )
         if self._mirror is not None:
             self._mirror.finalize_trace(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 from apps.api.services.approval_reply import (
@@ -19,6 +20,7 @@ _DEFAULT_DONE_FOLLOWUP = fixed_text("done_followup.default", "es")
 _DEFAULT_GATE = fixed_text("gate.default", "es")
 _DEFAULT_WAITING = fixed_text("waiting.default", "es")
 _FAILED = fixed_text("failed", "es")
+TENANT = uuid4()
 
 
 class TestDoneFollowupMessage:
@@ -86,7 +88,9 @@ class TestFallbackMessage:
 
 class TestGenerateCustomerReply:
     async def test_no_client_returns_template(self) -> None:
-        msg = await generate_customer_reply(None, "shopify.cancel_order", success=True)
+        msg = await generate_customer_reply(
+            None, "shopify.cancel_order", tenant_id=TENANT, success=True
+        )
         assert msg == "Hemos cancelado tu pedido."
 
     async def test_uses_llm_text_when_available(self) -> None:
@@ -98,14 +102,18 @@ class TestGenerateCustomerReply:
         client = MagicMock()
         client.messages.create = AsyncMock(return_value=resp)
 
-        msg = await generate_customer_reply(client, "shopify.cancel_order", success=True)
+        msg = await generate_customer_reply(
+            client, "shopify.cancel_order", tenant_id=TENANT, success=True
+        )
         assert msg == "¡Listo! Cancelamos tu pedido, cualquier cosa aquí estamos."
 
     async def test_falls_back_when_llm_raises(self) -> None:
         client = MagicMock()
         client.messages.create = AsyncMock(side_effect=RuntimeError("boom"))
 
-        msg = await generate_customer_reply(client, "shopify.cancel_order", success=True)
+        msg = await generate_customer_reply(
+            client, "shopify.cancel_order", tenant_id=TENANT, success=True
+        )
         assert msg == "Hemos cancelado tu pedido."
 
     async def test_falls_back_when_no_text_block(self) -> None:
@@ -114,7 +122,9 @@ class TestGenerateCustomerReply:
         client = MagicMock()
         client.messages.create = AsyncMock(return_value=resp)
 
-        msg = await generate_customer_reply(client, "shopify.refund_partial", success=True)
+        msg = await generate_customer_reply(
+            client, "shopify.refund_partial", tenant_id=TENANT, success=True
+        )
         assert msg == "Hemos procesado el reembolso de tu pedido."
 
 
@@ -166,6 +176,7 @@ class TestNoEmojiOrMarkdownToCustomer:
         msg = await generate_customer_reply(
             client,
             "shopify.update_shipping_address",
+            tenant_id=TENANT,
             success=True,
             output={"address": {"address1": "Calle *Mayor* 1"}},
         )
@@ -186,6 +197,7 @@ class TestOutcomeReplies:
         msg = await generate_customer_reply(
             client,
             "shopify.cancel_order",
+            tenant_id=TENANT,
             success=True,
             output={"order_id": 1001, "outcome": "refund_pending"},
         )
@@ -200,6 +212,7 @@ class TestOutcomeReplies:
         msg = await generate_customer_reply(
             None,
             "shopify.cancel_order",
+            tenant_id=TENANT,
             success=True,
             output={"outcome": "refund_failed", "detail": "CARD_DECLINED"},
         )
@@ -213,6 +226,7 @@ class TestOutcomeReplies:
         msg = await generate_customer_reply(
             None,
             "shopify.update_shipping_address",
+            tenant_id=TENANT,
             success=True,
             output={
                 "outcome": "confirmed",
@@ -230,6 +244,7 @@ class TestOutcomeReplies:
         msg = await generate_customer_reply(
             None,
             "shopify.update_shipping_address",
+            tenant_id=TENANT,
             success=True,
             output={"outcome": "not_confirmed", "new_address1": "Calle Vieja 1"},
         )
@@ -274,6 +289,7 @@ class TestLanguages:
         msg = await generate_customer_reply(
             None,
             "shopify.update_shipping_address",
+            tenant_id=TENANT,
             success=True,
             output={
                 "outcome": "confirmed",
@@ -292,6 +308,7 @@ class TestLanguages:
         msg = await generate_customer_reply(
             None,
             "shopify.cancel_order",
+            tenant_id=TENANT,
             success=True,
             output={"outcome": "refund_failed"},
             language="ca",
@@ -310,7 +327,7 @@ class TestLanguages:
         client.messages.create = AsyncMock(return_value=MagicMock(content=[block]))
 
         msg = await generate_customer_reply(
-            client, "shopify.cancel_order", success=True, language="en"
+            client, "shopify.cancel_order", tenant_id=TENANT, success=True, language="en"
         )
 
         assert msg == "All done, we have cancelled your order. Anything else, just ask."
@@ -326,7 +343,7 @@ class TestLanguages:
         client.messages.create = AsyncMock(return_value=MagicMock(content=[block]))
 
         msg = await generate_customer_reply(
-            client, "shopify.cancel_order", success=True, language="en"
+            client, "shopify.cancel_order", tenant_id=TENANT, success=True, language="en"
         )
 
         assert msg == "We've cancelled your order."
@@ -588,3 +605,37 @@ def test_a_return_with_nothing_left_after_fees_promises_no_money() -> None:
     assert text.endswith(
         "Con los gastos de la devolución descontados, no queda importe por devolverte."
     )
+
+
+class TestApprovalReplyUsage:
+    @pytest.mark.asyncio
+    async def test_the_reply_is_charged_to_the_tenant_without_counting_a_request(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        client = MagicMock()
+        client.messages.create = AsyncMock(
+            return_value=SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="Listo, pedido cancelado.")],
+                stop_reason="end_turn",
+                usage=SimpleNamespace(
+                    input_tokens=300,
+                    output_tokens=40,
+                    cache_read_input_tokens=0,
+                    cache_creation_input_tokens=0,
+                ),
+            )
+        )
+        tenant = uuid4()
+
+        with patch("apps.api.services.approval_reply._usage_recorder") as recorder:
+            await generate_customer_reply(
+                client, "shopify.cancel_order", tenant_id=tenant, success=True
+            )
+
+        kwargs = recorder.record.call_args.kwargs
+        assert kwargs["tenant_id"] == tenant
+        assert kwargs["tokens_in"] == 300
+        assert kwargs["tokens_out"] == 40
+        assert kwargs["cost_usd"] > 0
+        assert kwargs["requests"] == 0

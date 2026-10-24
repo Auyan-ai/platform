@@ -15,7 +15,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from apps.api.agents.dependencies import AgentDependencies
@@ -305,7 +305,9 @@ async def text_role_scenarios() -> dict[str, RecordingAnthropic]:
             text("Listo, tu pedido está cancelado."), model="claude-haiku-4-5-20251001", **end_turn
         )
     )
-    await generate_customer_reply(approval.client, CANCEL, success=True, language="es")
+    await generate_customer_reply(
+        approval.client, CANCEL, tenant_id=uuid4(), success=True, language="es"
+    )
 
     simulator = RecordingAnthropic(
         message(
@@ -1268,7 +1270,9 @@ class TestTextRolesOn55:
             )
         )
 
-        msg = await generate_customer_reply(api.client, "shopify.cancel_order", success=True)
+        msg = await generate_customer_reply(
+            api.client, "shopify.cancel_order", tenant_id=uuid4(), success=True
+        )
 
         assert msg == "Listo, pedido cancelado."
         assert api.requests[0]["output_config"] == {"effort": "medium"}

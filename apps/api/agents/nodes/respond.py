@@ -17,6 +17,7 @@ from apps.api.agents.nodes._reply import EMPTY_REPLY, finalize_agent_reply
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import insert_message, update_conversation_last_message
+from apps.api.integrations.llm_ledger import turn_telemetry
 from apps.api.services.language import LANGUAGE_NAMES, reply_language_mismatch
 
 logger = logging.getLogger(__name__)
@@ -96,17 +97,19 @@ def make_respond_node(
         if wrong_language is not None:
             return wrong_language
 
+        telemetry = turn_telemetry(state)
         metadata = {
             # Enlaza la respuesta con el inbound que la originó: el worker lo usa para
             # no responder dos veces si reintenta un turno que ya había respondido.
             "inbound_message_id": state.get("inbound_message_id"),
             "langfuse_trace_id": state.get("langfuse_trace_id"),
             "model": state.get("model_used"),
-            "prompt_tokens": state.get("tokens_in", 0),
-            "cache_write_tokens": state.get("tokens_cache_write", 0),
-            "cache_read_tokens": state.get("tokens_cache_read", 0),
-            "completion_tokens": state.get("tokens_out", 0),
-            "cost_usd": state.get("cost_usd", 0.0),
+            "prompt_tokens": telemetry["tokens_in"],
+            "cache_write_tokens": telemetry["tokens_cache_write"],
+            "cache_read_tokens": telemetry["tokens_cache_read"],
+            "completion_tokens": telemetry["tokens_out"],
+            "cost_usd": telemetry["cost_usd"],
+            "usage_by_role": telemetry["usage_by_role"],
             "confidence": state.get("confidence"),
             "writing_surface": surface,
             "language": state.get("response_language"),

@@ -86,8 +86,12 @@ class UsageRecorder:
         tokens_in: int,
         tokens_out: int,
         cost_usd: float,
+        requests: int = 1,
     ) -> None:
-        """Encola el registro de uso. Noop si no hay event loop o si el uso es cero."""
+        """Encola el registro de uso. Noop si no hay event loop o si el uso es cero.
+
+        `requests`: cuánto suma a `request_count` (1 por turno; 0 para llamadas sueltas,
+        como el mensaje tras una aprobación, que gastan pero no son un turno)."""
         if tokens_in == 0 and tokens_out == 0 and cost_usd == 0.0:
             return
 
@@ -102,6 +106,7 @@ class UsageRecorder:
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 cost_usd=cost_usd,
+                requests=requests,
             ),
             name=f"record_usage_{tenant_id}",
         )
@@ -115,6 +120,7 @@ class UsageRecorder:
         tokens_in: int,
         tokens_out: int,
         cost_usd: float,
+        requests: int,
     ) -> None:
         try:
             async with bootstrap_connection() as conn:
@@ -124,6 +130,7 @@ class UsageRecorder:
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
                     cost_usd=cost_usd,
+                    requests=requests,
                 )
         except Exception:
             logger.exception(

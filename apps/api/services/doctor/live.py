@@ -518,6 +518,7 @@ async def llm_provider_check(client: Any, model: str) -> DoctorCheck:
         await call_claude_with_tools(
             client=client,
             model=model,
+            role="intent_classifier_model",
             system="ping",
             messages=[{"role": "user", "content": "ping"}],
             tools=[],

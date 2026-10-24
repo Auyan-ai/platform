@@ -235,6 +235,7 @@ async def _settle_applied(
     content = await generate_customer_reply(
         anthropic_client,
         approval.skill_slug,
+        tenant_id=tenant_id,
         success=True,
         output=output,
         language=language,

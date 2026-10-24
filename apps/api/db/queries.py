@@ -14,9 +14,10 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
+import asyncpg
 from apps.api.core.errors import ConflictError
 from apps.api.db.models import (
     AgentReasoningEvent,
@@ -77,9 +78,6 @@ from apps.api.db.models import (
     WeeklyReport,
     WeeklyReportStatus,
 )
-
-if TYPE_CHECKING:
-    import asyncpg
 
 logger = logging.getLogger(__name__)
 
@@ -2075,24 +2073,16 @@ async def insert_intent_classifier_run(
     alternative_confidence: float | None = None,
     ambiguity_detected: bool,
     was_reclassification: bool,
+    fallback_reason: str | None = None,
 ) -> IntentClassifierRun:
     """Registra una ejecución del clasificador de intent. Siempre se persiste, incluso
     cuando se cae al AOP 'default' — eso es exactamente lo que queremos auditar.
+
+    `fallback_reason`: por qué no hubo decisión (`NoDecision.reason`); None si la hubo.
+    Si la columna aún no existe (migración sin aplicar) se inserta sin ella: el turno
+    no cae por una columna de auditoría.
     """
-    row = await conn.fetchrow(
-        """
-        INSERT INTO intent_classifier_runs (
-            tenant_id, conversation_id, turn_number,
-            primary_slug, primary_confidence,
-            alternative_slug, alternative_confidence,
-            ambiguity_detected, was_reclassification
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        RETURNING id, tenant_id, conversation_id, turn_number,
-                  primary_slug, primary_confidence::float,
-                  alternative_slug, alternative_confidence::float,
-                  ambiguity_detected, was_reclassification,
-                  human_correction, created_at
-        """,
+    args = (
         tenant_id,
         conversation_id,
         turn_number,
@@ -2103,6 +2093,49 @@ async def insert_intent_classifier_run(
         ambiguity_detected,
         was_reclassification,
     )
+    row = None
+    try:
+        # Savepoint: un fallo del INSERT no debe abortar la transacción del turno.
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                INSERT INTO intent_classifier_runs (
+                    tenant_id, conversation_id, turn_number,
+                    primary_slug, primary_confidence,
+                    alternative_slug, alternative_confidence,
+                    ambiguity_detected, was_reclassification, fallback_reason
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                RETURNING id, tenant_id, conversation_id, turn_number,
+                          primary_slug, primary_confidence::float,
+                          alternative_slug, alternative_confidence::float,
+                          ambiguity_detected, was_reclassification,
+                          human_correction, created_at
+                """,
+                *args,
+                fallback_reason,
+            )
+    except asyncpg.UndefinedColumnError:
+        logger.error(
+            "intent_classifier_fallback_reason_column_missing: aplica la migración "
+            "20261024000001_add_intent_classifier_fallback_reason.sql",
+            exc_info=True,
+        )
+        row = await conn.fetchrow(
+            """
+            INSERT INTO intent_classifier_runs (
+                tenant_id, conversation_id, turn_number,
+                primary_slug, primary_confidence,
+                alternative_slug, alternative_confidence,
+                ambiguity_detected, was_reclassification
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING id, tenant_id, conversation_id, turn_number,
+                      primary_slug, primary_confidence::float,
+                      alternative_slug, alternative_confidence::float,
+                      ambiguity_detected, was_reclassification,
+                      human_correction, created_at
+            """,
+            *args,
+        )
     assert row is not None
     return IntentClassifierRun(**dict(row))
 
@@ -3425,6 +3458,7 @@ async def upsert_tenant_usage_daily(
     tokens_in: int,
     tokens_out: int,
     cost_usd: float,
+    requests: int = 1,
 ) -> None:
     """Incrementa atómicamente el uso del día para un tenant.
 
@@ -3435,19 +3469,20 @@ async def upsert_tenant_usage_daily(
         """
         INSERT INTO tenant_usage_daily
             (tenant_id, date, tokens_in, tokens_out, cost_usd, request_count)
-        VALUES ($1, CURRENT_DATE, $2, $3, $4, 1)
+        VALUES ($1, CURRENT_DATE, $2, $3, $4, $5)
         ON CONFLICT (tenant_id, date)
         DO UPDATE SET
             tokens_in     = tenant_usage_daily.tokens_in     + EXCLUDED.tokens_in,
             tokens_out    = tenant_usage_daily.tokens_out    + EXCLUDED.tokens_out,
             cost_usd      = tenant_usage_daily.cost_usd      + EXCLUDED.cost_usd,
-            request_count = tenant_usage_daily.request_count + 1,
+            request_count = tenant_usage_daily.request_count + EXCLUDED.request_count,
             updated_at    = now()
         """,
         tenant_id,
         tokens_in,
         tokens_out,
         cost_usd,
+        requests,
     )
 
 

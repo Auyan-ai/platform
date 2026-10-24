@@ -219,6 +219,8 @@ class AgentState(TypedDict, total=False):
     # modelos con mensajes del operador, el feedback va como mensaje justo ahí y se queda
     # ahí en las vueltas siguientes (el historial solo crece).
     supervisor_feedback_at: int
+    # Por qué el clasificador de AOP no decidió y el turno cayó a `default` (#378).
+    classifier_fallback_reason: str | None
     # La llamada a Claude del último nodo que llamó (`CallTrace.as_dict()`: modelo,
     # thinking, esfuerzo, stop_reason, refusal): va al run del nodo en LangSmith.
     llm_call: dict | None

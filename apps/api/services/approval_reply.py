@@ -20,18 +20,23 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from apps.api.integrations.anthropic_client import call_claude_text
+from apps.api.integrations.llm_ledger import open_ledger
 from apps.api.services.fixed_texts import CATALOG, FALLBACK_LANGUAGE, LANGUAGE_CODES, fixed_text
 from apps.api.services.language import LANGUAGE_NAMES, reply_language_mismatch
 from apps.api.services.reply_format import strip_emojis, strip_formatting
 from apps.api.services.returns import ReturnPlan, currency_decimals
+from apps.api.services.usage import UsageRecorder
 from apps.api.skills.shopify._order_guard import ActionOutcome
 
 if TYPE_CHECKING:
     import anthropic
 
 logger = logging.getLogger(__name__)
+
+_usage_recorder = UsageRecorder()
 
 
 def _skill_key(prefix: str, skill_slug: str | None) -> str:
@@ -241,6 +246,7 @@ async def generate_customer_reply(
     client: anthropic.AsyncAnthropic | None,
     skill_slug: str,
     *,
+    tenant_id: UUID,
     success: bool,
     reject_comment: str | None = None,
     output: dict[str, Any] | None = None,
@@ -281,19 +287,29 @@ async def generate_customer_reply(
         language=language,
         tenant_default=tenant_default,
     )
-    try:
-        reply = await call_claude_text(
-            client=client,
-            role="reply_model",
-            max_tokens=200,
-            system=_system_prompt(language),
-            messages=[{"role": "user", "content": base}],
-            timeout_seconds=timeout_seconds,
-        )
-        warm = reply.text.strip() or base
-    except Exception:
-        logger.warning("approval_reply_generation_failed skill=%s", skill_slug, exc_info=True)
-        warm = base
+    # Esta llamada va fuera de un turno del grafo: su coste se cobra al tenant aquí (#378).
+    with open_ledger() as ledger:
+        try:
+            reply = await call_claude_text(
+                client=client,
+                role="reply_model",
+                max_tokens=200,
+                system=_system_prompt(language),
+                messages=[{"role": "user", "content": base}],
+                timeout_seconds=timeout_seconds,
+                trace_label="approval_reply",
+            )
+            warm = reply.text.strip() or base
+        except Exception:
+            logger.warning("approval_reply_generation_failed skill=%s", skill_slug, exc_info=True)
+            warm = base
+    _usage_recorder.record(
+        tenant_id=tenant_id,
+        tokens_in=ledger.usage.prompt_tokens,
+        tokens_out=ledger.usage.output_tokens,
+        cost_usd=ledger.cost_usd,
+        requests=0,
+    )
     # Lo redactado por el LLM pasa por el mismo filtro que las respuestas del agente
     # (ADR 0012); `details` son datos literales y no se tocan.
     warm = strip_emojis(strip_formatting(warm)) or base

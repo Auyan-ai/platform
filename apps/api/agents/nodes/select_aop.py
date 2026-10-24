@@ -286,10 +286,15 @@ def make_select_aop_node(
             max_tokens=512,
             max_retries=deps.settings.llm_max_retries,
             timeout_seconds=deps.settings.llm_timeout_seconds,
+            trace_label="select_aop",
         )
 
         # ── 3. Parsear respuesta del clasificador ────────────────────────
+        # Por qué el clasificador no decidió (None si decidió): va a la fila de auditoría y
+        # al output del nodo en LangSmith, para distinguir un refusal de un max_tokens.
+        fallback_reason: str | None = None
         if isinstance(outcome, NoDecision):
+            fallback_reason = outcome.reason
             logger.warning(
                 "select_aop.no_decision tenant_id=%s reason=%s — falling back to default",
                 tenant_id,
@@ -313,9 +318,10 @@ def make_select_aop_node(
                     "falling back to default",
                     tenant_id,
                 )
+                fallback_reason = "invalid_classifier_output"
                 parsed = _ClassifierOutput(
                     primary=_Candidate(slug="default", confidence=0.0),
-                    reasoning="invalid_classifier_output",
+                    reasoning=fallback_reason,
                 )
 
         classified_slug = parsed.primary.slug
@@ -379,6 +385,7 @@ def make_select_aop_node(
                 alternative_confidence=alt.confidence if alt else None,
                 ambiguity_detected=parsed.ambiguity_detected,
                 was_reclassification=was_reclassification,
+                fallback_reason=fallback_reason,
             )
 
         out: dict = {
@@ -387,6 +394,7 @@ def make_select_aop_node(
             "aop_version": selected_aop.current_version,
             "aop_workspace": selected_aop.workspace,
             "intent_confidence": primary_confidence,
+            "classifier_fallback_reason": fallback_reason,
             "system_prompt": compiled.system_prompt,
             "allowed_skills": compiled.allowed_skills,
             "max_tool_iterations": compiled.max_iterations,

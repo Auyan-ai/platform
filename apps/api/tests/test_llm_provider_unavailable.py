@@ -88,7 +88,7 @@ class TestCallWrapper:
 
         with pytest.raises(LLMProviderUnavailable) as info:
             await call_claude_with_tools(
-                client=client, model="m", system="s", messages=[], tools=[{"name": "t"}]
+                client=client, model="m", role="default_agent_model", system="s", messages=[], tools=[{"name": "t"}]
             )
 
         assert info.value.reason == "credit_balance_exhausted"
@@ -104,7 +104,7 @@ class TestCallWrapper:
 
         with pytest.raises(anthropic.BadRequestError):
             await call_claude_with_tools(
-                client=client, model="m", system="s", messages=[], tools=[{"name": "t"}]
+                client=client, model="m", role="default_agent_model", system="s", messages=[], tools=[{"name": "t"}]
             )
 
 

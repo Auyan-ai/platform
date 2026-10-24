@@ -25,6 +25,7 @@ from apps.api.db.queries import (
     update_conversation_status,
 )
 from apps.api.integrations.anthropic_client import PROVIDER_UNAVAILABLE_CATEGORY
+from apps.api.integrations.llm_ledger import turn_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +66,13 @@ def make_handle_error_node(
             else f"agent_error: {error_msg}"
         )
 
+        telemetry = turn_telemetry(state)
         metadata = {
             "error": error_msg,
             "langfuse_trace_id": state.get("langfuse_trace_id"),
             "model_used": state.get("model_used"),
+            "cost_usd": telemetry["cost_usd"],
+            "usage_by_role": telemetry["usage_by_role"],
         }
 
         async with tenant_scope(tenant_id) as conn:

@@ -51,6 +51,7 @@ from apps.api.db.queries import (
     soft_delete_conversation,
     update_conversation_last_message,
 )
+from apps.api.integrations.llm_ledger import LLMLedger, open_ledger
 from apps.api.services.inbound_media import chat_escalation_ack
 from apps.api.services.language import state_languages
 from apps.api.simulator.assertions import check_assertions, summarize
@@ -544,13 +545,21 @@ async def _execute_loop(
             "allowed_skills": [],
         }
 
-        try:
-            final_state: AgentState = await graph.ainvoke(initial_state)
-        except Exception:
-            logger.exception("sim_graph_invoke_failed run_id=%s turn=%d", acc.run_id, turn_number)
-            _finalize_trace(observability, trace, None, error="graph_invoke_failed")
-            return "error"
-        _finalize_trace(observability, trace, final_state)
+        # Libro del turno: coste completo (clasificador, supervisor...) para el tope diario.
+        with open_ledger() as ledger:
+            try:
+                final_state: AgentState = await graph.ainvoke(initial_state)
+            except Exception:
+                logger.exception(
+                    "sim_graph_invoke_failed run_id=%s turn=%d", acc.run_id, turn_number
+                )
+                acc.cost_usd += ledger.cost_usd
+                _finalize_trace(
+                    observability, trace, None, error="graph_invoke_failed", ledger=ledger
+                )
+                return "error"
+        final_state = ledger.overlay(final_state)  # type: ignore[assignment]
+        _finalize_trace(observability, trace, final_state, ledger=ledger)
 
         agent_response = simulated_chat_reply(final_state)
         decision = final_state.get("decision", "respond")
@@ -848,10 +857,11 @@ def _finalize_trace(
     trace: Any,
     final_state: AgentState | None,
     error: str | None = None,
+    ledger: LLMLedger | None = None,
 ) -> None:
     if observability is None or trace is None:
         return
-    state: Any = final_state or {}
+    state: Any = ledger.overlay(final_state or {}) if ledger else (final_state or {})
     observability.finalize_trace(
         trace,
         decision=state.get("decision"),
@@ -865,6 +875,7 @@ def _finalize_trace(
         cost_usd=state.get("cost_usd", 0.0),
         model=state.get("model_used"),
         error=error or state.get("error"),
+        llm_calls=ledger.calls if ledger else None,
     )
 
 
