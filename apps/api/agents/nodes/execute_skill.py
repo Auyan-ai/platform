@@ -26,10 +26,15 @@ from uuid import UUID, uuid4
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
-from apps.api.db.queries import create_pending_approval, get_recent_approval_for_skill
+from apps.api.db.models import PendingApproval
+from apps.api.db.queries import (
+    create_pending_approval,
+    get_recent_approval_for_skill,
+    get_tenant_pii_salt,
+)
 from apps.api.integrations.base import IntegrationContext, MutationNotApplied
 from apps.api.services.approval_execution import Applied, ExecutionResult, reconcile
-from apps.api.services.approval_reply import outcome_message
+from apps.api.services.approval_reply import done_followup_message, outcome_message
 from apps.api.services.approval_resolution import team_followup_reason, unknown_outcome_reason
 from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.fixed_texts import fixed_text
@@ -582,11 +587,9 @@ def make_execute_skill_node(
             approval_id: UUID,
             *,
             is_repeat: bool,
-            status: str | None,
         ) -> dict[str, Any]:
             # Señal al state: route_after_execute_skill detecta pending_approval_id y rutea
-            # a escalate. `status` es el de la aprobación reusada (None si es nueva): el
-            # mensaje al cliente depende de él.
+            # a escalate, que elige el mensaje según `is_repeat`.
             auditor.log(
                 tenant_id=state["tenant_id"],
                 conversation_id=state["conversation_id"],
@@ -626,9 +629,46 @@ def make_execute_skill_node(
                 "pending_approval_id": str(approval_id),
                 "pending_approval_skill_slug": slug,
                 "pending_approval_is_repeat": is_repeat,
-                "pending_approval_reused_status": status,
                 "escalation_reason": f"awaiting_human_approval:{approval_id}",
             }
+
+        def _already_applied(
+            skill_cls: type[Skill], inputs: dict[str, Any], approval_id: UUID
+        ) -> dict[str, Any]:
+            # La misma acción ya se aprobó y ejecutó: texto fijo de "ya quedó aplicado" y
+            # sin escalar. Una escalación de gate sobre una aprobación resuelta no la
+            # cierra nadie desde el panel (#377).
+            tracker.emit(
+                tenant_id=state["tenant_id"],
+                conversation_id=state["conversation_id"],
+                phase="decision",
+                event_type="tool_result",
+                label=slug,
+                detail={"approval_id": str(approval_id), "status": "already_approved"},
+                status="done",
+            )
+            language, default_language = state_languages(state)
+            return {
+                **_append_and_finish(
+                    {
+                        "id": tool_use_id,
+                        "slug": slug,
+                        "input": inputs,
+                        "output": {"approval_id": str(approval_id), "status": "approved"},
+                        "is_error": False,
+                        "error": None,
+                    }
+                ),
+                "decision": "respond",
+                "agent_response": done_followup_message(slug, language, default_language),
+            }
+
+        def _reuse(
+            skill_cls: type[Skill], inputs: dict[str, Any], approval: PendingApproval
+        ) -> dict[str, Any]:
+            if approval.status == "approved":
+                return _already_applied(skill_cls, inputs, approval.id)
+            return _awaiting_approval(skill_cls, inputs, approval.id, is_repeat=True)
 
         # 1) Skill permitida por el AOP (lista vacía = ninguna, fail-safe).
         # Las skills `core` (identidad) las ofrece el código, no el AOP ni el tenant.
@@ -732,9 +772,7 @@ def make_execute_skill_node(
                 _requested(skill_cls, raw_input),
                 skill_cls,
             ):
-                return _awaiting_approval(
-                    skill_cls, raw_input, live.id, is_repeat=True, status=live.status
-                )
+                return _reuse(skill_cls, raw_input, live)
 
         # El código completa y valida los inputs en los dos caminos, con y sin aprobación
         # (p. ej. refund_partial: tope y moneda; start_return: el plan de la política).
@@ -793,34 +831,19 @@ def make_execute_skill_node(
                 approval_id = uuid4()
                 tenant_id_uuid = UUID(state["tenant_id"])
                 conv_id_uuid = UUID(state["conversation_id"])
-                # is_repeat: ya existe una aprobación para esta MISMA acción —el
-                # cliente reescribió mientras seguía en revisión (pending) o tras
-                # aprobarse (approved)— así que la reusamos en vez de duplicarla.
-                is_repeat = False
-                # Estado del approval reusado ("pending" | "approved" | None): el
-                # mensaje al cliente depende de él — "sigue en revisión" si está
-                # pendiente, "ya quedó aplicado" si ya se aprobó/ejecutó.
-                reused_status: str | None = None
-                # Obtener salt para redactar PII — usamos tenant_scope directamente.
-                from apps.api.db.queries import get_tenant_pii_salt
-
                 async with tenant_scope(tenant_id_uuid) as conn:
-                    # Idempotencia del gate L3: si ya hay una aprobación reciente
-                    # (pending o approved) para esta misma acción, la reusamos y
-                    # no creamos un duplicado huérfano. order_id se compara
-                    # resolviendo visible ↔ interno (mismo pedido, formas distintas).
+                    # Idempotencia del gate L3: si ya hay una aprobación viva (pending,
+                    # executing o approved) para esta misma acción, se reusa en vez de
+                    # crear un duplicado. order_id se compara resolviendo visible ↔
+                    # interno (mismo pedido, formas distintas).
                     existing = await get_recent_approval_for_skill(
                         conn, tenant_id_uuid, conv_id_uuid, slug
                     )
-                    if existing is not None and await _same_order_action(
+                    reused = existing is not None and await _same_order_action(
                         state, existing.inputs_raw, raw_input, skill_cls
-                    ):
-                        approval_id = existing.id
-                        is_repeat = True
-                        reused_status = existing.status
-                    else:
+                    )
+                    if not reused:
                         salt = await get_tenant_pii_salt(conn, tenant_id_uuid)
-                        inputs_redacted = redact_inputs(raw_input, salt)
                         await create_pending_approval(
                             conn,
                             approval_id=approval_id,
@@ -829,15 +852,14 @@ def make_execute_skill_node(
                             skill_slug=slug,
                             skill_tier=skill_cls.tier,
                             inputs_raw=raw_input,
-                            inputs_redacted=inputs_redacted,
+                            inputs_redacted=redact_inputs(raw_input, salt),
                             aop_slug=state.get("aop_slug") or "unknown",
                             aop_version=state.get("aop_version") or 0,
                             langfuse_trace_id=state.get("langfuse_trace_id"),
                         )
-
-                return _awaiting_approval(
-                    skill_cls, raw_input, approval_id, is_repeat=is_repeat, status=reused_status
-                )
+                if reused and existing is not None:
+                    return _reuse(skill_cls, raw_input, existing)
+                return _awaiting_approval(skill_cls, raw_input, approval_id, is_repeat=False)
             # Sin tenant/conversation en state (no debería pasar en prod) → error.
             return _append_and_finish(
                 _error_entry(
