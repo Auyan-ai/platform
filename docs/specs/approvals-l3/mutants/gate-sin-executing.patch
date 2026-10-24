@@ -1,0 +1,24 @@
+# El gate no ve las executing (get_recent_approval_for_skill solo con pending y approved), sin fallos: mientras se ejecuta, el cliente escribe y el gate crea otra aprobación del mismo pedido.
+# espera: each ExecAtMostOnce=OK OneExecPerOrder=VIOLADA
+--- a/ApprovalsL3.tla
++++ b/ApprovalsL3.tla
+@@ -189,7 +189,7 @@
+ 
+ \* get_recent_approval_for_skill: pending, executing o approved, la más reciente.
+ \* Las failed y rejected no cuentan: esa acción se puede pedir otra vez.
+-LiveAppr == {i \in Ids : appr[i] \in {"pending", "executing", "approved"}}
++LiveAppr == {i \in Ids : appr[i] \in {"pending", "approved"}}
+ FreeIds  == {i \in Ids : appr[i] = "none"}
+ 
+ Reuse(w) ==
+--- a/ApprovalsL3.cfg
++++ b/ApprovalsL3.cfg
+@@ -9,7 +9,7 @@
+     MaxMsgs = 2
+     MaxApprovals = 2
+     MaxClicks = 1
+-    MaxFaults = 1
++    MaxFaults = 0
+     LeaseCanExpire = FALSE
+     CancelRefusedIn = {"cancelled"}
+     RecoverWhileRunning = FALSE

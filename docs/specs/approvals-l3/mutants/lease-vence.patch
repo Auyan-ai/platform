@@ -1,0 +1,13 @@
+# Variante: el heartbeat no renueva el lease a tiempo (event loop bloqueado más de lease_seconds).
+# espera: each OneTurnAtATime=VIOLADA
+--- a/ApprovalsL3.cfg
++++ b/ApprovalsL3.cfg
+@@ -10,7 +10,7 @@
+     MaxApprovals = 2
+     MaxClicks = 1
+     MaxFaults = 1
+-    LeaseCanExpire = FALSE
++    LeaseCanExpire = TRUE
+     CancelRefusedIn = {"cancelled"}
+     RecoverWhileRunning = FALSE
+ SYMMETRY Perms
