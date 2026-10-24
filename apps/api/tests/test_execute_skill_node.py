@@ -22,6 +22,8 @@ from apps.api.agents.nodes.execute_skill import (
     make_execute_skill_node,
 )
 from apps.api.integrations.base import MutationNotApplied
+from apps.api.services.approval_reply import done_followup_message
+from apps.api.services.approval_resolution import ApprovalGate
 from apps.api.skills.base import (
     ReconcileUnknown,
     Skill,
@@ -124,6 +126,23 @@ def _no_live_approval(monkeypatch: pytest.MonkeyPatch) -> None:
         "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
         AsyncMock(return_value=None),
     )
+    _gate_status(monkeypatch, "pending")
+
+
+GATE_ESCALATION_ID = UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+
+
+def _gate_status(monkeypatch: pytest.MonkeyPatch, status: str) -> AsyncMock:
+    """`open_gate_escalation` ve la aprobación con este estado (su propio test va contra
+    Postgres en `test_approval_gate_pg.py`)."""
+    live = status in ("pending", "executing")
+    gate = AsyncMock(
+        return_value=ApprovalGate(
+            status, GATE_ESCALATION_ID if live else None, escalation_created=live
+        )
+    )
+    monkeypatch.setattr("apps.api.agents.nodes.execute_skill.open_gate_escalation", gate)
+    return gate
 
 
 def _base_state(**overrides: Any) -> dict[str, Any]:
@@ -845,6 +864,7 @@ class TestL3HumanApprovalGate:
             inputs_raw={"text": "hola", "order_id": 7133911154968},
         )
         self._mock_l3_scope(monkeypatch, mock_create, existing)
+        _gate_status(monkeypatch, "approved")
 
         node = make_execute_skill_node(deps)
         state = _base_state(
@@ -861,10 +881,15 @@ class TestL3HumanApprovalGate:
         result = await node(state)
 
         mock_create.assert_not_awaited()
-        assert result.get("pending_approval_id") == str(approved_id)
-        assert result.get("pending_approval_is_repeat") is True
-        # El status del reusado se propaga para que escalate elija el mensaje correcto.
-        assert result.get("pending_approval_reused_status") == "approved"
+        # Ya aprobada: contesta "ya quedó aplicado" sin escalar, porque una escalación de
+        # gate sobre una aprobación resuelta no la cierra nadie (#377).
+        assert "pending_approval_id" not in result
+        assert result["decision"] == "respond"
+        assert result["agent_response"] == done_followup_message("test.dangerous")
+        assert result["tool_results"][-1]["output"] == {
+            "approval_id": str(approved_id),
+            "status": "approved",
+        }
 
     async def test_l3_different_order_creates_new_approval(
         self, deps: AgentDependencies, monkeypatch: pytest.MonkeyPatch
@@ -1416,12 +1441,13 @@ class TestRepeatedRequestBeforePrepare:
             inputs_raw={"text": "sin foto", "plan": {"approve": True}},
         )
         create = self._gate(monkeypatch, existing)
+        _gate_status(monkeypatch, "approved")
 
         result = await make_execute_skill_node(deps)(self._state("sin foto"))
 
-        assert result["pending_approval_id"] == str(existing_id)
-        assert result["pending_approval_is_repeat"] is True
-        assert result["pending_approval_reused_status"] == "approved"
+        assert "pending_approval_id" not in result
+        assert result["decision"] == "respond"
+        assert result["agent_response"] == done_followup_message("test.planned")
         create.assert_not_awaited()
 
     async def test_another_request_still_goes_through_prepare(

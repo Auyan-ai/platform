@@ -1073,6 +1073,30 @@ async def get_open_escalation_for_conversation(
     return None if row is None else Escalation(**dict(row))
 
 
+async def get_open_escalation_by_reason(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID, reason: str
+) -> Escalation | None:
+    """La escalación activa (pending/claimed) de la conversación con ese `reason` exacto."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, conversation_id, reason,
+               triggered_by_message_id, status, assigned_user_id, metadata, created_at
+          FROM escalations
+         WHERE tenant_id = $1
+           AND conversation_id = $2
+           AND reason = $3
+           AND status IN ('pending', 'claimed')
+           AND deleted_at IS NULL
+         ORDER BY created_at
+         LIMIT 1
+        """,
+        tenant_id,
+        conversation_id,
+        reason,
+    )
+    return None if row is None else Escalation(**dict(row))
+
+
 async def get_escalation(
     conn: asyncpg.Connection, tenant_id: UUID, escalation_id: UUID
 ) -> Escalation | None:
@@ -1210,6 +1234,39 @@ async def resolve_open_escalations_for_conversation(
         """,
         tenant_id,
         conversation_id,
+    )
+    return int(result.split()[-1])
+
+
+async def resolve_open_escalations_for_approval(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID, approval_id: UUID
+) -> int:
+    """Al cerrar la aprobación `approval_id`: resuelve las escalaciones activas de la
+    conversación salvo las de OTRA aprobación (#393). De otra aprobación son el gate
+    `awaiting_human_approval:<id>` de una que sigue pending/executing y el seguimiento
+    del equipo (`metadata.approval_id`). Las demás, incluida una escalación previa del
+    agente por la misma petición (tickets #29/#31), se cierran. Devuelve cuántas cerró."""
+    result = await conn.execute(
+        """
+        UPDATE escalations e
+           SET status = 'resolved'::escalation_status
+         WHERE e.tenant_id = $1 AND e.conversation_id = $2
+           AND e.status IN ('pending', 'claimed')
+           AND e.deleted_at IS NULL
+           AND coalesce(e.metadata->>'approval_id', $3::uuid::text) = $3::uuid::text
+           AND NOT EXISTS (
+               SELECT 1 FROM pending_approvals pa
+                WHERE pa.tenant_id = e.tenant_id
+                  AND pa.conversation_id = e.conversation_id
+                  AND pa.id <> $3::uuid
+                  AND pa.status IN ('pending', 'executing')
+                  AND pa.deleted_at IS NULL
+                  AND e.reason = 'awaiting_human_approval:' || pa.id::text
+           )
+        """,
+        tenant_id,
+        conversation_id,
+        approval_id,
     )
     return int(result.split()[-1])
 
@@ -2703,6 +2760,24 @@ async def get_pending_approval(
         approval_id,
     )
     return PendingApproval(**dict(row)) if row else None
+
+
+async def lock_approval_status(
+    conn: asyncpg.Connection, tenant_id: UUID, approval_id: UUID
+) -> str | None:
+    """Estado de la aprobación con su fila bloqueada (`FOR UPDATE`) hasta el fin de la
+    transacción. Aprobar, rechazar y cerrar una ejecución cambian esa fila, así que
+    esperan a que la transacción termine. None si no existe."""
+    status = await conn.fetchval(
+        """
+        SELECT status FROM pending_approvals
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+           FOR UPDATE
+        """,
+        tenant_id,
+        approval_id,
+    )
+    return None if status is None else str(status)
 
 
 async def get_recent_approval_for_skill(

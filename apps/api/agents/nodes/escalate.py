@@ -5,6 +5,8 @@ deja la conversación en status='escalated' para que aparezca en el inbox humano
 
 Si ya existe una escalación activa (pending/claimed) para la conversación, no
 crea una nueva — devuelve la existente y persiste igualmente el mensaje del agente.
+La escalación del gate L3 no la crea este nodo: la abre `execute_skill` junto con la
+aprobación (`services.approval_resolution.open_gate_escalation`).
 """
 
 from __future__ import annotations
@@ -24,11 +26,7 @@ from apps.api.db.queries import (
     update_conversation_last_message,
     update_conversation_status,
 )
-from apps.api.services.approval_reply import (
-    done_followup_message,
-    gate_message,
-    waiting_message,
-)
+from apps.api.services.approval_reply import gate_message, waiting_message
 from apps.api.services.language import state_languages
 
 logger = logging.getLogger(__name__)
@@ -42,28 +40,21 @@ def make_escalate_node(
     async def _node(state: AgentState) -> dict:
         tenant_id = UUID(state["tenant_id"])
         conversation_id = UUID(state["conversation_id"])
-        inbound_id = (
-            UUID(state["inbound_message_id"])
-            if state.get("inbound_message_id")
-            else None
-        )
+        inbound_id = UUID(state["inbound_message_id"]) if state.get("inbound_message_id") else None
         reason = state.get("escalation_reason") or "unspecified_escalation"
 
         # Si la escalación es por pending_approval, construir un mensaje cálido y
         # contextual por skill si el agente no generó uno propio:
         #  - primera vez → gate ("lo paso a mi equipo");
-        #  - re-disparo con la acción aún pendiente → "sigue en revisión";
-        #  - re-disparo con la acción ya aprobada/aplicada → "ya quedó aplicado"
-        #    (NO "sigue en revisión", que contradiría el cambio ya confirmado).
+        #  - re-disparo con la acción aún pendiente o ejecutándose → "sigue en revisión".
+        # Una acción ya aprobada no llega aquí: `execute_skill` contesta "ya quedó
+        # aplicado" sin escalar (#377).
         pending_approval_id = state.get("pending_approval_id")
         if pending_approval_id and not state.get("agent_response"):
             skill_slug = state.get("pending_approval_skill_slug")
             language, tenant_default = state_languages(state)
             if state.get("pending_approval_is_repeat"):
-                if state.get("pending_approval_reused_status") == "approved":
-                    agent_response = done_followup_message(skill_slug, language, tenant_default)
-                else:
-                    agent_response = waiting_message(skill_slug, language, tenant_default)
+                agent_response = waiting_message(skill_slug, language, tenant_default)
             else:
                 agent_response = gate_message(skill_slug, language, tenant_default)
         else:
@@ -85,33 +76,35 @@ def make_escalate_node(
             "langfuse_trace_id": state.get("langfuse_trace_id"),
             "model_used": state.get("model_used"),
         }
-        if state.get("pending_approval_id"):
-            metadata["pending_approval_id"] = state["pending_approval_id"]
         if state.get("rejected_draft"):
             metadata["rejected_draft"] = state["rejected_draft"]
 
         async with tenant_scope(tenant_id) as conn:
-            existing = await get_open_escalation_for_conversation(
-                conn, tenant_id, conversation_id
-            )
-
-            if existing is None:
-                esc = await insert_escalation(
-                    conn,
-                    tenant_id=tenant_id,
-                    conversation_id=conversation_id,
-                    reason=reason,
-                    triggered_by_message_id=inbound_id,
-                    metadata=metadata,
-                )
-                await update_conversation_status(
-                    conn, tenant_id, conversation_id, "escalated"
-                )
+            if pending_approval_id:
+                # Gate L3: `execute_skill` ya abrió la escalación de la aprobación en la
+                # transacción que la creó (#390). Aquí no se abre ninguna: una abierta
+                # ahora podría quedar sobre una aprobación que el panel ya resolvió.
+                escalation_id = state["escalation_id"]
+                created = bool(state.get("escalation_created"))
             else:
-                esc = existing
+                existing = await get_open_escalation_for_conversation(
+                    conn, tenant_id, conversation_id
+                )
+                if existing is None:
+                    esc = await insert_escalation(
+                        conn,
+                        tenant_id=tenant_id,
+                        conversation_id=conversation_id,
+                        reason=reason,
+                        triggered_by_message_id=inbound_id,
+                        metadata=metadata,
+                    )
+                    await update_conversation_status(conn, tenant_id, conversation_id, "escalated")
+                escalation_id = str((existing or esc).id)
+                created = existing is None
 
             result: dict = {
-                "escalation_id": str(esc.id),
+                "escalation_id": escalation_id,
                 "decision": "escalate",
                 "escalation_reason": reason,
                 # Pisa el borrador crudo: lo que el caller entrega es el texto
@@ -119,7 +112,7 @@ def make_escalate_node(
                 "agent_response": None,
                 # Solo al crear: el caller empuja la nota + asignación al helpdesk
                 # una única vez (no en cada re-escalado de la misma conversación).
-                "escalation_created": existing is None,
+                "escalation_created": created,
             }
 
             if agent_response.strip():
@@ -131,6 +124,8 @@ def make_escalate_node(
                     direction="outbound",
                     content=agent_response,
                     metadata={
+                        # Como en `respond`: el worker no repite un turno ya contestado.
+                        "inbound_message_id": state.get("inbound_message_id"),
                         "langfuse_trace_id": state.get("langfuse_trace_id"),
                         "model": state.get("model_used"),
                         "prompt_tokens": state.get("tokens_in", 0),
