@@ -63,7 +63,9 @@ class RecordingAnthropic:
         self.client = (
             base.copy(http_client=http_client)
             if base is not None
-            else anthropic.AsyncAnthropic(api_key="test-key", max_retries=0, http_client=http_client)
+            else anthropic.AsyncAnthropic(
+                api_key="test-key", max_retries=0, http_client=http_client
+            )
         )
 
     def _handle(self, request: httpx2.Request) -> httpx2.Response:

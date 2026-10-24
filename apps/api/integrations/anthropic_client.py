@@ -81,9 +81,7 @@ async def create_message(
     for attempt in range(1, attempts + 1):
         remaining = deadline - time.monotonic()
         try:
-            return await client.messages.create(
-                **request, timeout=min(timeout_seconds, remaining)
-            )
+            return await client.messages.create(**request, timeout=min(timeout_seconds, remaining))
         except anthropic.APIError as exc:
             delay = _backoff_seconds(attempt, exc)
             out_of_time = deadline - time.monotonic() - delay < _MIN_ATTEMPT_SECONDS

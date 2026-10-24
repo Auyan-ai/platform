@@ -264,7 +264,9 @@ def _sim_transcript() -> Any:
     transcript = SimulatorTranscript(
         scenario=scenario, profile_name="cooperativo", termination_reason="goal_achieved"
     )
-    transcript.turns.append(TranscriptTurn(role="customer", content="¿Cuánto tarda?", turn_number=0))
+    transcript.turns.append(
+        TranscriptTurn(role="customer", content="¿Cuánto tarda?", turn_number=0)
+    )
     transcript.turns.append(TranscriptTurn(role="agent", content="Tardan 3 días.", turn_number=1))
     return transcript
 
@@ -283,7 +285,9 @@ async def text_role_scenarios() -> dict[str, RecordingAnthropic]:
     sim_judges = {}
     for alias, model in (("sonnet", "claude-sonnet-4-6"), ("opus", "claude-opus-4-7")):
         api = RecordingAnthropic(message(text(SIM_JUDGE_REPLY), model=model, **end_turn))
-        await judge_simulation(api.client, _sim_transcript(), _sim_transcript().scenario, judge_model=alias)
+        await judge_simulation(
+            api.client, _sim_transcript(), _sim_transcript().scenario, judge_model=alias
+        )
         sim_judges[f"sim_judge_{alias}"] = api
 
     slow_agent = RecordingAnthropic(
@@ -297,7 +301,9 @@ async def text_role_scenarios() -> dict[str, RecordingAnthropic]:
     )
 
     approval = RecordingAnthropic(
-        message(text("Listo, tu pedido está cancelado."), model="claude-haiku-4-5-20251001", **end_turn)
+        message(
+            text("Listo, tu pedido está cancelado."), model="claude-haiku-4-5-20251001", **end_turn
+        )
     )
     await generate_customer_reply(approval.client, CANCEL, success=True, language="es")
 
