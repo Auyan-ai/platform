@@ -233,6 +233,7 @@ No mover esto a "Empezar aquí" mientras el onboarding siga mandando.
 - [`DESIGN.md`](DESIGN.md) — sistema de diseño visual.
 - [`billing-engine.md`](billing-engine.md) — motor de billing por resolución.
 - [`onboarding-system-plan.md`](onboarding-system-plan.md) — plan del onboarding (Fases 1-4).
+- [`url-to-agent-plan.md`](url-to-agent-plan.md) — de la URL de la tienda al agente: demo y onboarding ([ADR 0015](adr/0015-url-a-agente.md)).
 - [`whatsapp-zernio-plan.md`](whatsapp-zernio-plan.md) — plan del Sprint 2 (WhatsApp vía Zernio) por PRs; se archiva al cerrar el sprint.
 - [`runbooks/whatsapp-onboarding.md`](runbooks/whatsapp-onboarding.md) — alta de WhatsApp (Zernio) por tenant y checklist de verificación.
 - [`adr/`](adr/) — ADRs de arquitectura (formato Nygard).

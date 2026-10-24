@@ -25,6 +25,8 @@ un ADR nuevo que la supersede y se actualiza el `Estado` del viejo.
 | [0011](0011-transcripcion-notas-de-voz.md) | Transcripción de notas de voz de WhatsApp detrás de `Transcriber` | Propuesta |
 | [0012](0012-escritura-natural-por-canal.md) | Escritura natural por canal: el código pone el formato y la firma, el LLM la redacción | Propuesta |
 | [0013](0013-verificacion-identidad-por-niveles.md) | Verificación de identidad en dos niveles (`guest` con número de pedido + contacto, `verified` por remitente, sesión firmada u OTP) decidida en código, con gate único y OTP opcional | Propuesta |
+| [0014](0014-devoluciones-y-cambios-politica-del-tenant.md) | Devoluciones y cambios: política del tenant, decidida en código y sin valores por defecto | Propuesta |
+| [0015](0015-url-a-agente.md) | De la URL de la tienda al agente: un motor de ingesta de fuentes oficiales para demos y onboarding, con citas verificadas en código | Propuesta |
 
 ## Estados posibles
 
