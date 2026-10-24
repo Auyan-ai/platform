@@ -577,6 +577,143 @@ class TestReasonOn55:
         assert out["decision"] == "respond"
 
 
+def _progress(note: str, signature: str) -> dict[str, Any]:
+    """Thinking block con texto: lo que devuelve `between_tools` (nota de progreso)."""
+    return {"type": "thinking", "thinking": note, "signature": signature}
+
+
+async def _hop(
+    fake_deps: AgentDependencies, state: dict[str, Any], response: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Una vuelta de `reason` y el state de la siguiente, como lo deja el grafo: la tool
+    pedida se ejecuta y su resultado se suma a `tool_results`."""
+    api, out = await run_reason(fake_deps, state, response)
+    following = {**state, **out}
+    call = following.pop("pending_tool_call", None)
+    if call:
+        result = {**call, "output": {"shipping": "3 días"}, "is_error": False, "error": None}
+        following["tool_results"] = [*state["tool_results"], result]
+        following["tool_iterations"] = state.get("tool_iterations", 0) + 1
+    return api.requests[0], following
+
+
+def _assert_replayed_on_its_own_prefix(
+    produced: dict[str, Any], content: list[dict[str, Any]], later: dict[str, Any]
+) -> None:
+    """El turno del assistant vuelve tal cual y detrás de lo mismo que tenía delante cuando
+    se escribió: system, tools y mensajes previos idénticos (preserved thinking)."""
+    n = len(produced["messages"])
+    assert later["system"] == produced["system"]
+    assert later["tools"] == produced["tools"]
+    assert later["messages"][:n] == produced["messages"]
+    assert later["messages"][n] == {"role": "assistant", "content": content}
+
+
+class TestLoopPrefixOn55:
+    """Cada vuelta del loop en un 5.5 es una petición válida y replaya los turnos previos
+    sobre el mismo prefijo, también con el reintento del supervisor y la vuelta de cierre."""
+
+    @pytest.mark.parametrize(
+        ("model", "thinking_by_role"),
+        [("claude-opus-5-5", None), ("claude-sonnet-5-5", "off")],
+    )
+    @pytest.mark.asyncio
+    async def test_every_hop_replays_the_previous_turns_on_their_own_prefix(
+        self,
+        fake_deps: AgentDependencies,
+        _env: pytest.MonkeyPatch,
+        model: str,
+        thinking_by_role: str | None,
+    ) -> None:
+        if thinking_by_role:
+            _env.setenv("THINKING_BY_ROLE", f'{{"default_agent_model": "{thinking_by_role}"}}')
+            get_models.cache_clear()
+        turns = [
+            [_progress("Miro las políticas.", "sig_a"), tool_use(POLICIES_TOOL, {}, id="toolu_a")],
+            [
+                _progress("Confirmo el plazo.", "sig_b"),
+                text("Un momento."),
+                tool_use(POLICIES_TOOL, {}, id="toolu_b"),
+            ],
+            [_progress("Último dato.", "sig_c"), tool_use(POLICIES_TOOL, {}, id="toolu_c")],
+        ]
+        state = _with_policies(_reason_state(model), hops=0)
+        requests = []
+        for content in turns:
+            request, state = await _hop(fake_deps, state, message(*content, model=model))
+            requests.append(request)
+        decide = message(tool_use("respond_or_escalate", RESPOND), model=model)
+        closing, state = await _hop(fake_deps, state, decide)
+        state.update(supervisor_feedback=FEEDBACK, supervisor_feedback_at=3)
+        retry, _ = await _hop(fake_deps, state, decide)
+
+        later_requests = [*requests[1:], closing, retry]
+        for i, content in enumerate(turns):
+            for later in later_requests[i:]:
+                _assert_replayed_on_its_own_prefix(requests[i], content, later)
+        for body in [*requests, closing, retry]:
+            assert body["tool_choice"] == {"type": "auto"}
+            assert "budget_tokens" not in body["thinking"]
+        assert closing["messages"][-1]["role"] == "system"
+        assert retry["messages"][-1]["role"] == "system"
+        assert FEEDBACK in retry["messages"][-1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_between_tools_does_not_replay_thinking_after_a_prefix_change(
+        self,
+        fake_deps: AgentDependencies,
+        _env: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Con `between_tools` no hay `block_binding`/`drop_block`: si lo que precede a un
+        turno cambió (aquí, un dato verificado nuevo en el system), sus thinking blocks y
+        los de después no se reenvían, o una cuenta con la comprobación activa da 400. El
+        texto y los `tool_use` sí vuelven."""
+        _env.setenv("THINKING_BY_ROLE", '{"default_agent_model": "off"}')
+        get_models.cache_clear()
+        model = "claude-sonnet-5-5"
+        content = [
+            _progress("Miro las políticas.", "sig_a"),
+            text("Un momento."),
+            tool_use(POLICIES_TOOL, {}, id="toolu_a"),
+        ]
+        _, state = await _hop(
+            fake_deps, _with_policies(_reason_state(model), hops=0), message(*content, model=model)
+        )
+        unchanged, _ = await _hop(
+            fake_deps, state, message(tool_use("respond_or_escalate", RESPOND), model=model)
+        )
+        state["known_facts"] = "- Email verificado: ana@example.com"
+        with caplog.at_level("WARNING"):
+            changed, _ = await _hop(
+                fake_deps, state, message(tool_use("respond_or_escalate", RESPOND), model=model)
+            )
+
+        assert unchanged["messages"][1] == {"role": "assistant", "content": content}
+        assert changed["messages"][1] == {"role": "assistant", "content": content[1:]}
+        assert any("thinking_blocks_not_replayed" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_adaptive_leaves_a_prefix_change_to_drop_block(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        """Con adaptive la petición lleva `drop_block`: la API descarta lo que no valga y lo
+        reporta en `input_transformations`; el cliente reenvía el turno tal cual."""
+        model = "claude-opus-5-5"
+        content = [_progress("", "sig_a"), tool_use(POLICIES_TOOL, {}, id="toolu_a")]
+        _, state = await _hop(
+            fake_deps, _with_policies(_reason_state(model), hops=0), message(*content, model=model)
+        )
+        state["known_facts"] = "- Email verificado: ana@example.com"
+        changed, _ = await _hop(
+            fake_deps, state, message(tool_use("respond_or_escalate", RESPOND), model=model)
+        )
+
+        assert changed["thinking"] == ADAPTIVE
+        assert changed["messages"][1] == {"role": "assistant", "content": content}
+
+
+POLICIES_TOOL = "shopify_get_shop_policies"
 FEEDBACK = "Da el plazo exacto que dicen las políticas."
 
 

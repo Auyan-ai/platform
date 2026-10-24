@@ -394,6 +394,10 @@ def make_reason_node(
             timeout_seconds=deps.settings.llm_timeout_seconds,
             cache=True,
             trace_label="reason",
+            replay_prefixes={
+                tool_id: turn.get("prefix", "")
+                for tool_id, turn in (state.get("assistant_turns") or {}).items()
+            },
         )
 
         # Acumular tokens/costo con lo que ya hubiera de iteraciones previas.
@@ -498,7 +502,7 @@ def make_reason_node(
             },
             "assistant_turns": {
                 **(state.get("assistant_turns") or {}),
-                tool_block.id: {"content": outcome.content},
+                tool_block.id: {"content": outcome.content, "prefix": outcome.prefix},
             },
             # Anular la decisión de la pasada anterior (espejo del caso decide):
             # si el supervisor rechazó un respond y el retry pide una tool, el

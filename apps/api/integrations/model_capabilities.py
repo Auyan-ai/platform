@@ -201,9 +201,10 @@ def thinking_settings(
         thinking: dict[str, Any] = {"type": "adaptive"}
         if not caps.preserved_thinking:
             return ThinkingSettings(thinking=thinking, effort=resolved_effort, beta=None)
-        # El system y las tools cambian entre vueltas del loop ReAct (hora del turno,
-        # feedback del supervisor): un thinking block de una vuelta anterior deja de
-        # valer y, sin `drop_block`, una cuenta con la comprobación activa da 400.
+        # El loop ReAct mantiene el prefijo (hora fija; feedback y cierre como mensajes),
+        # pero lo que entra al system a mitad de turno (datos verificados, identidad) lo
+        # cambia: `drop_block` descarta lo que ya no vale en vez de dar 400. Con
+        # `between_tools` no se admite y el cliente quita esos bloques (anthropic_client).
         thinking["block_binding"] = {"prefix_mismatch_behavior": "drop_block"}
         return ThinkingSettings(
             thinking=thinking, effort=resolved_effort, beta=PRESERVED_THINKING_BETA

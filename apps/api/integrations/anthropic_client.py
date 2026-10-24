@@ -22,10 +22,12 @@ Devuelve la tool llamada o un `NoDecision` explícito (refusal, sin tool, max_to
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 import anthropic
@@ -175,25 +177,7 @@ async def call_claude_with_tools(
         LLMProviderUnavailable si Anthropic rechaza por saldo agotado, 401 o 403.
         anthropic.APIError o subclase si después de los reintentos sigue fallando.
     """
-    system_param: Any = system
-    tools_param = tools
-    if cache:
-        if tools_param:
-            # cache_control en la última tool cachea TODO el bloque de tools.
-            # Copia superficial: no mutamos el input del caller.
-            tools_param = [
-                *tools_param[:-1],
-                {**tools_param[-1], "cache_control": {"type": "ephemeral"}},
-            ]
-        if isinstance(system_param, str):
-            system_param = [
-                {
-                    "type": "text",
-                    "text": system_param,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ]
-
+    system_param, tools_param = _cached(system, tools, cache=cache)
     kwargs: dict[str, Any] = {
         "model": model,
         "max_tokens": max_tokens,
@@ -234,6 +218,93 @@ async def call_claude_with_tools(
             usage.output_tokens,
         )
     return last_response
+
+
+def _cached(
+    system: str | list[dict[str, Any]], tools: list[dict[str, Any]], *, cache: bool
+) -> tuple[Any, list[dict[str, Any]]]:
+    """System y tools tal como salen, con los breakpoints de caché si `cache`."""
+    if not cache:
+        return system, tools
+    tools_param = tools
+    if tools_param:
+        # cache_control en la última tool cachea TODO el bloque de tools.
+        # Copia superficial: no mutamos el input del caller.
+        tools_param = [
+            *tools_param[:-1],
+            {**tools_param[-1], "cache_control": {"type": "ephemeral"}},
+        ]
+    system_param: Any = system
+    if isinstance(system_param, str):
+        system_param = [
+            {"type": "text", "text": system_param, "cache_control": {"type": "ephemeral"}}
+        ]
+    return system_param, tools_param
+
+
+def prefix_digest(system: Any, tools: Any, messages: list[dict[str, Any]]) -> str:
+    """Huella de lo que precede a un turno del assistant: system, tools y mensajes previos,
+    lo que la API comprueba antes de aceptar sus thinking blocks (preserved thinking)."""
+    raw = json.dumps(
+        {"system": system, "tools": tools, "messages": messages},
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+_THINKING_TYPES = frozenset({"thinking", "redacted_thinking"})
+
+
+def _has_thinking(message: dict[str, Any]) -> bool:
+    content = message.get("content")
+    return isinstance(content, list) and any(b.get("type") in _THINKING_TYPES for b in content)
+
+
+def _without_thinking(message: dict[str, Any]) -> dict[str, Any]:
+    if not _has_thinking(message):
+        return message
+    return {
+        **message,
+        "content": [b for b in message["content"] if b.get("type") not in _THINKING_TYPES],
+    }
+
+
+def _turn_key(message: dict[str, Any]) -> str | None:
+    """Un turno replayado se reconoce por su primer `tool_use`."""
+    for block in message.get("content") or []:
+        if isinstance(block, dict) and block.get("type") == "tool_use":
+            return str(block["id"])
+    return None
+
+
+def drop_stale_thinking(
+    messages: list[dict[str, Any]],
+    *,
+    system: Any,
+    tools: Any,
+    prefixes: Mapping[str, str],
+) -> list[dict[str, Any]]:
+    """Sin `block_binding` (thinking `between_tools`) la API no descarta un thinking block
+    cuyo prefijo cambió: una cuenta con la comprobación activa da 400. Desde el primer
+    turno del assistant cuyo prefijo ya no es el que tenía al escribirse (`prefixes`, por
+    su primer `tool_use`), sus thinking blocks y los de después no se reenvían; texto y
+    `tool_use` sí. Quitar un sufijo de la cadena de bloques es válido; uno del medio no."""
+    for i, message in enumerate(messages):
+        if message["role"] != "assistant" or not _has_thinking(message):
+            continue
+        key = _turn_key(message)
+        if key is not None and prefixes.get(key) == prefix_digest(system, tools, messages[:i]):
+            continue
+        logger.warning(
+            "thinking_blocks_not_replayed from_message=%d turn=%s: el prefijo cambió",
+            i,
+            key,
+            extra={"from_message": i, "turn": key},
+        )
+        return [*messages[:i], *(_without_thinking(m) for m in messages[i:])]
+    return messages
 
 
 # Con thinking (adaptive, o las notas de progreso de `between_tools`), esos tokens cuentan
@@ -289,6 +360,9 @@ class ToolCalled:
     # devolverlo intacto en la siguiente vuelta del loop.
     content: list[dict[str, Any]]
     usage: LLMUsage
+    # `prefix_digest` de lo que precedía a este turno, para saber si al replayarlo sus
+    # thinking blocks siguen valiendo.
+    prefix: str = ""
 
 
 @dataclass(frozen=True)
@@ -315,6 +389,9 @@ class _DecisionRequest:
     forced: bool
     # Instrucción de cierre que va como mensaje del operador al final (5.5).
     closing_note: str | None = None
+    # Thinking preservado sin `block_binding` (`between_tools`): el cliente no reenvía
+    # thinking blocks cuyo prefijo cambió (`drop_stale_thinking`).
+    drop_stale_thinking: bool = False
 
 
 def _closing_note(decision: ToolDecision) -> str:
@@ -389,6 +466,11 @@ def decision_request(
         options=options,
         forced=False,
         closing_note=_closing_note(decision) if note_closing else None,
+        drop_stale_thinking=(
+            caps.preserved_thinking
+            and thinking.thinking is not None
+            and "block_binding" not in thinking.thinking
+        ),
     )
 
 
@@ -426,12 +508,14 @@ async def call_claude_for_decision(
     timeout_seconds: int = 30,
     cache: bool = False,
     trace_label: str | None = None,
+    replay_prefixes: Mapping[str, str] | None = None,
 ) -> ToolCalled | NoDecision:
     """Pide una decisión estructurada al modelo de `role` (o `model`, si un tenant fija el
     suyo). Sin tool tras el reintento, refusal o max_tokens → `NoDecision`, logueado como
     error: el nodo decide cómo escalar, nunca un texto vacío al cliente.
 
-    `usage` suma todas las llamadas, reintento incluido.
+    `usage` suma todas las llamadas, reintento incluido. `replay_prefixes`: el
+    `ToolCalled.prefix` de cada turno replayado en `messages`, por su primer `tool_use`.
     """
     request = decision_request(
         model=model,
@@ -441,7 +525,12 @@ async def call_claude_for_decision(
         decision=decision,
         max_tokens=max_tokens,
     )
+    system_sent, tools_sent = _cached(request.system, request.tools, cache=cache)
     turn = list(messages)
+    if request.drop_stale_thinking:
+        turn = drop_stale_thinking(
+            turn, system=system_sent, tools=tools_sent, prefixes=replay_prefixes or {}
+        )
     if request.closing_note is not None:
         turn = _with_trailing_note(turn, request.closing_note)
     usage = LLMUsage()
@@ -479,7 +568,7 @@ async def call_claude_for_decision(
         usage = usage + LLMUsage.from_anthropic(response.usage)
         outcome = read_decision(response, usage)
         if isinstance(outcome, ToolCalled):
-            return outcome
+            return replace(outcome, prefix=prefix_digest(system_sent, tools_sent, turn))
         if request.forced or outcome.kind != "tool_not_called" or attempt == NO_TOOL_RETRIES:
             break
         turn = [
