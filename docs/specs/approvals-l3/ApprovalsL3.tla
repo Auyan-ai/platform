@@ -322,7 +322,7 @@ LeaseExpire(w) ==
                    humanVars, recVars>>
 
 (***************************************************************************)
-(* Cierre de una ejecución (services/approval_execution.py:190-371).       *)
+(* Cierre de una ejecución (services/approval_execution.py:190-374).       *)
 (* settle_executing_approval es un CAS desde `executing` con el mismo      *)
 (* execution_attempt (db/queries.py:3041-3073). En la misma transacción:   *)
 (*   applied    -> approved; release_escalations_after_executed_action     *)
@@ -388,7 +388,7 @@ RejectClick(h, a) ==
     /\ hpc' = [hpc EXCEPT ![h] = IF appr[a] = "pending" THEN "r_cas" ELSE "idle"]
     /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, turnVars, hAtt, hRes, recVars>>
 
-\* approvals.py:201-213, claim_pending_approval (db/queries.py:2907-2935): CAS
+\* approvals.py:201-213, claim_pending_approval (db/queries.py:2982-3010): CAS
 \* pending -> executing con execution_attempt + 1. Si no actualiza nada, 409 sin
 \* ejecutar. load_execution_context va en la misma transacción.
 ApproveClaim(h) ==
@@ -466,7 +466,7 @@ ApproveMutate(h) ==
     /\ UNCHANGED <<skill, dbVars, inbox, arrived, unclaimed, turnVars, hAppr, hClicks, hAtt,
                    recVars>>
 
-\* approval_execution.py:190-371. El CAS perdido es 409 sin escribir ni entregar.
+\* approval_execution.py:190-374. El CAS perdido es 409 sin escribir ni entregar.
 ApproveSettle(h) ==
     LET a == hAppr[h] IN
     /\ hpc[h] = "a_settle"
@@ -478,7 +478,7 @@ ApproveSettle(h) ==
               /\ UNCHANGED dbVars
     /\ UNCHANGED <<shopVars, inbox, queueVars, turnVars, hAppr, hClicks, hAtt, hRes, recVars>>
 
-\* deliver_after_commit (approval_execution.py:396-409).
+\* deliver_after_commit (approval_execution.py:399-412).
 ApproveDeliver(h) ==
     /\ hpc[h] = "a_del"
     /\ inbox' = Append(inbox, [k |-> OutcomeKind(hRes[h]), a |-> hAppr[h]])
@@ -486,7 +486,7 @@ ApproveDeliver(h) ==
     /\ UNCHANGED <<shopVars, dbVars, queueVars, turnVars, hAppr, hClicks, hAtt, hRes, recVars>>
 
 \* approvals.py:299-318, una transacción: reject_pending_approval
-\* (db/queries.py:2938-2963), CAS solo desde pending; si no actualiza nada, 409.
+\* (db/queries.py:3013-3038), CAS solo desde pending; si no actualiza nada, 409.
 \* Después, el mensaje y release_approval_escalation (solo la del gate de esta
 \* aprobación). La redacción con Haiku va antes, fuera de la transacción.
 RejectCas(h) ==
@@ -519,9 +519,9 @@ HumanFault(h) ==
                    hAtt, hRes, recVars>>
 
 (***************************************************************************)
-(* Recuperación (approval_execution.py:412-458): el job de limpieza lista  *)
+(* Recuperación (approval_execution.py:415-461): el job de limpieza lista  *)
 (* las `executing` con reviewed_at de hace más de STALE_EXECUTION = 15 min *)
-(* (db/queries.py:3001-3020), lee Shopify con reconcile(cause=None) y      *)
+(* (db/queries.py:3076-3097), lee Shopify con reconcile(cause=None) y      *)
 (* cierra con el mismo CAS por execution_attempt. Nunca ejecuta.           *)
 (* Supuesto (approval_execution.py:67-69): pasados 15 min ninguna petición *)
 (* sigue viva, porque Cloud Run corta a los 300 s. RecoverWhileRunning =   *)
