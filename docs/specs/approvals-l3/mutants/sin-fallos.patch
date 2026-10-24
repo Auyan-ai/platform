@@ -1,0 +1,13 @@
+# Sin fallos (MaxFaults = 0): sin respuesta perdida no hay resultado desconocido, y OneExecPerOrder se cumple.
+# espera: each OneExecPerOrder=OK
+--- a/ApprovalsL3.cfg
++++ b/ApprovalsL3.cfg
+@@ -9,7 +9,7 @@
+     MaxMsgs = 2
+     MaxApprovals = 2
+     MaxClicks = 1
+-    MaxFaults = 1
++    MaxFaults = 0
+     LeaseCanExpire = FALSE
+     CancelRefusedIn = {"cancelled"}
+     RecoverWhileRunning = FALSE

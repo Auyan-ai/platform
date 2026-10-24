@@ -9,5 +9,5 @@
 -    LeaseCanExpire = FALSE
 +    LeaseCanExpire = TRUE
      CancelRefusedIn = {"cancelled"}
+     RecoverWhileRunning = FALSE
  SYMMETRY Perms
- CHECK_DEADLOCK FALSE

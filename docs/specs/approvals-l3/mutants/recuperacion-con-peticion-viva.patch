@@ -1,0 +1,13 @@
+# La recuperación ve `executing` una petición que sigue viva (sin el supuesto de STALE_EXECUTION > vida de una petición): la reabre a pending, otro la aprueba y la petición vieja también muta.
+# espera: each ExecAtMostOnce=VIOLADA
+--- a/ApprovalsL3.cfg
++++ b/ApprovalsL3.cfg
+@@ -12,7 +12,7 @@
+     MaxFaults = 1
+     LeaseCanExpire = FALSE
+     CancelRefusedIn = {"cancelled"}
+-    RecoverWhileRunning = FALSE
++    RecoverWhileRunning = TRUE
+ SYMMETRY Perms
+ CHECK_DEADLOCK FALSE
+ INVARIANTS
