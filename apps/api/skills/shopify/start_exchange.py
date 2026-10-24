@@ -1,6 +1,7 @@
 """Skill L3: cambio en el mismo pedido (`returnCreate` con `exchangeLineItems`, ADR 0014 §7).
 
-Siempre con aprobación humana: envía mercancía nueva.
+Si pasa por aprobación humana lo decide la política del tenant (`exchanges.requires_approval`
+y `evidence_requires_approval`), además del piso L3 de `tenant_tool_permissions`.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ class StartExchange(_ReturnSkill):
         "el motivo y qué variante quiere a cambio (`variant_id` de get_product_info). "
         "`reason_code` es uno de los códigos de la política de la tienda que tienes en el "
         "turno. El sistema comprueba si la tienda admite ese cambio, la disponibilidad y la "
-        "diferencia de precio, y siempre lo pasa a aprobación del equipo."
+        "diferencia de precio, y decide si pasa por aprobación del equipo."
     )
     input_schema = StartExchangeInput
 

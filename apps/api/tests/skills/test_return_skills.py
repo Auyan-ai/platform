@@ -571,3 +571,12 @@ async def test_the_approval_key_uses_the_resolved_refund_form() -> None:
 
     assert await _same_order_action({}, silent, ignored, StartReturn) is True
     assert await _same_order_action({}, money, credit, StartReturn) is False
+
+
+def test_the_exchange_tool_does_not_promise_approval_the_policy_may_skip() -> None:
+    import apps.api.skills.shopify.start_exchange as module
+
+    text = f"{StartExchange.description} {module.__doc__}"
+
+    assert "siempre" not in text.lower()
+    assert "aprobación" in StartExchange.description
