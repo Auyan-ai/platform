@@ -1,0 +1,30 @@
+# La escalación del gate nace en escalate, en otra transacción después del COMMIT de la aprobación (el hueco de #390): el panel ve la aprobación sin escalación, y un rechazo en ese hueco deja la escalación huérfana.
+# espera: each LiveApprovalHasEscalation=VIOLADA NoOrphanEscalation=VIOLADA
+--- a/ApprovalsL3.tla
++++ b/ApprovalsL3.tla
+@@ -264,11 +264,10 @@
+     /\ FreeIds # {}
+     /\ LET n == Min(FreeIds) IN
+          /\ appr' = [appr EXCEPT ![n] = "pending"]
+-         /\ openEsc' = openEsc \cup {n}
+          /\ tAppr' = [tAppr EXCEPT ![w] = n]
+     /\ tKind' = [tKind EXCEPT ![w] = "gate"]
+     /\ tpc' = [tpc EXCEPT ![w] = "escalate"]
+-    /\ UNCHANGED <<shopVars, attempt, teamEsc, unknownOut, inbox, queueVars,
++    /\ UNCHANGED <<shopVars, attempt, openEsc, teamEsc, unknownOut, inbox, queueVars,
+                    lease, humanVars, recVars>>
+ 
+ \* Cota del modelo, no del código: sin ids libres el turno termina sin L3.
+@@ -284,9 +283,10 @@
+ \* metadata.inbound_message_id (:128).
+ Escalate(w) ==
+     /\ tpc[w] = "escalate"
++    /\ openEsc' = IF tKind[w] = "gate" THEN openEsc \cup {tAppr[w]} ELSE openEsc
+     /\ tpc' = [tpc EXCEPT ![w] = "deliver"]
+-    /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, tAppr, tKind, lease, humanVars,
+-                   recVars>>
++    /\ UNCHANGED <<shopVars, appr, attempt, teamEsc, unknownOut, inbox, queueVars, tAppr,
++                   tKind, lease, humanVars, recVars>>
+ 
+ \* _deliver_outcome tras el grafo y complete_inbound_job.
+ Deliver(w) ==

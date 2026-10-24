@@ -2,7 +2,7 @@
 # espera: each OneTurnAtATime=VIOLADA
 --- a/ApprovalsL3.tla
 +++ b/ApprovalsL3.tla
-@@ -178,7 +178,6 @@
+@@ -180,7 +180,6 @@
  \* vuelve a extender el lease (UPDATE ... WHERE status='running').
  Claim(w) ==
      /\ tpc[w] = "idle"

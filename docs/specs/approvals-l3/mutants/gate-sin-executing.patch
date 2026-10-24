@@ -2,15 +2,15 @@
 # espera: each ExecAtMostOnce=OK OneExecPerOrder=VIOLADA
 --- a/ApprovalsL3.tla
 +++ b/ApprovalsL3.tla
-@@ -189,7 +189,7 @@
- 
- \* get_recent_approval_for_skill: pending, executing o approved, la más reciente.
- \* Las failed y rejected no cuentan: esa acción se puede pedir otra vez.
+@@ -192,7 +192,7 @@
+ \* get_recent_approval_for_skill (db/queries.py:2783-2817): pending, executing o
+ \* approved, la más reciente. Las failed y rejected no cuentan: esa acción se puede
+ \* pedir otra vez. Es una lectura sin lock en su propia transacción.
 -LiveAppr == {i \in Ids : appr[i] \in {"pending", "executing", "approved"}}
 +LiveAppr == {i \in Ids : appr[i] \in {"pending", "approved"}}
  FreeIds  == {i \in Ids : appr[i] = "none"}
  
- Reuse(w) ==
+ \* execute_skill.py:799-813: antes de prepare, lee la aprobación viva (#386). Si la
 --- a/ApprovalsL3.cfg
 +++ b/ApprovalsL3.cfg
 @@ -9,7 +9,7 @@

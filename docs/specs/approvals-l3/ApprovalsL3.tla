@@ -2,11 +2,12 @@
 (***************************************************************************)
 (* Aprobaciones L3 frente a la cola inbound (issue #341, ADR 0008).        *)
 (*                                                                         *)
-(* Modela lo que hace el código de `develop` (084955e, con el arreglo de   *)
-(* #376 del PR #395), no lo que dice la documentación. Cada acción es un   *)
+(* Modela lo que hace el código de la rama fix/l3-approval-escalations   *)
+(* (820fac2, PR #402, arreglos de #377, #390 y #393, sobre develop con el  *)
+(* arreglo de #376), no lo que dice la documentación. Cada acción es un    *)
 (* paso atómico del código; README.md cita el archivo:línea y la           *)
-(* transacción que lo hace atómico. El modelo de antes del arreglo es el   *)
-(* mutante mutants/antes-376.patch.                                        *)
+(* transacción que lo hace atómico. Los modelos de antes de cada arreglo   *)
+(* son los mutantes mutants/antes-402.patch y mutants/antes-376.patch.     *)
 (*                                                                         *)
 (* Una conversación, un pedido y una skill L3 (`skill`, elegida en Init    *)
 (* entre `Skills`). Actores concurrentes:                                  *)
@@ -50,7 +51,8 @@ Final       == {"approved", "failed", "rejected"}
 Outcomes    == {"done", "failed", "rejected"}
 MsgKinds    == {"gate", "waiting", "followup_done", "refused"} \cup Outcomes
 Results     == {"none", "applied", "refused", "notapplied", "unknown"}
-TurnPcs     == {"idle", "reuse", "precheck", "gate", "escalate", "deliver"}
+TurnPcs     == {"idle", "reuse", "prelock", "precheck", "gate", "gatelock", "create",
+                "escalate", "deliver"}
 HumanPcs    == {"idle", "a_claim", "a_snap", "a_mut", "a_settle", "a_del", "r_cas", "r_del"}
 RecPcs      == {"idle", "settle", "deliver"}
 
@@ -187,26 +189,22 @@ Claim(w) ==
     /\ unclaimed' = 0
     /\ UNCHANGED <<shopVars, dbVars, inbox, arrived, faults, humanVars, recVars>>
 
-\* get_recent_approval_for_skill: pending, executing o approved, la más reciente.
-\* Las failed y rejected no cuentan: esa acción se puede pedir otra vez.
+\* get_recent_approval_for_skill (db/queries.py:2783-2817): pending, executing o
+\* approved, la más reciente. Las failed y rejected no cuentan: esa acción se puede
+\* pedir otra vez. Es una lectura sin lock en su propia transacción.
 LiveAppr == {i \in Ids : appr[i] \in {"pending", "executing", "approved"}}
 FreeIds  == {i \in Ids : appr[i] = "none"}
 
-Reuse(w) ==
-    LET r == Max(LiveAppr) IN
-    /\ tAppr' = [tAppr EXCEPT ![w] = r]
-    /\ tKind' = [tKind EXCEPT ![w] =
-                   IF appr[r] = "approved" THEN "followup_done" ELSE "waiting"]
-    /\ tpc' = [tpc EXCEPT ![w] = "escalate"]
-
-\* execute_skill.py:721-737: reusa una aprobación viva antes de prepare (#386).
+\* execute_skill.py:799-813: antes de prepare, lee la aprobación viva (#386). Si la
+\* hay, _reuse (:695-707) la relee con la fila bloqueada en otra transacción.
 PreReuse(w) ==
     /\ tpc[w] = "reuse"
     /\ IF LiveAppr # {}
-         THEN Reuse(w)
+         THEN /\ tAppr' = [tAppr EXCEPT ![w] = Max(LiveAppr)]
+              /\ tpc' = [tpc EXCEPT ![w] = "prelock"]
          ELSE /\ tpc' = [tpc EXCEPT ![w] = "precheck"]
-              /\ UNCHANGED <<tAppr, tKind>>
-    /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, lease, humanVars, recVars>>
+              /\ UNCHANGED tAppr
+    /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, tKind, lease, humanVars, recVars>>
 
 \* El LLM pide la L3. prepare relee el pedido: cancel y address rechazan uno
 \* enviado o cancelado (SkillRefusal); refund solo mira el saldo.
@@ -219,44 +217,76 @@ Precheck(w) ==
               /\ UNCHANGED tKind
     /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, tAppr, lease, humanVars, recVars>>
 
-\* Gate L3, una transacción (execute_skill.py:800-839): get_recent_approval_for_skill
-\* y, si no hay ninguna viva, create_pending_approval.
-GateReuse(w) ==
+\* Gate L3, primera transacción (execute_skill.py:872-879): get_recent_approval_for_skill.
+\* Con una viva, _reuse (:880-885); sin ninguna, la transacción de creación (:888-904).
+GateRead(w) ==
     /\ tpc[w] = "gate"
-    /\ LiveAppr # {}
-    /\ Reuse(w)
-    /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, lease, humanVars, recVars>>
+    /\ IF LiveAppr # {}
+         THEN /\ tAppr' = [tAppr EXCEPT ![w] = Max(LiveAppr)]
+              /\ tpc' = [tpc EXCEPT ![w] = "gatelock"]
+         ELSE /\ tpc' = [tpc EXCEPT ![w] = "create"]
+              /\ UNCHANGED tAppr
+    /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, tKind, lease, humanVars, recVars>>
 
+\* _reuse (execute_skill.py:695-707), una transacción: open_gate_escalation
+\* (approval_resolution.py:65-96) relee el estado con FOR UPDATE (lock_approval_status,
+\* db/queries.py:2765-2780) y solo abre o reutiliza awaiting_human_approval:<id> si
+\* sigue pending o executing. Aprobar, rechazar y cerrar una ejecución cambian la
+\* fila con un UPDATE que la bloquea hasta su COMMIT, así que este paso y esos se
+\* serializan.
+\*   approved          -> "ya quedó aplicado" (_already_applied, :648-677) por
+\*                        respond, sin escalación.
+\*   pending/executing -> su escalación de gate; escalate dice "sigue en revisión".
+\*   failed/rejected   -> None: desde PreReuse sigue a prepare (:812-813); desde el
+\*                        gate crea otra aprobación (:884-888).
+GateReuse(w) ==
+    LET r == tAppr[w] IN
+    /\ tpc[w] \in {"prelock", "gatelock"}
+    /\ CASE appr[r] = "approved" ->
+              /\ tKind' = [tKind EXCEPT ![w] = "followup_done"]
+              /\ tpc' = [tpc EXCEPT ![w] = "deliver"]
+              /\ UNCHANGED openEsc
+         [] appr[r] \in {"pending", "executing"} ->
+              /\ openEsc' = openEsc \cup {r}
+              /\ tKind' = [tKind EXCEPT ![w] = "waiting"]
+              /\ tpc' = [tpc EXCEPT ![w] = "escalate"]
+         [] OTHER ->
+              /\ tpc' = [tpc EXCEPT ![w] = IF tpc[w] = "prelock" THEN "precheck" ELSE "create"]
+              /\ UNCHANGED <<openEsc, tKind>>
+    /\ UNCHANGED <<shopVars, appr, attempt, teamEsc, unknownOut, inbox, queueVars, tAppr,
+                   lease, humanVars, recVars>>
+
+\* Transacción de creación (execute_skill.py:888-904): create_pending_approval
+\* (db/queries.py:2703-2740) y open_gate_escalation sobre la fila recién insertada.
+\* La aprobación y su escalación se ven a la vez, al COMMIT (#390).
 GateCreate(w) ==
-    /\ tpc[w] = "gate"
-    /\ LiveAppr = {}
+    /\ tpc[w] = "create"
     /\ FreeIds # {}
     /\ LET n == Min(FreeIds) IN
          /\ appr' = [appr EXCEPT ![n] = "pending"]
+         /\ openEsc' = openEsc \cup {n}
          /\ tAppr' = [tAppr EXCEPT ![w] = n]
     /\ tKind' = [tKind EXCEPT ![w] = "gate"]
     /\ tpc' = [tpc EXCEPT ![w] = "escalate"]
-    /\ UNCHANGED <<shopVars, attempt, openEsc, teamEsc, unknownOut, inbox, queueVars,
+    /\ UNCHANGED <<shopVars, attempt, teamEsc, unknownOut, inbox, queueVars,
                    lease, humanVars, recVars>>
 
 \* Cota del modelo, no del código: sin ids libres el turno termina sin L3.
 GateExhausted(w) ==
-    /\ tpc[w] = "gate"
-    /\ LiveAppr = {}
+    /\ tpc[w] = "create"
     /\ FreeIds = {}
     /\ tpc' = [tpc EXCEPT ![w] = "idle"]
     /\ lease' = [lease EXCEPT ![w] = FALSE]
     /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, tAppr, tKind, humanVars, recVars>>
 
-\* Nodo escalate, una transacción: si no hay ninguna escalación abierta (del gate
-\* o del equipo) crea la del gate (reason awaiting_human_approval:<id>); si la
-\* hay, la reutiliza. Inserta el mensaje al cliente en la misma transacción.
+\* Nodo escalate (escalate.py:82-155), una transacción. Con pending_approval_id ya
+\* no lee ni abre escalaciones (:83-88): propaga la del gate e inserta el acuse con
+\* metadata.inbound_message_id (:128).
 Escalate(w) ==
     /\ tpc[w] = "escalate"
-    /\ openEsc' = IF openEsc = {} /\ teamEsc = {} THEN {tAppr[w]} ELSE openEsc
     /\ tpc' = [tpc EXCEPT ![w] = "deliver"]
-    /\ UNCHANGED <<shopVars, appr, attempt, teamEsc, unknownOut, inbox, queueVars,
-                   tAppr, tKind, lease, humanVars, recVars>>
+    /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, tAppr, tKind, lease, humanVars,
+                   recVars>>
 
 \* _deliver_outcome tras el grafo y complete_inbound_job.
 Deliver(w) ==
@@ -268,13 +298,15 @@ Deliver(w) ==
 
 \* Excepción (fail_inbound_job con backoff), shutdown (release_inbound_job) o
 \* muerte del proceso: el job vuelve a pending y se repite entero. Lo ya
-\* committed se queda. inbound_already_answered no salva un turno que acabó
-\* en escalate: ese mensaje no lleva metadata.inbound_message_id.
+\* committed se queda. En "deliver" el mensaje del turno ya está committed con
+\* metadata.inbound_message_id (respond, y escalate desde #377), así que el
+\* reintento acaba en inbound_already_answered (inbound_worker.py:89-99) sin
+\* repetir el turno ni entregar nada.
 TurnFault(w) ==
     /\ tpc[w] # "idle"
     /\ faults < MaxFaults
     /\ faults' = faults + 1
-    /\ unclaimed' = unclaimed + 1
+    /\ unclaimed' = IF tpc[w] = "deliver" THEN unclaimed ELSE unclaimed + 1
     /\ tpc' = [tpc EXCEPT ![w] = "idle"]
     /\ lease' = [lease EXCEPT ![w] = FALSE]
     /\ UNCHANGED <<shopVars, dbVars, inbox, arrived, tAppr, tKind, humanVars, recVars>>
@@ -292,15 +324,18 @@ LeaseExpire(w) ==
 (***************************************************************************)
 (* Cierre de una ejecución (services/approval_execution.py:190-371).       *)
 (* settle_executing_approval es un CAS desde `executing` con el mismo      *)
-(* execution_attempt (db/queries.py:2966-2998). En la misma transacción:   *)
+(* execution_attempt (db/queries.py:3041-3073). En la misma transacción:   *)
 (*   applied    -> approved; release_escalations_after_executed_action     *)
-(*                 cierra todas las abiertas, o, si el equipo tiene que    *)
-(*                 rematarla (`fu`), hand_approval_to_team.                *)
+(*                 (approval_resolution.py:118-133), o, si el equipo tiene *)
+(*                 que rematarla (`fu`), hand_approval_to_team.            *)
 (*   refused    -> failed; hand_approval_to_team.                          *)
 (*   notapplied -> pending; nada más.                                      *)
 (*   unknown    -> failed; hand_approval_to_team; sin mensaje al cliente.  *)
-(* hand_approval_to_team (approval_resolution.py:142-163) cierra todas las *)
-(* abiertas y abre una del equipo.                                         *)
+(* Las dos cierran con resolve_open_escalations_for_approval               *)
+(* (db/queries.py:1241-1271, #393): todas las abiertas salvo las de otra   *)
+(* aprobación, que son el gate de una pending o executing y el seguimiento *)
+(* del equipo de otra (metadata.approval_id). hand_approval_to_team        *)
+(* (approval_resolution.py:194-215) abre después la del equipo.            *)
 (***************************************************************************)
 SettleTo(res) ==
     CASE res = "applied"    -> "approved"
@@ -309,15 +344,18 @@ SettleTo(res) ==
 
 CanSettle(a, at) == appr[a] = "executing" /\ attempt[a] = at
 
+\* Las escalaciones de gate que resolve_open_escalations_for_approval(a) no cierra.
+OtherLiveGates(a) == {i \in openEsc : i # a /\ appr[i] \in {"pending", "executing"}}
+
 SettleDb(a, res, fu) ==
     /\ appr' = [appr EXCEPT ![a] = SettleTo(res)]
     /\ IF res = "notapplied"
          THEN UNCHANGED <<openEsc, teamEsc>>
          ELSE IF res = "applied" /\ ~fu
-         THEN /\ openEsc' = {}
-              /\ teamEsc' = {}
-         ELSE /\ openEsc' = {}
-              /\ teamEsc' = {a}
+         THEN /\ openEsc' = OtherLiveGates(a)
+              /\ teamEsc' = teamEsc \ {a}
+         ELSE /\ openEsc' = OtherLiveGates(a)
+              /\ teamEsc' = teamEsc \cup {a}
     /\ unknownOut' = IF res = "unknown" THEN unknownOut \cup {a} ELSE unknownOut
     /\ UNCHANGED attempt
 
@@ -528,8 +566,8 @@ RecoverDeliver(r) ==
 (* Especificación                                                          *)
 (***************************************************************************)
 TurnStep(w) ==
-    \/ Claim(w) \/ PreReuse(w) \/ Precheck(w) \/ GateReuse(w) \/ GateCreate(w)
-    \/ GateExhausted(w) \/ Escalate(w) \/ Deliver(w)
+    \/ Claim(w) \/ PreReuse(w) \/ Precheck(w) \/ GateRead(w) \/ GateReuse(w)
+    \/ GateCreate(w) \/ GateExhausted(w) \/ Escalate(w) \/ Deliver(w)
 
 HumanStep(h) ==
     \/ ApproveClaim(h) \/ ApproveSnapshot(h) \/ ApproveMutate(h) \/ ApproveSettle(h)
@@ -604,6 +642,16 @@ NoWaitingAfterOutcome ==
 \* En reposo, toda escalación de gate abierta apunta a una aprobación pending
 \* (si no, nadie puede cerrarla desde el panel y la conversación queda escalada).
 NoOrphanEscalation == Quiescent => (\A a \in openEsc : appr[a] = "pending")
+
+\* Auxiliar de #377: nunca hay una escalación de gate abierta sobre una
+\* aprobación ya aprobada (nadie la cierra desde el panel).
+NoGateEscalationForApproved == \A a \in openEsc : appr[a] # "approved"
+
+\* #390 y #393: toda aprobación pending o executing tiene abierta su escalación de
+\* gate, en todo estado. El panel nunca la ve sin escalación y cerrar otra no se la
+\* quita.
+LiveApprovalHasEscalation ==
+    \A a \in Ids : appr[a] \in {"pending", "executing"} => a \in openEsc
 
 \* En reposo, lo ejecutado en Shopify consta como aprobado, o como failed con el
 \* resultado desconocido y el caso en manos del equipo (lo que #376 manda hacer

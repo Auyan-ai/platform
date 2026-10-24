@@ -2,12 +2,12 @@
 # espera: each ExecutedNeverPending=VIOLADA
 --- a/ApprovalsL3.tla
 +++ b/ApprovalsL3.tla
-@@ -307,7 +307,7 @@
+@@ -342,7 +342,7 @@
        [] res = "notapplied" -> "pending"
        [] OTHER              -> "failed"
  
 -CanSettle(a, at) == appr[a] = "executing" /\ attempt[a] = at
 +CanSettle(a, at) == appr[a] = "executing"
  
- SettleDb(a, res, fu) ==
-     /\ appr' = [appr EXCEPT ![a] = SettleTo(res)]
+ \* Las escalaciones de gate que resolve_open_escalations_for_approval(a) no cierra.
+ OtherLiveGates(a) == {i \in openEsc : i # a /\ appr[i] \in {"pending", "executing"}}
