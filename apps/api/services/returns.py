@@ -738,6 +738,10 @@ def build_plan(
             "variante del mismo precio o más barata.",
         )
     rule = _price_rule(eligible, difference)
+    # Sobre lo devuelto con impuesto si el pedido no lo incluye. La doc de Shopify
+    # (2026-04) no dice sobre qué base aplica `restockingFee.percentage`; si difiere,
+    # `returnCalculate` admite `restockingFee` por línea y `returnShippingFee` y devuelve
+    # sus importes (`CalculatedRestockingFee.amountSet`) para usarlos aquí.
     restocking = round_money(
         returned_total * eligible.restocking_percent / 100, calculation.currency
     )
