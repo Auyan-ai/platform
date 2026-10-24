@@ -437,6 +437,8 @@ def make_supervise_node(
                 # system_prompt rompía el prefijo cacheado (#211) → el retry hacía
                 # cache-miss y pagaba todo el input de nuevo (latencia + coste).
                 result["supervisor_feedback"] = verdict.reason
+                # Dónde va el feedback en el historial de la siguiente vuelta (ver reason).
+                result["supervisor_feedback_at"] = len(state.get("tool_results") or [])
             else:
                 # structural o segundo rechazo → escalar. El borrador sale de
                 # `agent_response` aquí mismo: escalate solo entrega lo que quede ahí.

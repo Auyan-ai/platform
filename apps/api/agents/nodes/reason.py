@@ -28,6 +28,7 @@ from apps.api.agents.prompts.builder import (
     build_message_history,
     build_system_blocks,
     conversation_context_block,
+    supervisor_feedback_block,
 )
 from apps.api.agents.schemas import RESPOND_OR_ESCALATE_TOOL, AgentDecisionTool
 from apps.api.agents.state import AgentState
@@ -36,6 +37,8 @@ from apps.api.integrations.anthropic_client import (
     NoDecision,
     ToolDecision,
     call_claude_for_decision,
+    operator_messages_supported,
+    operator_note,
 )
 from apps.api.integrations.pricing import compute_llm_cost
 from apps.api.services.conversation_progress import no_progress_reason
@@ -51,6 +54,7 @@ from pydantic import ValidationError
 logger = logging.getLogger(__name__)
 
 DECIDE_TOOL_NAME: str = RESPOND_OR_ESCALATE_TOOL["name"]
+
 
 def _fixed_reply(state: AgentState, key: str) -> str:
     """Texto fijo al cliente en el idioma de la conversación."""
@@ -181,6 +185,33 @@ def _append_tool_result_blocks(
             }
         )
     return messages
+
+
+def _agent_request(
+    state: AgentState, model: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """System y mensajes de esta vuelta.
+
+    El feedback del supervisor (o el del reintento por idioma) va, donde el modelo lo
+    admite, como mensaje del operador justo después de lo que el agente tenía delante al
+    decidir (`supervisor_feedback_at`, ciclos de tools hasta entonces) y ahí se queda en
+    las vueltas siguientes: el system no cambia y el historial solo crece, así los
+    thinking blocks replayados siguen valiendo. Donde no, va en el system como siempre."""
+    feedback = state.get("supervisor_feedback")
+    as_message = bool(feedback) and operator_messages_supported(model)
+    system_blocks = agent_system_blocks(
+        {**state, "supervisor_feedback": None} if as_message else state
+    )
+    history = build_message_history(state["conversation_history"])
+    tool_results = state.get("tool_results", [])
+    messages = _append_tool_result_blocks(list(history), tool_results, state.get("assistant_turns"))
+    if as_message:
+        anchor = state.get("supervisor_feedback_at")
+        cycles = len(tool_results) if anchor is None else min(anchor, len(tool_results))
+        messages.insert(
+            len(history) + 2 * cycles, operator_note(supervisor_feedback_block(feedback or ""))
+        )
+    return system_blocks, messages
 
 
 ReasonRole = Literal["default_agent_model", "simple_turn_model"]
@@ -339,16 +370,10 @@ def make_reason_node(
             )
 
         state = {**state, "turn_now": turn_now(state)}  # type: ignore[typeddict-item]
-        system_blocks = agent_system_blocks(state)
-        messages = build_message_history(state["conversation_history"])
-        messages = _append_tool_result_blocks(
-            messages, state.get("tool_results", []), state.get("assistant_turns")
-        )
-
         allowed_skills = _visible_skills(state)
         tools = _build_tools(allowed_skills)
-
         model = _select_reason_model(state)
+        system_blocks, messages = _agent_request(state, model)
 
         # Iteraciones agotadas: último turno SOLO para decidir (respond/escalate) con
         # lo ya obtenido. Las tools siguen definidas (el historial trae tool_use de
@@ -364,7 +389,7 @@ def make_reason_node(
             system=system_blocks,
             messages=messages,
             tools=tools,
-            decision=ToolDecision(DECIDE_TOOL_NAME, any_tool=not iterations_exhausted),
+            decision=ToolDecision(DECIDE_TOOL_NAME, any_tool=True, closing=iterations_exhausted),
             max_retries=deps.settings.llm_max_retries,
             timeout_seconds=deps.settings.llm_timeout_seconds,
             cache=True,

@@ -50,6 +50,9 @@ class ModelCapabilities:
     default_effort: Effort | None
     # Thinking blocks atados al modelo y a la conversación (preserved thinking).
     preserved_thinking: bool
+    # Mensajes `role: system` a mitad de conversación (instrucciones del operador sin
+    # editar el system de arriba).
+    system_messages: bool
 
 
 MODEL_CAPABILITIES: dict[str, ModelCapabilities] = {
@@ -63,6 +66,7 @@ MODEL_CAPABILITIES: dict[str, ModelCapabilities] = {
         efforts=frozenset(),
         default_effort=None,
         preserved_thinking=False,
+        system_messages=False,
     ),
     "claude-sonnet-4-6": ModelCapabilities(
         forced_tool_choice=True,
@@ -74,6 +78,7 @@ MODEL_CAPABILITIES: dict[str, ModelCapabilities] = {
         efforts=frozenset({"low", "medium", "high", "max"}),
         default_effort=None,
         preserved_thinking=False,
+        system_messages=False,
     ),
     "claude-opus-4-7": ModelCapabilities(
         forced_tool_choice=True,
@@ -85,6 +90,7 @@ MODEL_CAPABILITIES: dict[str, ModelCapabilities] = {
         efforts=_ALL_EFFORTS,
         default_effort=None,
         preserved_thinking=False,
+        system_messages=False,
     ),
     # Sonnet 5.5: `disabled` da 400 (se apaga con `between_tools`); esfuerzo explícito
     # porque los niveles se recalibraron.
@@ -98,6 +104,7 @@ MODEL_CAPABILITIES: dict[str, ModelCapabilities] = {
         efforts=_ALL_EFFORTS,
         default_effort="medium",
         preserved_thinking=True,
+        system_messages=True,
     ),
     # Opus 5.5: el thinking no se apaga; su esfuerzo por defecto en la API es `medium`
     # y se manda explícito.
@@ -111,6 +118,7 @@ MODEL_CAPABILITIES: dict[str, ModelCapabilities] = {
         efforts=_ALL_EFFORTS,
         default_effort="medium",
         preserved_thinking=True,
+        system_messages=True,
     ),
 }
 
@@ -126,6 +134,7 @@ UNKNOWN_MODEL_CAPABILITIES = ModelCapabilities(
     efforts=frozenset(),
     default_effort=None,
     preserved_thinking=False,
+    system_messages=False,
 )
 
 

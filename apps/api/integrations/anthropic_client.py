@@ -247,10 +247,38 @@ NO_TOOL_RETRIES = 1
 @dataclass(frozen=True)
 class ToolDecision:
     """Lo que pide un nodo: una llamada a `tool`, o a cualquier tool ofrecida (`any_tool`,
-    el paso del loop ReAct) cerrando con `tool`."""
+    el paso del loop ReAct) cerrando con `tool`. `closing`: última vuelta del loop, solo
+    vale `tool` (las demás siguen definidas porque el historial trae sus `tool_use`)."""
 
     tool: str
     any_tool: bool = False
+    closing: bool = False
+
+    @property
+    def this_round(self) -> ToolDecision:
+        """Lo que vale en esta vuelta: en la de cierre, solo `tool`."""
+        return ToolDecision(self.tool, any_tool=self.any_tool and not self.closing)
+
+
+def operator_messages_supported(model: str) -> bool:
+    """El modelo admite mensajes `role: system` a mitad de conversación: una instrucción
+    del operador va como mensaje añadido en vez de editar el system de arriba."""
+    return capabilities_of(model).system_messages
+
+
+def operator_note(text: str) -> dict[str, Any]:
+    """Instrucción del operador a mitad de conversación (solo si
+    `operator_messages_supported`). Va tras un mensaje `user` y antes de un `assistant` o
+    al final."""
+    return {"role": "system", "content": text}
+
+
+def _with_trailing_note(messages: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
+    """Añade la nota al final; si ya acaba en una nota del operador, la amplía (dos
+    mensajes `system` seguidos no siguen a un `user`)."""
+    if messages and messages[-1]["role"] == "system":
+        return [*messages[:-1], operator_note(f"{messages[-1]['content']}\n\n{text}")]
+    return [*messages, operator_note(text)]
 
 
 @dataclass(frozen=True)
@@ -285,6 +313,15 @@ class _DecisionRequest:
     max_tokens: int
     options: dict[str, Any]
     forced: bool
+    # Instrucción de cierre que va como mensaje del operador al final (5.5).
+    closing_note: str | None = None
+
+
+def _closing_note(decision: ToolDecision) -> str:
+    return (
+        "Ya no quedan consultas en este turno. Cierra ahora llamando a "
+        f"`{decision.tool}` con lo que ya tienes; no llames a otras herramientas."
+    )
 
 
 def _instruction(decision: ToolDecision) -> str:
@@ -325,15 +362,20 @@ def decision_request(
 
     Modelos que aceptan tool forzada y no piensan: `tool_choice` `any`/`tool`, la petición
     de siempre. El resto (5.5, o un rol con thinking): `auto`, la tool de decisión
-    estricta y la instrucción al final del system."""
+    estricta y la instrucción al final del system. Donde el modelo admite mensajes del
+    operador, el system no cambia en la vuelta de cierre: la instrucción de cierre va como
+    mensaje al final (con thinking preservado, editar el system invalida los thinking
+    blocks de las vueltas anteriores)."""
     caps = capabilities_of(model)
     thinking = get_models().thinking(role, model=model)
     options = thinking.request_options()
+    this_round = decision.this_round
     if caps.forced_tool_choice and not thinking.thinking_on:
-        choice = {"type": "any"} if decision.any_tool else {"type": "tool", "name": decision.tool}
+        choice = {"type": "any"} if this_round.any_tool else {"type": "tool", "name": decision.tool}
         return _DecisionRequest(system, tools, choice, max_tokens, options, forced=True)
+    note_closing = caps.system_messages and decision.closing
     return _DecisionRequest(
-        system=_with_instruction(system, _instruction(decision)),
+        system=_with_instruction(system, _instruction(decision if note_closing else this_round)),
         tools=[
             _strict(tool) if caps.strict_tools and tool["name"] == decision.tool else tool
             for tool in tools
@@ -346,6 +388,7 @@ def decision_request(
         ),
         options=options,
         forced=False,
+        closing_note=_closing_note(decision) if note_closing else None,
     )
 
 
@@ -399,6 +442,8 @@ async def call_claude_for_decision(
         max_tokens=max_tokens,
     )
     turn = list(messages)
+    if request.closing_note is not None:
+        turn = _with_trailing_note(turn, request.closing_note)
     usage = LLMUsage()
     for attempt in range(NO_TOOL_RETRIES + 1):
         try:
@@ -443,7 +488,7 @@ async def call_claude_for_decision(
             {
                 "role": "user",
                 "content": "Tu respuesta anterior no llamó a ninguna herramienta. "
-                + _instruction(decision),
+                + _instruction(decision.this_round),
             },
         ]
     logger.error(

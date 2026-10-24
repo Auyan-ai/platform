@@ -553,19 +553,128 @@ class TestReasonOn55:
         assert "no se ejecutó" in unrun["content"]
 
     @pytest.mark.asyncio
-    async def test_exhausted_iterations_steer_to_the_decide_tool(
+    async def test_exhausted_iterations_steer_to_the_decide_tool_without_touching_the_system(
         self, fake_deps: AgentDependencies
     ) -> None:
-        state = _with_policies(_reason_state("claude-opus-5-5"), hops=3)
+        """La instrucción de cierre de la última vuelta va como mensaje `system` al final: el
+        system es el de las vueltas anteriores y sus thinking blocks siguen valiendo."""
+        before, _ = await run_reason(
+            fake_deps,
+            _with_policies(_reason_state("claude-opus-5-5"), hops=2),
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+        )
         api, out = await run_reason(
             fake_deps,
-            state,
+            _with_policies(_reason_state("claude-opus-5-5"), hops=3),
             message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
         )
         body = api.requests[0]
         assert body["tool_choice"] == {"type": "auto"}
-        assert "`respond_or_escalate`" in body["system"][-1]["text"]
+        assert body["system"] == before.requests[0]["system"]
+        closing = body["messages"][-1]
+        assert closing["role"] == "system"
+        assert "`respond_or_escalate`" in closing["content"]
         assert out["decision"] == "respond"
+
+
+FEEDBACK = "Da el plazo exacto que dicen las políticas."
+
+
+class TestSupervisorFeedbackOn55:
+    """El feedback del supervisor (o el reintento por idioma) va como mensaje `system` justo
+    después de lo que el agente tenía delante al decidir, y se queda ahí en las vueltas
+    siguientes: el historial solo crece y los thinking blocks replayados siguen valiendo."""
+
+    @pytest.mark.asyncio
+    async def test_feedback_is_a_system_message_and_the_system_does_not_change(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        reply = message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5")
+        original, _ = await run_reason(
+            fake_deps, _with_policies(_reason_state("claude-opus-5-5"), hops=1), reply
+        )
+        retry_state = _with_policies(_reason_state("claude-opus-5-5"), hops=1)
+        retry_state.update(supervisor_feedback=FEEDBACK, supervisor_feedback_at=1)
+        retry, _ = await run_reason(fake_deps, retry_state, reply)
+
+        first, second = original.requests[0], retry.requests[0]
+        assert second["system"] == first["system"]
+        assert second["messages"][:-1] == first["messages"]
+        assert second["messages"][-1]["role"] == "system"
+        assert FEEDBACK in second["messages"][-1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_feedback_stays_where_it_was_given_on_later_hops(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        state = _with_policies(_reason_state("claude-opus-5-5"), hops=2)
+        state.update(supervisor_feedback=FEEDBACK, supervisor_feedback_at=1)
+        api, _ = await run_reason(
+            fake_deps,
+            state,
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+        )
+
+        roles = [m["role"] for m in api.requests[0]["messages"]]
+        assert roles == ["user", "assistant", "user", "system", "assistant", "user"]
+        assert FEEDBACK in api.requests[0]["messages"][3]["content"]
+
+    @pytest.mark.asyncio
+    async def test_feedback_and_closing_at_the_end_are_one_system_message(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        state = _with_policies(_reason_state("claude-opus-5-5"), hops=3)
+        state.update(supervisor_feedback=FEEDBACK, supervisor_feedback_at=3)
+        api, _ = await run_reason(
+            fake_deps,
+            state,
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+        )
+
+        messages = api.requests[0]["messages"]
+        assert [m["role"] for m in messages[-2:]] == ["user", "system"]
+        assert FEEDBACK in messages[-1]["content"]
+        assert "`respond_or_escalate`" in messages[-1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_current_models_keep_the_feedback_in_the_system(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        """Sonnet 4.6 no admite mensajes `system` a mitad de conversación ni ata sus thinking
+        blocks al prefijo: la petición es la de siempre."""
+        state = _with_policies(_reason_state("claude-sonnet-4-6"), hops=1)
+        state.update(supervisor_feedback=FEEDBACK, supervisor_feedback_at=1)
+        api, _ = await run_reason(
+            fake_deps, state, message(tool_use("respond_or_escalate", RESPOND))
+        )
+
+        body = api.requests[0]
+        assert FEEDBACK in body["system"][-1]["text"]
+        assert [m["role"] for m in body["messages"]] == ["user", "assistant", "user"]
+
+    @pytest.mark.asyncio
+    async def test_a_tactical_reject_records_where_the_feedback_goes(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        state = _supervise_state(
+            tool_results=[
+                {
+                    "id": "toolu_hop0",
+                    "slug": POLICIES,
+                    "input": {},
+                    "output": {"shipping": "3 días"},
+                    "is_error": False,
+                    "error": None,
+                }
+            ]
+        )
+        reject = {"verdict": "reject", "reject_kind": "tactical", "reason": FEEDBACK}
+        _, out = await run_supervise(
+            fake_deps, state, message(tool_use("supervisor_verdict", reject))
+        )
+
+        assert out["supervisor_feedback"] == FEEDBACK
+        assert out["supervisor_feedback_at"] == 1
 
     @pytest.mark.asyncio
     async def test_refusal_escalates_with_its_category_and_charges_the_call(

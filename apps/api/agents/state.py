@@ -218,6 +218,10 @@ class AgentState(TypedDict, total=False):
     # dinámico (NO cacheado), no concatenado al system_prompt: si fuera al system_prompt
     # rompería el prefijo cacheado (#211) y el retry pagaría todo el input sin caché.
     supervisor_feedback: str | None
+    # Ciclos de tools que el agente tenía delante cuando se le dio el feedback. En los
+    # modelos con mensajes del operador, el feedback va como mensaje justo ahí y se queda
+    # ahí en las vueltas siguientes (el historial solo crece).
+    supervisor_feedback_at: int
     # Borrador que el supervisor rechazó y que escala (#380): sale de `agent_response`
     # en el mismo parche del rechazo y solo llega a la nota interna del escalado.
     rejected_draft: str | None

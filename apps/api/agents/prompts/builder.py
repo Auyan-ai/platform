@@ -104,7 +104,7 @@ def channel_register_block(surface: str | None) -> str:
     return f"## Reglas del canal\n\n{text}" if text else ""
 
 
-def _supervisor_feedback_block(feedback: str) -> str:
+def supervisor_feedback_block(feedback: str) -> str:
     return (
         "## Feedback del supervisor (corrección requerida)\n\n"
         f"{feedback}\n\n"
@@ -178,7 +178,7 @@ def build_system_blocks(
     if kb:
         dynamic.append(kb)
     if supervisor_feedback:
-        dynamic.append(_supervisor_feedback_block(supervisor_feedback))
+        dynamic.append(supervisor_feedback_block(supervisor_feedback))
     if response_language:
         # Lo último antes de generar: el resto del system está en español y arrastra.
         dynamic.append(response_language_block(response_language))
