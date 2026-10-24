@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from anthropic import AsyncAnthropic
 from apps.api.core.config import get_models
 from apps.api.db.models import UserProfile
-from apps.api.integrations.anthropic_client import call_claude_text
+from apps.api.integrations.anthropic_client import CallTrace, call_claude_text
 from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.simulator.prompts import SIMULATOR_PROMPT
 
@@ -33,6 +33,8 @@ class SimulatorTurn:
     give_up: bool
     internal_reasoning: str
     usage: LLMUsage
+    # Con qué salió la llamada y cómo terminó (va al run de LangSmith).
+    call: CallTrace | None = None
 
     @property
     def input_tokens(self) -> int:
@@ -87,7 +89,18 @@ class UserSimulator:
             messages=_build_messages(history),
             timeout_seconds=SIMULATOR_TIMEOUT_SECONDS,
         )
-        return _parse_turn(reply.text.strip() or "{}", reply.usage)
+        if reply.refusal_reason is not None:
+            # El cliente sintético se negó: se termina la conversación con la razón, sin
+            # mandar al agente un mensaje inventado.
+            return SimulatorTurn(
+                message="",
+                goal_achieved=False,
+                give_up=True,
+                internal_reasoning=reply.refusal_reason,
+                usage=reply.usage,
+                call=reply.call,
+            )
+        return replace(_parse_turn(reply.text.strip() or "{}", reply.usage), call=reply.call)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

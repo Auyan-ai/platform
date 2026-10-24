@@ -382,6 +382,7 @@ def make_select_aop_node(
             )
 
         out: dict = {
+            "llm_call": outcome.call.as_dict() if outcome.call else None,
             "aop_slug": selected_aop.slug,
             "aop_version": selected_aop.current_version,
             "aop_workspace": selected_aop.workspace,

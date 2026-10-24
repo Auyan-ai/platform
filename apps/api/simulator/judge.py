@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from anthropic import AsyncAnthropic
 from apps.api.core.config import get_models
 from apps.api.db.models import SimulationScenario
-from apps.api.integrations.anthropic_client import call_claude_text
+from apps.api.integrations.anthropic_client import CallTrace, call_claude_text
 from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 from apps.api.simulator.prompts import SIM_JUDGE_SYSTEM_PROMPT
 from apps.api.simulator.transcript import SimulatorTranscript, format_for_sim_judge
@@ -48,6 +48,8 @@ class SimulatorJudgeVerdict:
     suggestions: str
     model_used: str
     usage: LLMUsage
+    # Con qué salió la llamada y cómo terminó (va al run de LangSmith).
+    call: CallTrace | None = None
 
     @property
     def input_tokens(self) -> int:
@@ -90,7 +92,12 @@ async def judge_simulation(
         messages=[{"role": "user", "content": formatted}],
         timeout_seconds=JUDGE_TIMEOUT_SECONDS,
     )
-    return _parse_verdict(reply.text.strip() or "{}", reply.usage, model_used=model)
+    if reply.refusal_reason is not None:
+        # Un refusal no es un JSON vacío: veredicto conservador con la razón explícita.
+        verdict = _fallback_verdict(reply.usage, model_used=model, reason=reply.refusal_reason)
+    else:
+        verdict = _parse_verdict(reply.text.strip() or "{}", reply.usage, model_used=model)
+    return replace(verdict, call=reply.call)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -155,6 +162,7 @@ def _fallback_verdict(
     usage: LLMUsage,
     *,
     model_used: str,
+    reason: str = "parse_error",
 ) -> SimulatorJudgeVerdict:
     return SimulatorJudgeVerdict(
         reasoning_score=0,
@@ -163,12 +171,12 @@ def _fallback_verdict(
         brand_voice_score=0,
         overall_score=0.0,
         verdict="fail",
-        reasoning_explanation="parse_error",
-        knowledge_explanation="parse_error",
-        tools_explanation="parse_error",
-        brand_voice_explanation="parse_error",
+        reasoning_explanation=reason,
+        knowledge_explanation=reason,
+        tools_explanation=reason,
+        brand_voice_explanation=reason,
         judge_goal_achieved=False,
-        judge_goal_explanation="parse_error",
+        judge_goal_explanation=reason,
         suggestions="",
         model_used=model_used,
         usage=usage,

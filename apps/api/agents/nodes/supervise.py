@@ -343,6 +343,7 @@ def make_supervise_node(
         tenant_id = state.get("tenant_id")
         this_in = this_out = 0
         sup_cost = 0.0
+        llm_call: dict[str, Any] | None = None
 
         literal = _literal_verdict(state)
         if literal is not None:
@@ -398,6 +399,7 @@ def make_supervise_node(
             this_in = usage.prompt_tokens
             this_out = usage.output_tokens
             sup_cost = compute_llm_cost(model, usage)
+            llm_call = outcome.call.as_dict() if outcome.call else None
 
         if conv_id and tenant_id:
             tracker.emit(
@@ -426,6 +428,7 @@ def make_supervise_node(
             "supervisor_tokens_in": state.get("supervisor_tokens_in", 0) + this_in,
             "supervisor_tokens_out": state.get("supervisor_tokens_out", 0) + this_out,
             "cost_usd": state.get("cost_usd", 0.0) + sup_cost,
+            "llm_call": llm_call,
         }
 
         if verdict.verdict == "reject":

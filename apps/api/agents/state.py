@@ -223,6 +223,9 @@ class AgentState(TypedDict, total=False):
     # modelos con mensajes del operador, el feedback va como mensaje justo ahí y se queda
     # ahí en las vueltas siguientes (el historial solo crece).
     supervisor_feedback_at: int
+    # La llamada a Claude del último nodo que llamó (`CallTrace.as_dict()`: modelo,
+    # thinking, esfuerzo, stop_reason, refusal): va al run del nodo en LangSmith.
+    llm_call: dict | None
     # Borrador que el supervisor rechazó y que escala (#380): sale de `agent_response`
     # en el mismo parche del rechazo y solo llega a la nota interna del escalado.
     rejected_draft: str | None

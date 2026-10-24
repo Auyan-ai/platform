@@ -27,12 +27,12 @@ import json
 import logging
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 import anthropic
 from apps.api.core.config import LLM_CALL_BUDGET_SECONDS, get_models
-from apps.api.integrations.model_capabilities import capabilities_of
+from apps.api.integrations.model_capabilities import ThinkingSettings, capabilities_of
 from apps.api.integrations.pricing import LLMUsage
 
 if TYPE_CHECKING:
@@ -208,7 +208,7 @@ async def call_claude_with_tools(
         # hubo reintentos incluye los backoffs, lo cual es raro y se nota.
         usage = LLMUsage.from_anthropic(last_response.usage)
         logger.info(
-            "llm_call label=%s model=%s dur_ms=%d in=%d cache_w=%d cache_r=%d out=%d",
+            "llm_call label=%s model=%s dur_ms=%d in=%d cache_w=%d cache_r=%d out=%d stop=%s",
             trace_label,
             model,
             int((time.monotonic() - start) * 1000),
@@ -216,6 +216,7 @@ async def call_claude_with_tools(
             usage.cache_write_tokens,
             usage.cache_read_tokens,
             usage.output_tokens,
+            getattr(last_response, "stop_reason", None),
         )
     return last_response
 
@@ -353,6 +354,40 @@ def _with_trailing_note(messages: list[dict[str, Any]], text: str) -> list[dict[
 
 
 @dataclass(frozen=True)
+class CallTrace:
+    """Con qué salió una llamada y cómo terminó: va a su run de LangSmith."""
+
+    model: str
+    # "off", "adaptive" o "between_tools".
+    thinking: str
+    effort: str | None
+    stop_reason: str | None
+    refusal_category: str | None = None
+    # Llamadas cobradas (el reintento sin tool cuenta).
+    calls: int = 1
+
+    @classmethod
+    def of(
+        cls, model: str, settings: ThinkingSettings, response: Any | None, *, calls: int = 1
+    ) -> CallTrace:
+        stop_reason = getattr(response, "stop_reason", None)
+        category = None
+        if stop_reason == "refusal":
+            category = getattr(getattr(response, "stop_details", None), "category", None)
+        return cls(
+            model=model,
+            thinking=settings.thinking["type"] if settings.thinking else "off",
+            effort=settings.effort,
+            stop_reason=stop_reason,
+            refusal_category=category,
+            calls=calls,
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class ToolCalled:
     # La primera tool llamada: la que se ejecuta.
     block: Any
@@ -363,6 +398,7 @@ class ToolCalled:
     # `prefix_digest` de lo que precedía a este turno, para saber si al replayarlo sus
     # thinking blocks siguen valiendo.
     prefix: str = ""
+    call: CallTrace | None = None
 
 
 @dataclass(frozen=True)
@@ -370,6 +406,7 @@ class NoDecision:
     kind: Literal["refusal", "max_tokens", "tool_not_called", "call_failed"]
     detail: str
     usage: LLMUsage
+    call: CallTrace | None = None
 
     @property
     def reason(self) -> str:
@@ -387,6 +424,7 @@ class _DecisionRequest:
     max_tokens: int
     options: dict[str, Any]
     forced: bool
+    settings: ThinkingSettings
     # Instrucción de cierre que va como mensaje del operador al final (5.5).
     closing_note: str | None = None
     # Thinking preservado sin `block_binding` (`between_tools`): el cliente no reenvía
@@ -449,7 +487,9 @@ def decision_request(
     this_round = decision.this_round
     if caps.forced_tool_choice and not thinking.thinking_on:
         choice = {"type": "any"} if this_round.any_tool else {"type": "tool", "name": decision.tool}
-        return _DecisionRequest(system, tools, choice, max_tokens, options, forced=True)
+        return _DecisionRequest(
+            system, tools, choice, max_tokens, options, forced=True, settings=thinking
+        )
     note_closing = caps.system_messages and decision.closing
     return _DecisionRequest(
         system=_with_instruction(system, _instruction(decision if note_closing else this_round)),
@@ -465,6 +505,7 @@ def decision_request(
         ),
         options=options,
         forced=False,
+        settings=thinking,
         closing_note=_closing_note(decision) if note_closing else None,
         drop_stale_thinking=(
             caps.preserved_thinking
@@ -554,7 +595,12 @@ async def call_claude_for_decision(
             if attempt == 0:
                 raise
             # La primera llamada ya se cobró: sin esto su usage se perdía con la excepción.
-            outcome = NoDecision("call_failed", type(exc).__name__, usage)
+            outcome = NoDecision(
+                "call_failed",
+                type(exc).__name__,
+                usage,
+                call=CallTrace.of(model, request.settings, None, calls=attempt + 1),
+            )
             logger.error(
                 "%s label=%s role=%s model=%s",
                 outcome.reason,
@@ -566,7 +612,8 @@ async def call_claude_for_decision(
             )
             return outcome
         usage = usage + LLMUsage.from_anthropic(response.usage)
-        outcome = read_decision(response, usage)
+        call = CallTrace.of(model, request.settings, response, calls=attempt + 1)
+        outcome = replace(read_decision(response, usage), call=call)
         if isinstance(outcome, ToolCalled):
             return replace(outcome, prefix=prefix_digest(system_sent, tools_sent, turn))
         if request.forced or outcome.kind != "tool_not_called" or attempt == NO_TOOL_RETRIES:
@@ -598,6 +645,14 @@ class TextReply:
     usage: LLMUsage
     stop_reason: str | None
     refusal_category: str | None
+    call: CallTrace | None = None
+
+    @property
+    def refusal_reason(self) -> str | None:
+        """`llm_refusal: <categoría>` si el modelo se negó; el texto viene vacío."""
+        if self.stop_reason != "refusal":
+            return None
+        return f"llm_refusal: {self.refusal_category or 'sin_categoria'}"
 
 
 async def call_claude_text(
@@ -632,18 +687,23 @@ async def call_claude_text(
     response = await create_message(
         client, kwargs, attempts=attempts, timeout_seconds=timeout_seconds
     )
-    stop_reason = getattr(response, "stop_reason", None)
-    category = None
-    if stop_reason == "refusal":
-        category = getattr(getattr(response, "stop_details", None), "category", None)
-        logger.error("llm_refusal: %s role=%s model=%s", category or "sin_categoria", role, model)
+    call = CallTrace.of(model, thinking, response)
+    if call.stop_reason == "refusal":
+        logger.error(
+            "llm_refusal: %s role=%s model=%s",
+            call.refusal_category or "sin_categoria",
+            role,
+            model,
+            extra={"role": role, "llm_call": call.as_dict()},
+        )
     return TextReply(
         text="".join(
             block.text for block in response.content if getattr(block, "type", None) == "text"
         ),
         usage=LLMUsage.from_anthropic(response.usage),
-        stop_reason=stop_reason,
-        refusal_category=category,
+        stop_reason=call.stop_reason,
+        refusal_category=call.refusal_category,
+        call=call,
     )
 
 

@@ -713,6 +713,144 @@ class TestLoopPrefixOn55:
         assert changed["messages"][1] == {"role": "assistant", "content": content}
 
 
+class TestCallTrace:
+    """Cada nodo que llama a Claude deja en su run de LangSmith (allowlist de `graph.py`)
+    el modelo, el thinking y el esfuerzo con que salió la petición y el `stop_reason`."""
+
+    @pytest.mark.asyncio
+    async def test_reason_on_opus_5_5(self, fake_deps: AgentDependencies) -> None:
+        _, out = await run_reason(
+            fake_deps,
+            _with_policies(_reason_state("claude-opus-5-5"), hops=0),
+            message(thinking(), tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+        )
+        assert out["llm_call"] == {
+            "model": "claude-opus-5-5",
+            "thinking": "adaptive",
+            "effort": "medium",
+            "stop_reason": "tool_use",
+            "refusal_category": None,
+            "calls": 1,
+        }
+
+    @pytest.mark.asyncio
+    async def test_reason_on_a_current_model(self, fake_deps: AgentDependencies) -> None:
+        _, out = await run_reason(
+            fake_deps,
+            _with_policies(_reason_state("claude-sonnet-4-6"), hops=0),
+            message(tool_use("respond_or_escalate", RESPOND)),
+        )
+        assert out["llm_call"]["thinking"] == "off"
+        assert out["llm_call"]["effort"] is None
+        assert out["llm_call"]["stop_reason"] == "tool_use"
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_is_traced_with_its_category(
+        self, fake_deps: AgentDependencies, _env: pytest.MonkeyPatch
+    ) -> None:
+        _env.setenv("SUPERVISOR_MODEL_L1_L2", "claude-sonnet-5-5")
+        get_models.cache_clear()
+        _, out = await run_supervise(
+            fake_deps, _supervise_state(), refusal("cyber", "claude-sonnet-5-5")
+        )
+        assert out["llm_call"]["stop_reason"] == "refusal"
+        assert out["llm_call"]["refusal_category"] == "cyber"
+
+    @pytest.mark.asyncio
+    async def test_the_nudge_retry_counts_both_calls(self, fake_deps: AgentDependencies) -> None:
+        _, out = await run_reason(
+            fake_deps,
+            _with_policies(_reason_state("claude-opus-5-5"), hops=0),
+            message(text("..."), stop_reason="end_turn", model="claude-opus-5-5"),
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+        )
+        assert out["llm_call"]["calls"] == 2
+
+    @pytest.mark.asyncio
+    async def test_select_aop_traces_its_call(self, fake_deps: AgentDependencies) -> None:
+        _, out = await run_select_aop(
+            fake_deps, message(tool_use("select_aop", CLASSIFIED), model="claude-haiku-4-5-20251001")
+        )
+        assert out["llm_call"]["model"] == "claude-haiku-4-5-20251001"
+        assert out["llm_call"]["stop_reason"] == "tool_use"
+
+    def test_the_call_reaches_langsmith_for_every_llm_node(self) -> None:
+        from apps.api.agents.graph import _NODE_OUTPUT_KEYS
+
+        for node in ("select_aop", "reason", "supervise"):
+            assert "llm_call" in _NODE_OUTPUT_KEYS[node]
+
+
+class TestTextRefusals:
+    """Un refusal en jueces o simulador no se parsea como `{}`: queda explícito, con su
+    categoría, en el veredicto o el turno (y en su run de LangSmith)."""
+
+    @pytest.mark.asyncio
+    async def test_sim_judge(self) -> None:
+        from apps.api.simulator.judge import judge_simulation
+
+        api = RecordingAnthropic(refusal("cyber", "claude-sonnet-4-6"))
+        verdict = await judge_simulation(
+            api.client, _sim_transcript(), _sim_transcript().scenario, judge_model="sonnet"
+        )
+        assert verdict.reasoning_explanation == "llm_refusal: cyber"
+        assert verdict.call is not None
+        assert verdict.call.stop_reason == "refusal"
+
+    @pytest.mark.asyncio
+    async def test_slow_agent_judge(self) -> None:
+        from apps.api.slow_agent.judge import _call_judge
+        from apps.api.tests.slow_agent.test_judge import _transcript
+
+        api = RecordingAnthropic(refusal("general_harms", "claude-sonnet-4-6"))
+        verdict = await _call_judge(api.client, _transcript(), "slow_agent_model")
+        assert verdict.should_propose is False
+        assert verdict.rationale == "llm_refusal: general_harms"
+
+    @pytest.mark.asyncio
+    async def test_user_simulator(self) -> None:
+        from apps.api.simulator.user_simulator import UserSimulator
+        from apps.api.tests.simulator.test_user_simulator import _make_profile
+
+        api = RecordingAnthropic(refusal("cyber", "claude-haiku-4-5-20251001"))
+        turn = await UserSimulator(profile=_make_profile(), anthropic=api.client).next_turn(
+            conversation_history=[{"role": "agent", "content": "¿En qué ayudo?"}], turn_number=1
+        )
+        assert turn.give_up is True
+        assert turn.internal_reasoning == "llm_refusal: cyber"
+        assert turn.call is not None
+        assert turn.call.refusal_category == "cyber"
+
+    def test_llm_runs_carry_the_call_metadata(self) -> None:
+        from datetime import UTC, datetime
+        from unittest.mock import MagicMock
+
+        from apps.api.integrations.anthropic_client import CallTrace
+        from apps.api.integrations.langsmith_client import LangSmithClient, LangSmithTrace
+        from apps.api.integrations.pricing import LLMUsage
+
+        client = MagicMock()
+        langsmith = LangSmithClient(client, project_name="p")
+        now = datetime.now(UTC)
+        root = UUID(int=1)
+        trace = LangSmithTrace(
+            run_id=root, dotted_order=LangSmithClient._dotted_order_segment(now, root)
+        )
+        call = CallTrace("claude-sonnet-5-5", "adaptive", "medium", "refusal", "cyber", 1)
+        langsmith.record_llm_run(
+            trace,
+            name="simulation_judge",
+            model="claude-sonnet-5-5",
+            usage=LLMUsage(),
+            cost_usd=0.0,
+            start_time=now,
+            end_time=now,
+            call=call.as_dict(),
+        )
+        metadata = client.create_run.call_args.kwargs["extra"]["metadata"]
+        assert metadata["llm_call"] == call.as_dict()
+
+
 POLICIES_TOOL = "shopify_get_shop_policies"
 FEEDBACK = "Da el plazo exacto que dicen las políticas."
 

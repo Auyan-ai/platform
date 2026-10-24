@@ -360,6 +360,7 @@ async def _run_simulation_inner(
                     start_time=judge_started,
                     end_time=datetime.now(UTC),
                     outputs={"verdict": str(judge_verdict.verdict)},
+                    call=judge_verdict.call.as_dict() if judge_verdict.call else None,
                 )
         except TimeoutError:
             logger.warning("sim_judge_timeout run_id=%s", run_id)
@@ -721,6 +722,7 @@ async def _next_simulator_turn(
                 "goal_achieved": sim_turn.goal_achieved,
                 "give_up": sim_turn.give_up,
             },
+            call=sim_turn.call.as_dict() if sim_turn.call else None,
         )
     return sim_turn
 

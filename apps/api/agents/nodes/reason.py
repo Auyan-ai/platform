@@ -410,6 +410,7 @@ def make_reason_node(
             "cost_usd": state.get("cost_usd", 0.0) + compute_llm_cost(model, usage),
             "model_used": model,
             "turn_now": state["turn_now"],
+            "llm_call": outcome.call.as_dict() if outcome.call else None,
         }
         if isinstance(outcome, NoDecision):
             return {"error": outcome.reason, **tokens_update}
