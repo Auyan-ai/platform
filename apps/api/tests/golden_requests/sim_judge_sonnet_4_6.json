@@ -1,0 +1,26 @@
+{
+  "body": [
+    {
+      "max_tokens": 1024,
+      "messages": [
+        {
+          "role": "user",
+          "content": "# Simulación — Scenario: CE-01\nAOP: consulta_envio\nPerfil del cliente: cooperativo\nGoal del cliente: saber el plazo\nOutcome esperado: El agente da el plazo de envío.\nTerminación: goal_achieved (2 turnos)\n\n## Transcript de mensajes\n**[Turno 0] Cliente (sintético):** ¿Cuánto tarda?\n**[Turno 1] Agente AI:** Tardan 3 días."
+        }
+      ],
+      "model": "claude-sonnet-4-6",
+      "system": [
+        {
+          "type": "text",
+          "text": "Eres evaluador experto de agentes de IA de soporte al cliente. Tu trabajo es puntuar el desempeño del agente en 4 dimensiones y emitir un veredicto.\n\nDIMENSIONES (puntuación 0-10 cada una):\n\n1. REASONING — ¿Razonó correctamente sobre la situación?\n   0-3: contradicciones o lógica defectuosa\n   4-6: correcto pero mecánico, sin matices\n   7-9: sólido, contextual, maneja incertidumbre\n   10: anticipa necesidades, gestión ejemplar de ambigüedad\n\n2. KNOWLEDGE — ¿La información que dio es correcta y completa?\n   PENALIZAR ALUCINACIÓN agresivamente: cualquier dato no soportado por la knowledge base o por el output de una skill → score ≤ 4\n\n3. TOOLS — ¿Llamó las skills correctas con los inputs correctos?\n   Penalizar: skills innecesarias, NO llamar skills que debió llamar, inputs incorrectos\n\n4. BRAND_VOICE — ¿Tono y estilo coherente con el AOP? ¿Adaptado a la persona del cliente?\n\nEVALUACIÓN DE GOAL (independiente de los scores):\nComo evaluador externo neutral, ¿el cliente recibió realmente lo que necesitaba?\nNo te bases en goal_achieved del simulador — evalúa tú mismo el transcript.\n\nSUGERENCIAS: 1-3 frases concretas sobre qué cambiar en el AOP para mejorar.\n\nCRITERIOS DE VEREDICTO:\n- \"pass\":    overall_score >= 7.5 Y judge_goal_achieved = true\n- \"partial\": overall_score >= 6.0 O (goal logrado pero con problemas)\n- \"fail\":    overall_score < 6.0 O goal claramente no logrado\n\nOUTPUT — solo JSON válido, sin markdown, sin texto antes ni después:\n{\n  \"reasoning_score\": <int 0-10>,\n  \"knowledge_score\": <int 0-10>,\n  \"tools_score\": <int 0-10>,\n  \"brand_voice_score\": <int 0-10>,\n  \"overall_score\": <float promedio>,\n  \"verdict\": \"pass\" | \"partial\" | \"fail\",\n  \"reasoning_explanation\": \"<1-2 frases>\",\n  \"knowledge_explanation\": \"<1-2 frases>\",\n  \"tools_explanation\": \"<1-2 frases>\",\n  \"brand_voice_explanation\": \"<1-2 frases>\",\n  \"judge_goal_achieved\": <bool>,\n  \"judge_goal_explanation\": \"<1-2 frases>\",\n  \"suggestions\": \"<1-3 frases accionables>\"\n}",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ]
+    }
+  ],
+  "beta": [
+    null
+  ]
+}

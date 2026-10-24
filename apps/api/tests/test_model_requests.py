@@ -10,10 +10,12 @@ fuerza tool ni apaga el thinking, y la respuesta se lee igual con thinking, sin 
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 from apps.api.agents.dependencies import AgentDependencies
@@ -206,13 +208,121 @@ async def current_model_scenarios(
         ),
         message(tool_use("supervisor_verdict", APPROVE), model="claude-opus-4-7"),
     )
+    first_hop, _ = await run_reason(
+        fake_deps,
+        _with_policies(_reason_state("claude-sonnet-4-6"), hops=0),
+        message(tool_use("shopify_get_shop_policies", {}, id="toolu_hop0")),
+    )
+    failed_state = _with_policies(_reason_state("claude-sonnet-4-6"), hops=1)
+    failed_state["tool_results"][0].update(
+        output=None, is_error=True, error="shopify_unavailable: 503"
+    )
+    tool_error, _ = await run_reason(
+        fake_deps, failed_state, message(tool_use("respond_or_escalate", RESPOND))
+    )
     return {
         "reason_simple_haiku": simple,
         "reason_loop_sonnet_4_6": loop,
         "reason_exhausted_sonnet_4_6": exhausted,
+        "reason_first_hop_skills_sonnet_4_6": first_hop,
+        "reason_tool_error_sonnet_4_6": tool_error,
         "select_aop_haiku": classifier,
         "supervise_l1_l2_sonnet_4_6": supervisor_l1_l2,
         "supervise_l3_opus_4_7": supervisor_l3,
+        **await text_role_scenarios(),
+    }
+
+
+SIM_JUDGE_REPLY = json.dumps(
+    {
+        "reasoning_score": 8,
+        "knowledge_score": 8,
+        "tools_score": 8,
+        "brand_voice_score": 8,
+        "overall_score": 8.0,
+        "verdict": "pass",
+        "judge_goal_achieved": True,
+    }
+)
+
+
+def _sim_transcript() -> Any:
+    from apps.api.db.models import SimulationScenario
+    from apps.api.simulator.transcript import SimulatorTranscript, TranscriptTurn
+
+    scenario = SimulationScenario(
+        id=UUID(int=1),
+        tenant_id=UUID(int=2),
+        name="CE-01",
+        aop_slug="consulta_envio",
+        user_profile_id=UUID(int=3),
+        expected_outcome="El agente da el plazo de envío.",
+        mock_fixtures={"goal": "saber el plazo"},
+        assertions={},
+        max_turns=8,
+    )
+    transcript = SimulatorTranscript(
+        scenario=scenario, profile_name="cooperativo", termination_reason="goal_achieved"
+    )
+    transcript.turns.append(
+        TranscriptTurn(role="customer", content="¿Cuánto tarda?", turn_number=0)
+    )
+    transcript.turns.append(TranscriptTurn(role="agent", content="Tardan 3 días.", turn_number=1))
+    return transcript
+
+
+async def text_role_scenarios() -> dict[str, RecordingAnthropic]:
+    """Jueces, slow agent, mensaje tras aprobar una L3 y simulador, con sus modelos de hoy."""
+    from apps.api.services.approval_reply import generate_customer_reply
+    from apps.api.simulator.judge import judge_simulation
+    from apps.api.simulator.user_simulator import UserSimulator
+    from apps.api.slow_agent.judge import _call_judge
+    from apps.api.slow_agent.transcript import build_transcript
+    from apps.api.tests.simulator.test_user_simulator import _make_profile
+    from apps.api.tests.slow_agent.test_judge import _conv
+
+    end_turn = {"stop_reason": "end_turn"}
+    sim_judges = {}
+    for alias, model in (("sonnet", "claude-sonnet-4-6"), ("opus", "claude-opus-4-7")):
+        api = RecordingAnthropic(message(text(SIM_JUDGE_REPLY), model=model, **end_turn))
+        await judge_simulation(
+            api.client, _sim_transcript(), _sim_transcript().scenario, judge_model=alias
+        )
+        sim_judges[f"sim_judge_{alias}"] = api
+
+    slow_agent = RecordingAnthropic(
+        message(text('{"should_propose": false, "confidence": 0.9}'), **end_turn)
+    )
+    conversation = _conv().model_copy(update={"id": UUID(int=4), "end_customer_id": UUID(int=5)})
+    await _call_judge(
+        slow_agent.client,
+        build_transcript(conversation, [], [], None, None, "salt"),
+        "slow_agent_model",
+    )
+
+    approval = RecordingAnthropic(
+        message(
+            text("Listo, tu pedido está cancelado."), model="claude-haiku-4-5-20251001", **end_turn
+        )
+    )
+    await generate_customer_reply(approval.client, CANCEL, success=True, language="es")
+
+    simulator = RecordingAnthropic(
+        message(
+            text('{"message": "vale", "goal_achieved": false, "give_up": false}'),
+            model="claude-haiku-4-5-20251001",
+            **end_turn,
+        )
+    )
+    await UserSimulator(profile=_make_profile(), anthropic=simulator.client).next_turn(
+        conversation_history=[{"role": "agent", "content": "¿En qué ayudo?"}], turn_number=1
+    )
+    return {
+        "sim_judge_sonnet_4_6": sim_judges["sim_judge_sonnet"],
+        "sim_judge_opus_4_7": sim_judges["sim_judge_opus"],
+        "slow_agent_judge_sonnet_4_6": slow_agent,
+        "approval_reply_haiku": approval,
+        "user_simulator_haiku": simulator,
     }
 
 
@@ -220,10 +330,78 @@ async def current_model_scenarios(
 async def test_current_models_send_the_same_request_as_before(
     fake_deps: AgentDependencies,
 ) -> None:
+    """`UPDATE_GOLDEN_REQUESTS=1` reescribe los JSON: solo con un cambio de petición buscado."""
     scenarios = await current_model_scenarios(fake_deps)
     for name, api in scenarios.items():
-        golden = json.loads((GOLDEN / f"{name}.json").read_text())
-        assert {"body": api.requests, "beta": api.beta_headers} == golden, name
+        recorded = {"body": api.requests, "beta": api.beta_headers}
+        path = GOLDEN / f"{name}.json"
+        if os.environ.get("UPDATE_GOLDEN_REQUESTS") == "1":
+            path.write_text(json.dumps(recorded, ensure_ascii=False, indent=2) + "\n")
+        assert recorded == json.loads(path.read_text()), name
+
+
+class TestTruncatedDecision:
+    """Un `tool_use` cortado por `max_tokens` trae un `input` a medias: nunca se lee."""
+
+    @pytest.mark.asyncio
+    async def test_truncated_reply_is_an_explicit_error_not_a_reply(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        cut = {"decision": "respond", "confidence": 0.9, "response_text": "Tu pedido sal"}
+        _, out = await run_reason(
+            fake_deps,
+            _reason_state("claude-sonnet-4-6"),
+            message(
+                tool_use("respond_or_escalate", cut),
+                stop_reason="max_tokens",
+                model="claude-haiku-4-5-20251001",
+            ),
+        )
+
+        assert out["error"] == "llm_no_decision: max_tokens"
+        assert "agent_response" not in out
+        # 100 in @ $1 + 50 out @ $5 (Haiku): la llamada se cobra igual.
+        assert out["cost_usd"] == pytest.approx(0.00035)
+
+    @pytest.mark.asyncio
+    async def test_truncated_skill_call_is_not_executed(self, fake_deps: AgentDependencies) -> None:
+        _, out = await run_reason(
+            fake_deps,
+            _with_policies(_reason_state("claude-sonnet-4-6"), hops=0),
+            message(tool_use("shopify_get_shop_policies", {}), stop_reason="max_tokens"),
+        )
+
+        assert out["error"] == "llm_no_decision: max_tokens"
+        assert "pending_tool_call" not in out
+
+
+@pytest.mark.asyncio
+async def test_a_failed_nudge_retry_keeps_the_cost_of_the_first_call(
+    fake_deps: AgentDependencies, _env: pytest.MonkeyPatch, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sonnet 4.6 con thinking por rol: sin tool forzada, la primera llamada contesta solo
+    texto y el reintento con la instrucción falla. La primera llamada ya se cobró."""
+    from apps.api.tests.anthropic_http import api_error
+
+    async def _no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("asyncio.sleep", _no_sleep)
+    _env.setenv("THINKING_BY_ROLE", '{"default_agent_model": "adaptive"}')
+    get_models.cache_clear()
+    state = _with_policies(_reason_state("claude-sonnet-4-6"), hops=0)
+
+    _, out = await run_reason(
+        fake_deps,
+        state,
+        message(thinking(), text("Te cuento..."), stop_reason="end_turn"),
+        *[api_error(500)] * 3,
+    )
+
+    assert out["error"] == "llm_no_decision: call_failed (InternalServerError)"
+    # 100 in @ $3 + 50 out @ $15 (Sonnet 4.6), solo la primera llamada.
+    assert out["cost_usd"] == pytest.approx(0.00105)
+    assert out["tokens_out"] == 50
 
 
 PRESERVED_BETA = "thinking-binding-controls-2026-08-01"
@@ -250,6 +428,32 @@ def _keys(schema: Any) -> set[str]:
     if isinstance(schema, list):
         return {k for v in schema for k in _keys(v)}
     return set()
+
+
+@pytest.mark.asyncio
+async def test_the_turn_clock_is_read_once_so_the_system_does_not_change_between_hops(
+    fake_deps: AgentDependencies, _env: pytest.MonkeyPatch
+) -> None:
+    """Con thinking preservado, un system distinto entre vueltas invalida los thinking blocks
+    replayados. La hora del turno se fija en la primera vuelta."""
+    minutes = iter(["10:00", "10:01"])
+    _env.setattr(
+        "apps.api.agents.nodes.reason._tenant_now_str",
+        lambda _facts: f"2026-10-17 {next(minutes)} (Europe/Madrid)",
+    )
+    first_hop, first = await run_reason(
+        fake_deps,
+        _with_policies(_reason_state("claude-opus-5-5"), hops=0),
+        message(thinking(), tool_use("shopify_get_shop_policies", {}, id="toolu_hop0")),
+    )
+    next_state = {**_with_policies(_reason_state("claude-opus-5-5"), hops=1), **first}
+    next_state.pop("pending_tool_call")
+    second_hop, _ = await run_reason(
+        fake_deps, next_state, message(tool_use("respond_or_escalate", RESPOND))
+    )
+
+    assert first["turn_now"] == "2026-10-17 10:00 (Europe/Madrid)"
+    assert second_hop.requests[0]["system"] == first_hop.requests[0]["system"]
 
 
 class TestReasonOn55:

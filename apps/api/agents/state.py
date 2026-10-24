@@ -54,6 +54,8 @@ class AgentState(TypedDict, total=False):
     identity_summary: dict
     # Línea de código para el bloque volátil de reason.
     identity_note: str
+    # Fecha y hora de la tienda, fijada en la primera vuelta de reason (`turn_now`).
+    turn_now: str
     # Qué falta para tocar pedidos: ["order_number", "contact"], ["contact"], ["order_number"] o [].
     identity_missing: list[str]
     # Progreso de una conversación de pedidos (services/conversation_progress.py).

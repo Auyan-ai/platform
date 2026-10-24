@@ -1,9 +1,6 @@
-"""Tests del retry behavior de `call_claude_with_tools`.
+"""Tests de lo que `call_claude_with_tools` pasa al cliente (tool_choice, caché, traza).
 
-Verifica que tenacity reintenta sólo errores transitorios, que respeta
-`max_retries`, y que el wrapper pasa `tool_choice` correctamente al cliente.
-Parchea `asyncio.sleep` para que el test sea instantáneo en lugar de esperar
-los backoffs reales.
+Los reintentos se prueban con el SDK real en `test_llm_retries.py`.
 """
 
 from __future__ import annotations
@@ -11,28 +8,9 @@ from __future__ import annotations
 import logging
 from unittest.mock import AsyncMock, MagicMock
 
-import anthropic
-import httpx
 import pytest
 from apps.api.agents.schemas import RESPOND_OR_ESCALATE_TOOL
 from apps.api.integrations.anthropic_client import call_claude_with_tools
-
-
-@pytest.fixture(autouse=True)
-def _fast_sleep(monkeypatch):
-    """Hace que los backoffs de tenacity no esperen tiempo real."""
-    import asyncio
-
-    async def _noop(seconds):  # type: ignore[no-untyped-def]
-        return
-
-    monkeypatch.setattr(asyncio, "sleep", _noop)
-
-
-def _conn_error() -> anthropic.APIConnectionError:
-    return anthropic.APIConnectionError(
-        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")
-    )
 
 
 def _fake_response() -> MagicMock:
@@ -41,92 +19,6 @@ def _fake_response() -> MagicMock:
     resp.content = []
     resp.usage = MagicMock(input_tokens=10, output_tokens=5)
     return resp
-
-
-@pytest.mark.asyncio
-async def test_succeeds_on_first_attempt() -> None:
-    client = MagicMock()
-    fake_resp = _fake_response()
-    client.messages.create = AsyncMock(return_value=fake_resp)
-
-    result = await call_claude_with_tools(
-        client=client,
-        model="claude-sonnet-4-6",
-        system="x",
-        messages=[{"role": "user", "content": "y"}],
-        tools=[RESPOND_OR_ESCALATE_TOOL],
-        tool_choice={"type": "any"},
-        max_retries=3,
-    )
-
-    assert result is fake_resp
-    assert client.messages.create.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_retries_on_connection_error_and_succeeds() -> None:
-    """Falla dos veces, tercera vez OK → debe reintentar y devolver la buena."""
-    client = MagicMock()
-    fake_resp = _fake_response()
-    client.messages.create = AsyncMock(side_effect=[_conn_error(), _conn_error(), fake_resp])
-
-    result = await call_claude_with_tools(
-        client=client,
-        model="claude-sonnet-4-6",
-        system="x",
-        messages=[{"role": "user", "content": "y"}],
-        tools=[RESPOND_OR_ESCALATE_TOOL],
-        tool_choice={"type": "any"},
-        max_retries=3,
-    )
-
-    assert result is fake_resp
-    assert client.messages.create.await_count == 3
-
-
-@pytest.mark.asyncio
-async def test_raises_after_exhausting_retries() -> None:
-    """Si los 3 intentos fallan, el error original se propaga."""
-    client = MagicMock()
-    client.messages.create = AsyncMock(side_effect=_conn_error())
-
-    with pytest.raises(anthropic.APIConnectionError):
-        await call_claude_with_tools(
-            client=client,
-            model="claude-sonnet-4-6",
-            system="x",
-            messages=[{"role": "user", "content": "y"}],
-            tools=[RESPOND_OR_ESCALATE_TOOL],
-            tool_choice={"type": "any"},
-            max_retries=3,
-        )
-
-    assert client.messages.create.await_count == 3
-
-
-@pytest.mark.asyncio
-async def test_does_not_retry_non_transient_errors() -> None:
-    """`anthropic.BadRequestError` (4xx) no es retryable — falla al primer intento."""
-    client = MagicMock()
-    bad_request = anthropic.BadRequestError(
-        message="invalid request",
-        response=MagicMock(status_code=400, headers={}),
-        body=None,
-    )
-    client.messages.create = AsyncMock(side_effect=bad_request)
-
-    with pytest.raises(anthropic.BadRequestError):
-        await call_claude_with_tools(
-            client=client,
-            model="claude-sonnet-4-6",
-            system="x",
-            messages=[{"role": "user", "content": "y"}],
-            tools=[RESPOND_OR_ESCALATE_TOOL],
-            tool_choice={"type": "any"},
-            max_retries=3,
-        )
-
-    assert client.messages.create.await_count == 1
 
 
 @pytest.mark.asyncio

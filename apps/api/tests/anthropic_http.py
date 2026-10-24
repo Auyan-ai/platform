@@ -7,27 +7,84 @@ el JSON y las cabeceras que habrían salido y decide qué devuelve la API.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 import anthropic
 import httpx2
 
 
+@dataclass(frozen=True)
+class ApiError:
+    """Respuesta de error de la API: el SDK la convierte en su clase de error real."""
+
+    status: int
+    headers: dict[str, str] = field(default_factory=dict)
+
+
+class ConnectionDrop:
+    """La conexión se cae antes de la respuesta: el SDK lanza `APIConnectionError`."""
+
+
+def overloaded() -> ApiError:
+    return ApiError(529)
+
+
+def api_error(status: int, **headers: str) -> ApiError:
+    return ApiError(status, headers)
+
+
+_ERROR_TYPES = {
+    400: "invalid_request_error",
+    401: "authentication_error",
+    429: "rate_limit_error",
+    529: "overloaded_error",
+}
+
+
 class RecordingAnthropic:
-    def __init__(self, *responses: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        *responses: dict[str, Any] | ApiError | ConnectionDrop,
+        base: anthropic.AsyncAnthropic | None = None,
+        on_request: Callable[[float | None], None] | None = None,
+    ) -> None:
+        """`base`: un cliente de producción (p. ej. `build_anthropic_client`) del que se
+        conserva todo salvo el transporte. `on_request`: corre en cada intento (un reloj
+        falso que avanza lo que tarda la API)."""
         self.requests: list[dict[str, Any]] = []
         self.beta_headers: list[str | None] = []
+        # Timeout de lectura con el que salió cada intento (`timeout=` de la petición).
+        self.read_timeouts: list[float | None] = []
         self._responses = list(responses)
-        self.client = anthropic.AsyncAnthropic(
-            api_key="test-key",
-            max_retries=0,
-            http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(self._handle)),
+        self._on_request = on_request
+        http_client = httpx2.AsyncClient(transport=httpx2.MockTransport(self._handle))
+        self.client = (
+            base.copy(http_client=http_client)
+            if base is not None
+            else anthropic.AsyncAnthropic(
+                api_key="test-key", max_retries=0, http_client=http_client
+            )
         )
 
     def _handle(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(json.loads(request.content))
         self.beta_headers.append(request.headers.get("anthropic-beta"))
-        return httpx2.Response(200, json=self._responses.pop(0))
+        self.read_timeouts.append(request.extensions.get("timeout", {}).get("read"))
+        if self._on_request is not None:
+            self._on_request(self.read_timeouts[-1])
+        response = self._responses.pop(0)
+        if isinstance(response, ConnectionDrop):
+            raise httpx2.ConnectError("connection reset", request=request)
+        if isinstance(response, ApiError):
+            error_type = _ERROR_TYPES.get(response.status, "api_error")
+            return httpx2.Response(
+                response.status,
+                headers=response.headers,
+                json={"type": "error", "error": {"type": error_type, "message": error_type}},
+            )
+        return httpx2.Response(200, json=response)
 
 
 def message(

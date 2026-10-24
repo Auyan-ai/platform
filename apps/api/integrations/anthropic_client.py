@@ -1,8 +1,12 @@
 """Wrapper para llamadas a Claude con tools y reintentos.
 
-Reintentos: backoff exponencial sobre errores transitorios
-(`APIConnectionError`, `APITimeoutError`, `RateLimitError`, `InternalServerError`).
-Los errores 4xx no-rate-limited NO se reintentan — son problemas nuestros.
+Reintentos: solo aquí (`create_message`); el cliente del SDK va con `max_retries=0`.
+Backoff exponencial (o el `retry-after` de la API) sobre errores transitorios
+(`is_transient`): conexión, timeout y los códigos que el propio SDK reintenta (408, 409,
+429, 5xx, 529 incluido). Se decide por código de estado, no por clase: en el SDK 1.x el
+529 es `OverloadedError`, que ya no hereda de `InternalServerError`. El resto de 4xx NO se
+reintenta — son problemas nuestros. Cada llamada, reintentos incluidos, cabe en
+`LLM_CALL_BUDGET_SECONDS`: el último intento se acorta a lo que queda.
 
 Caída total del proveedor (saldo agotado, 401, 403): no es transitoria ni reintentable.
 `classify_provider_error` la detecta y `call_claude_with_tools` la relanza como
@@ -17,6 +21,7 @@ Devuelve la tool llamada o un `NoDecision` explícito (refusal, sin tool, max_to
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Mapping
@@ -24,27 +29,72 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 import anthropic
-from apps.api.core.config import get_models
+from apps.api.core.config import LLM_CALL_BUDGET_SECONDS, get_models
 from apps.api.integrations.model_capabilities import capabilities_of
 from apps.api.integrations.pricing import LLMUsage
-from tenacity import (
-    AsyncRetrying,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 if TYPE_CHECKING:
     from anthropic.types import Message
 
 logger = logging.getLogger(__name__)
 
-RETRYABLE_ERRORS: tuple[type[Exception], ...] = (
-    anthropic.APIConnectionError,
-    anthropic.APITimeoutError,
-    anthropic.RateLimitError,
-    anthropic.InternalServerError,
-)
+_TRANSIENT_STATUSES = frozenset({408, 409, 429})
+_MAX_BACKOFF_SECONDS = 10.0
+# Un intento con menos margen que esto no llega a recibir la respuesta: mejor fallar ya.
+_MIN_ATTEMPT_SECONDS = 5.0
+
+
+def is_transient(exc: BaseException) -> bool:
+    """Error que puede salir bien al repetir la misma petición. Misma política que el SDK
+    (`x-should-retry` manda si viene), para que no dependa de la jerarquía de clases."""
+    if isinstance(exc, anthropic.APIConnectionError):
+        return True
+    if not isinstance(exc, anthropic.APIStatusError):
+        return False
+    should_retry = exc.response.headers.get("x-should-retry")
+    if should_retry in ("true", "false"):
+        return should_retry == "true"
+    return exc.status_code in _TRANSIENT_STATUSES or exc.status_code >= 500
+
+
+def _backoff_seconds(attempt: int, exc: BaseException) -> float:
+    delay = min(2.0 ** (attempt - 1), _MAX_BACKOFF_SECONDS)
+    if isinstance(exc, anthropic.APIStatusError):
+        try:
+            delay = max(delay, float(exc.response.headers.get("retry-after", 0)))
+        except ValueError:
+            pass
+    return delay
+
+
+async def create_message(
+    client: anthropic.AsyncAnthropic,
+    request: Mapping[str, Any],
+    *,
+    attempts: int,
+    timeout_seconds: float,
+    budget_seconds: float = LLM_CALL_BUDGET_SECONDS,
+) -> Message:
+    """`messages.create` con reintentos sobre errores transitorios, todo dentro de
+    `budget_seconds`: cada intento dura como mucho `timeout_seconds` o lo que quede."""
+    deadline = time.monotonic() + budget_seconds
+    for attempt in range(1, attempts + 1):
+        remaining = deadline - time.monotonic()
+        try:
+            return await client.messages.create(**request, timeout=min(timeout_seconds, remaining))
+        except anthropic.APIError as exc:
+            delay = _backoff_seconds(attempt, exc)
+            out_of_time = deadline - time.monotonic() - delay < _MIN_ATTEMPT_SECONDS
+            if attempt == attempts or not is_transient(exc) or out_of_time:
+                raise
+            logger.warning(
+                "llm_call_retry attempt=%d status=%s delay_s=%.1f",
+                attempt,
+                getattr(exc, "status_code", None),
+                delay,
+            )
+            await asyncio.sleep(delay)
+    raise ValueError("attempts debe ser >= 1")
 
 
 PROVIDER_UNAVAILABLE_CATEGORY = "llm_provider_unavailable"
@@ -149,7 +199,6 @@ async def call_claude_with_tools(
         "max_tokens": max_tokens,
         "system": system_param,
         "messages": messages,
-        "timeout": timeout_seconds,
     }
     if tools_param:
         kwargs["tools"] = tools_param
@@ -158,23 +207,16 @@ async def call_claude_with_tools(
     if request_options:
         kwargs.update(request_options)
 
-    last_response: Message | None = None
     start = time.monotonic()
     try:
-        async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(max_retries),
-            wait=wait_exponential(multiplier=1, min=1, max=10),
-            retry=retry_if_exception_type(RETRYABLE_ERRORS),
-            reraise=True,
-        ):
-            with attempt:
-                last_response = await client.messages.create(**kwargs)
+        last_response = await create_message(
+            client, kwargs, attempts=max_retries, timeout_seconds=timeout_seconds
+        )
     except anthropic.APIStatusError as exc:
         unavailable = provider_unavailable_from(exc)
         if unavailable is None:
             raise
         raise unavailable from exc
-    assert last_response is not None
 
     if trace_label is not None:
         # Instrumentación de latencia/cache: una línea por llamada al LLM.
@@ -220,7 +262,7 @@ class ToolCalled:
 
 @dataclass(frozen=True)
 class NoDecision:
-    kind: Literal["refusal", "max_tokens", "tool_not_called"]
+    kind: Literal["refusal", "max_tokens", "tool_not_called", "call_failed"]
     detail: str
     usage: LLMUsage
 
@@ -305,11 +347,15 @@ def _as_param(block: Any) -> dict[str, Any]:
 
 
 def read_decision(response: Any, usage: LLMUsage) -> ToolCalled | NoDecision:
-    """Primera tool llamada, o por qué no hubo ninguna. `refusal` va antes que el contenido."""
+    """Primera tool llamada, o por qué no hubo ninguna. `refusal` y `max_tokens` van antes
+    que el contenido: un `tool_use` cortado trae un `input` a medias (un `response_text`
+    truncado que llegaría al cliente)."""
     stop_reason = getattr(response, "stop_reason", None)
     if stop_reason == "refusal":
         category = getattr(getattr(response, "stop_details", None), "category", None)
         return NoDecision("refusal", category or "sin_categoria", usage)
+    if stop_reason == "max_tokens":
+        return NoDecision("max_tokens", "", usage)
     thinking: list[dict[str, Any]] = []
     for block in response.content:
         block_type = getattr(block, "type", None)
@@ -317,8 +363,6 @@ def read_decision(response: Any, usage: LLMUsage) -> ToolCalled | NoDecision:
             return ToolCalled(block, thinking, usage)
         if block_type in ("thinking", "redacted_thinking"):
             thinking.append(_as_param(block))
-    if stop_reason == "max_tokens":
-        return NoDecision("max_tokens", "", usage)
     return NoDecision("tool_not_called", str(stop_reason), usage)
 
 
@@ -354,20 +398,36 @@ async def call_claude_for_decision(
     turn = list(messages)
     usage = LLMUsage()
     for attempt in range(NO_TOOL_RETRIES + 1):
-        response = await call_claude_with_tools(
-            client=client,
-            model=model,
-            system=request.system,
-            messages=turn,
-            tools=request.tools,
-            tool_choice=request.tool_choice,
-            max_tokens=request.max_tokens,
-            max_retries=max_retries,
-            timeout_seconds=timeout_seconds,
-            cache=cache,
-            trace_label=trace_label,
-            request_options=request.options,
-        )
+        try:
+            response = await call_claude_with_tools(
+                client=client,
+                model=model,
+                system=request.system,
+                messages=turn,
+                tools=request.tools,
+                tool_choice=request.tool_choice,
+                max_tokens=request.max_tokens,
+                max_retries=max_retries,
+                timeout_seconds=timeout_seconds,
+                cache=cache,
+                trace_label=trace_label,
+                request_options=request.options,
+            )
+        except anthropic.APIError as exc:
+            if attempt == 0:
+                raise
+            # La primera llamada ya se cobró: sin esto su usage se perdía con la excepción.
+            outcome = NoDecision("call_failed", type(exc).__name__, usage)
+            logger.error(
+                "%s label=%s role=%s model=%s",
+                outcome.reason,
+                trace_label,
+                role,
+                model,
+                exc_info=True,
+                extra={"role": role, "model": model, "no_decision": outcome.kind},
+            )
+            return outcome
         usage = usage + LLMUsage.from_anthropic(response.usage)
         outcome = read_decision(response, usage)
         if isinstance(outcome, ToolCalled):
@@ -410,13 +470,15 @@ async def call_claude_text(
     system: str | list[dict[str, Any]],
     messages: list[dict[str, Any]],
     max_tokens: int,
-    timeout_seconds: float | None = None,
+    timeout_seconds: float = 60.0,
     model: str | None = None,
     temperature: float | None = None,
+    attempts: int = 3,
 ) -> TextReply:
     """Llamada que espera texto (jueces, simulador, mensajes al cliente) traducida para el
     modelo del rol: thinking y esfuerzo del registro, `temperature` solo donde se acepta, y
-    el texto leído por tipo de bloque (con thinking, el primer bloque no es texto)."""
+    el texto leído por tipo de bloque (con thinking, el primer bloque no es texto).
+    `timeout_seconds` es por intento; los reintentos son los de `create_message`."""
     model = model or getattr(get_models(), role)
     thinking = get_models().thinking(role, model=model)
     kwargs: dict[str, Any] = {
@@ -428,11 +490,11 @@ async def call_claude_text(
         "messages": messages,
         **thinking.request_options(),
     }
-    if timeout_seconds is not None:
-        kwargs["timeout"] = timeout_seconds
     if temperature is not None and capabilities_of(model).sampling_params:
         kwargs["extra_body"] = {"temperature": temperature}
-    response = await client.messages.create(**kwargs)
+    response = await create_message(
+        client, kwargs, attempts=attempts, timeout_seconds=timeout_seconds
+    )
     stop_reason = getattr(response, "stop_reason", None)
     category = None
     if stop_reason == "refusal":
@@ -449,5 +511,7 @@ async def call_claude_text(
 
 
 def build_anthropic_client(api_key: str, *, timeout: float = 60.0) -> anthropic.AsyncAnthropic:
-    """Construye el cliente async. El timeout aquí es el del transport HTTP global."""
-    return anthropic.AsyncAnthropic(api_key=api_key, timeout=timeout)
+    """Construye el cliente async. Sin reintentos propios del SDK: los hace `create_message`,
+    dentro del presupuesto por llamada; con los dos a la vez un intento se multiplicaba por 3.
+    `timeout` es el del transport HTTP global; cada llamada fija el suyo."""
+    return anthropic.AsyncAnthropic(api_key=api_key, timeout=timeout, max_retries=0)

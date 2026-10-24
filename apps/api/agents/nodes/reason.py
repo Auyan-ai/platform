@@ -84,6 +84,13 @@ def _returns_policy_note(state: AgentState) -> str | None:
     return policy_note(active)
 
 
+def turn_now(state: AgentState) -> str:
+    """La hora del turno, leída en la primera vuelta de `reason` y fija hasta el final: el
+    system no cambia entre vueltas (con thinking preservado, un cambio invalida los thinking
+    blocks de las vueltas anteriores)."""
+    return state.get("turn_now") or _tenant_now_str(state.get("tenant_facts"))
+
+
 def agent_system_blocks(state: AgentState) -> list[dict[str, Any]]:
     """El system de `reason`: prompt compilado (cacheado) + bloque volátil del turno.
 
@@ -92,7 +99,7 @@ def agent_system_blocks(state: AgentState) -> list[dict[str, Any]]:
     return build_system_blocks(
         state["system_prompt"],
         state.get("retrieved_chunks", []),
-        current_date=_tenant_now_str(state.get("tenant_facts")),
+        current_date=turn_now(state),
         known_facts=state.get("known_facts"),
         supervisor_feedback=state.get("supervisor_feedback"),
         conversation_context=conversation_context_block(
@@ -311,6 +318,7 @@ def make_reason_node(
                 status="done",
             )
 
+        state = {**state, "turn_now": turn_now(state)}  # type: ignore[typeddict-item]
         system_blocks = agent_system_blocks(state)
         messages = build_message_history(state["conversation_history"])
         messages = _append_tool_result_blocks(
@@ -352,6 +360,7 @@ def make_reason_node(
             "tokens_out": state.get("tokens_out", 0) + usage.output_tokens,
             "cost_usd": state.get("cost_usd", 0.0) + compute_llm_cost(model, usage),
             "model_used": model,
+            "turn_now": state["turn_now"],
         }
         if isinstance(outcome, NoDecision):
             return {"error": outcome.reason, **tokens_update}
