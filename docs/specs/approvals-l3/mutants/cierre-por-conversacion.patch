@@ -1,0 +1,13 @@
+# Cerrar una ejecución cierra todas las escalaciones de la conversación, como antes de #393. Con un solo pedido nunca hay dos aprobaciones vivas a la vez, así que el modelo no lo distingue: #393 queda fuera de su alcance.
+# espera: each LiveApprovalHasEscalation=OK NoOrphanEscalation=OK
+--- a/ApprovalsL3.tla
++++ b/ApprovalsL3.tla
+@@ -345,7 +345,7 @@
+ CanSettle(a, at) == appr[a] = "executing" /\ attempt[a] = at
+ 
+ \* Las escalaciones de gate que resolve_open_escalations_for_approval(a) no cierra.
+-OtherLiveGates(a) == {i \in openEsc : i # a /\ appr[i] \in {"pending", "executing"}}
++OtherLiveGates(a) == {}
+ 
+ SettleDb(a, res, fu) ==
+     /\ appr' = [appr EXCEPT ![a] = SettleTo(res)]

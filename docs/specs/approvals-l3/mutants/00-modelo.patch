@@ -1,3 +1,3 @@
-# El modelo del código actual (develop 084955e, con el arreglo de #376), sin cambios.
-# espera: each OneTurnAtATime=OK ExecAtMostOnce=OK OneExecPerOrder=VIOLADA NoExecOnClosedOrder=VIOLADA RejectedNeverExecuted=OK ExecutedNeverPending=OK OneOutcomePerApproval=OK OutcomeIsTruthful=OK NoWaitingAfterOutcome=VIOLADA NoOrphanEscalation=VIOLADA ExecutedIsApproved=OK
+# El modelo del código de #402 (fix/l3-approval-escalations 820fac2, sobre develop con el arreglo de #376), sin cambios.
+# espera: each OneTurnAtATime=OK ExecAtMostOnce=OK OneExecPerOrder=VIOLADA NoExecOnClosedOrder=VIOLADA RejectedNeverExecuted=OK ExecutedNeverPending=OK OneOutcomePerApproval=OK OutcomeIsTruthful=OK NoWaitingAfterOutcome=VIOLADA NoOrphanEscalation=OK NoGateEscalationForApproved=OK LiveApprovalHasEscalation=OK ExecutedIsApproved=OK
 # espera: liveness MessagesTaken=OK ExecutionSettles=OK ApprovalEventuallyFinal=VIOLADA

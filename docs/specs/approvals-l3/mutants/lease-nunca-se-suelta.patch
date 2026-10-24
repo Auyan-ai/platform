@@ -2,7 +2,7 @@
 # espera: liveness MessagesTaken=VIOLADA
 --- a/ApprovalsL3.tla
 +++ b/ApprovalsL3.tla
-@@ -170,7 +170,7 @@
+@@ -172,7 +172,7 @@
  (***************************************************************************)
  (* Turnos inbound (services/inbound_worker.py, db/inbound_jobs.py).        *)
  (***************************************************************************)
@@ -11,7 +11,7 @@
  StaleTurn    == \E v \in Workers : tpc[v] # "idle" /\ ~lease[v]
  
  \* claim_next_inbound_job: advisory xact lock + "no hay running con lease vigente".
-@@ -263,8 +263,7 @@
+@@ -293,8 +293,7 @@
      /\ tpc[w] = "deliver"
      /\ inbox' = Append(inbox, [k |-> tKind[w], a |-> tAppr[w]])
      /\ tpc' = [tpc EXCEPT ![w] = "idle"]

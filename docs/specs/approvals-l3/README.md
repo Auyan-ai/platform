@@ -2,10 +2,13 @@
 
 Especificación TLA+ de la máquina de estados de las aprobaciones L3 y su
 concurrencia con los turnos inbound de la misma conversación (issue #341,
-ADR 0008). Modela el código de `develop` en `084955e`, con el arreglo de #376
-(PR #395), no la documentación. Si cambia el código de un paso de las tablas de
-abajo, hay que revisar su acción. El modelo de antes del arreglo (`9f30a82`) se
-conserva como el mutante `mutants/antes-376.patch`.
+ADR 0008). Modela el código de la rama `fix/l3-approval-escalations` en `820fac2`
+(PR #402, arreglos de #377, #390 y #393), que parte de `develop` en `084955e` con
+el arreglo de #376 (PR #395). No modela la documentación. Si cambia el código de
+un paso de las tablas de abajo, hay que revisar su acción. Los modelos de antes
+de cada arreglo se conservan como mutantes: `mutants/antes-402.patch` (`084955e`)
+y `mutants/antes-376.patch` (`9f30a82`). Este modelo describe el código de #402,
+así que se mergea después de él.
 
 | Archivo | Qué es |
 |---|---|
@@ -43,7 +46,7 @@ docs/specs/run_tlc.sh full       # espacio de estados completo, solo TypeOK
 docs/specs/run_tlc.sh each       # un TLC por invariante: tabla OK / VIOLADA
 docs/specs/run_tlc.sh liveness   # un TLC por propiedad temporal
 docs/specs/run_tlc.sh trace docs/specs/approvals-l3 ExecAtMostOnce   # traza mínima resumida
-docs/specs/run_mutants.sh        # mutantes contra lo esperado (unos 6 min)
+docs/specs/run_mutants.sh        # mutantes contra lo esperado (unos 18 min)
 ```
 
 TLC para en la primera violación. Por eso `each` y `liveness` lanzan una corrida
@@ -55,34 +58,38 @@ Los logs quedan en `$TLC_OUT`.
 
 ## Resultados (TLC v1.7.4, `ApprovalsL3.cfg`)
 
-Con el arreglo de #376, el espacio completo tiene 741.857 estados generados y
-262.630 distintos, con simetría entre operadores, entre workers y entre
-recuperaciones. Su profundidad es 29 y `TypeOK` se cumple en todos. TLC lo agota
-en unos 11 s. La liveness se comprueba sin simetría, sobre 1.209.257
-estados distintos. La columna "Antes" es el mutante `antes-376` (426.304 estados
-distintos).
+Con #402, el espacio completo tiene 604.161 estados generados y 211.220
+distintos, con simetría entre operadores, entre workers y entre recuperaciones.
+Su profundidad es 31 y `TypeOK` se cumple en todos. TLC lo agota en unos
+9 s. La liveness se comprueba sin simetría, sobre 971.351 estados
+distintos. La columna "Antes de #376" es el mutante `antes-376` y la columna
+"Con #395" es el mutante `antes-402` (262.630 estados distintos).
 
-| Invariante o propiedad | Antes (`9f30a82`) | Con #395 (`084955e`) | Issue |
-|---|---|---|---|
-| `OneTurnAtATime` | OK | OK | |
-| `ExecAtMostOnce` | VIOLADA | OK | #376 |
-| `RejectedNeverExecuted` | VIOLADA | OK | #376 |
-| `OneOutcomePerApproval` | VIOLADA | OK | #376 |
-| `OutcomeIsTruthful` | VIOLADA | OK | #376 |
-| `ExecutedIsApproved` | VIOLADA | OK | #376 |
-| `ExecutedNeverPending` | (nueva) | OK | #376 |
-| `OneExecPerOrder` | VIOLADA | VIOLADA | #376 antes; #399 con el arreglo |
-| `NoExecOnClosedOrder` | VIOLADA | VIOLADA | #392 (TOCTOU) |
-| `NoWaitingAfterOutcome` | VIOLADA | VIOLADA | #391, #377 (punto 2) |
-| `NoOrphanEscalation` | VIOLADA | VIOLADA | #377, #390, #393 |
-| `MessagesTaken` | OK | OK | |
-| `ExecutionSettles` | (nueva) | OK | #376 |
-| `ApprovalEventuallyFinal` | VIOLADA | VIOLADA | sin issue: no hay caducidad (decisión de producto) |
+| Invariante o propiedad | Antes de #376 (`9f30a82`) | Con #395 (`084955e`) | Con #402 (`820fac2`) | Issue |
+|---|---|---|---|---|
+| `OneTurnAtATime` | OK | OK | OK | |
+| `ExecAtMostOnce` | VIOLADA | OK | OK | #376 |
+| `RejectedNeverExecuted` | VIOLADA | OK | OK | #376 |
+| `OneOutcomePerApproval` | VIOLADA | OK | OK | #376 |
+| `OutcomeIsTruthful` | VIOLADA | OK | OK | #376 |
+| `ExecutedIsApproved` | VIOLADA | OK | OK | #376 |
+| `ExecutedNeverPending` | (nueva) | OK | OK | #376 |
+| `OneExecPerOrder` | VIOLADA | VIOLADA | VIOLADA | #376 antes; #399 desde #395 |
+| `NoExecOnClosedOrder` | VIOLADA | VIOLADA | VIOLADA | #392 (TOCTOU) |
+| `NoWaitingAfterOutcome` | VIOLADA | VIOLADA | VIOLADA | #391 |
+| `NoOrphanEscalation` | VIOLADA | VIOLADA | OK | #377, #390 |
+| `NoGateEscalationForApproved` | (nueva) | VIOLADA | OK | #377 (punto 1) |
+| `LiveApprovalHasEscalation` | (nueva) | VIOLADA | OK | #390 |
+| `MessagesTaken` | OK | OK | OK | |
+| `ExecutionSettles` | (nueva) | OK | OK | #376 |
+| `ApprovalEventuallyFinal` | VIOLADA | VIOLADA | VIOLADA | sin issue: no hay caducidad (decisión de producto) |
 
-Las seis invariantes de #376 pasan con el arreglo y siguen fallando en
-`antes-376`. `OneExecPerOrder` ya no falla por la carrera de #376. Falla por un
-camino que el arreglo abre (contraejemplo 9). Las trazas de antes están en los
-comentarios de #376 y #377 y en el cuerpo de #390.
+Las seis invariantes de #376 pasan desde #395 y siguen fallando en `antes-376`.
+Las tres de escalaciones pasan con #402 y siguen fallando en `antes-402`.
+`OneExecPerOrder` ya no falla por la carrera de #376. Falla por un camino que #395
+abre (contraejemplo 9). Las trazas de antes están en los comentarios de #376 y
+#377 y en el cuerpo de #390. #393 no aparece en la tabla porque el modelo tiene un
+solo pedido (ver Pendiente).
 
 ## Qué se modela
 
@@ -120,12 +127,14 @@ ROLLBACK.
 | Acción | Código | Atomicidad |
 |---|---|---|
 | `Claim` | `apps/api/db/inbound_jobs.py:132-245` (`claim_next_inbound_job`) | Una transacción con `pg_try_advisory_xact_lock(tenant:conversation)` (`:169`), la comprobación de que no hay un `running` con lease vigente (`:177-189`) y `FOR UPDATE` de los jobs vivos (`:198`). El lock se suelta al COMMIT. Desde ahí la exclusión es solo el estado `running` más `locked_until`, que renueva el heartbeat (`apps/api/services/inbound_worker.py:484-494`). |
-| `PreReuse` | `execute_skill.py:721-737` (#386) | Una transacción de lectura: `get_recent_approval_for_skill`. Si hay una aprobación viva (`pending`, `executing` o `approved`) la reutiliza y va a `escalate` sin pasar por `prepare`. |
-| `Precheck` | `apps/api/agents/nodes/execute_skill.py:743-745` → `prepare` (`skills/shopify/cancel_order.py:75-89`, `update_shipping_address.py:96-103`, `refund_partial.py:84-100`) | Una lectura HTTP de Shopify. cancel y address lanzan `SkillRefusal` si el pedido está enviado o cancelado (`skills/shopify/_order_guard.py:52-83`). refund solo comprueba el saldo. |
-| `GateReuse`, `GateCreate` | `execute_skill.py:800-839`: `get_recent_approval_for_skill` (`db/queries.py:2708-2742`, cuenta `pending`, `executing` y `approved`) y `create_pending_approval` (`db/queries.py:2646-2683`) | Una transacción sin locks. Hace un SELECT y después un INSERT. Se modela como un solo paso porque el INSERT no lee nada. Un COMMIT ajeno entre las dos sentencias equivale a uno posterior al paso. |
-| `Escalate` | `apps/api/agents/nodes/escalate.py:91-142` | Una transacción con `get_open_escalation_for_conversation`, `insert_escalation` si no hay ninguna abierta, e `insert_message`. Es un solo paso por el mismo argumento: lo único que puede cerrar escalaciones a la vez son los endpoints, y si cierran después de la lectura el resultado es el mismo que si cierran después del paso. Con #395, `hand_approval_to_team` también abre una escalación. Si `escalate` lee antes de su COMMIT, quedan abiertas la del gate y la del equipo. El modelo no explora ese orden (ver Pendiente). Solo afecta a `NoOrphanEscalation`, que ya falla. |
+| `PreReuse` | `execute_skill.py:799-813` (#386) | Una transacción de lectura: `get_recent_approval_for_skill` (`db/queries.py:2783-2817`). Si hay una aprobación viva (`pending`, `executing` o `approved`), `GateReuse` la relee antes de `prepare`. |
+| `Precheck` | `apps/api/agents/nodes/execute_skill.py:817-819` → `prepare` (`skills/shopify/cancel_order.py:75-89`, `update_shipping_address.py:96-103`, `refund_partial.py:84-100`) | Una lectura HTTP de Shopify. cancel y address lanzan `SkillRefusal` si el pedido está enviado o cancelado (`skills/shopify/_order_guard.py:52-83`). refund solo comprueba el saldo. |
+| `GateRead` | `execute_skill.py:872-885` | Una transacción de lectura: `get_recent_approval_for_skill`. Con una viva va a `GateReuse` (`_reuse`). Sin ninguna va a `GateCreate`, en otra transacción. |
+| `GateReuse` | `_reuse` (`execute_skill.py:695-707`), `open_gate_escalation` (`services/approval_resolution.py:65-96`) | Una transacción. `lock_approval_status` (`db/queries.py:2765-2780`) relee el estado con `FOR UPDATE`. Si sigue `pending` o `executing`, reutiliza o abre `awaiting_human_approval:<id>` (`get_open_escalation_by_reason`, `db/queries.py:1076-1097`). Si está `approved`, `_already_applied` (`execute_skill.py:648-677`) contesta "ya quedó aplicado" por `respond`, sin escalar. Si está `failed` o `rejected`, devuelve None: desde `PreReuse` sigue a `prepare` y desde `GateRead` crea otra. Es atómico frente al panel y la recuperación porque sus CAS (`claim_pending_approval`, `reject_pending_approval`, `settle_executing_approval`) son un UPDATE de la misma fila, que la bloquea hasta su COMMIT. Si el CAS va antes, el `FOR UPDATE` espera y lee el estado nuevo. Si va después, el cierre de su transacción ve la escalación que se abrió aquí. |
+| `GateCreate` | `execute_skill.py:888-904`: `create_pending_approval` (`db/queries.py:2703-2740`) y `open_gate_escalation` sobre la fila nueva | Una transacción. La aprobación y su escalación se hacen visibles a la vez, al COMMIT (#390). Va separada de `GateRead`, como en el código. El INSERT no lee nada, así que la separación solo añade órdenes posibles. |
+| `Escalate` | `apps/api/agents/nodes/escalate.py:82-155` | Una transacción. Con `pending_approval_id` ya no lee ni abre escalaciones (`:83-88`): propaga la del gate. Inserta el acuse con `metadata.inbound_message_id` (`:128`, #377). No lee la aprobación ni las escalaciones, así que no hace falta partirlo en lectura y escritura. |
 | `Deliver` | `inbound_worker.py:158` (`_deliver_outcome`), `:534` (`complete_inbound_job`) | Una entrega HTTP. |
-| `TurnFault` | `inbound_worker.py:510-529` (`release_inbound_job`, `fail_inbound_job`) | El job vuelve a `pending` y se repite entero. `inbound_already_answered` (`db/inbound_jobs.py:390-412`) busca `metadata.inbound_message_id`. El mensaje de `escalate` no lo lleva (`escalate.py:130-140`), así que un turno que acabó escalando se repite completo. |
+| `TurnFault` | `inbound_worker.py:510-529` (`release_inbound_job`, `fail_inbound_job`) | El job vuelve a `pending`. Si el turno no llegó a `deliver`, se repite entero. En `deliver` el mensaje del turno ya está committed con `metadata.inbound_message_id` (de `respond`, y de `escalate` desde #377), así que el reintento acaba en `inbound_already_answered` (`inbound_worker.py:89-99`, `db/inbound_jobs.py:390-412`) sin repetir el turno ni entregar nada. |
 | `LeaseExpire` | `inbound_worker.py:484-494` | Si el heartbeat no renueva a tiempo, otro slot reclama el mismo job (`db/inbound_jobs.py:157`). El turno viejo sigue vivo y su heartbeat vuelve a extender el lease (`:247-259`, `WHERE status='running'`). |
 
 ### Panel: aprobar (`apps/api/routers/approvals.py:165-262`)
@@ -137,30 +146,30 @@ evaluar el WHERE, así que dos transacciones sobre la misma fila se serializan.
 | Acción | Código | Atomicidad |
 |---|---|---|
 | `ApproveClick` | `:176-177`, `_reviewable_approval` (`:135-150`) | Primera transacción. Un SELECT sin `FOR UPDATE`. Si no está `pending`, 409. |
-| `ApproveClaim` | `:201-213`, `claim_pending_approval` (`db/queries.py:2907-2935`) | Segunda transacción. CAS `pending → executing` con `execution_attempt + 1` y **resultado comprobado**: si no actualiza nada, 409 sin ejecutar. `load_execution_context` va en la misma transacción. |
+| `ApproveClaim` | `:201-213`, `claim_pending_approval` (`db/queries.py:2982-3010`) | Segunda transacción. CAS `pending → executing` con `execution_attempt + 1` y **resultado comprobado**: si no actualiza nada, 409 sin ejecutar. `load_execution_context` va en la misma transacción. |
 | `ApproveSnapshot` | `execute_once` (`services/approval_execution.py:137-163`): `snapshot_before_mutation` y `ensure_order_changeable` (`cancel_order.py:97-98`, `update_shipping_address.py:111-112`) | Una lectura HTTP de Shopify y el guard en memoria. En el primer claim, un `SkillRefusal` es `Refused` (`:158-159`). En uno posterior se reconcilia (`:162`, `reconcile` en `:166-187`). |
 | `ApproveMutate` | `cancel_order.py:99-106`, `update_shipping_address.py:113-124`, `refund_partial.py:110-128` | Una mutación HTTP distinta de la lectura. refund busca antes su reembolso por la marca de la aprobación (`:110-121`) y manda `refundCreate @idempotent` con la aprobación como clave (`integrations/shopify.py:1165`). cancel y address no admiten clave. Si Shopify rechaza (`ShopifyRejected`, que es `MutationNotApplied`), el primer claim da `NotApplied` (`approval_execution.py:160-161`). Con un fallo, la respuesta se pierde y `reconcile` la encuentra o no se sabe (`Unknown`). |
-| `ApproveSettle` | `settle` (`approval_execution.py:190-371`), `settle_executing_approval` (`db/queries.py:2966-2998`) | Tercera transacción. CAS desde `executing` **con el mismo `execution_attempt`**: `approved` si consta aplicada, `pending` solo si consta que no se aplicó (`NotApplied`), `failed` si una regla la rechazó (`Refused`) o si no se sabe (`Unknown`). En la misma transacción, el mensaje y `release_escalations_after_executed_action` (todo resuelto) o `hand_approval_to_team` (`approval_resolution.py:142-163`). Un CAS perdido es 409 sin escribir ni entregar. |
-| `ApproveDeliver` | `deliver_after_commit` (`approval_execution.py:396-409`) | Una entrega HTTP **después del COMMIT**. Solo `Applied` ("hecho") y `Refused` ("no se pudo") llevan mensaje. |
+| `ApproveSettle` | `settle` (`approval_execution.py:190-374`), `settle_executing_approval` (`db/queries.py:3041-3073`) | Tercera transacción. CAS desde `executing` **con el mismo `execution_attempt`**: `approved` si consta aplicada, `pending` solo si consta que no se aplicó (`NotApplied`), `failed` si una regla la rechazó (`Refused`) o si no se sabe (`Unknown`). En la misma transacción, el mensaje y `release_escalations_after_executed_action` (`approval_resolution.py:118-133`) o `hand_approval_to_team` (`:194-215`). Las dos cierran con `resolve_open_escalations_for_approval` (`db/queries.py:1241-1271`, #393): todas las abiertas salvo el gate de otra aprobación `pending` o `executing` y el seguimiento del equipo de otra (`metadata.approval_id`). Un CAS perdido es 409 sin escribir ni entregar. Sigue siendo un paso: el CAS bloquea la fila antes del cierre, así que `GateReuse` sobre la misma aprobación espera al COMMIT. |
+| `ApproveDeliver` | `deliver_after_commit` (`approval_execution.py:399-412`) | Una entrega HTTP **después del COMMIT**. Solo `Applied` ("hecho") y `Refused` ("no se pudo") llevan mensaje. |
 
 ### Panel: rechazar (`apps/api/routers/approvals.py:270-326`)
 
 | Acción | Código | Atomicidad |
 |---|---|---|
 | `RejectClick` | `:280-288` (`_reviewable_approval`) | Un SELECT sin `FOR UPDATE`. La redacción con Haiku (`:291-298`) va después, fuera de toda transacción. |
-| `RejectCas` | `:299-318`, `reject_pending_approval` (`db/queries.py:2938-2963`) | Una transacción. CAS **solo desde `pending`**, con resultado comprobado: una `executing` da 409 y el cliente no recibe "rechazada". Después, el mensaje y `release_approval_escalation`, que cierra solo la escalación del gate de esta aprobación. |
+| `RejectCas` | `:299-318`, `reject_pending_approval` (`db/queries.py:3013-3038`) | Una transacción. CAS **solo desde `pending`**, con resultado comprobado: una `executing` da 409 y el cliente no recibe "rechazada". Después, el mensaje y `release_approval_escalation` (`approval_resolution.py:99-115`), que cierra solo la escalación del gate de esta aprobación. #402 no lo cambia. Sigue siendo un paso por el mismo lock de fila que `ApproveSettle`. |
 | `RejectDeliver` | `:320` | Una entrega HTTP después del COMMIT. |
 
 `HumanFault` es la muerte de la petición, por timeout de Cloud Run o por un
 reinicio. Lo committed se queda. Tras el claim, la aprobación queda `executing`
 hasta que la cierra una recuperación.
 
-### Recuperación (`services/approval_execution.py:412-458`)
+### Recuperación (`services/approval_execution.py:415-461`)
 
 | Acción | Código | Atomicidad |
 |---|---|---|
-| `RecoverRead` | `list_stale_executing_approvals` (`db/queries.py:3001-3020`), `reconcile(cause=None)` (`approval_execution.py:418`) | Lista las `executing` con `reviewed_at` de hace más de `STALE_EXECUTION` = 15 min (`:67-69`) y lee Shopify. `Applied` si la encuentra, `NotApplied` si no, `Unknown` si la lectura falla. **Nunca ejecuta.** |
-| `RecoverSettle` | `settle` con el `execution_attempt` que leyó (`:427-434`) | El mismo CAS que `ApproveSettle`. |
+| `RecoverRead` | `list_stale_executing_approvals` (`db/queries.py:3076-3097`), `reconcile(cause=None)` (`approval_execution.py:421`) | Lista las `executing` con `reviewed_at` de hace más de `STALE_EXECUTION` = 15 min (`:67-69`) y lee Shopify. `Applied` si la encuentra, `NotApplied` si no, `Unknown` si la lectura falla. **Nunca ejecuta.** |
+| `RecoverSettle` | `settle` con el `execution_attempt` que leyó (`:430-437`) | El mismo CAS que `ApproveSettle`. |
 | `RecoverDeliver` | `deliver_after_commit` | Igual que al aprobar. |
 
 La recuperación solo ve una `executing` si ninguna petición viva tiene ese
@@ -181,6 +190,8 @@ claim. Es el supuesto de `STALE_EXECUTION`: Cloud Run corta cada petición a los
 | `OutcomeIsTruthful` | Si el cliente leyó "rechazada" o "no se pudo", la acción no se ejecutó. |
 | `NoWaitingAfterOutcome` | Después del resultado, el cliente no recibe "sigue en revisión" sobre la misma aprobación. |
 | `NoOrphanEscalation` | En reposo, toda escalación de gate abierta apunta a una aprobación `pending`. Si no, nadie puede cerrarla desde el panel. |
+| `NoGateEscalationForApproved` | En todo estado, ninguna escalación de gate abierta apunta a una aprobación `approved`. Es la invariante auxiliar de la traza de #377. |
+| `LiveApprovalHasEscalation` | En todo estado, toda aprobación `pending` o `executing` tiene abierta su escalación de gate. El panel nunca la ve sin escalación (#390) y cerrar otra aprobación no se la quita (#393). |
 | `ExecutedIsApproved` | En reposo, lo que se ejecutó en Shopify consta como `approved`, o como `failed` por resultado desconocido y con el caso en manos del equipo. Esa segunda salida es la que #376 manda tomar ante la duda. |
 | `MessagesTaken` (liveness) | Todo mensaje del cliente acaba reclamado por un turno. |
 | `ExecutionSettles` (liveness) | Toda `executing` acaba cerrada, por su petición o por una recuperación. |
@@ -203,35 +214,43 @@ sin jobs sin reclamar y sin ninguna `executing`.
 4. **Dos "rechazada" por una caída** (`OneOutcomePerApproval`, #376). La entrega
    iba antes del COMMIT.
 
-### Con el arreglo
+### Antes de #402 (mutante `antes-402`)
+
+7. **Escalación huérfana** (`NoOrphanEscalation`, #377, #390). El gate
+   reutiliza una aprobación ya resuelta y `escalate` abre su escalación, o un
+   rechazo cae en el hueco entre crear la aprobación y su escalación.
+   `NoGateEscalationForApproved` da la variante de #377 y
+   `LiveApprovalHasEscalation` la de #390: el panel ve la aprobación sin su
+   escalación.
+
+### Con #402
 
 5. **Pedido enviado entre el guard y la mutación** (`NoExecOnClosedOrder`,
    #392). Es un TOCTOU contra Shopify (`cancel_order.py:97-99`) que el código no
    puede cerrar sin una precondición en la propia mutación. #395 no lo toca.
-6. **"Sigue en revisión" después del resultado** (`NoWaitingAfterOutcome`, #391
-   y #377). Un turno lee la aprobación viva y entrega después del resultado.
-7. **Escalación huérfana** (`NoOrphanEscalation`, #377, #390, #393). El gate
-   reutiliza una aprobación ya resuelta y `escalate` abre su escalación, o un
-   rechazo cae en el hueco entre crear la aprobación y su escalación.
+6. **"Sigue en revisión" después del resultado** (`NoWaitingAfterOutcome`,
+   #391). `GateReuse` ve la aprobación `pending` con la fila bloqueada, pero
+   entrega "sigue en revisión" después del COMMIT y de la decisión del operador.
+   El lock no lo evita, porque la entrega va fuera de la transacción.
 8. **Aprobación que nunca termina** (`ApprovalEventuallyFinal`). Si nadie la
    rechaza ni la aprueba, sigue `pending`. No hay caducidad.
 9. **Segunda ejecución tras un resultado desconocido** (`OneExecPerOrder`,
-   #399). Necesita un fallo. Traza mínima de 22 pasos, con
+   #399). Necesita un fallo. Traza mínima de 24 pasos con #402, con
    `refund` o `address`:
 
    ```
-   12. ApproveClaim     appr = <<"executing", "none">>
-   14. ApproveMutate    execs = <<[a |-> 1]>>, hRes = h1 :> "unknown"   (respuesta perdida, reconcile falla)
-   15. ApproveSettle    appr = <<"failed", "none">>, teamEsc = {1}
-   16. PreReuse         (failed no cuenta como viva)
-   18. GateCreate       appr = <<"failed", "pending">>
-   20. ApproveClaim     appr = <<"failed", "executing">>
-   22. ApproveMutate    execs = <<[a |-> 1], [a |-> 2]>>
+   13. ApproveClaim     appr = <<"executing", "none">>
+   15. ApproveMutate    execs = <<[a |-> 1]>>, hRes = h1 :> "unknown"   (respuesta perdida, reconcile falla)
+   16. ApproveSettle    appr = <<"failed", "none">>, openEsc = {}, teamEsc = {1}
+   17. PreReuse         (failed no cuenta como viva)
+   20. GateCreate       appr = <<"failed", "pending">>, openEsc = {2}
+   22. ApproveClaim     appr = <<"failed", "executing">>
+   24. ApproveMutate    execs = <<[a |-> 1], [a |-> 2]>>
    ```
 
    Una aprobación cerrada como `failed` por resultado desconocido puede estar
    aplicada en Shopify. `get_recent_approval_for_skill` ignora las `failed`
-   (`db/queries.py:2733`), así que el cliente vuelve a pedirla, el gate crea otra
+   (`db/queries.py:2808`), así que el cliente vuelve a pedirla, el gate crea otra
    aprobación y, si un operador la aprueba, refund reembolsa dos veces. La marca
    y la clave de idempotencia son por aprobación, así que no lo frenan. En cancel
    no pasa porque el pre-check ve el pedido cancelado. Lo único que lo frena hoy
@@ -259,6 +278,10 @@ lo comprueba.
 | `claim-sin-exclusion` | `Claim` no mira si otro turno tiene el lease vigente. | `OneTurnAtATime` VIOLADA |
 | `lease-nunca-se-suelta` | El turno acaba sin soltar `locked_until` y el lease no vence. | `MessagesTaken` VIOLADA |
 | `lease-vence` | El heartbeat no renueva a tiempo. | `OneTurnAtATime` VIOLADA |
+| `antes-402` | El modelo de `084955e`, antes de #402. | `NoOrphanEscalation`, `NoGateEscalationForApproved` y `LiveApprovalHasEscalation` VIOLADAS |
+| `gate-reusa-sin-releer` | `_reuse` decide con el estado de la lectura sin lock, sin el `FOR UPDATE` de `open_gate_escalation`. | `NoOrphanEscalation` y `NoGateEscalationForApproved` VIOLADAS |
+| `escalacion-en-escalate` | La escalación del gate nace en `escalate`, después del COMMIT de la aprobación. | `LiveApprovalHasEscalation` y `NoOrphanEscalation` VIOLADAS |
+| `cierre-por-conversacion` | Cerrar una ejecución cierra todas las escalaciones, como antes de #393. | `LiveApprovalHasEscalation` OK: con un pedido no hay dos aprobaciones vivas |
 
 `settle-sin-attempt` necesita las dos recuperaciones. Las dos leen la misma
 `executing` sin aplicar, una la reabre, un operador la reclama y la ejecuta, y
@@ -266,6 +289,30 @@ la otra la vuelve a dejar `pending` con su lectura vieja.
 `recuperacion-con-peticion-viva` muestra que el arreglo depende de que
 `STALE_EXECUTION` sea mayor que la vida de una petición. Con address la segunda
 mutación sale. Con refund la frena la clave de idempotencia.
+
+## Qué cambió en el modelo con #402
+
+- **`GateRead`, que es nueva.** Es la lectura del gate (`get_recent_approval_for_skill`),
+  en su propia transacción. Antes iba en el mismo paso que la creación.
+- **`GateReuse`.** Ya no reutiliza con el estado leído. Relee la aprobación con
+  `FOR UPDATE` y decide con ese estado. `PreReuse` y `GateRead` llevan a ella. Con
+  `approved` el turno contesta "ya quedó aplicado" sin escalar (#377). Con
+  `failed` o `rejected` sigue a `prepare` o crea otra.
+- **`GateCreate`.** Abre la escalación del gate en el mismo paso que la aprobación
+  (#390, opción A).
+- **`Escalate`.** Ya no abre ni lee escalaciones. Solo pasa a `deliver`.
+- **`SettleDb` (`ApproveSettle` y `RecoverSettle`).** Cierra las escalaciones
+  salvo el gate de otra aprobación viva y el seguimiento del equipo de otra (#393).
+  `teamEsc` ya no se vacía entera.
+- **`TurnFault`.** En `deliver` ya no repite el turno (#377, punto 2).
+- **`NoGateEscalationForApproved` y `LiveApprovalHasEscalation`, que son nuevas.**
+
+`ApproveSettle` y `RejectCas` no se parten en lectura y escritura. La sección
+Pendiente lo preveía para el caso en que `escalate` leyera la aprobación sin
+lock. El código de #402 la relee con `FOR UPDATE` en `open_gate_escalation`, y los
+CAS del panel y de la recuperación bloquean esa fila hasta su COMMIT. Por eso
+cada una de esas transacciones sigue siendo un paso atómico frente al gate. El
+mutante `gate-reusa-sin-releer` quita ese lock y TLC encuentra la huérfana.
 
 ## Qué cambió en el modelo con #395
 
@@ -290,14 +337,12 @@ mutación sale. Con refund la frena la clave de idempotencia.
 
 ## Pendiente
 
-Los arreglos de #377, #390 y #393 se modelarán cuando entre el PR de
-`fix/l3-approval-escalations`. Los bocetos de antes (`arreglo-escalacion-huerfana*`)
-se quitaron porque ya no aplican al modelo nuevo. Siguen en el historial de este
-PR, en `376dbec`. Al modelarlos, hay que partir `Escalate`, `ApproveSettle` y
-`RejectCas` en lectura y escritura. Hoy pueden ser atómicos porque `escalate` no
-lee la aprobación. Con el arreglo la leerá, y un rechazo sin COMMIT entre su CAS
-y su cierre vuelve a importar. Lo mismo pasa con una `hand_approval_to_team` sin
-COMMIT que `escalate` todavía no ve.
+- **#393 con dos pedidos.** El modelo tiene un pedido y una skill, así que el
+  gate siempre reutiliza y nunca hay dos aprobaciones vivas a la vez. El cierre
+  de `resolve_open_escalations_for_approval` se modela, pero ninguna traza lo
+  ejercita: el mutante `cierre-por-conversacion` da OK. Para comprobar #393 hace
+  falta un segundo pedido (o una segunda acción distinta para
+  `_same_order_action`), con un espacio de estados bastante mayor.
 
 ## Abstracciones y lo que no se modela
 
@@ -308,8 +353,9 @@ COMMIT que `escalate` todavía no ve.
   tiene una sola dirección, así que `reconcile` la encuentra si hubo cualquier
   mutación.
 - **Las escalaciones** son las de gate (por id de aprobación) y las de
-  `hand_approval_to_team`. No se modelan la del `SkillRefusal` del pre-check, el
-  estado de la conversación ni `finalize_agent_resolution`. Si el equipo tiene
+  `hand_approval_to_team`. No se modelan la del `SkillRefusal` del pre-check, las
+  demás escalaciones del agente que `resolve_open_escalations_for_approval` cierra
+  (tickets #29/#31), el estado de la conversación ni `finalize_agent_resolution`. Si el equipo tiene
   que rematar la acción (`team_followup_reason`) se elige de forma no
   determinista.
 - **La entrega al helpdesk** siempre llega, o no llega porque muere la petición.

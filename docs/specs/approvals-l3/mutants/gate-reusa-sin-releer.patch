@@ -1,0 +1,48 @@
+# _reuse decide con el estado que leyó get_recent_approval_for_skill, sin releerlo con la fila bloqueada (sin el FOR UPDATE de open_gate_escalation): un rechazo o un cierre entre la lectura y _reuse deja la escalación del gate sobre una aprobación resuelta.
+# espera: each NoOrphanEscalation=VIOLADA NoGateEscalationForApproved=VIOLADA
+--- a/ApprovalsL3.tla
++++ b/ApprovalsL3.tla
+@@ -201,10 +201,12 @@
+     /\ tpc[w] = "reuse"
+     /\ IF LiveAppr # {}
+          THEN /\ tAppr' = [tAppr EXCEPT ![w] = Max(LiveAppr)]
++              /\ tKind' = [tKind EXCEPT ![w] = IF appr[Max(LiveAppr)] = "approved"
++                                                  THEN "followup_done" ELSE "waiting"]
+               /\ tpc' = [tpc EXCEPT ![w] = "prelock"]
+          ELSE /\ tpc' = [tpc EXCEPT ![w] = "precheck"]
+-              /\ UNCHANGED tAppr
+-    /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, tKind, lease, humanVars, recVars>>
++              /\ UNCHANGED <<tAppr, tKind>>
++    /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, lease, humanVars, recVars>>
+ 
+ \* El LLM pide la L3. prepare relee el pedido: cancel y address rechazan uno
+ \* enviado o cancelado (SkillRefusal); refund solo mira el saldo.
+@@ -223,10 +225,12 @@
+     /\ tpc[w] = "gate"
+     /\ IF LiveAppr # {}
+          THEN /\ tAppr' = [tAppr EXCEPT ![w] = Max(LiveAppr)]
++              /\ tKind' = [tKind EXCEPT ![w] = IF appr[Max(LiveAppr)] = "approved"
++                                                  THEN "followup_done" ELSE "waiting"]
+               /\ tpc' = [tpc EXCEPT ![w] = "gatelock"]
+          ELSE /\ tpc' = [tpc EXCEPT ![w] = "create"]
+-              /\ UNCHANGED tAppr
+-    /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, tKind, lease, humanVars, recVars>>
++              /\ UNCHANGED <<tAppr, tKind>>
++    /\ UNCHANGED <<shopVars, dbVars, inbox, queueVars, lease, humanVars, recVars>>
+ 
+ \* _reuse (execute_skill.py:695-707), una transacción: open_gate_escalation
+ \* (approval_resolution.py:65-96) relee el estado con FOR UPDATE (lock_approval_status,
+@@ -242,11 +246,11 @@
+ GateReuse(w) ==
+     LET r == tAppr[w] IN
+     /\ tpc[w] \in {"prelock", "gatelock"}
+-    /\ CASE appr[r] = "approved" ->
++    /\ CASE tKind[w] = "followup_done" ->
+               /\ tKind' = [tKind EXCEPT ![w] = "followup_done"]
+               /\ tpc' = [tpc EXCEPT ![w] = "deliver"]
+               /\ UNCHANGED openEsc
+-         [] appr[r] \in {"pending", "executing"} ->
++         [] tKind[w] = "waiting" ->
+               /\ openEsc' = openEsc \cup {r}
+               /\ tKind' = [tKind EXCEPT ![w] = "waiting"]
+               /\ tpc' = [tpc EXCEPT ![w] = "escalate"]
