@@ -50,6 +50,9 @@ class ModelCapabilities:
     default_effort: Effort | None
     # Thinking blocks atados al modelo y a la conversación (preserved thinking).
     preserved_thinking: bool
+    # Mensajes `role: system` a mitad de conversación (instrucciones del operador sin
+    # editar el system de arriba).
+    system_messages: bool
 
 
 MODEL_CAPABILITIES: dict[str, ModelCapabilities] = {
@@ -63,6 +66,7 @@ MODEL_CAPABILITIES: dict[str, ModelCapabilities] = {
         efforts=frozenset(),
         default_effort=None,
         preserved_thinking=False,
+        system_messages=False,
     ),
     "claude-sonnet-4-6": ModelCapabilities(
         forced_tool_choice=True,
@@ -74,6 +78,7 @@ MODEL_CAPABILITIES: dict[str, ModelCapabilities] = {
         efforts=frozenset({"low", "medium", "high", "max"}),
         default_effort=None,
         preserved_thinking=False,
+        system_messages=False,
     ),
     "claude-opus-4-7": ModelCapabilities(
         forced_tool_choice=True,
@@ -85,6 +90,7 @@ MODEL_CAPABILITIES: dict[str, ModelCapabilities] = {
         efforts=_ALL_EFFORTS,
         default_effort=None,
         preserved_thinking=False,
+        system_messages=False,
     ),
     # Sonnet 5.5: `disabled` da 400 (se apaga con `between_tools`); esfuerzo explícito
     # porque los niveles se recalibraron.
@@ -98,6 +104,7 @@ MODEL_CAPABILITIES: dict[str, ModelCapabilities] = {
         efforts=_ALL_EFFORTS,
         default_effort="medium",
         preserved_thinking=True,
+        system_messages=True,
     ),
     # Opus 5.5: el thinking no se apaga; su esfuerzo por defecto en la API es `medium`
     # y se manda explícito.
@@ -111,6 +118,7 @@ MODEL_CAPABILITIES: dict[str, ModelCapabilities] = {
         efforts=_ALL_EFFORTS,
         default_effort="medium",
         preserved_thinking=True,
+        system_messages=True,
     ),
 }
 
@@ -126,6 +134,7 @@ UNKNOWN_MODEL_CAPABILITIES = ModelCapabilities(
     efforts=frozenset(),
     default_effort=None,
     preserved_thinking=False,
+    system_messages=False,
 )
 
 
@@ -154,6 +163,12 @@ class ThinkingSettings:
     @property
     def thinking_on(self) -> bool:
         return self.thinking is not None and self.thinking["type"] == "adaptive"
+
+    @property
+    def writes_thinking_blocks(self) -> bool:
+        """Adaptive piensa; `between_tools` no piensa, pero escribe notas de progreso como
+        thinking blocks antes de cada tool. Las dos cuentan contra `max_tokens`."""
+        return self.thinking is not None
 
     def request_options(self) -> dict[str, Any]:
         """Campos de `messages.create`. Vacío en los modelos actuales sin elección por rol."""
@@ -186,9 +201,10 @@ def thinking_settings(
         thinking: dict[str, Any] = {"type": "adaptive"}
         if not caps.preserved_thinking:
             return ThinkingSettings(thinking=thinking, effort=resolved_effort, beta=None)
-        # El system y las tools cambian entre vueltas del loop ReAct (hora del turno,
-        # feedback del supervisor): un thinking block de una vuelta anterior deja de
-        # valer y, sin `drop_block`, una cuenta con la comprobación activa da 400.
+        # El loop ReAct mantiene el prefijo (hora fija; feedback y cierre como mensajes),
+        # pero lo que entra al system a mitad de turno (datos verificados, identidad) lo
+        # cambia: `drop_block` descarta lo que ya no vale en vez de dar 400. Con
+        # `between_tools` no se admite y el cliente quita esos bloques (anthropic_client).
         thinking["block_binding"] = {"prefix_mismatch_behavior": "drop_block"}
         return ThinkingSettings(
             thinking=thinking, effort=resolved_effort, beta=PRESERVED_THINKING_BETA

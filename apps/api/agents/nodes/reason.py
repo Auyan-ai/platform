@@ -28,6 +28,7 @@ from apps.api.agents.prompts.builder import (
     build_message_history,
     build_system_blocks,
     conversation_context_block,
+    supervisor_feedback_block,
 )
 from apps.api.agents.schemas import RESPOND_OR_ESCALATE_TOOL, AgentDecisionTool
 from apps.api.agents.state import AgentState
@@ -36,6 +37,8 @@ from apps.api.integrations.anthropic_client import (
     NoDecision,
     ToolDecision,
     call_claude_for_decision,
+    operator_messages_supported,
+    operator_note,
 )
 from apps.api.integrations.pricing import compute_llm_cost
 from apps.api.services.conversation_progress import no_progress_reason
@@ -51,6 +54,7 @@ from pydantic import ValidationError
 logger = logging.getLogger(__name__)
 
 DECIDE_TOOL_NAME: str = RESPOND_OR_ESCALATE_TOOL["name"]
+
 
 def _fixed_reply(state: AgentState, key: str) -> str:
     """Texto fijo al cliente en el idioma de la conversación."""
@@ -112,55 +116,102 @@ def agent_system_blocks(state: AgentState) -> list[dict[str, Any]]:
     )
 
 
+UNRUN_TOOL_RESULT = (
+    "Esta herramienta no se ejecutó: se ejecuta una por vuelta. "
+    "Si todavía la necesitas, vuelve a pedirla."
+)
+
+
+def _tool_result_block(result: dict[str, Any]) -> dict[str, Any]:
+    if result["is_error"]:
+        text = result.get("error") or "unknown_error"
+    else:
+        text = json.dumps(result["output"], ensure_ascii=False)
+    return {
+        "type": "tool_result",
+        "tool_use_id": result["id"],
+        "content": text,
+        "is_error": result["is_error"],
+    }
+
+
 def _append_tool_result_blocks(
     messages: list[dict[str, Any]],
     tool_results: list[dict[str, Any]],
-    tool_use_thinking: dict[str, list[dict[str, Any]]] | None = None,
+    assistant_turns: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Appendea los ciclos tool_use/tool_result de iteraciones previas al historial.
 
     Anthropic espera, después del último mensaje user del cliente:
-        [{role: assistant, content: [thinking blocks..., tool_use block]},
-         {role: user,      content: [tool_result block]},
+        [{role: assistant, content: [thinking..., texto..., tool_use...]},
+         {role: user,      content: [un tool_result por tool_use]},
          ...]
-    Los thinking blocks (solo los hay con thinking encendido) vuelven intactos: con
-    thinking, la API exige que el turno del assistant previo al tool_result empiece por ellos.
+    El turno del assistant vuelve tal como lo escribió el modelo (`assistant_turns`, por id
+    de la tool ejecutada): con thinking preservado, cambiarlo invalida sus thinking blocks.
+    Se ejecuta una tool por vuelta; un `tool_use` en paralelo que no corrió recibe un
+    `tool_result` de error que lo dice. Sin turno guardado se reconstruye el `tool_use`.
     """
-    thinking_by_id = tool_use_thinking or {}
+    turns = assistant_turns or {}
     for result in tool_results:
-        anthropic_name = result["slug"].replace(".", "_")
-        messages.append(
-            {
-                "role": "assistant",
-                "content": [
-                    *thinking_by_id.get(result["id"], []),
-                    {
-                        "type": "tool_use",
-                        "id": result["id"],
-                        "name": anthropic_name,
-                        "input": result["input"],
-                    },
-                ],
-            }
+        stored = turns.get(result["id"])
+        content: list[dict[str, Any]] = (
+            stored["content"]
+            if stored
+            else [
+                {
+                    "type": "tool_use",
+                    "id": result["id"],
+                    "name": result["slug"].replace(".", "_"),
+                    "input": result["input"],
+                }
+            ]
         )
-        if result["is_error"]:
-            tool_result_text = result.get("error") or "unknown_error"
-        else:
-            tool_result_text = json.dumps(result["output"], ensure_ascii=False)
+        messages.append({"role": "assistant", "content": content})
         messages.append(
             {
                 "role": "user",
                 "content": [
-                    {
+                    _tool_result_block(result)
+                    if block["id"] == result["id"]
+                    else {
                         "type": "tool_result",
-                        "tool_use_id": result["id"],
-                        "content": tool_result_text,
-                        "is_error": result["is_error"],
+                        "tool_use_id": block["id"],
+                        "content": UNRUN_TOOL_RESULT,
+                        "is_error": True,
                     }
+                    for block in content
+                    if block.get("type") == "tool_use"
                 ],
             }
         )
     return messages
+
+
+def _agent_request(
+    state: AgentState, model: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """System y mensajes de esta vuelta.
+
+    El feedback del supervisor (o el del reintento por idioma) va, donde el modelo lo
+    admite, como mensaje del operador justo después de lo que el agente tenía delante al
+    decidir (`supervisor_feedback_at`, ciclos de tools hasta entonces) y ahí se queda en
+    las vueltas siguientes: el system no cambia y el historial solo crece, así los
+    thinking blocks replayados siguen valiendo. Donde no, va en el system como siempre."""
+    feedback = state.get("supervisor_feedback")
+    as_message = bool(feedback) and operator_messages_supported(model)
+    system_blocks = agent_system_blocks(
+        {**state, "supervisor_feedback": None} if as_message else state
+    )
+    history = build_message_history(state["conversation_history"])
+    tool_results = state.get("tool_results", [])
+    messages = _append_tool_result_blocks(list(history), tool_results, state.get("assistant_turns"))
+    if as_message:
+        anchor = state.get("supervisor_feedback_at")
+        cycles = len(tool_results) if anchor is None else min(anchor, len(tool_results))
+        messages.insert(
+            len(history) + 2 * cycles, operator_note(supervisor_feedback_block(feedback or ""))
+        )
+    return system_blocks, messages
 
 
 ReasonRole = Literal["default_agent_model", "simple_turn_model"]
@@ -319,16 +370,10 @@ def make_reason_node(
             )
 
         state = {**state, "turn_now": turn_now(state)}  # type: ignore[typeddict-item]
-        system_blocks = agent_system_blocks(state)
-        messages = build_message_history(state["conversation_history"])
-        messages = _append_tool_result_blocks(
-            messages, state.get("tool_results", []), state.get("tool_use_thinking")
-        )
-
         allowed_skills = _visible_skills(state)
         tools = _build_tools(allowed_skills)
-
         model = _select_reason_model(state)
+        system_blocks, messages = _agent_request(state, model)
 
         # Iteraciones agotadas: último turno SOLO para decidir (respond/escalate) con
         # lo ya obtenido. Las tools siguen definidas (el historial trae tool_use de
@@ -344,11 +389,15 @@ def make_reason_node(
             system=system_blocks,
             messages=messages,
             tools=tools,
-            decision=ToolDecision(DECIDE_TOOL_NAME, any_tool=not iterations_exhausted),
+            decision=ToolDecision(DECIDE_TOOL_NAME, any_tool=True, closing=iterations_exhausted),
             max_retries=deps.settings.llm_max_retries,
             timeout_seconds=deps.settings.llm_timeout_seconds,
             cache=True,
             trace_label="reason",
+            replay_prefixes={
+                tool_id: turn.get("prefix", "")
+                for tool_id, turn in (state.get("assistant_turns") or {}).items()
+            },
         )
 
         # Acumular tokens/costo con lo que ya hubiera de iteraciones previas.
@@ -361,6 +410,7 @@ def make_reason_node(
             "cost_usd": state.get("cost_usd", 0.0) + compute_llm_cost(model, usage),
             "model_used": model,
             "turn_now": state["turn_now"],
+            "llm_call": outcome.call.as_dict() if outcome.call else None,
         }
         if isinstance(outcome, NoDecision):
             return {"error": outcome.reason, **tokens_update}
@@ -445,23 +495,16 @@ def make_reason_node(
                 status="pending",
             )
 
-        thinking_update: dict[str, Any] = (
-            {
-                "tool_use_thinking": {
-                    **(state.get("tool_use_thinking") or {}),
-                    tool_block.id: outcome.thinking,
-                }
-            }
-            if outcome.thinking
-            else {}
-        )
         return {
             "pending_tool_call": {
                 "id": tool_block.id,
                 "slug": slug,
                 "input": tool_block.input,
             },
-            **thinking_update,
+            "assistant_turns": {
+                **(state.get("assistant_turns") or {}),
+                tool_block.id: {"content": outcome.content, "prefix": outcome.prefix},
+            },
             # Anular la decisión de la pasada anterior (espejo del caso decide):
             # si el supervisor rechazó un respond y el retry pide una tool, el
             # agent_response rechazado quedaría en el state y escalate lo

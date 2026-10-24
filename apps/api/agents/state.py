@@ -123,9 +123,11 @@ class AgentState(TypedDict, total=False):
     # Cada entry: {"id", "slug", "input", "output", "is_error", "error"}.
     # reason lo lee para reconstruir el contexto multi-turn de Anthropic.
     tool_results: list[dict]
-    # Thinking blocks que precedieron a cada tool_use de este turno, por id. `reason` los
-    # devuelve intactos al reconstruir el loop (solo existen con thinking encendido).
-    tool_use_thinking: dict[str, list[dict]]
+    # El turno del assistant que pidió cada tool ejecutada, por id del tool_use:
+    # {"content": [bloques tal cual], "prefix": huella de lo que lo precedía}. `reason` lo
+    # devuelve intacto al reconstruir el loop (thinking, texto y tool_use en paralelo); sin
+    # `drop_block`, el cliente quita sus thinking blocks si el prefijo cambió.
+    assistant_turns: dict[str, dict]
 
     # Contadores del loop ReAct.
     tool_iterations: int
@@ -217,6 +219,13 @@ class AgentState(TypedDict, total=False):
     # dinámico (NO cacheado), no concatenado al system_prompt: si fuera al system_prompt
     # rompería el prefijo cacheado (#211) y el retry pagaría todo el input sin caché.
     supervisor_feedback: str | None
+    # Ciclos de tools que el agente tenía delante cuando se le dio el feedback. En los
+    # modelos con mensajes del operador, el feedback va como mensaje justo ahí y se queda
+    # ahí en las vueltas siguientes (el historial solo crece).
+    supervisor_feedback_at: int
+    # La llamada a Claude del último nodo que llamó (`CallTrace.as_dict()`: modelo,
+    # thinking, esfuerzo, stop_reason, refusal): va al run del nodo en LangSmith.
+    llm_call: dict | None
     # Borrador que el supervisor rechazó y que escala (#380): sale de `agent_response`
     # en el mismo parche del rechazo y solo llega a la nota interna del escalado.
     rejected_draft: str | None

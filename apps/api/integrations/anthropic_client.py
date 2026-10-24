@@ -22,15 +22,17 @@ Devuelve la tool llamada o un `NoDecision` explícito (refusal, sin tool, max_to
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 import anthropic
 from apps.api.core.config import LLM_CALL_BUDGET_SECONDS, get_models
-from apps.api.integrations.model_capabilities import capabilities_of
+from apps.api.integrations.model_capabilities import ThinkingSettings, capabilities_of
 from apps.api.integrations.pricing import LLMUsage
 
 if TYPE_CHECKING:
@@ -175,25 +177,7 @@ async def call_claude_with_tools(
         LLMProviderUnavailable si Anthropic rechaza por saldo agotado, 401 o 403.
         anthropic.APIError o subclase si después de los reintentos sigue fallando.
     """
-    system_param: Any = system
-    tools_param = tools
-    if cache:
-        if tools_param:
-            # cache_control en la última tool cachea TODO el bloque de tools.
-            # Copia superficial: no mutamos el input del caller.
-            tools_param = [
-                *tools_param[:-1],
-                {**tools_param[-1], "cache_control": {"type": "ephemeral"}},
-            ]
-        if isinstance(system_param, str):
-            system_param = [
-                {
-                    "type": "text",
-                    "text": system_param,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ]
-
+    system_param, tools_param = _cached(system, tools, cache=cache)
     kwargs: dict[str, Any] = {
         "model": model,
         "max_tokens": max_tokens,
@@ -224,7 +208,7 @@ async def call_claude_with_tools(
         # hubo reintentos incluye los backoffs, lo cual es raro y se nota.
         usage = LLMUsage.from_anthropic(last_response.usage)
         logger.info(
-            "llm_call label=%s model=%s dur_ms=%d in=%d cache_w=%d cache_r=%d out=%d",
+            "llm_call label=%s model=%s dur_ms=%d in=%d cache_w=%d cache_r=%d out=%d stop=%s",
             trace_label,
             model,
             int((time.monotonic() - start) * 1000),
@@ -232,12 +216,101 @@ async def call_claude_with_tools(
             usage.cache_write_tokens,
             usage.cache_read_tokens,
             usage.output_tokens,
+            getattr(last_response, "stop_reason", None),
         )
     return last_response
 
 
-# Con thinking, los tokens de pensar cuentan contra `max_tokens`: un límite pensado para
-# una respuesta corta cortaría la decisión antes de la tool.
+def _cached(
+    system: str | list[dict[str, Any]], tools: list[dict[str, Any]], *, cache: bool
+) -> tuple[Any, list[dict[str, Any]]]:
+    """System y tools tal como salen, con los breakpoints de caché si `cache`."""
+    if not cache:
+        return system, tools
+    tools_param = tools
+    if tools_param:
+        # cache_control en la última tool cachea TODO el bloque de tools.
+        # Copia superficial: no mutamos el input del caller.
+        tools_param = [
+            *tools_param[:-1],
+            {**tools_param[-1], "cache_control": {"type": "ephemeral"}},
+        ]
+    system_param: Any = system
+    if isinstance(system_param, str):
+        system_param = [
+            {"type": "text", "text": system_param, "cache_control": {"type": "ephemeral"}}
+        ]
+    return system_param, tools_param
+
+
+def prefix_digest(system: Any, tools: Any, messages: list[dict[str, Any]]) -> str:
+    """Huella de lo que precede a un turno del assistant: system, tools y mensajes previos,
+    lo que la API comprueba antes de aceptar sus thinking blocks (preserved thinking)."""
+    raw = json.dumps(
+        {"system": system, "tools": tools, "messages": messages},
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+_THINKING_TYPES = frozenset({"thinking", "redacted_thinking"})
+
+
+def _has_thinking(message: dict[str, Any]) -> bool:
+    content = message.get("content")
+    return isinstance(content, list) and any(b.get("type") in _THINKING_TYPES for b in content)
+
+
+def _without_thinking(message: dict[str, Any]) -> dict[str, Any]:
+    if not _has_thinking(message):
+        return message
+    return {
+        **message,
+        "content": [b for b in message["content"] if b.get("type") not in _THINKING_TYPES],
+    }
+
+
+def _turn_key(message: dict[str, Any]) -> str | None:
+    """Un turno replayado se reconoce por su primer `tool_use`."""
+    for block in message.get("content") or []:
+        if isinstance(block, dict) and block.get("type") == "tool_use":
+            return str(block["id"])
+    return None
+
+
+def drop_stale_thinking(
+    messages: list[dict[str, Any]],
+    *,
+    system: Any,
+    tools: Any,
+    prefixes: Mapping[str, str],
+) -> list[dict[str, Any]]:
+    """Sin `block_binding` (thinking `between_tools`) la API no descarta un thinking block
+    cuyo prefijo cambió: una cuenta con la comprobación activa da 400. Desde el primer
+    turno del assistant cuyo prefijo ya no es el que tenía al escribirse (`prefixes`, por
+    su primer `tool_use`), sus thinking blocks y los de después no se reenvían; texto y
+    `tool_use` sí. Quitar un sufijo de la cadena de bloques es válido; uno del medio no."""
+    for i, message in enumerate(messages):
+        if message["role"] != "assistant" or not _has_thinking(message):
+            continue
+        key = _turn_key(message)
+        if key is not None and prefixes.get(key) == prefix_digest(system, tools, messages[:i]):
+            continue
+        logger.warning(
+            "thinking_blocks_not_replayed from_message=%d turn=%s: el prefijo cambió",
+            i,
+            key,
+            extra={"from_message": i, "turn": key},
+        )
+        return [*messages[:i], *(_without_thinking(m) for m in messages[i:])]
+    return messages
+
+
+# Con thinking (adaptive, o las notas de progreso de `between_tools`), esos tokens cuentan
+# contra `max_tokens`: un límite pensado para una respuesta corta cortaría la decisión
+# antes de la tool.
 THINKING_MIN_MAX_TOKENS = 16_000
 # Con `auto` el modelo puede contestar sin tool: un reintento con la instrucción explícita.
 NO_TOOL_RETRIES = 1
@@ -246,18 +319,86 @@ NO_TOOL_RETRIES = 1
 @dataclass(frozen=True)
 class ToolDecision:
     """Lo que pide un nodo: una llamada a `tool`, o a cualquier tool ofrecida (`any_tool`,
-    el paso del loop ReAct) cerrando con `tool`."""
+    el paso del loop ReAct) cerrando con `tool`. `closing`: última vuelta del loop, solo
+    vale `tool` (las demás siguen definidas porque el historial trae sus `tool_use`)."""
 
     tool: str
     any_tool: bool = False
+    closing: bool = False
+
+    @property
+    def this_round(self) -> ToolDecision:
+        """Lo que vale en esta vuelta: en la de cierre, solo `tool`."""
+        return ToolDecision(self.tool, any_tool=self.any_tool and not self.closing)
+
+
+def operator_messages_supported(model: str) -> bool:
+    """El modelo admite mensajes `role: system` a mitad de conversación: una instrucción
+    del operador va como mensaje añadido en vez de editar el system de arriba."""
+    return capabilities_of(model).system_messages
+
+
+def operator_note(text: str) -> dict[str, Any]:
+    """Instrucción del operador a mitad de conversación (solo si
+    `operator_messages_supported`). Va tras un mensaje `user` y antes de un `assistant` o
+    al final."""
+    return {"role": "system", "content": text}
+
+
+def _with_trailing_note(messages: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
+    """Añade la nota al final; si ya acaba en una nota del operador, la amplía (dos
+    mensajes `system` seguidos no siguen a un `user`)."""
+    if messages and messages[-1]["role"] == "system":
+        return [*messages[:-1], operator_note(f"{messages[-1]['content']}\n\n{text}")]
+    return [*messages, operator_note(text)]
+
+
+@dataclass(frozen=True)
+class CallTrace:
+    """Con qué salió una llamada y cómo terminó: va a su run de LangSmith."""
+
+    model: str
+    # "off", "adaptive" o "between_tools".
+    thinking: str
+    effort: str | None
+    stop_reason: str | None
+    refusal_category: str | None = None
+    # Llamadas cobradas (el reintento sin tool cuenta).
+    calls: int = 1
+
+    @classmethod
+    def of(
+        cls, model: str, settings: ThinkingSettings, response: Any | None, *, calls: int = 1
+    ) -> CallTrace:
+        stop_reason = getattr(response, "stop_reason", None)
+        category = None
+        if stop_reason == "refusal":
+            category = getattr(getattr(response, "stop_details", None), "category", None)
+        return cls(
+            model=model,
+            thinking=settings.thinking["type"] if settings.thinking else "off",
+            effort=settings.effort,
+            stop_reason=stop_reason,
+            refusal_category=category,
+            calls=calls,
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
 class ToolCalled:
+    # La primera tool llamada: la que se ejecuta.
     block: Any
-    # Thinking blocks previos a la tool, para devolverlos intactos en la siguiente vuelta.
-    thinking: list[dict[str, Any]]
+    # El turno del assistant entero (thinking, texto, `tool_use` en paralelo), para
+    # devolverlo intacto en la siguiente vuelta del loop.
+    content: list[dict[str, Any]]
     usage: LLMUsage
+    # `prefix_digest` de lo que precedía a este turno, para saber si al replayarlo sus
+    # thinking blocks siguen valiendo.
+    prefix: str = ""
+    call: CallTrace | None = None
 
 
 @dataclass(frozen=True)
@@ -265,6 +406,7 @@ class NoDecision:
     kind: Literal["refusal", "max_tokens", "tool_not_called", "call_failed"]
     detail: str
     usage: LLMUsage
+    call: CallTrace | None = None
 
     @property
     def reason(self) -> str:
@@ -282,6 +424,19 @@ class _DecisionRequest:
     max_tokens: int
     options: dict[str, Any]
     forced: bool
+    settings: ThinkingSettings
+    # Instrucción de cierre que va como mensaje del operador al final (5.5).
+    closing_note: str | None = None
+    # Thinking preservado sin `block_binding` (`between_tools`): el cliente no reenvía
+    # thinking blocks cuyo prefijo cambió (`drop_stale_thinking`).
+    drop_stale_thinking: bool = False
+
+
+def _closing_note(decision: ToolDecision) -> str:
+    return (
+        "Ya no quedan consultas en este turno. Cierra ahora llamando a "
+        f"`{decision.tool}` con lo que ya tienes; no llames a otras herramientas."
+    )
 
 
 def _instruction(decision: ToolDecision) -> str:
@@ -322,23 +477,41 @@ def decision_request(
 
     Modelos que aceptan tool forzada y no piensan: `tool_choice` `any`/`tool`, la petición
     de siempre. El resto (5.5, o un rol con thinking): `auto`, la tool de decisión
-    estricta y la instrucción al final del system."""
+    estricta y la instrucción al final del system. Donde el modelo admite mensajes del
+    operador, el system no cambia en la vuelta de cierre: la instrucción de cierre va como
+    mensaje al final (con thinking preservado, editar el system invalida los thinking
+    blocks de las vueltas anteriores)."""
     caps = capabilities_of(model)
     thinking = get_models().thinking(role, model=model)
     options = thinking.request_options()
+    this_round = decision.this_round
     if caps.forced_tool_choice and not thinking.thinking_on:
-        choice = {"type": "any"} if decision.any_tool else {"type": "tool", "name": decision.tool}
-        return _DecisionRequest(system, tools, choice, max_tokens, options, forced=True)
+        choice = {"type": "any"} if this_round.any_tool else {"type": "tool", "name": decision.tool}
+        return _DecisionRequest(
+            system, tools, choice, max_tokens, options, forced=True, settings=thinking
+        )
+    note_closing = caps.system_messages and decision.closing
     return _DecisionRequest(
-        system=_with_instruction(system, _instruction(decision)),
+        system=_with_instruction(system, _instruction(decision if note_closing else this_round)),
         tools=[
             _strict(tool) if caps.strict_tools and tool["name"] == decision.tool else tool
             for tool in tools
         ],
         tool_choice={"type": "auto"},
-        max_tokens=max(max_tokens, THINKING_MIN_MAX_TOKENS) if thinking.thinking_on else max_tokens,
+        max_tokens=(
+            max(max_tokens, THINKING_MIN_MAX_TOKENS)
+            if thinking.writes_thinking_blocks
+            else max_tokens
+        ),
         options=options,
         forced=False,
+        settings=thinking,
+        closing_note=_closing_note(decision) if note_closing else None,
+        drop_stale_thinking=(
+            caps.preserved_thinking
+            and thinking.thinking is not None
+            and "block_binding" not in thinking.thinking
+        ),
     )
 
 
@@ -356,13 +529,9 @@ def read_decision(response: Any, usage: LLMUsage) -> ToolCalled | NoDecision:
         return NoDecision("refusal", category or "sin_categoria", usage)
     if stop_reason == "max_tokens":
         return NoDecision("max_tokens", "", usage)
-    thinking: list[dict[str, Any]] = []
     for block in response.content:
-        block_type = getattr(block, "type", None)
-        if block_type == "tool_use":
-            return ToolCalled(block, thinking, usage)
-        if block_type in ("thinking", "redacted_thinking"):
-            thinking.append(_as_param(block))
+        if getattr(block, "type", None) == "tool_use":
+            return ToolCalled(block, [_as_param(b) for b in response.content], usage)
     return NoDecision("tool_not_called", str(stop_reason), usage)
 
 
@@ -380,12 +549,14 @@ async def call_claude_for_decision(
     timeout_seconds: int = 30,
     cache: bool = False,
     trace_label: str | None = None,
+    replay_prefixes: Mapping[str, str] | None = None,
 ) -> ToolCalled | NoDecision:
     """Pide una decisión estructurada al modelo de `role` (o `model`, si un tenant fija el
     suyo). Sin tool tras el reintento, refusal o max_tokens → `NoDecision`, logueado como
     error: el nodo decide cómo escalar, nunca un texto vacío al cliente.
 
-    `usage` suma todas las llamadas, reintento incluido.
+    `usage` suma todas las llamadas, reintento incluido. `replay_prefixes`: el
+    `ToolCalled.prefix` de cada turno replayado en `messages`, por su primer `tool_use`.
     """
     request = decision_request(
         model=model,
@@ -395,7 +566,14 @@ async def call_claude_for_decision(
         decision=decision,
         max_tokens=max_tokens,
     )
+    system_sent, tools_sent = _cached(request.system, request.tools, cache=cache)
     turn = list(messages)
+    if request.drop_stale_thinking:
+        turn = drop_stale_thinking(
+            turn, system=system_sent, tools=tools_sent, prefixes=replay_prefixes or {}
+        )
+    if request.closing_note is not None:
+        turn = _with_trailing_note(turn, request.closing_note)
     usage = LLMUsage()
     for attempt in range(NO_TOOL_RETRIES + 1):
         try:
@@ -417,7 +595,12 @@ async def call_claude_for_decision(
             if attempt == 0:
                 raise
             # La primera llamada ya se cobró: sin esto su usage se perdía con la excepción.
-            outcome = NoDecision("call_failed", type(exc).__name__, usage)
+            outcome = NoDecision(
+                "call_failed",
+                type(exc).__name__,
+                usage,
+                call=CallTrace.of(model, request.settings, None, calls=attempt + 1),
+            )
             logger.error(
                 "%s label=%s role=%s model=%s",
                 outcome.reason,
@@ -429,9 +612,10 @@ async def call_claude_for_decision(
             )
             return outcome
         usage = usage + LLMUsage.from_anthropic(response.usage)
-        outcome = read_decision(response, usage)
+        call = CallTrace.of(model, request.settings, response, calls=attempt + 1)
+        outcome = replace(read_decision(response, usage), call=call)
         if isinstance(outcome, ToolCalled):
-            return outcome
+            return replace(outcome, prefix=prefix_digest(system_sent, tools_sent, turn))
         if request.forced or outcome.kind != "tool_not_called" or attempt == NO_TOOL_RETRIES:
             break
         turn = [
@@ -440,7 +624,7 @@ async def call_claude_for_decision(
             {
                 "role": "user",
                 "content": "Tu respuesta anterior no llamó a ninguna herramienta. "
-                + _instruction(decision),
+                + _instruction(decision.this_round),
             },
         ]
     logger.error(
@@ -461,6 +645,14 @@ class TextReply:
     usage: LLMUsage
     stop_reason: str | None
     refusal_category: str | None
+    call: CallTrace | None = None
+
+    @property
+    def refusal_reason(self) -> str | None:
+        """`llm_refusal: <categoría>` si el modelo se negó; el texto viene vacío."""
+        if self.stop_reason != "refusal":
+            return None
+        return f"llm_refusal: {self.refusal_category or 'sin_categoria'}"
 
 
 async def call_claude_text(
@@ -484,7 +676,7 @@ async def call_claude_text(
     kwargs: dict[str, Any] = {
         "model": model,
         "max_tokens": max(max_tokens, THINKING_MIN_MAX_TOKENS)
-        if thinking.thinking_on
+        if thinking.writes_thinking_blocks
         else max_tokens,
         "system": system,
         "messages": messages,
@@ -495,18 +687,23 @@ async def call_claude_text(
     response = await create_message(
         client, kwargs, attempts=attempts, timeout_seconds=timeout_seconds
     )
-    stop_reason = getattr(response, "stop_reason", None)
-    category = None
-    if stop_reason == "refusal":
-        category = getattr(getattr(response, "stop_details", None), "category", None)
-        logger.error("llm_refusal: %s role=%s model=%s", category or "sin_categoria", role, model)
+    call = CallTrace.of(model, thinking, response)
+    if call.stop_reason == "refusal":
+        logger.error(
+            "llm_refusal: %s role=%s model=%s",
+            call.refusal_category or "sin_categoria",
+            role,
+            model,
+            extra={"role": role, "llm_call": call.as_dict()},
+        )
     return TextReply(
         text="".join(
             block.text for block in response.content if getattr(block, "type", None) == "text"
         ),
         usage=LLMUsage.from_anthropic(response.usage),
-        stop_reason=stop_reason,
-        refusal_category=category,
+        stop_reason=call.stop_reason,
+        refusal_category=call.refusal_category,
+        call=call,
     )
 
 

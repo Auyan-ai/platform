@@ -78,6 +78,19 @@ async def _call_judge(
     )
     raw = reply.text.strip()
     usage = reply.usage
+    if reply.refusal_reason is not None:
+        # Un refusal no es un JSON vacío: no se propone nada y queda la razón.
+        return JudgeVerdict(
+            should_propose=False,
+            proposal_type=None,
+            aop_slug=None,
+            diff_markdown="",
+            rationale=reply.refusal_reason,
+            confidence=0.0,
+            flag_for_opus=False,
+            model_used=model,
+            usage=usage,
+        )
 
     try:
         data: dict = json.loads(raw)

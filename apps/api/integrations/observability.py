@@ -124,6 +124,7 @@ class ObservabilityClient:
         end_time: datetime,
         outputs: dict[str, Any] | None = None,
         error: str | None = None,
+        call: dict[str, Any] | None = None,
     ) -> None:
         self._primary.record_llm_run(
             trace,
@@ -135,6 +136,7 @@ class ObservabilityClient:
             end_time=end_time,
             outputs=mask_pii_recursive(outputs) if outputs else outputs,
             error=error,
+            call=call,
         )
 
     def finalize_trace(

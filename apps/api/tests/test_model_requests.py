@@ -495,7 +495,7 @@ class TestReasonOn55:
         assert first["pending_tool_call"]["slug"] == POLICIES
 
         next_state = _with_policies(_reason_state("claude-sonnet-5-5"), hops=1)
-        next_state["tool_use_thinking"] = first["tool_use_thinking"]
+        next_state["assistant_turns"] = first["assistant_turns"]
         api, _ = await run_reason(
             fake_deps,
             next_state,
@@ -517,19 +517,439 @@ class TestReasonOn55:
         }
 
     @pytest.mark.asyncio
-    async def test_exhausted_iterations_steer_to_the_decide_tool(
+    async def test_the_whole_assistant_turn_is_replayed_and_unrun_tools_get_a_result(
         self, fake_deps: AgentDependencies
     ) -> None:
-        state = _with_policies(_reason_state("claude-opus-5-5"), hops=3)
+        """Texto entre tools y `tool_use` en paralelo vuelven tal cual: el turno replayado es
+        el que escribió el modelo. Se ejecuta una tool por vuelta; las demás reciben un
+        `tool_result` de error que lo dice (la API exige un resultado por `tool_use`)."""
+        turn = [
+            thinking("sig_hop0"),
+            text("Miro las políticas."),
+            tool_use("shopify_get_shop_policies", {}, id="toolu_hop0"),
+            tool_use("shopify_get_shop_policies", {"topic": "returns"}, id="toolu_extra"),
+        ]
+        _, first = await run_reason(
+            fake_deps,
+            _with_policies(_reason_state("claude-sonnet-5-5"), hops=0),
+            message(*turn, model="claude-sonnet-5-5"),
+        )
+        assert first["pending_tool_call"]["id"] == "toolu_hop0"
+
+        next_state = _with_policies(_reason_state("claude-sonnet-5-5"), hops=1)
+        next_state["assistant_turns"] = first["assistant_turns"]
+        api, _ = await run_reason(
+            fake_deps,
+            next_state,
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-sonnet-5-5"),
+        )
+
+        assistant, results = api.requests[0]["messages"][-2:]
+        assert assistant == {"role": "assistant", "content": turn}
+        assert [r["tool_use_id"] for r in results["content"]] == ["toolu_hop0", "toolu_extra"]
+        executed, unrun = results["content"]
+        assert executed["is_error"] is False
+        assert unrun["is_error"] is True
+        assert "no se ejecutó" in unrun["content"]
+
+    @pytest.mark.asyncio
+    async def test_exhausted_iterations_steer_to_the_decide_tool_without_touching_the_system(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        """La instrucción de cierre de la última vuelta va como mensaje `system` al final: el
+        system es el de las vueltas anteriores y sus thinking blocks siguen valiendo."""
+        before, _ = await run_reason(
+            fake_deps,
+            _with_policies(_reason_state("claude-opus-5-5"), hops=2),
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+        )
         api, out = await run_reason(
             fake_deps,
-            state,
+            _with_policies(_reason_state("claude-opus-5-5"), hops=3),
             message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
         )
         body = api.requests[0]
         assert body["tool_choice"] == {"type": "auto"}
-        assert "`respond_or_escalate`" in body["system"][-1]["text"]
+        assert body["system"] == before.requests[0]["system"]
+        closing = body["messages"][-1]
+        assert closing["role"] == "system"
+        assert "`respond_or_escalate`" in closing["content"]
         assert out["decision"] == "respond"
+
+
+def _progress(note: str, signature: str) -> dict[str, Any]:
+    """Thinking block con texto: lo que devuelve `between_tools` (nota de progreso)."""
+    return {"type": "thinking", "thinking": note, "signature": signature}
+
+
+async def _hop(
+    fake_deps: AgentDependencies, state: dict[str, Any], response: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Una vuelta de `reason` y el state de la siguiente, como lo deja el grafo: la tool
+    pedida se ejecuta y su resultado se suma a `tool_results`."""
+    api, out = await run_reason(fake_deps, state, response)
+    following = {**state, **out}
+    call = following.pop("pending_tool_call", None)
+    if call:
+        result = {**call, "output": {"shipping": "3 días"}, "is_error": False, "error": None}
+        following["tool_results"] = [*state["tool_results"], result]
+        following["tool_iterations"] = state.get("tool_iterations", 0) + 1
+    return api.requests[0], following
+
+
+def _assert_replayed_on_its_own_prefix(
+    produced: dict[str, Any], content: list[dict[str, Any]], later: dict[str, Any]
+) -> None:
+    """El turno del assistant vuelve tal cual y detrás de lo mismo que tenía delante cuando
+    se escribió: system, tools y mensajes previos idénticos (preserved thinking)."""
+    n = len(produced["messages"])
+    assert later["system"] == produced["system"]
+    assert later["tools"] == produced["tools"]
+    assert later["messages"][:n] == produced["messages"]
+    assert later["messages"][n] == {"role": "assistant", "content": content}
+
+
+class TestLoopPrefixOn55:
+    """Cada vuelta del loop en un 5.5 es una petición válida y replaya los turnos previos
+    sobre el mismo prefijo, también con el reintento del supervisor y la vuelta de cierre."""
+
+    @pytest.mark.parametrize(
+        ("model", "thinking_by_role"),
+        [("claude-opus-5-5", None), ("claude-sonnet-5-5", "off")],
+    )
+    @pytest.mark.asyncio
+    async def test_every_hop_replays_the_previous_turns_on_their_own_prefix(
+        self,
+        fake_deps: AgentDependencies,
+        _env: pytest.MonkeyPatch,
+        model: str,
+        thinking_by_role: str | None,
+    ) -> None:
+        if thinking_by_role:
+            _env.setenv("THINKING_BY_ROLE", f'{{"default_agent_model": "{thinking_by_role}"}}')
+            get_models.cache_clear()
+        turns = [
+            [_progress("Miro las políticas.", "sig_a"), tool_use(POLICIES_TOOL, {}, id="toolu_a")],
+            [
+                _progress("Confirmo el plazo.", "sig_b"),
+                text("Un momento."),
+                tool_use(POLICIES_TOOL, {}, id="toolu_b"),
+            ],
+            [_progress("Último dato.", "sig_c"), tool_use(POLICIES_TOOL, {}, id="toolu_c")],
+        ]
+        state = _with_policies(_reason_state(model), hops=0)
+        requests = []
+        for content in turns:
+            request, state = await _hop(fake_deps, state, message(*content, model=model))
+            requests.append(request)
+        decide = message(tool_use("respond_or_escalate", RESPOND), model=model)
+        closing, state = await _hop(fake_deps, state, decide)
+        state.update(supervisor_feedback=FEEDBACK, supervisor_feedback_at=3)
+        retry, _ = await _hop(fake_deps, state, decide)
+
+        later_requests = [*requests[1:], closing, retry]
+        for i, content in enumerate(turns):
+            for later in later_requests[i:]:
+                _assert_replayed_on_its_own_prefix(requests[i], content, later)
+        for body in [*requests, closing, retry]:
+            assert body["tool_choice"] == {"type": "auto"}
+            assert "budget_tokens" not in body["thinking"]
+        assert closing["messages"][-1]["role"] == "system"
+        assert retry["messages"][-1]["role"] == "system"
+        assert FEEDBACK in retry["messages"][-1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_between_tools_does_not_replay_thinking_after_a_prefix_change(
+        self,
+        fake_deps: AgentDependencies,
+        _env: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Con `between_tools` no hay `block_binding`/`drop_block`: si lo que precede a un
+        turno cambió (aquí, un dato verificado nuevo en el system), sus thinking blocks y
+        los de después no se reenvían, o una cuenta con la comprobación activa da 400. El
+        texto y los `tool_use` sí vuelven."""
+        _env.setenv("THINKING_BY_ROLE", '{"default_agent_model": "off"}')
+        get_models.cache_clear()
+        model = "claude-sonnet-5-5"
+        content = [
+            _progress("Miro las políticas.", "sig_a"),
+            text("Un momento."),
+            tool_use(POLICIES_TOOL, {}, id="toolu_a"),
+        ]
+        _, state = await _hop(
+            fake_deps, _with_policies(_reason_state(model), hops=0), message(*content, model=model)
+        )
+        unchanged, _ = await _hop(
+            fake_deps, state, message(tool_use("respond_or_escalate", RESPOND), model=model)
+        )
+        state["known_facts"] = "- Email verificado: ana@example.com"
+        with caplog.at_level("WARNING"):
+            changed, _ = await _hop(
+                fake_deps, state, message(tool_use("respond_or_escalate", RESPOND), model=model)
+            )
+
+        assert unchanged["messages"][1] == {"role": "assistant", "content": content}
+        assert changed["messages"][1] == {"role": "assistant", "content": content[1:]}
+        assert any("thinking_blocks_not_replayed" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_adaptive_leaves_a_prefix_change_to_drop_block(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        """Con adaptive la petición lleva `drop_block`: la API descarta lo que no valga y lo
+        reporta en `input_transformations`; el cliente reenvía el turno tal cual."""
+        model = "claude-opus-5-5"
+        content = [_progress("", "sig_a"), tool_use(POLICIES_TOOL, {}, id="toolu_a")]
+        _, state = await _hop(
+            fake_deps, _with_policies(_reason_state(model), hops=0), message(*content, model=model)
+        )
+        state["known_facts"] = "- Email verificado: ana@example.com"
+        changed, _ = await _hop(
+            fake_deps, state, message(tool_use("respond_or_escalate", RESPOND), model=model)
+        )
+
+        assert changed["thinking"] == ADAPTIVE
+        assert changed["messages"][1] == {"role": "assistant", "content": content}
+
+
+class TestCallTrace:
+    """Cada nodo que llama a Claude deja en su run de LangSmith (allowlist de `graph.py`)
+    el modelo, el thinking y el esfuerzo con que salió la petición y el `stop_reason`."""
+
+    @pytest.mark.asyncio
+    async def test_reason_on_opus_5_5(self, fake_deps: AgentDependencies) -> None:
+        _, out = await run_reason(
+            fake_deps,
+            _with_policies(_reason_state("claude-opus-5-5"), hops=0),
+            message(thinking(), tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+        )
+        assert out["llm_call"] == {
+            "model": "claude-opus-5-5",
+            "thinking": "adaptive",
+            "effort": "medium",
+            "stop_reason": "tool_use",
+            "refusal_category": None,
+            "calls": 1,
+        }
+
+    @pytest.mark.asyncio
+    async def test_reason_on_a_current_model(self, fake_deps: AgentDependencies) -> None:
+        _, out = await run_reason(
+            fake_deps,
+            _with_policies(_reason_state("claude-sonnet-4-6"), hops=0),
+            message(tool_use("respond_or_escalate", RESPOND)),
+        )
+        assert out["llm_call"]["thinking"] == "off"
+        assert out["llm_call"]["effort"] is None
+        assert out["llm_call"]["stop_reason"] == "tool_use"
+
+    @pytest.mark.asyncio
+    async def test_a_refusal_is_traced_with_its_category(
+        self, fake_deps: AgentDependencies, _env: pytest.MonkeyPatch
+    ) -> None:
+        _env.setenv("SUPERVISOR_MODEL_L1_L2", "claude-sonnet-5-5")
+        get_models.cache_clear()
+        _, out = await run_supervise(
+            fake_deps, _supervise_state(), refusal("cyber", "claude-sonnet-5-5")
+        )
+        assert out["llm_call"]["stop_reason"] == "refusal"
+        assert out["llm_call"]["refusal_category"] == "cyber"
+
+    @pytest.mark.asyncio
+    async def test_the_nudge_retry_counts_both_calls(self, fake_deps: AgentDependencies) -> None:
+        _, out = await run_reason(
+            fake_deps,
+            _with_policies(_reason_state("claude-opus-5-5"), hops=0),
+            message(text("..."), stop_reason="end_turn", model="claude-opus-5-5"),
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+        )
+        assert out["llm_call"]["calls"] == 2
+
+    @pytest.mark.asyncio
+    async def test_select_aop_traces_its_call(self, fake_deps: AgentDependencies) -> None:
+        _, out = await run_select_aop(
+            fake_deps, message(tool_use("select_aop", CLASSIFIED), model="claude-haiku-4-5-20251001")
+        )
+        assert out["llm_call"]["model"] == "claude-haiku-4-5-20251001"
+        assert out["llm_call"]["stop_reason"] == "tool_use"
+
+    def test_the_call_reaches_langsmith_for_every_llm_node(self) -> None:
+        from apps.api.agents.graph import _NODE_OUTPUT_KEYS
+
+        for node in ("select_aop", "reason", "supervise"):
+            assert "llm_call" in _NODE_OUTPUT_KEYS[node]
+
+
+class TestTextRefusals:
+    """Un refusal en jueces o simulador no se parsea como `{}`: queda explícito, con su
+    categoría, en el veredicto o el turno (y en su run de LangSmith)."""
+
+    @pytest.mark.asyncio
+    async def test_sim_judge(self) -> None:
+        from apps.api.simulator.judge import judge_simulation
+
+        api = RecordingAnthropic(refusal("cyber", "claude-sonnet-4-6"))
+        verdict = await judge_simulation(
+            api.client, _sim_transcript(), _sim_transcript().scenario, judge_model="sonnet"
+        )
+        assert verdict.reasoning_explanation == "llm_refusal: cyber"
+        assert verdict.call is not None
+        assert verdict.call.stop_reason == "refusal"
+
+    @pytest.mark.asyncio
+    async def test_slow_agent_judge(self) -> None:
+        from apps.api.slow_agent.judge import _call_judge
+        from apps.api.tests.slow_agent.test_judge import _transcript
+
+        api = RecordingAnthropic(refusal("general_harms", "claude-sonnet-4-6"))
+        verdict = await _call_judge(api.client, _transcript(), "slow_agent_model")
+        assert verdict.should_propose is False
+        assert verdict.rationale == "llm_refusal: general_harms"
+
+    @pytest.mark.asyncio
+    async def test_user_simulator(self) -> None:
+        from apps.api.simulator.user_simulator import UserSimulator
+        from apps.api.tests.simulator.test_user_simulator import _make_profile
+
+        api = RecordingAnthropic(refusal("cyber", "claude-haiku-4-5-20251001"))
+        turn = await UserSimulator(profile=_make_profile(), anthropic=api.client).next_turn(
+            conversation_history=[{"role": "agent", "content": "¿En qué ayudo?"}], turn_number=1
+        )
+        assert turn.give_up is True
+        assert turn.internal_reasoning == "llm_refusal: cyber"
+        assert turn.call is not None
+        assert turn.call.refusal_category == "cyber"
+
+    def test_llm_runs_carry_the_call_metadata(self) -> None:
+        from datetime import UTC, datetime
+        from unittest.mock import MagicMock
+
+        from apps.api.integrations.anthropic_client import CallTrace
+        from apps.api.integrations.langsmith_client import LangSmithClient, LangSmithTrace
+        from apps.api.integrations.pricing import LLMUsage
+
+        client = MagicMock()
+        langsmith = LangSmithClient(client, project_name="p")
+        now = datetime.now(UTC)
+        root = UUID(int=1)
+        trace = LangSmithTrace(
+            run_id=root, dotted_order=LangSmithClient._dotted_order_segment(now, root)
+        )
+        call = CallTrace("claude-sonnet-5-5", "adaptive", "medium", "refusal", "cyber", 1)
+        langsmith.record_llm_run(
+            trace,
+            name="simulation_judge",
+            model="claude-sonnet-5-5",
+            usage=LLMUsage(),
+            cost_usd=0.0,
+            start_time=now,
+            end_time=now,
+            call=call.as_dict(),
+        )
+        metadata = client.create_run.call_args.kwargs["extra"]["metadata"]
+        assert metadata["llm_call"] == call.as_dict()
+
+
+POLICIES_TOOL = "shopify_get_shop_policies"
+FEEDBACK = "Da el plazo exacto que dicen las políticas."
+
+
+class TestSupervisorFeedbackOn55:
+    """El feedback del supervisor (o el reintento por idioma) va como mensaje `system` justo
+    después de lo que el agente tenía delante al decidir, y se queda ahí en las vueltas
+    siguientes: el historial solo crece y los thinking blocks replayados siguen valiendo."""
+
+    @pytest.mark.asyncio
+    async def test_feedback_is_a_system_message_and_the_system_does_not_change(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        reply = message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5")
+        original, _ = await run_reason(
+            fake_deps, _with_policies(_reason_state("claude-opus-5-5"), hops=1), reply
+        )
+        retry_state = _with_policies(_reason_state("claude-opus-5-5"), hops=1)
+        retry_state.update(supervisor_feedback=FEEDBACK, supervisor_feedback_at=1)
+        retry, _ = await run_reason(fake_deps, retry_state, reply)
+
+        first, second = original.requests[0], retry.requests[0]
+        assert second["system"] == first["system"]
+        assert second["messages"][:-1] == first["messages"]
+        assert second["messages"][-1]["role"] == "system"
+        assert FEEDBACK in second["messages"][-1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_feedback_stays_where_it_was_given_on_later_hops(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        state = _with_policies(_reason_state("claude-opus-5-5"), hops=2)
+        state.update(supervisor_feedback=FEEDBACK, supervisor_feedback_at=1)
+        api, _ = await run_reason(
+            fake_deps,
+            state,
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+        )
+
+        roles = [m["role"] for m in api.requests[0]["messages"]]
+        assert roles == ["user", "assistant", "user", "system", "assistant", "user"]
+        assert FEEDBACK in api.requests[0]["messages"][3]["content"]
+
+    @pytest.mark.asyncio
+    async def test_feedback_and_closing_at_the_end_are_one_system_message(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        state = _with_policies(_reason_state("claude-opus-5-5"), hops=3)
+        state.update(supervisor_feedback=FEEDBACK, supervisor_feedback_at=3)
+        api, _ = await run_reason(
+            fake_deps,
+            state,
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+        )
+
+        messages = api.requests[0]["messages"]
+        assert [m["role"] for m in messages[-2:]] == ["user", "system"]
+        assert FEEDBACK in messages[-1]["content"]
+        assert "`respond_or_escalate`" in messages[-1]["content"]
+
+    @pytest.mark.asyncio
+    async def test_current_models_keep_the_feedback_in_the_system(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        """Sonnet 4.6 no admite mensajes `system` a mitad de conversación ni ata sus thinking
+        blocks al prefijo: la petición es la de siempre."""
+        state = _with_policies(_reason_state("claude-sonnet-4-6"), hops=1)
+        state.update(supervisor_feedback=FEEDBACK, supervisor_feedback_at=1)
+        api, _ = await run_reason(
+            fake_deps, state, message(tool_use("respond_or_escalate", RESPOND))
+        )
+
+        body = api.requests[0]
+        assert FEEDBACK in body["system"][-1]["text"]
+        assert [m["role"] for m in body["messages"]] == ["user", "assistant", "user"]
+
+    @pytest.mark.asyncio
+    async def test_a_tactical_reject_records_where_the_feedback_goes(
+        self, fake_deps: AgentDependencies
+    ) -> None:
+        state = _supervise_state(
+            tool_results=[
+                {
+                    "id": "toolu_hop0",
+                    "slug": POLICIES,
+                    "input": {},
+                    "output": {"shipping": "3 días"},
+                    "is_error": False,
+                    "error": None,
+                }
+            ]
+        )
+        reject = {"verdict": "reject", "reject_kind": "tactical", "reason": FEEDBACK}
+        _, out = await run_supervise(
+            fake_deps, state, message(tool_use("supervisor_verdict", reject))
+        )
+
+        assert out["supervisor_feedback"] == FEEDBACK
+        assert out["supervisor_feedback_at"] == 1
 
     @pytest.mark.asyncio
     async def test_refusal_escalates_with_its_category_and_charges_the_call(
@@ -583,6 +1003,75 @@ class TestReasonOn55:
 
         assert len(api.requests) == 2
         assert out["error"] == "llm_no_decision: tool_not_called (end_turn)"
+
+
+class TestTenantModelIncompatibleWithRoleSettings:
+    """El thinking/esfuerzo por rol se valida al cargar contra el modelo del rol, no contra
+    el `agent_model` que fije un tenant. Un tenant incompatible no escala cada turno: la
+    petición degrada al ajuste por defecto de su modelo y queda un error."""
+
+    @pytest.mark.asyncio
+    async def test_opus_5_5_with_thinking_off_by_role_degrades_to_its_default(
+        self,
+        fake_deps: AgentDependencies,
+        _env: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        _env.setenv("THINKING_BY_ROLE", '{"default_agent_model": "off"}')
+        get_models.cache_clear()
+        state = _with_policies(_reason_state("claude-opus-5-5"), hops=0)
+
+        with caplog.at_level("ERROR"):
+            api, out = await run_reason(
+                fake_deps,
+                state,
+                message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
+            )
+
+        _assert_valid_5_5_request(api.requests[0], decision_tool="respond_or_escalate")
+        assert out["decision"] == "respond"
+        assert any(
+            "model_setting_degraded" in r.getMessage() and "claude-opus-5-5" in r.getMessage()
+            for r in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_haiku_with_effort_by_role_drops_the_effort(
+        self, fake_deps: AgentDependencies, _env: pytest.MonkeyPatch
+    ) -> None:
+        _env.setenv("EFFORT_BY_ROLE", '{"default_agent_model": "low"}')
+        get_models.cache_clear()
+        state = _with_policies(_reason_state("claude-haiku-4-5-20251001"), hops=0)
+
+        api, out = await run_reason(
+            fake_deps,
+            state,
+            message(tool_use("respond_or_escalate", RESPOND), model="claude-haiku-4-5-20251001"),
+        )
+
+        assert "output_config" not in api.requests[0]
+        assert out["decision"] == "respond"
+
+
+@pytest.mark.asyncio
+async def test_between_tools_loop_has_room_for_progress_notes(
+    fake_deps: AgentDependencies, _env: pytest.MonkeyPatch
+) -> None:
+    """Con `between_tools` el modelo escribe notas de progreso (thinking blocks) antes de la
+    tool: con 1024 tokens la decisión se cortaba en `NoDecision("max_tokens")`."""
+    _env.setenv("THINKING_BY_ROLE", '{"default_agent_model": "off"}')
+    get_models.cache_clear()
+    state = _with_policies(_reason_state("claude-sonnet-5-5"), hops=0)
+
+    api, _ = await run_reason(
+        fake_deps,
+        state,
+        message(tool_use("respond_or_escalate", RESPOND), model="claude-sonnet-5-5"),
+    )
+
+    body = api.requests[0]
+    assert body["thinking"] == {"type": "between_tools"}
+    assert body["max_tokens"] >= 16000
 
 
 class TestSelectAopOn55:

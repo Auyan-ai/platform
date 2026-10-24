@@ -417,8 +417,10 @@ class LangSmithClient:
         end_time: datetime,
         outputs: dict[str, Any] | None = None,
         error: str | None = None,
+        call: dict[str, Any] | None = None,
     ) -> None:
-        """Run hijo de tipo llm con su usage y coste (cliente simulado, judge)."""
+        """Run hijo de tipo llm con su usage y coste (cliente simulado, judge). `call`:
+        thinking, esfuerzo y `stop_reason` de la llamada (`CallTrace.as_dict()`)."""
         if self._client is None or trace is None:
             return
         run_id = uuid4()
@@ -445,7 +447,13 @@ class LangSmithClient:
                 outputs=outputs or {},
                 error=error,
                 tags=["source:simulator", name],
-                extra={"metadata": {"model": model, "usage_metadata": usage_metadata}},
+                extra={
+                    "metadata": {
+                        "model": model,
+                        "usage_metadata": usage_metadata,
+                        "llm_call": call,
+                    }
+                },
             )
         except Exception:
             logger.exception("langsmith_llm_run_failed name=%s", name)

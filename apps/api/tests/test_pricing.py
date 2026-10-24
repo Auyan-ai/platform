@@ -136,12 +136,12 @@ class TestComputeLlmCost:
         assert models_without_price(registry.by_role()) == {}
 
     def test_env_var_overrides_a_role(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SUPERVISOR_MODEL_L3", "claude-future-99")
+        """Un ID sin fila ni siquiera carga (`test_model_capabilities`): el cambio por
+        entorno solo admite modelos de la tabla, y todos tienen precio."""
+        monkeypatch.setenv("SUPERVISOR_MODEL_L3", "claude-opus-5-5")
         registry = ModelRegistry(_env_file=None)  # type: ignore[call-arg]
-        assert registry.supervisor_model_l3 == "claude-future-99"
-        assert models_without_price(registry.by_role()) == {
-            "supervisor_model_l3": "claude-future-99"
-        }
+        assert registry.supervisor_model_l3 == "claude-opus-5-5"
+        assert models_without_price(registry.by_role()) == {}
 
     def test_zero_tokens(self) -> None:
         assert compute_llm_cost("claude-sonnet-4-6", LLMUsage()) == 0.0

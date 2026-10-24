@@ -49,6 +49,7 @@ def check_reply_language(state: AgentState, content: str) -> dict | None:
         return {
             "decision": REGENERATE,
             "language_retry": True,
+            "supervisor_feedback_at": len(state.get("tool_results") or []),
             "agent_response": None,
             "supervisor_feedback": (
                 f"Tu respuesta estaba en {LANGUAGE_NAMES[wrong]}, pero el cliente escribe en "

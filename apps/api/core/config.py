@@ -4,17 +4,22 @@ Cargada una sola vez por proceso vía `get_settings()` (lru_cache).
 Todas las variables sensibles llegan por entorno; nada hardcodeado.
 """
 
+import logging
 from functools import lru_cache
 from typing import Literal, Self
 
 from apps.api.integrations.model_capabilities import (
+    MODEL_CAPABILITIES,
     Effort,
     ThinkingMode,
     ThinkingSettings,
+    UnsupportedModelSetting,
     thinking_settings,
 )
 from pydantic import Field, HttpUrl, PostgresDsn, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 AppEnv = Literal["development", "staging", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
@@ -278,17 +283,59 @@ class ModelRegistry(BaseSettings):
     def thinking(self, role: str, *, model: str | None = None) -> ThinkingSettings:
         """Thinking y esfuerzo del rol para `model` (por defecto, el modelo del rol).
 
-        `model` cubre el modelo que fija un tenant para el agente."""
-        return thinking_settings(
-            model or getattr(self, role),
-            mode=self.thinking_by_role.get(role),
-            effort=self.effort_by_role.get(role),
+        `model` cubre el modelo que fija un tenant para el agente. El ajuste del rol se valida
+        al cargar contra el modelo del rol, no contra el del tenant: si este lo rechazaría con
+        un 400, la petición va con el ajuste por defecto de su modelo y queda un error, en vez
+        de escalar todos los turnos del tenant."""
+        mode = self.thinking_by_role.get(role)
+        effort = self.effort_by_role.get(role)
+        if model is None:
+            return thinking_settings(getattr(self, role), mode=mode, effort=effort)
+        try:
+            return thinking_settings(model, mode=mode, effort=effort)
+        except UnsupportedModelSetting as exc:
+            logger.error(
+                "model_setting_degraded role=%s model=%s thinking=%s effort=%s: %s; "
+                "va con el ajuste por defecto del modelo",
+                role,
+                model,
+                mode,
+                effort,
+                exc,
+                extra={"role": role, "model": model},
+            )
+            return thinking_settings(model, mode=None, effort=None)
+
+    def agent_model_for(self, tenant_model: str) -> str:
+        """El modelo del agente para un tenant (`tenant_configurations.agent_model`, que se
+        escribe por SQL). Un ID sin fila de capacidades no corre: cambiaría la petición y
+        se cobraría a la tarifa máxima. Va el modelo por defecto y queda un error."""
+        if tenant_model in MODEL_CAPABILITIES:
+            return tenant_model
+        logger.error(
+            "tenant_agent_model_unsupported model=%s: sin fila en "
+            "integrations/model_capabilities.py; corre %s",
+            tenant_model,
+            self.default_agent_model,
+            extra={"model": tenant_model},
         )
+        return self.default_agent_model
 
     @model_validator(mode="after")
     def _validate_role_settings(self) -> Self:
-        """Falla al cargar si un rol pide algo que su modelo rechazaría con un 400."""
+        """Falla al cargar si un rol usa un modelo sin fila en la tabla de capacidades (la
+        petición cambiaría y se cobraría a la tarifa máxima) o pide algo que su modelo
+        rechazaría con un 400. En Cloud Run, la revisión no arranca y no se promueve."""
         roles = self.by_role()
+        unknown_models = {
+            role: model for role, model in roles.items() if model not in MODEL_CAPABILITIES
+        }
+        if unknown_models:
+            listed = ", ".join(f"{role}={model}" for role, model in sorted(unknown_models.items()))
+            raise ValueError(
+                f"modelos sin fila en integrations/model_capabilities.py: {listed}. "
+                f"IDs válidos: {sorted(MODEL_CAPABILITIES)}"
+            )
         unknown = (set(self.thinking_by_role) | set(self.effort_by_role)) - set(roles)
         if unknown:
             raise ValueError(f"roles desconocidos en thinking/effort_by_role: {sorted(unknown)}")

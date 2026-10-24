@@ -113,6 +113,16 @@ class TestRegistryRoleSettings:
         with pytest.raises(ValidationError, match="no acepta esfuerzo"):
             ModelRegistry(_env_file=None)  # type: ignore[call-arg]
 
+    @pytest.mark.parametrize("model", ["claude-haiku-4-5", "claude-future-99"])
+    def test_rejects_a_model_without_a_capabilities_row_at_load(
+        self, clean_env: pytest.MonkeyPatch, model: str
+    ) -> None:
+        """Un ID sin fila (p. ej. el alias de Haiku) cambiaría la petición y se cobraría a la
+        tarifa máxima: la revisión no arranca y Cloud Run no la promueve."""
+        clean_env.setenv("SIMPLE_TURN_MODEL", model)
+        with pytest.raises(ValidationError, match=f"simple_turn_model={model}"):
+            ModelRegistry(_env_file=None)  # type: ignore[call-arg]
+
     def test_rejects_unknown_roles(self, clean_env: pytest.MonkeyPatch) -> None:
         clean_env.setenv("EFFORT_BY_ROLE", '{"reasoner": "low"}')
         with pytest.raises(ValidationError, match="reasoner"):
