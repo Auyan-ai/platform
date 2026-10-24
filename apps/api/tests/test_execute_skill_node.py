@@ -23,6 +23,7 @@ from apps.api.agents.nodes.execute_skill import (
 )
 from apps.api.integrations.base import MutationNotApplied
 from apps.api.services.approval_reply import done_followup_message
+from apps.api.services.approval_resolution import ApprovalGate
 from apps.api.skills.base import (
     ReconcileUnknown,
     Skill,
@@ -125,6 +126,23 @@ def _no_live_approval(monkeypatch: pytest.MonkeyPatch) -> None:
         "apps.api.agents.nodes.execute_skill.get_recent_approval_for_skill",
         AsyncMock(return_value=None),
     )
+    _gate_status(monkeypatch, "pending")
+
+
+GATE_ESCALATION_ID = UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+
+
+def _gate_status(monkeypatch: pytest.MonkeyPatch, status: str) -> AsyncMock:
+    """`open_gate_escalation` ve la aprobación con este estado (su propio test va contra
+    Postgres en `test_approval_gate_pg.py`)."""
+    live = status in ("pending", "executing")
+    gate = AsyncMock(
+        return_value=ApprovalGate(
+            status, GATE_ESCALATION_ID if live else None, escalation_created=live
+        )
+    )
+    monkeypatch.setattr("apps.api.agents.nodes.execute_skill.open_gate_escalation", gate)
+    return gate
 
 
 def _base_state(**overrides: Any) -> dict[str, Any]:
@@ -846,6 +864,7 @@ class TestL3HumanApprovalGate:
             inputs_raw={"text": "hola", "order_id": 7133911154968},
         )
         self._mock_l3_scope(monkeypatch, mock_create, existing)
+        _gate_status(monkeypatch, "approved")
 
         node = make_execute_skill_node(deps)
         state = _base_state(
@@ -1422,6 +1441,7 @@ class TestRepeatedRequestBeforePrepare:
             inputs_raw={"text": "sin foto", "plan": {"approve": True}},
         )
         create = self._gate(monkeypatch, existing)
+        _gate_status(monkeypatch, "approved")
 
         result = await make_execute_skill_node(deps)(self._state("sin foto"))
 

@@ -202,3 +202,56 @@ async def test_a_turn_that_escalated_counts_as_answered_on_retry(
             conversation_id=s.conversation_id,
             inbound_message_id=inbound_id,
         )
+
+
+# ----------------------------------------------------------------
+# #390
+# ----------------------------------------------------------------
+
+
+async def test_the_panel_never_sees_an_approval_without_its_escalation(
+    pool: asyncpg.Pool, fake_skill: type[FakeL3], fake_deps: AgentDependencies
+) -> None:
+    """#390: la aprobación y su escalación nacen en la misma transacción del gate. En
+    cuanto el panel puede ver la aprobación, su escalación ya existe."""
+    s = await _seed_conversation(pool)
+
+    gated = await _gate(fake_deps, _state(s, await _inbound(pool, s), 1001))
+
+    approval_id = gated["pending_approval_id"]
+    assert await _open_escalations(pool, s) == [f"awaiting_human_approval:{approval_id}"]
+    assert await _conversation_status(pool, s) == "escalated"
+    assert gated["escalation_created"] is True
+
+
+@pytest.mark.parametrize("reused", [False, True], ids=["nueva", "reusada"])
+@pytest.mark.parametrize(
+    ("decision", "body", "conversation"),
+    [("reject", {"comment": "no procede"}, "open"), ("approve", {}, "resolved")],
+)
+async def test_a_decision_between_the_gate_and_escalate_leaves_no_orphan_escalation(
+    pool: asyncpg.Pool,
+    fake_skill: type[FakeL3],
+    fake_deps: AgentDependencies,
+    reused: bool,
+    decision: str,
+    body: dict[str, Any],
+    conversation: str,
+) -> None:
+    """#390 (traza de TLC de `NoOrphanEscalation`): el gate hace COMMIT, el operador
+    decide y después el turno corre `escalate`. Ninguna escalación queda abierta sobre
+    la aprobación resuelta. `reusada`: el gate reutiliza una aprobación pendiente."""
+    s = await _seed_conversation(pool)
+    if reused:
+        await _turn(pool, fake_deps, s)
+    fake_skill.gate.set()
+
+    gated = await _gate(fake_deps, _state(s, await _inbound(pool, s), 1001))
+    assert gated.get("pending_approval_is_repeat") is reused
+    async with _client(s) as c:
+        decided = await c.post(f"/approvals/{gated['pending_approval_id']}/{decision}", json=body)
+    assert decided.status_code == 200
+    await _finish(fake_deps, gated)
+
+    assert await _open_escalations(pool, s) == [], "escalación del gate huérfana"
+    assert await _conversation_status(pool, s) == conversation

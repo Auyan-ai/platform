@@ -20,7 +20,7 @@ import dataclasses
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from apps.api.agents.dependencies import AgentDependencies
@@ -35,7 +35,13 @@ from apps.api.db.queries import (
 from apps.api.integrations.base import IntegrationContext, MutationNotApplied
 from apps.api.services.approval_execution import Applied, ExecutionResult, reconcile
 from apps.api.services.approval_reply import done_followup_message, outcome_message
-from apps.api.services.approval_resolution import team_followup_reason, unknown_outcome_reason
+from apps.api.services.approval_resolution import (
+    ApprovalGate,
+    approval_escalation_reason,
+    open_gate_escalation,
+    team_followup_reason,
+    unknown_outcome_reason,
+)
 from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.identity import (
@@ -61,6 +67,9 @@ from apps.api.skills.base import Skill, SkillContext, SkillRefusal, SkillRejecti
 from apps.api.skills.identity.check_order_contact import CheckOrderContactOutput
 from apps.api.skills.registry import SkillRegistry
 from pydantic import ValidationError
+
+if TYPE_CHECKING:
+    import asyncpg
 
 logger = logging.getLogger(__name__)
 
@@ -585,11 +594,13 @@ def make_execute_skill_node(
             skill_cls: type[Skill],
             inputs: dict[str, Any],
             approval_id: UUID,
+            gate: ApprovalGate,
             *,
             is_repeat: bool,
         ) -> dict[str, Any]:
             # Señal al state: route_after_execute_skill detecta pending_approval_id y rutea
-            # a escalate, que elige el mensaje según `is_repeat`.
+            # a escalate, que elige el mensaje según `is_repeat`. La escalación ya está
+            # abierta (`open_gate_escalation`): escalate solo añade el acuse.
             auditor.log(
                 tenant_id=state["tenant_id"],
                 conversation_id=state["conversation_id"],
@@ -629,7 +640,9 @@ def make_execute_skill_node(
                 "pending_approval_id": str(approval_id),
                 "pending_approval_skill_slug": slug,
                 "pending_approval_is_repeat": is_repeat,
-                "escalation_reason": f"awaiting_human_approval:{approval_id}",
+                "escalation_reason": approval_escalation_reason(approval_id),
+                "escalation_id": str(gate.escalation_id),
+                "escalation_created": gate.escalation_created,
             }
 
         def _already_applied(
@@ -663,12 +676,35 @@ def make_execute_skill_node(
                 "agent_response": done_followup_message(slug, language, default_language),
             }
 
-        def _reuse(
+        async def _open_gate(conn: asyncpg.Connection, approval_id: UUID) -> ApprovalGate:
+            return await open_gate_escalation(
+                conn,
+                tenant_id=UUID(state["tenant_id"]),
+                conversation_id=UUID(state["conversation_id"]),
+                approval_id=approval_id,
+                triggered_by_message_id=(
+                    UUID(state["inbound_message_id"]) if state.get("inbound_message_id") else None
+                ),
+                metadata={
+                    "confidence": state.get("confidence"),
+                    "langfuse_trace_id": state.get("langfuse_trace_id"),
+                    "model_used": state.get("model_used"),
+                },
+            )
+
+        async def _reuse(
             skill_cls: type[Skill], inputs: dict[str, Any], approval: PendingApproval
-        ) -> dict[str, Any]:
-            if approval.status == "approved":
+        ) -> dict[str, Any] | None:
+            # La misma acción con una aprobación viva. Su estado se relee con la fila
+            # bloqueada: si se resolvió desde que se leyó, no se escala sobre ella.
+            # None si se rechazó o falló entretanto: la acción se puede pedir de nuevo.
+            async with tenant_scope(UUID(state["tenant_id"])) as conn:
+                gate = await _open_gate(conn, approval.id)
+            if gate.status == "approved":
                 return _already_applied(skill_cls, inputs, approval.id)
-            return _awaiting_approval(skill_cls, inputs, approval.id, is_repeat=True)
+            if gate.escalation_id is None:
+                return None
+            return _awaiting_approval(skill_cls, inputs, approval.id, gate, is_repeat=True)
 
         # 1) Skill permitida por el AOP (lista vacía = ninguna, fail-safe).
         # Las skills `core` (identidad) las ofrece el código, no el AOP ni el tenant.
@@ -772,7 +808,9 @@ def make_execute_skill_node(
                 _requested(skill_cls, raw_input),
                 skill_cls,
             ):
-                return _reuse(skill_cls, raw_input, live)
+                reused = await _reuse(skill_cls, raw_input, live)
+                if reused is not None:
+                    return reused
 
         # El código completa y valida los inputs en los dos caminos, con y sin aprobación
         # (p. ej. refund_partial: tope y moneda; start_return: el plan de la política).
@@ -839,27 +877,31 @@ def make_execute_skill_node(
                     existing = await get_recent_approval_for_skill(
                         conn, tenant_id_uuid, conv_id_uuid, slug
                     )
-                    reused = existing is not None and await _same_order_action(
-                        state, existing.inputs_raw, raw_input, skill_cls
+                if existing is not None and await _same_order_action(
+                    state, existing.inputs_raw, raw_input, skill_cls
+                ):
+                    reused = await _reuse(skill_cls, raw_input, existing)
+                    if reused is not None:
+                        return reused
+                # La aprobación y su escalación nacen en la misma transacción: el panel
+                # nunca ve una aprobación sin la escalación que la acompaña (#390).
+                async with tenant_scope(tenant_id_uuid) as conn:
+                    salt = await get_tenant_pii_salt(conn, tenant_id_uuid)
+                    await create_pending_approval(
+                        conn,
+                        approval_id=approval_id,
+                        tenant_id=tenant_id_uuid,
+                        conversation_id=conv_id_uuid,
+                        skill_slug=slug,
+                        skill_tier=skill_cls.tier,
+                        inputs_raw=raw_input,
+                        inputs_redacted=redact_inputs(raw_input, salt),
+                        aop_slug=state.get("aop_slug") or "unknown",
+                        aop_version=state.get("aop_version") or 0,
+                        langfuse_trace_id=state.get("langfuse_trace_id"),
                     )
-                    if not reused:
-                        salt = await get_tenant_pii_salt(conn, tenant_id_uuid)
-                        await create_pending_approval(
-                            conn,
-                            approval_id=approval_id,
-                            tenant_id=tenant_id_uuid,
-                            conversation_id=conv_id_uuid,
-                            skill_slug=slug,
-                            skill_tier=skill_cls.tier,
-                            inputs_raw=raw_input,
-                            inputs_redacted=redact_inputs(raw_input, salt),
-                            aop_slug=state.get("aop_slug") or "unknown",
-                            aop_version=state.get("aop_version") or 0,
-                            langfuse_trace_id=state.get("langfuse_trace_id"),
-                        )
-                if reused and existing is not None:
-                    return _reuse(skill_cls, raw_input, existing)
-                return _awaiting_approval(skill_cls, raw_input, approval_id, is_repeat=False)
+                    gate = await _open_gate(conn, approval_id)
+                return _awaiting_approval(skill_cls, raw_input, approval_id, gate, is_repeat=False)
             # Sin tenant/conversation en state (no debería pasar en prod) → error.
             return _append_and_finish(
                 _error_entry(

@@ -5,6 +5,8 @@ deja la conversación en status='escalated' para que aparezca en el inbox humano
 
 Si ya existe una escalación activa (pending/claimed) para la conversación, no
 crea una nueva — devuelve la existente y persiste igualmente el mensaje del agente.
+La escalación del gate L3 no la crea este nodo: la abre `execute_skill` junto con la
+aprobación (`services.approval_resolution.open_gate_escalation`).
 """
 
 from __future__ import annotations
@@ -74,29 +76,35 @@ def make_escalate_node(
             "langfuse_trace_id": state.get("langfuse_trace_id"),
             "model_used": state.get("model_used"),
         }
-        if state.get("pending_approval_id"):
-            metadata["pending_approval_id"] = state["pending_approval_id"]
         if state.get("rejected_draft"):
             metadata["rejected_draft"] = state["rejected_draft"]
 
         async with tenant_scope(tenant_id) as conn:
-            existing = await get_open_escalation_for_conversation(conn, tenant_id, conversation_id)
-
-            if existing is None:
-                esc = await insert_escalation(
-                    conn,
-                    tenant_id=tenant_id,
-                    conversation_id=conversation_id,
-                    reason=reason,
-                    triggered_by_message_id=inbound_id,
-                    metadata=metadata,
-                )
-                await update_conversation_status(conn, tenant_id, conversation_id, "escalated")
+            if pending_approval_id:
+                # Gate L3: `execute_skill` ya abrió la escalación de la aprobación en la
+                # transacción que la creó (#390). Aquí no se abre ninguna: una abierta
+                # ahora podría quedar sobre una aprobación que el panel ya resolvió.
+                escalation_id = state["escalation_id"]
+                created = bool(state.get("escalation_created"))
             else:
-                esc = existing
+                existing = await get_open_escalation_for_conversation(
+                    conn, tenant_id, conversation_id
+                )
+                if existing is None:
+                    esc = await insert_escalation(
+                        conn,
+                        tenant_id=tenant_id,
+                        conversation_id=conversation_id,
+                        reason=reason,
+                        triggered_by_message_id=inbound_id,
+                        metadata=metadata,
+                    )
+                    await update_conversation_status(conn, tenant_id, conversation_id, "escalated")
+                escalation_id = str((existing or esc).id)
+                created = existing is None
 
             result: dict = {
-                "escalation_id": str(esc.id),
+                "escalation_id": escalation_id,
                 "decision": "escalate",
                 "escalation_reason": reason,
                 # Pisa el borrador crudo: lo que el caller entrega es el texto
@@ -104,7 +112,7 @@ def make_escalate_node(
                 "agent_response": None,
                 # Solo al crear: el caller empuja la nota + asignación al helpdesk
                 # una única vez (no en cada re-escalado de la misma conversación).
-                "escalation_created": existing is None,
+                "escalation_created": created,
             }
 
             if agent_response.strip():

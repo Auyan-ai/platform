@@ -1073,6 +1073,30 @@ async def get_open_escalation_for_conversation(
     return None if row is None else Escalation(**dict(row))
 
 
+async def get_open_escalation_by_reason(
+    conn: asyncpg.Connection, tenant_id: UUID, conversation_id: UUID, reason: str
+) -> Escalation | None:
+    """La escalación activa (pending/claimed) de la conversación con ese `reason` exacto."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, tenant_id, conversation_id, reason,
+               triggered_by_message_id, status, assigned_user_id, metadata, created_at
+          FROM escalations
+         WHERE tenant_id = $1
+           AND conversation_id = $2
+           AND reason = $3
+           AND status IN ('pending', 'claimed')
+           AND deleted_at IS NULL
+         ORDER BY created_at
+         LIMIT 1
+        """,
+        tenant_id,
+        conversation_id,
+        reason,
+    )
+    return None if row is None else Escalation(**dict(row))
+
+
 async def get_escalation(
     conn: asyncpg.Connection, tenant_id: UUID, escalation_id: UUID
 ) -> Escalation | None:
@@ -2703,6 +2727,24 @@ async def get_pending_approval(
         approval_id,
     )
     return PendingApproval(**dict(row)) if row else None
+
+
+async def lock_approval_status(
+    conn: asyncpg.Connection, tenant_id: UUID, approval_id: UUID
+) -> str | None:
+    """Estado de la aprobación con su fila bloqueada (`FOR UPDATE`) hasta el fin de la
+    transacción. Aprobar, rechazar y cerrar una ejecución cambian esa fila, así que
+    esperan a que la transacción termine. None si no existe."""
+    status = await conn.fetchval(
+        """
+        SELECT status FROM pending_approvals
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+           FOR UPDATE
+        """,
+        tenant_id,
+        approval_id,
+    )
+    return None if status is None else str(status)
 
 
 async def get_recent_approval_for_skill(
