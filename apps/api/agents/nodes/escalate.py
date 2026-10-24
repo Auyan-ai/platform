@@ -26,6 +26,7 @@ from apps.api.db.queries import (
     update_conversation_last_message,
     update_conversation_status,
 )
+from apps.api.integrations.llm_ledger import turn_telemetry
 from apps.api.services.approval_reply import gate_message, waiting_message
 from apps.api.services.language import state_languages
 
@@ -71,10 +72,14 @@ def make_escalate_node(
                 },
             )
 
+        telemetry = turn_telemetry(state)
         metadata: dict = {
             "confidence": state.get("confidence"),
             "langfuse_trace_id": state.get("langfuse_trace_id"),
             "model_used": state.get("model_used"),
+            # Un escalado sin texto no deja mensaje: su coste queda aquí, por rol.
+            "cost_usd": telemetry["cost_usd"],
+            "usage_by_role": telemetry["usage_by_role"],
         }
         if state.get("rejected_draft"):
             metadata["rejected_draft"] = state["rejected_draft"]
@@ -128,11 +133,12 @@ def make_escalate_node(
                         "inbound_message_id": state.get("inbound_message_id"),
                         "langfuse_trace_id": state.get("langfuse_trace_id"),
                         "model": state.get("model_used"),
-                        "prompt_tokens": state.get("tokens_in", 0),
-                        "cache_write_tokens": state.get("tokens_cache_write", 0),
-                        "cache_read_tokens": state.get("tokens_cache_read", 0),
-                        "completion_tokens": state.get("tokens_out", 0),
-                        "cost_usd": state.get("cost_usd", 0.0),
+                        "prompt_tokens": telemetry["tokens_in"],
+                        "cache_write_tokens": telemetry["tokens_cache_write"],
+                        "cache_read_tokens": telemetry["tokens_cache_read"],
+                        "completion_tokens": telemetry["tokens_out"],
+                        "cost_usd": telemetry["cost_usd"],
+                        "usage_by_role": telemetry["usage_by_role"],
                         "confidence": state.get("confidence"),
                         "writing_surface": surface,
                     },

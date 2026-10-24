@@ -29,6 +29,7 @@ async def test_passes_tool_choice_any() -> None:
 
     await call_claude_with_tools(
         client=client,
+        role="default_agent_model",
         model="claude-sonnet-4-6",
         system="x",
         messages=[{"role": "user", "content": "y"}],
@@ -50,6 +51,7 @@ async def test_passes_specific_tool_choice() -> None:
 
     await call_claude_with_tools(
         client=client,
+        role="default_agent_model",
         model="claude-sonnet-4-6",
         system="x",
         messages=[{"role": "user", "content": "y"}],
@@ -71,6 +73,7 @@ async def test_no_tool_choice_means_auto() -> None:
 
     await call_claude_with_tools(
         client=client,
+        role="default_agent_model",
         model="claude-sonnet-4-6",
         system="x",
         messages=[{"role": "user", "content": "y"}],
@@ -92,6 +95,7 @@ async def test_passes_multiple_tools() -> None:
 
     await call_claude_with_tools(
         client=client,
+        role="default_agent_model",
         model="claude-sonnet-4-6",
         system="x",
         messages=[{"role": "user", "content": "y"}],
@@ -112,6 +116,7 @@ async def test_cache_false_passes_system_and_tools_untouched() -> None:
 
     await call_claude_with_tools(
         client=client,
+        role="default_agent_model",
         model="claude-sonnet-4-6",
         system="x",
         messages=[{"role": "user", "content": "y"}],
@@ -133,6 +138,7 @@ async def test_cache_true_marks_last_tool_and_wraps_system() -> None:
     extra_tool = {"name": "shopify_get_order", "description": "x", "input_schema": {}}
     await call_claude_with_tools(
         client=client,
+        role="default_agent_model",
         model="claude-sonnet-4-6",
         system="system base",
         messages=[{"role": "user", "content": "y"}],
@@ -160,6 +166,7 @@ async def test_cache_true_does_not_mutate_caller_tools() -> None:
     tools = [{"name": "t", "description": "x", "input_schema": {}}]
     await call_claude_with_tools(
         client=client,
+        role="default_agent_model",
         model="claude-sonnet-4-6",
         system="x",
         messages=[{"role": "user", "content": "y"}],
@@ -183,6 +190,7 @@ async def test_cache_true_respects_system_blocks_from_caller() -> None:
     ]
     await call_claude_with_tools(
         client=client,
+        role="default_agent_model",
         model="claude-sonnet-4-6",
         system=blocks,
         messages=[{"role": "user", "content": "y"}],
@@ -212,6 +220,7 @@ async def test_trace_label_logs_duration_and_cache_breakdown(caplog) -> None:
     with caplog.at_level(logging.INFO, logger="apps.api.integrations.anthropic_client"):
         await call_claude_with_tools(
             client=client,
+            role="default_agent_model",
             model="claude-sonnet-4-6",
             system="x",
             messages=[{"role": "user", "content": "y"}],
@@ -233,14 +242,15 @@ async def test_trace_label_logs_duration_and_cache_breakdown(caplog) -> None:
 
 
 @pytest.mark.asyncio
-async def test_no_trace_label_does_not_log(caplog) -> None:
-    """Sin trace_label no se emite la línea de instrumentación (callers que no la piden)."""
+async def test_no_trace_label_logs_with_the_role_as_label(caplog) -> None:
+    """Sin trace_label la línea `llm_call` sale igual, con el rol como etiqueta."""
     client = MagicMock()
     client.messages.create = AsyncMock(return_value=_fake_response())
 
     with caplog.at_level(logging.INFO, logger="apps.api.integrations.anthropic_client"):
         await call_claude_with_tools(
             client=client,
+            role="default_agent_model",
             model="claude-sonnet-4-6",
             system="x",
             messages=[{"role": "user", "content": "y"}],
@@ -248,7 +258,10 @@ async def test_no_trace_label_does_not_log(caplog) -> None:
             max_retries=1,
         )
 
-    assert not [r for r in caplog.records if "llm_call" in r.getMessage()]
+    lines = [r.getMessage() for r in caplog.records if "llm_call" in r.getMessage()]
+    assert len(lines) == 1
+    assert "label=default_agent_model" in lines[0]
+    assert "role=default_agent_model" in lines[0]
 
 
 @pytest.mark.asyncio
@@ -266,6 +279,7 @@ async def test_trace_label_survives_missing_cache_fields(caplog) -> None:
     with caplog.at_level(logging.INFO, logger="apps.api.integrations.anthropic_client"):
         await call_claude_with_tools(
             client=client,
+            role="default_agent_model",
             model="claude-sonnet-4-6",
             system="x",
             messages=[{"role": "user", "content": "y"}],

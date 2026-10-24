@@ -291,6 +291,7 @@ async def reject_action(
     reply = await generate_customer_reply(
         getattr(getattr(request.app.state, "agent_deps", None), "anthropic", None),
         approval.skill_slug,
+        tenant_id=tenant_id,
         success=False,
         reject_comment=body.comment,
         language=language,

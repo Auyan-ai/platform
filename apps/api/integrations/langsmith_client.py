@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -17,6 +18,7 @@ from langsmith import Client
 
 if TYPE_CHECKING:
     from apps.api.core.config import Settings
+    from apps.api.integrations.llm_ledger import LLMCall
     from apps.api.integrations.pricing import LLMUsage
 
 logger = logging.getLogger(__name__)
@@ -151,6 +153,22 @@ class LangSmithClient:
             )
         except Exception:
             logger.exception("langsmith_standalone_run_failed name=%s", name)
+
+    def _record_llm_calls(self, trace: LangSmithTrace, calls: Sequence[LLMCall]) -> None:
+        """Corrida hija `llm` por llamada: `name` es el rol del `ModelRegistry`."""
+        for call in calls:
+            self.record_llm_run(
+                trace,
+                name=call.role,
+                model=call.model,
+                usage=call.usage,
+                cost_usd=call.cost_usd,
+                start_time=call.started_at,
+                end_time=call.ended_at,
+                call={"stop_reason": call.stop_reason, "latency_ms": call.latency_ms},
+                source="agent_service",
+                metadata={"role": call.role, "label": call.label},
+            )
 
     def _record_model_usage_run(
         self,
@@ -291,23 +309,29 @@ class LangSmithClient:
         cost_usd: float,
         model: str | None,
         error: str | None,
+        llm_calls: Sequence[LLMCall] | None = None,
     ) -> None:
         if self._client is None or trace is None:
             return
 
         try:
-            self._record_model_usage_run(
-                trace,
-                decision=decision,
-                confidence=confidence,
-                response_text=response_text,
-                tokens_in=tokens_in,
-                tokens_cache_write=tokens_cache_write,
-                tokens_cache_read=tokens_cache_read,
-                tokens_out=tokens_out,
-                cost_usd=cost_usd,
-                model=model,
-            )
+            if llm_calls:
+                # Una corrida `llm` por llamada, con su rol: la suma de sus `total_cost`
+                # es el `cost_usd` del turno. Sin llamadas (turno sin LLM) no hay corrida.
+                self._record_llm_calls(trace, llm_calls)
+            else:
+                self._record_model_usage_run(
+                    trace,
+                    decision=decision,
+                    confidence=confidence,
+                    response_text=response_text,
+                    tokens_in=tokens_in,
+                    tokens_cache_write=tokens_cache_write,
+                    tokens_cache_read=tokens_cache_read,
+                    tokens_out=tokens_out,
+                    cost_usd=cost_usd,
+                    model=model,
+                )
         except Exception:
             logger.exception("langsmith_model_usage_run_failed")
 
@@ -418,9 +442,12 @@ class LangSmithClient:
         outputs: dict[str, Any] | None = None,
         error: str | None = None,
         call: dict[str, Any] | None = None,
+        source: str = "simulator",
+        metadata: dict[str, Any] | None = None,
     ) -> None:
-        """Run hijo de tipo llm con su usage y coste (cliente simulado, judge). `call`:
-        thinking, esfuerzo y `stop_reason` de la llamada (`CallTrace.as_dict()`)."""
+        """Run hijo de tipo llm con su usage y coste (cliente simulado, judge, cada llamada
+        del agente). `call`: thinking, esfuerzo y `stop_reason` de la llamada
+        (`CallTrace.as_dict()`); `metadata`: rol y etiqueta de la llamada del agente."""
         if self._client is None or trace is None:
             return
         run_id = uuid4()
@@ -446,12 +473,13 @@ class LangSmithClient:
                 end_time=end_time,
                 outputs=outputs or {},
                 error=error,
-                tags=["source:simulator", name],
+                tags=[f"source:{source}", name],
                 extra={
                     "metadata": {
                         "model": model,
                         "usage_metadata": usage_metadata,
                         "llm_call": call,
+                        **(metadata or {}),
                     }
                 },
             )

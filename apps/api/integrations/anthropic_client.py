@@ -28,12 +28,14 @@ import logging
 import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 import anthropic
 from apps.api.core.config import LLM_CALL_BUDGET_SECONDS, get_models
+from apps.api.integrations.llm_ledger import LLMCall, ModelRole, record_call
 from apps.api.integrations.model_capabilities import ThinkingSettings, capabilities_of
-from apps.api.integrations.pricing import LLMUsage
+from apps.api.integrations.pricing import LLMUsage, compute_llm_cost
 
 if TYPE_CHECKING:
     from anthropic.types import Message
@@ -73,17 +75,36 @@ async def create_message(
     client: anthropic.AsyncAnthropic,
     request: Mapping[str, Any],
     *,
+    role: ModelRole,
     attempts: int,
     timeout_seconds: float,
     budget_seconds: float = LLM_CALL_BUDGET_SECONDS,
+    trace_label: str | None = None,
 ) -> Message:
     """`messages.create` con reintentos sobre errores transitorios, todo dentro de
-    `budget_seconds`: cada intento dura como mucho `timeout_seconds` o lo que quede."""
-    deadline = time.monotonic() + budget_seconds
+    `budget_seconds`: cada intento dura como mucho `timeout_seconds` o lo que quede.
+
+    Único punto que llama a la API de mensajes: anota la respuesta (tokens, coste,
+    latencia) en el libro del turno con su `role` (`integrations/llm_ledger.py`) y deja la
+    línea de log `llm_call`."""
+    started_at = datetime.now(UTC)
+    started = time.monotonic()
+    deadline = started + budget_seconds
     for attempt in range(1, attempts + 1):
         remaining = deadline - time.monotonic()
         try:
-            return await client.messages.create(**request, timeout=min(timeout_seconds, remaining))
+            response = await client.messages.create(
+                **request, timeout=min(timeout_seconds, remaining)
+            )
+            _record_response(
+                response,
+                role=role,
+                model=request["model"],
+                label=trace_label or role,
+                started_at=started_at,
+                latency_ms=int((time.monotonic() - started) * 1000),
+            )
+            return response
         except anthropic.APIError as exc:
             delay = _backoff_seconds(attempt, exc)
             out_of_time = deadline - time.monotonic() - delay < _MIN_ATTEMPT_SECONDS
@@ -97,6 +118,45 @@ async def create_message(
             )
             await asyncio.sleep(delay)
     raise ValueError("attempts debe ser >= 1")
+
+
+def _record_response(
+    response: Any,
+    *,
+    role: str,
+    model: str,
+    label: str,
+    started_at: datetime,
+    latency_ms: int,
+) -> None:
+    usage = LLMUsage.from_anthropic(response.usage)
+    stop_reason = getattr(response, "stop_reason", None)
+    record_call(
+        LLMCall(
+            role=role,
+            model=model,
+            label=label,
+            usage=usage,
+            cost_usd=compute_llm_cost(model, usage),
+            latency_ms=latency_ms,
+            started_at=started_at,
+            ended_at=datetime.now(UTC),
+            stop_reason=stop_reason if isinstance(stop_reason, str) else None,
+        )
+    )
+    # dur_ms incluye los reintentos previos; sin ellos es la llamada en sí.
+    logger.info(
+        "llm_call label=%s role=%s model=%s dur_ms=%d in=%d cache_w=%d cache_r=%d out=%d stop=%s",
+        label,
+        role,
+        model,
+        latency_ms,
+        usage.input_tokens,
+        usage.cache_write_tokens,
+        usage.cache_read_tokens,
+        usage.output_tokens,
+        stop_reason,
+    )
 
 
 PROVIDER_UNAVAILABLE_CATEGORY = "llm_provider_unavailable"
@@ -141,6 +201,7 @@ async def call_claude_with_tools(
     *,
     client: anthropic.AsyncAnthropic,
     model: str,
+    role: ModelRole,
     system: str | list[dict[str, Any]],
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
@@ -165,11 +226,11 @@ async def call_claude_with_tools(
             `system` llega ya como lista de bloques, el caller controla los breakpoints
             (debe marcar el bloque ESTABLE con cache_control). Pega solo si el prefijo
             es idéntico entre llamadas (TTL ~5 min).
-        trace_label: si se pasa, loguea a INFO una línea por llamada con duración
-            real + breakdown de tokens (input/cache_write/cache_read/output). Sirve
-            para medir el efecto del prompt caching: el primer turno escribe cache
-            (cache_w>0), los siguientes dentro del TTL lo leen (cache_r>0). Sin
-            label no loguea — así solo se instrumentan los callers que lo piden.
+        role: campo del `ModelRegistry` que pide la llamada: a él se atribuyen sus tokens y
+            su coste (`integrations/llm_ledger.py`).
+        trace_label: nombre de la línea `llm_call` que deja cada llamada (duración real +
+            breakdown de tokens input/cache_write/cache_read/output; sirve para medir el
+            prompt caching). Por defecto, el rol.
         request_options: campos extra de la petición (thinking, output_config,
             extra_headers) que arma la traducción por modelo.
 
@@ -191,34 +252,20 @@ async def call_claude_with_tools(
     if request_options:
         kwargs.update(request_options)
 
-    start = time.monotonic()
     try:
-        last_response = await create_message(
-            client, kwargs, attempts=max_retries, timeout_seconds=timeout_seconds
+        return await create_message(
+            client,
+            kwargs,
+            role=role,
+            attempts=max_retries,
+            timeout_seconds=timeout_seconds,
+            trace_label=trace_label,
         )
     except anthropic.APIStatusError as exc:
         unavailable = provider_unavailable_from(exc)
         if unavailable is None:
             raise
         raise unavailable from exc
-
-    if trace_label is not None:
-        # Instrumentación de latencia/cache: una línea por llamada al LLM.
-        # dur_ms cubre el happy path (sin reintentos = la llamada en sí); si
-        # hubo reintentos incluye los backoffs, lo cual es raro y se nota.
-        usage = LLMUsage.from_anthropic(last_response.usage)
-        logger.info(
-            "llm_call label=%s model=%s dur_ms=%d in=%d cache_w=%d cache_r=%d out=%d stop=%s",
-            trace_label,
-            model,
-            int((time.monotonic() - start) * 1000),
-            usage.input_tokens,
-            usage.cache_write_tokens,
-            usage.cache_read_tokens,
-            usage.output_tokens,
-            getattr(last_response, "stop_reason", None),
-        )
-    return last_response
 
 
 def _cached(
@@ -467,7 +514,7 @@ def _strict(tool: dict[str, Any]) -> dict[str, Any]:
 def decision_request(
     *,
     model: str,
-    role: str,
+    role: ModelRole,
     system: str | list[dict[str, Any]],
     tools: list[dict[str, Any]],
     decision: ToolDecision,
@@ -539,7 +586,7 @@ async def call_claude_for_decision(
     *,
     client: anthropic.AsyncAnthropic,
     model: str,
-    role: str,
+    role: ModelRole,
     system: str | list[dict[str, Any]],
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
@@ -580,6 +627,7 @@ async def call_claude_for_decision(
             response = await call_claude_with_tools(
                 client=client,
                 model=model,
+                role=role,
                 system=request.system,
                 messages=turn,
                 tools=request.tools,
@@ -658,7 +706,7 @@ class TextReply:
 async def call_claude_text(
     *,
     client: anthropic.AsyncAnthropic,
-    role: str,
+    role: ModelRole,
     system: str | list[dict[str, Any]],
     messages: list[dict[str, Any]],
     max_tokens: int,
@@ -666,6 +714,7 @@ async def call_claude_text(
     model: str | None = None,
     temperature: float | None = None,
     attempts: int = 3,
+    trace_label: str | None = None,
 ) -> TextReply:
     """Llamada que espera texto (jueces, simulador, mensajes al cliente) traducida para el
     modelo del rol: thinking y esfuerzo del registro, `temperature` solo donde se acepta, y
@@ -685,7 +734,12 @@ async def call_claude_text(
     if temperature is not None and capabilities_of(model).sampling_params:
         kwargs["extra_body"] = {"temperature": temperature}
     response = await create_message(
-        client, kwargs, attempts=attempts, timeout_seconds=timeout_seconds
+        client,
+        kwargs,
+        role=role,
+        attempts=attempts,
+        timeout_seconds=timeout_seconds,
+        trace_label=trace_label,
     )
     call = CallTrace.of(model, thinking, response)
     if call.stop_reason == "refusal":

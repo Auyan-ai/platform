@@ -362,9 +362,16 @@ async def test_save_aop_version_yaml_frontmatter_is_dict() -> None:
 # ============================================================
 
 
+def _conn_with_savepoint() -> AsyncMock:
+    """Conexión de mentira cuyo `transaction()` (savepoint) es un context manager async."""
+    conn = AsyncMock()
+    conn.transaction = MagicMock(return_value=AsyncMock())
+    return conn
+
+
 @pytest.mark.asyncio
 async def test_insert_classifier_run_basic() -> None:
-    conn = AsyncMock()
+    conn = _conn_with_savepoint()
     conn.fetchrow.return_value = _classifier_run_row()
 
     result = await insert_intent_classifier_run(
@@ -386,7 +393,7 @@ async def test_insert_classifier_run_basic() -> None:
 
 @pytest.mark.asyncio
 async def test_insert_classifier_run_with_alternative() -> None:
-    conn = AsyncMock()
+    conn = _conn_with_savepoint()
     conn.fetchrow.return_value = _classifier_run_row(
         alternative_slug="cancelacion",
         alternative_confidence=0.45,
@@ -412,7 +419,7 @@ async def test_insert_classifier_run_with_alternative() -> None:
 
 @pytest.mark.asyncio
 async def test_insert_classifier_run_reclassification() -> None:
-    conn = AsyncMock()
+    conn = _conn_with_savepoint()
     conn.fetchrow.return_value = _classifier_run_row(turn_number=3, was_reclassification=True)
 
     result = await insert_intent_classifier_run(
@@ -432,7 +439,7 @@ async def test_insert_classifier_run_reclassification() -> None:
 
 @pytest.mark.asyncio
 async def test_insert_classifier_run_passes_all_params_to_db() -> None:
-    conn = AsyncMock()
+    conn = _conn_with_savepoint()
     conn.fetchrow.return_value = _classifier_run_row()
 
     await insert_intent_classifier_run(
@@ -453,3 +460,58 @@ async def test_insert_classifier_run_passes_all_params_to_db() -> None:
     assert CONVERSATION_ID in call_args
     assert 2 in call_args
     assert "cancelacion" in call_args
+
+
+@pytest.mark.asyncio
+async def test_insert_classifier_run_persists_the_fallback_reason() -> None:
+    conn = _conn_with_savepoint()
+    conn.fetchrow.return_value = _classifier_run_row()
+
+    await insert_intent_classifier_run(
+        conn,
+        tenant_id=TENANT_ID,
+        conversation_id=CONVERSATION_ID,
+        turn_number=1,
+        primary_slug="default",
+        primary_confidence=0.0,
+        ambiguity_detected=False,
+        was_reclassification=False,
+        fallback_reason="llm_no_decision: max_tokens",
+    )
+
+    assert "fallback_reason" in conn.fetchrow.call_args[0][0]
+    assert conn.fetchrow.call_args[0][-1] == "llm_no_decision: max_tokens"
+
+
+@pytest.mark.asyncio
+async def test_insert_classifier_run_survives_a_missing_fallback_reason_column(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Migración sin aplicar: se inserta sin la razón y queda un error, el turno sigue."""
+    import asyncpg
+
+    conn = _conn_with_savepoint()
+    conn.fetchrow.side_effect = [
+        asyncpg.UndefinedColumnError("fallback_reason"),
+        _classifier_run_row(),
+    ]
+
+    result = await insert_intent_classifier_run(
+        conn,
+        tenant_id=TENANT_ID,
+        conversation_id=CONVERSATION_ID,
+        turn_number=1,
+        primary_slug="default",
+        primary_confidence=0.0,
+        ambiguity_detected=False,
+        was_reclassification=False,
+        fallback_reason="llm_refusal: x",
+    )
+
+    assert isinstance(result, IntentClassifierRun)
+    assert "fallback_reason" not in conn.fetchrow.call_args[0][0]
+    assert any(
+        "intent_classifier_fallback_reason_column_missing" in r.getMessage()
+        and r.levelname == "ERROR"
+        for r in caplog.records
+    )
