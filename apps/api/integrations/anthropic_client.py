@@ -285,9 +285,7 @@ def decision_request(
     thinking = get_models().thinking(role, model=model)
     options = thinking.request_options()
     if caps.forced_tool_choice and not thinking.thinking_on:
-        choice = (
-            {"type": "any"} if decision.any_tool else {"type": "tool", "name": decision.tool}
-        )
+        choice = {"type": "any"} if decision.any_tool else {"type": "tool", "name": decision.tool}
         return _DecisionRequest(system, tools, choice, max_tokens, options, forced=True)
     return _DecisionRequest(
         system=_with_instruction(system, _instruction(decision)),
@@ -439,9 +437,7 @@ async def call_claude_text(
     category = None
     if stop_reason == "refusal":
         category = getattr(getattr(response, "stop_details", None), "category", None)
-        logger.error(
-            "llm_refusal: %s role=%s model=%s", category or "sin_categoria", role, model
-        )
+        logger.error("llm_refusal: %s role=%s model=%s", category or "sin_categoria", role, model)
     return TextReply(
         text="".join(
             block.text for block in response.content if getattr(block, "type", None) == "text"

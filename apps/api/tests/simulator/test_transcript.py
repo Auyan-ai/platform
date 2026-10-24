@@ -13,7 +13,6 @@ from apps.api.simulator.transcript import (
 
 
 def _make_scenario():
-
     from apps.api.db.models import SimulationScenario
 
     return SimulationScenario(
@@ -96,9 +95,17 @@ class TestFormatForSimJudge:
 
         def entry(slug: str, tier: str, error: str) -> SkillAuditLog:
             return SkillAuditLog(
-                id=uuid4(), tenant_id=uuid4(), conversation_id=uuid4(), aop_slug="returns",
-                aop_version=1, skill_slug=slug, skill_tier=tier, inputs_redacted={},
-                inputs_hash="h", status="rejected_by_permissions", error_message=error,
+                id=uuid4(),
+                tenant_id=uuid4(),
+                conversation_id=uuid4(),
+                aop_slug="returns",
+                aop_version=1,
+                skill_slug=slug,
+                skill_tier=tier,
+                inputs_redacted={},
+                inputs_hash="h",
+                status="rejected_by_permissions",
+                error_message=error,
                 created_at=datetime.now(UTC),
             )
 
@@ -112,4 +119,7 @@ class TestFormatForSimJudge:
             "- `shopify.start_return` (L3) → pendiente de aprobación humana: la puerta L3 "
             "del producto, no un rechazo"
         ) in lines
-        assert "- `shopify.get_order_status` (L1) → rejected_by_permissions: identity_required" in lines
+        assert (
+            "- `shopify.get_order_status` (L1) → rejected_by_permissions: identity_required"
+            in lines
+        )

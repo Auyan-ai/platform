@@ -48,7 +48,9 @@ class TestParseVerdict:
         assert v.verdict == "fail"
 
     def test_fallback_on_bad_json(self):
-        v = _parse_verdict("not json", LLMUsage(input_tokens=10, output_tokens=5), model_used=SONNET)
+        v = _parse_verdict(
+            "not json", LLMUsage(input_tokens=10, output_tokens=5), model_used=SONNET
+        )
         assert v.verdict == "fail"
         assert v.overall_score == 0.0
         assert v.reasoning_explanation == "parse_error"

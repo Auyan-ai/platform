@@ -159,3 +159,25 @@ async def test_hand_off_closes_the_gate_and_opens_an_escalation_with_the_reason(
         "metadata": {"approval_id": str(APPROVAL_ID)},
     }
     set_status.assert_awaited_once_with(ANY, TENANT_ID, CONVERSATION_ID, "escalated")
+
+
+def test_an_opened_return_without_its_settlement_note_goes_to_the_team() -> None:
+    output = {
+        "outcome": "confirmed",
+        "order_id": 1431,
+        "note_written": False,
+        "return_name": "#1431-R2",
+    }
+
+    reason = approval_resolution.team_followup_reason("shopify.start_return", output)
+
+    assert reason == (
+        "La devolución del pedido 1431 se abrió en Shopify (#1431-R2), pero no se pudo "
+        "escribir la liquidación en la nota del pedido. Copiadla desde la aprobación."
+    )
+    assert (
+        approval_resolution.team_followup_reason(
+            "shopify.start_return", {**output, "note_written": True}
+        )
+        is None
+    )

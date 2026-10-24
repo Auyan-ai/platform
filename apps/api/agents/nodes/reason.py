@@ -19,9 +19,8 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Literal
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._reply import surface_of
@@ -43,7 +42,9 @@ from apps.api.services.conversation_progress import no_progress_reason
 from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.identity import IdentityContext
 from apps.api.services.language import state_languages
+from apps.api.services.returns_policy import ActivePolicy, policy_note
 from apps.api.services.skill_access import visible_skills
+from apps.api.services.tenant_time import tenant_zone
 from apps.api.skills.registry import SkillRegistry
 from pydantic import ValidationError
 
@@ -57,11 +58,6 @@ def _fixed_reply(state: AgentState, key: str) -> str:
     return fixed_text(key, language, tenant_default=tenant_default)
 
 
-# Zona horaria por defecto del vertical e-commerce ES. Cada tenant puede sobrescribirla
-# en tenant_facts["timezone"].
-_DEFAULT_TENANT_TZ = "Europe/Madrid"
-
-
 def _tenant_now_str(tenant_facts: dict | None) -> str:
     """Fecha y hora ACTUAL en la zona horaria de la tienda (tenant_facts['timezone'],
     default Europe/Madrid), con hora + etiqueta de zona.
@@ -70,17 +66,22 @@ def _tenant_now_str(tenant_facts: dict | None) -> str:
     se desplazaba un día para tiendas ES → off-by-one en ventanas de devolución. Si la
     zona es inválida cae a Europe/Madrid; si falta la tzdata del sistema, a UTC.
     """
-    tz_name = (tenant_facts or {}).get("timezone") or _DEFAULT_TENANT_TZ
-    try:
-        tz = ZoneInfo(tz_name)
-    except (ZoneInfoNotFoundError, ValueError):
-        tz_name = _DEFAULT_TENANT_TZ
-        try:
-            tz = ZoneInfo(_DEFAULT_TENANT_TZ)
-        except ZoneInfoNotFoundError:
-            tz_name, tz = "UTC", UTC
+    tz_name, tz = tenant_zone(tenant_facts)
     now = datetime.now(tz)
     return f"{now.strftime('%Y-%m-%d %H:%M')} ({tz_name})"
+
+
+_RETURN_SKILLS = frozenset({"shopify.start_return", "shopify.start_exchange"})
+
+
+def _returns_policy_note(state: AgentState) -> str | None:
+    """Resumen de la política de devoluciones: cualquier AOP puede contestar por el plazo, y
+    el supervisor lo contrasta con esto. Que no está configurada solo se dice donde el AOP
+    puede abrir una devolución."""
+    active = ActivePolicy.from_state(state.get("returns_policy"))
+    if active is None and not _RETURN_SKILLS & set(state.get("allowed_skills") or []):
+        return None
+    return policy_note(active)
 
 
 def agent_system_blocks(state: AgentState) -> list[dict[str, Any]]:
@@ -99,6 +100,7 @@ def agent_system_blocks(state: AgentState) -> list[dict[str, Any]]:
         ),
         writing_surface=surface_of(state),
         identity_note=state.get("identity_note"),
+        returns_policy_note=_returns_policy_note(state),
         response_language=state.get("response_language"),
     )
 

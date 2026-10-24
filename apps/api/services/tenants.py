@@ -54,9 +54,7 @@ async def evaluate_and_advance_lifecycle(
     return tenant, checklist
 
 
-async def get_tenant_config(
-    conn: asyncpg.Connection, tenant_id: UUID
-) -> TenantConfiguration:
+async def get_tenant_config(conn: asyncpg.Connection, tenant_id: UUID) -> TenantConfiguration:
     config = await get_tenant_configuration(conn, tenant_id)
     if config is None:
         raise NotFoundError(

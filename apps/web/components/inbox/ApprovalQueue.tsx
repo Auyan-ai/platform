@@ -70,7 +70,8 @@ const SKILL_LABELS: Record<string, string> = {
   'shopify.update_shipping_address': 'Cambiar dirección de envío',
   'shopify.cancel_order': 'Cancelar pedido',
   'shopify.refund_partial': 'Reembolso parcial',
-  'shopify.start_return': 'Iniciar devolución',
+  'shopify.start_return': 'Abrir devolución',
+  'shopify.start_exchange': 'Abrir cambio',
   'shopify.add_order_note': 'Añadir nota al pedido',
   'shopify.tag_order': 'Etiquetar pedido',
   'shopify.get_order_status': 'Consultar estado del pedido',
@@ -94,6 +95,7 @@ const AOP_LABELS: Record<string, string> = {
 const INPUT_LABELS: Record<string, string> = {
   order_id: 'Pedido',
   reason: 'Motivo',
+  reason_code: 'Motivo',
   address1: 'Dirección',
   address2: 'Dirección (línea 2)',
   city: 'Ciudad',
@@ -156,9 +158,18 @@ function formatInputValue(key: string, value: unknown, inputs: Record<string, un
   return String(value)
 }
 
+// Devoluciones y cambios: la liquidación del plan va aparte, ya redactada por el API.
+const HIDDEN_INPUTS = new Set([
+  'refund_gateway',
+  'plan',
+  'items',
+  'exchange_items',
+  'settlement_note',
+])
+
 function formatInputs(inputs: Record<string, unknown>): string {
   return Object.entries(inputs)
-    .filter(([k]) => k !== 'refund_gateway')
+    .filter(([k]) => !HIDDEN_INPUTS.has(k))
     .map(
       ([k, v]) => `${INPUT_LABELS[k] ?? k.replaceAll('_', ' ')}: ${formatInputValue(k, v, inputs)}`,
     )
@@ -248,6 +259,11 @@ function ApprovalRow({
           <p className="mt-0.5 text-xs text-foreground-muted truncate">
             {formatInputs(approval.inputs_raw)}
           </p>
+          {typeof approval.inputs_raw.settlement_note === 'string' && (
+            <p className="mt-1 whitespace-pre-line text-xs text-foreground-body">
+              {approval.inputs_raw.settlement_note}
+            </p>
+          )}
           {isPending && WAREHOUSE_CHECK_SKILLS.has(approval.skill_slug) && (
             <p className="mt-1 text-xs font-medium text-warning-foreground">
               Confirma con el almacén que el pedido no ha salido.

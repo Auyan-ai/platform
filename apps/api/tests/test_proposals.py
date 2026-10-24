@@ -102,6 +102,7 @@ def _make_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setattr("apps.api.core.security._lookup_user", _fake_lookup)
 
     from apps.api.core.config import get_settings
+
     app = FastAPI()
     register_exception_handlers(app)
     app.dependency_overrides[get_settings] = lambda: FakeAuthSettings()
@@ -117,10 +118,12 @@ def _auth() -> dict:
 
 
 def test_list_proposals_ok(monkeypatch):
-    with patch("apps.api.routers.proposals.tenant_scope") as mock_scope, \
-         patch("apps.api.routers.proposals.list_improvement_proposals",
-               new_callable=AsyncMock) as mock_list:
-
+    with (
+        patch("apps.api.routers.proposals.tenant_scope") as mock_scope,
+        patch(
+            "apps.api.routers.proposals.list_improvement_proposals", new_callable=AsyncMock
+        ) as mock_list,
+    ):
         conn = AsyncMock()
         mock_scope.return_value.__aenter__ = AsyncMock(return_value=conn)
         mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -137,10 +140,12 @@ def test_list_proposals_ok(monkeypatch):
 
 
 def test_get_proposal_not_found(monkeypatch):
-    with patch("apps.api.routers.proposals.tenant_scope") as mock_scope, \
-         patch("apps.api.routers.proposals.get_improvement_proposal",
-               new_callable=AsyncMock) as mock_get:
-
+    with (
+        patch("apps.api.routers.proposals.tenant_scope") as mock_scope,
+        patch(
+            "apps.api.routers.proposals.get_improvement_proposal", new_callable=AsyncMock
+        ) as mock_get,
+    ):
         conn = AsyncMock()
         mock_scope.return_value.__aenter__ = AsyncMock(return_value=conn)
         mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -158,6 +163,7 @@ def test_get_proposal_not_found(monkeypatch):
 
 def test_proposal_response_from_model():
     from apps.api.routers.proposals import ProposalResponse
+
     resp = ProposalResponse.from_model(_PENDING_PROPOSAL)
     assert resp.id == PROPOSAL_ID
     assert resp.status == "pending"
@@ -169,6 +175,7 @@ def test_proposal_response_from_model():
 
 def test_proposal_response_confidence_as_float():
     from apps.api.routers.proposals import ProposalResponse
+
     resp = ProposalResponse.from_model(_PENDING_PROPOSAL)
     assert isinstance(resp.judge_confidence, float)
 
@@ -181,10 +188,12 @@ def test_approve_proposal_non_pending_rejected(monkeypatch):
     rejected_proposal = ImprovementProposal(
         **{**_PENDING_PROPOSAL.model_dump(), "status": "rejected"}
     )
-    with patch("apps.api.routers.proposals.tenant_scope") as mock_scope, \
-         patch("apps.api.routers.proposals.get_improvement_proposal",
-               new_callable=AsyncMock) as mock_get:
-
+    with (
+        patch("apps.api.routers.proposals.tenant_scope") as mock_scope,
+        patch(
+            "apps.api.routers.proposals.get_improvement_proposal", new_callable=AsyncMock
+        ) as mock_get,
+    ):
         conn = AsyncMock()
         mock_scope.return_value.__aenter__ = AsyncMock(return_value=conn)
         mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -201,10 +210,12 @@ def test_approve_proposal_non_pending_rejected(monkeypatch):
 
 
 def test_reject_proposal_missing_proposal(monkeypatch):
-    with patch("apps.api.routers.proposals.tenant_scope") as mock_scope, \
-         patch("apps.api.routers.proposals.get_improvement_proposal",
-               new_callable=AsyncMock) as mock_get:
-
+    with (
+        patch("apps.api.routers.proposals.tenant_scope") as mock_scope,
+        patch(
+            "apps.api.routers.proposals.get_improvement_proposal", new_callable=AsyncMock
+        ) as mock_get,
+    ):
         conn = AsyncMock()
         mock_scope.return_value.__aenter__ = AsyncMock(return_value=conn)
         mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -226,15 +237,23 @@ def test_reject_proposal_missing_proposal(monkeypatch):
 
 def test_metrics_response_fields(monkeypatch):
     fake_metrics = {
-        "total": 10, "pending": 3, "approved": 4, "rejected": 2, "applied": 1,
-        "acceptance_rate": 0.5, "cost_usd_total": 1.23,
+        "total": 10,
+        "pending": 3,
+        "approved": 4,
+        "rejected": 2,
+        "applied": 1,
+        "acceptance_rate": 0.5,
+        "cost_usd_total": 1.23,
         "cost_per_accepted_proposal": 0.246,
-        "sonnet_tokens_total": 50000, "opus_tokens_total": 5000,
+        "sonnet_tokens_total": 50000,
+        "opus_tokens_total": 5000,
     }
-    with patch("apps.api.routers.proposals.tenant_scope") as mock_scope, \
-         patch("apps.api.routers.proposals.get_proposals_metrics",
-               new_callable=AsyncMock) as mock_metrics:
-
+    with (
+        patch("apps.api.routers.proposals.tenant_scope") as mock_scope,
+        patch(
+            "apps.api.routers.proposals.get_proposals_metrics", new_callable=AsyncMock
+        ) as mock_metrics,
+    ):
         conn = AsyncMock()
         mock_scope.return_value.__aenter__ = AsyncMock(return_value=conn)
         mock_scope.return_value.__aexit__ = AsyncMock(return_value=False)

@@ -77,7 +77,6 @@ class InboundIntakeResult:
         return {"received": True, "queued": True, "job_id": str(self.job_id)}
 
 
-
 def _with_identity_metadata(
     metadata: dict[str, Any], evidence: dict[str, str] | None, email: str | None
 ) -> dict[str, Any]:
@@ -90,6 +89,7 @@ def _with_identity_metadata(
         return {**metadata, EVIDENCE_KEY: evidence}
     provided = build_provided_contact(email)
     return {**metadata, PROVIDED_CONTACT_KEY: provided} if provided else metadata
+
 
 async def persist_and_enqueue_inbound(
     *,

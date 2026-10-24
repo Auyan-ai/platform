@@ -37,6 +37,7 @@ class TestCheckTenantCostCap:
             ),
         ):
             from apps.api.simulator.cost_guard import check_tenant_cost_cap
+
             await check_tenant_cost_cap(tenant_id)  # no debe lanzar
 
     @pytest.mark.asyncio
@@ -55,6 +56,7 @@ class TestCheckTenantCostCap:
             ),
         ):
             from apps.api.simulator.cost_guard import check_tenant_cost_cap
+
             with pytest.raises(HTTPException) as exc_info:
                 await check_tenant_cost_cap(tenant_id)
             assert exc_info.value.status_code == 429
@@ -77,6 +79,7 @@ class TestCheckGlobalCostCap:
             ),
         ):
             from apps.api.simulator.cost_guard import check_global_cost_cap
+
             await check_global_cost_cap()  # no debe lanzar
 
     @pytest.mark.asyncio
@@ -94,6 +97,7 @@ class TestCheckGlobalCostCap:
             ),
         ):
             from apps.api.simulator.cost_guard import check_global_cost_cap
+
             with pytest.raises(HTTPException) as exc_info:
                 await check_global_cost_cap()
             assert exc_info.value.status_code == 429

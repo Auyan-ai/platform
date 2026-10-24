@@ -124,9 +124,7 @@ async def test_unassign_already_unassigned() -> None:
 async def test_list_assignments_for_user_multiple_tenants() -> None:
     rows = [
         make_assignment_row(tenant_id=TENANT_ID, role_in_tenant="aide_primary"),
-        make_assignment_row(
-            id=uuid4(), tenant_id=TENANT_ID_2, role_in_tenant="aide_backup"
-        ),
+        make_assignment_row(id=uuid4(), tenant_id=TENANT_ID_2, role_in_tenant="aide_backup"),
     ]
     conn = AsyncMock()
     conn.fetch = AsyncMock(return_value=rows)
@@ -156,9 +154,7 @@ async def test_list_assignments_for_tenant() -> None:
     qa_id = uuid4()
     rows = [
         make_assignment_row(internal_user_id=aide_id, role_in_tenant="aide_primary"),
-        make_assignment_row(
-            id=uuid4(), internal_user_id=qa_id, role_in_tenant="qa_assigned"
-        ),
+        make_assignment_row(id=uuid4(), internal_user_id=qa_id, role_in_tenant="qa_assigned"),
     ]
     conn = AsyncMock()
     conn.fetch = AsyncMock(return_value=rows)
@@ -197,7 +193,5 @@ async def test_is_user_assigned_true() -> None:
 async def test_is_user_assigned_false() -> None:
     conn = AsyncMock()
     conn.fetchrow = AsyncMock(return_value=None)
-    result = await is_user_assigned_to_tenant(
-        conn, internal_user_id=uuid4(), tenant_id=uuid4()
-    )
+    result = await is_user_assigned_to_tenant(conn, internal_user_id=uuid4(), tenant_id=uuid4())
     assert result is False

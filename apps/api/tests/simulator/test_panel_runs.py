@@ -18,11 +18,18 @@ TENANT = uuid4()
 
 async def test_a_panel_run_is_traced_in_langsmith_like_the_cli(monkeypatch: Any) -> None:
     scenario = SimulationScenario(
-        id=uuid4(), tenant_id=TENANT, name="CE-01", aop_slug="order_status",
-        user_profile_id=uuid4(), expected_outcome="tracking",
+        id=uuid4(),
+        tenant_id=TENANT,
+        name="CE-01",
+        aop_slug="order_status",
+        user_profile_id=uuid4(),
+        expected_outcome="tracking",
     )
     run = SimulationRun(
-        id=uuid4(), tenant_id=TENANT, aop_slug="order_status", status="passed",
+        id=uuid4(),
+        tenant_id=TENANT,
+        aop_slug="order_status",
+        status="passed",
         started_at=datetime.now(UTC),
     )
     observability = object()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from apps.api.services.approval_reply import (
     done_followup_message,
     fallback_message,
@@ -329,3 +330,261 @@ class TestLanguages:
         )
 
         assert msg == "We've cancelled your order."
+
+
+def _return_output(**plan_overrides: object) -> dict:
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from apps.api.services.returns import PlanLine, ReturnPlan, Settlement, SettlementLine
+
+    plan = {
+        "plan_id": "a" * 32,
+        "policy_version": 2,
+        "requested_at": datetime(2026, 10, 18, tzinfo=UTC),
+        "order_id": 1,
+        "order_name": "#1042",
+        "reason_code": "talla",
+        "reason_label": "Talla",
+        "fault": "customer",
+        "shopify_reason": "too-small",
+        "lines": (
+            PlanLine(
+                line_item_id=1, fulfillment_line_item_id="gid://x/1", title="Blusa", quantity=1
+            ),
+        ),
+        "exchange_lines": (),
+        "evidence": (),
+        "shipping_method": "store_label",
+        "return_address": None,
+        "refund_days": 14,
+        "ship_replacement": None,
+        "requires_approval": True,
+        "settlement": Settlement(
+            currency="EUR",
+            returned=(SettlementLine(title="Blusa", quantity=1, amount=Decimal("52.15")),),
+            exchanged=(),
+            shipping_payer="customer",
+            fee=Decimal("4.95"),
+            fee_pending=None,
+            fee_label_cost=False,
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="none",
+            refund_as="original_payment",
+        ),
+    }
+    plan.update(plan_overrides)
+    return {
+        "outcome": "confirmed",
+        "order_id": 1,
+        "plan": ReturnPlan(**plan).model_dump(mode="json"),
+    }
+
+
+def test_opened_return_says_what_happens_next_and_never_that_money_is_back() -> None:
+    from apps.api.services.approval_reply import outcome_message
+
+    text = outcome_message("shopify.start_return", _return_output(), "es")
+
+    assert text == (
+        "Hemos abierto la devolución de tu pedido.\n\n"
+        "Te enviaremos la etiqueta de devolución. Por el envío de vuelta descontaremos "
+        "4,95 EUR del reembolso. Cuando recibamos el artículo y lo revisemos, te "
+        "devolveremos el dinero en un plazo de 14 días."
+    )
+
+
+def test_customer_ships_to_the_store_address_in_english() -> None:
+    from decimal import Decimal
+
+    from apps.api.services.approval_reply import outcome_message
+    from apps.api.services.returns import Settlement, SettlementLine
+
+    output = _return_output(
+        shipping_method="customer_ships",
+        return_address="Calle Mayor 1, Madrid",
+        settlement=Settlement(
+            currency="EUR",
+            returned=(SettlementLine(title="Blusa", quantity=1, amount=Decimal("52.15")),),
+            exchanged=(),
+            shipping_payer="customer",
+            fee=Decimal("0"),
+            fee_pending=None,
+            fee_label_cost=False,
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="none",
+            refund_as="original_payment",
+        ),
+    )
+
+    text = outcome_message("shopify.start_return", output, "en")
+
+    assert text == (
+        "We've opened the return for your order.\n\n"
+        "Send the item to this address: Calle Mayor 1, Madrid. Return shipping is at your "
+        "expense. Once we receive and check the item, we'll refund you within 14 days."
+    )
+
+
+def test_cheaper_exchange_as_store_credit_after_receipt() -> None:
+    from decimal import Decimal
+
+    from apps.api.services.approval_reply import outcome_message
+    from apps.api.services.returns import PlanExchangeLine, Settlement, SettlementLine
+
+    output = _return_output(
+        exchange_lines=(PlanExchangeLine(variant_id=9, title="Blusa M", quantity=1),),
+        ship_replacement="after_receipt",
+        settlement=Settlement(
+            currency="EUR",
+            returned=(
+                SettlementLine(
+                    title="Blusa", quantity=1, amount=Decimal("52.15"), exchanged_quantity=1
+                ),
+            ),
+            exchanged=(SettlementLine(title="Blusa M", quantity=1, amount=Decimal("40.00")),),
+            shipping_payer="store",
+            fee=Decimal("0"),
+            fee_pending=None,
+            fee_label_cost=False,
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="store_credit",
+            refund_as="store_credit",
+        ),
+    )
+
+    text = outcome_message("shopify.start_exchange", output, "es")
+
+    assert text == (
+        "Hemos abierto el cambio de tu pedido.\n\n"
+        "Te enviaremos la etiqueta de devolución. El envío de vuelta corre de nuestra cuenta. "
+        "Te enviaremos el artículo de cambio cuando recibamos el que devuelves. Cuando "
+        "recibamos el artículo, te abonaremos 12,15 EUR en crédito de la tienda en un plazo "
+        "de 14 días."
+    )
+
+
+def test_an_exchange_the_customer_pays_never_mentions_a_refund() -> None:
+    from decimal import Decimal
+
+    from apps.api.services.approval_reply import outcome_message
+    from apps.api.services.returns import PlanExchangeLine, Settlement, SettlementLine
+
+    output = _return_output(
+        exchange_lines=(PlanExchangeLine(variant_id=9, title="Blusa M", quantity=1),),
+        ship_replacement="immediately",
+        settlement=Settlement(
+            currency="EUR",
+            returned=(
+                SettlementLine(
+                    title="Blusa", quantity=1, amount=Decimal("52.15"), exchanged_quantity=1
+                ),
+            ),
+            exchanged=(SettlementLine(title="Blusa M", quantity=1, amount=Decimal("52.15")),),
+            shipping_payer="customer",
+            fee=Decimal("4.95"),
+            fee_pending=None,
+            fee_label_cost=False,
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="none",
+            refund_as="original_payment",
+        ),
+    )
+
+    text = outcome_message("shopify.start_exchange", output, "es")
+
+    assert "reembolso" not in text
+    assert text.endswith(
+        "Te quedan por pagar 4,95 EUR, incluidos los gastos de la devolución; nuestro equipo "
+        "te indicará cómo hacerlo."
+    )
+
+
+@pytest.mark.parametrize(
+    ("currency", "amount", "language", "text"),
+    [
+        ("JPY", "500", "es", "500 JPY"),
+        ("KWD", "0.875", "es", "0,875 KWD"),
+        ("EUR", "4.95", "en", "4.95 EUR"),
+        ("EUR", "5", "es", "5,00 EUR"),
+    ],
+)
+def test_money_is_written_with_the_decimals_of_the_currency(
+    currency: str, amount: str, language: str, text: str
+) -> None:
+    from decimal import Decimal
+
+    from apps.api.services.approval_reply import _money
+
+    assert _money(Decimal(amount), currency, language) == text
+
+
+def test_a_partial_exchange_tells_the_refund_and_the_credit_apart() -> None:
+    from decimal import Decimal
+
+    from apps.api.services.approval_reply import outcome_message
+    from apps.api.services.returns import PlanExchangeLine, Settlement, SettlementLine
+
+    output = _return_output(
+        exchange_lines=(PlanExchangeLine(variant_id=9, title="Blusa M", quantity=1),),
+        ship_replacement="after_receipt",
+        settlement=Settlement(
+            currency="EUR",
+            returned=(
+                SettlementLine(
+                    title="Blusa", quantity=2, amount=Decimal("104.30"), exchanged_quantity=1
+                ),
+            ),
+            exchanged=(SettlementLine(title="Blusa M", quantity=1, amount=Decimal("40.00")),),
+            shipping_payer="store",
+            fee=Decimal("0"),
+            fee_pending=None,
+            fee_label_cost=False,
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="store_credit",
+            refund_as="original_payment",
+        ),
+    )
+
+    text = outcome_message("shopify.start_exchange", output, "es")
+
+    assert text.endswith(
+        "Cuando recibamos el artículo, te devolveremos 52,15 EUR en un plazo de 14 días. "
+        "Cuando recibamos el artículo, te abonaremos 12,15 EUR en crédito de la tienda en un "
+        "plazo de 14 días."
+    )
+
+
+def test_a_return_with_nothing_left_after_fees_promises_no_money() -> None:
+    from decimal import Decimal
+
+    from apps.api.services.approval_reply import outcome_message
+    from apps.api.services.returns import Settlement, SettlementLine
+
+    output = _return_output(
+        settlement=Settlement(
+            currency="EUR",
+            returned=(SettlementLine(title="Blusa", quantity=1, amount=Decimal("4.95")),),
+            exchanged=(),
+            shipping_payer="customer",
+            fee=Decimal("4.95"),
+            fee_pending=None,
+            fee_label_cost=False,
+            restocking_percent=Decimal("0"),
+            restocking_fee=Decimal("0"),
+            price_rule="none",
+            refund_as="original_payment",
+        ),
+    )
+
+    text = outcome_message("shopify.start_return", output, "es")
+
+    assert "te devolveremos" not in text
+    assert text.endswith(
+        "Con los gastos de la devolución descontados, no queda importe por devolverte."
+    )

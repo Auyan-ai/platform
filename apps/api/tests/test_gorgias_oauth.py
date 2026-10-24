@@ -64,9 +64,7 @@ class TestStateHelpers:
             _verify_state(tampered, secret)
 
     def test_state_has_four_parts(self) -> None:
-        state = _build_state(
-            "11111111-1111-1111-1111-111111111111", "mitienda", "secret"
-        )
+        state = _build_state("11111111-1111-1111-1111-111111111111", "mitienda", "secret")
         parts = state.split(":")
         assert len(parts) == 4
 

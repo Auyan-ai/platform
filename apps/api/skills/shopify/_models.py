@@ -61,6 +61,7 @@ class OrderSummary(BaseModel):
 
 
 class ProductVariant(BaseModel):
+    variant_id: int  # el que pide start_exchange
     title: str
     price: Money  # en la moneda de la tienda
     available: bool
@@ -163,6 +164,7 @@ def map_order_summary(raw: dict[str, Any]) -> OrderSummary:
 def map_product_summary(raw: dict[str, Any], shop_currency: str) -> ProductSummary:
     variants = [
         ProductVariant(
+            variant_id=v["id"],
             title=v.get("title", ""),
             price=Money(amount=str(v.get("price", "0.00")), currency=shop_currency),
             available=(v.get("inventory_quantity", 0) or 0) > 0,

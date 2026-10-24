@@ -84,7 +84,9 @@ def test_non_static_kind_fails_loud_instead_of_being_skipped(
     monkeypatch.setattr(harness, "FIXTURES_DIR", tmp_path)
 
     assert run.main(["--static"]) == 1
-    assert "default/con_llm: tipos de aserción no estáticos ['llm_judge']" in capsys.readouterr().out
+    assert (
+        "default/con_llm: tipos de aserción no estáticos ['llm_judge']" in capsys.readouterr().out
+    )
 
 
 def test_fixture_dir_without_canonical_aop_fails(

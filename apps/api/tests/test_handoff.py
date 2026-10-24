@@ -399,9 +399,7 @@ def worker(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "get_inbound_message_contents": AsyncMock(return_value=["¿hay novedades?"]),
         "enforce_message_cap": AsyncMock(return_value=None),
         "flush_pending_messages": AsyncMock(return_value=0),
-        "process_inbound_media": AsyncMock(
-            return_value=MediaOutcome(texts=["¿hay novedades?"])
-        ),
+        "process_inbound_media": AsyncMock(return_value=MediaOutcome(texts=["¿hay novedades?"])),
         "get_active_handoff_for_chat": AsyncMock(return_value=_handoff()),
         "forward_customer_message": AsyncMock(return_value=True),
         "close_handoff": AsyncMock(return_value=True),

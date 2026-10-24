@@ -8,7 +8,9 @@ import pytest
 from apps.api.integrations.shopify import IssuedRefund, ShopifyActionError
 from apps.api.simulator.mocks import MockShopifyAdapter, MockShopifyError
 
-_GBP_BALANCE = {"get_refundable_balance": {"captured": "45.00", "refunded": "5.00", "currency": "GBP"}}
+_GBP_BALANCE = {
+    "get_refundable_balance": {"captured": "45.00", "refunded": "5.00", "currency": "GBP"}
+}
 
 
 async def test_returns_fixture_when_present() -> None:
@@ -31,7 +33,7 @@ async def test_list_default_is_empty_when_no_fixture() -> None:
 
 async def test_write_default_is_success_dict() -> None:
     mock = MockShopifyAdapter({})
-    result = await mock.start_return(None, 1, line_item_id=2, quantity=1)
+    result = await mock.tag_order(None, 1, ["vip"])
     assert result["ok"] is True
     assert result["simulated"] is True
 
@@ -98,3 +100,25 @@ async def test_explicit_single_order_fixture_wins_over_the_lists() -> None:
     single = {"id": 7, "name": "#1234", "fulfillments": [{"tracking_number": "1Z"}]}
     mock = MockShopifyAdapter({**_TWO_LISTED, "get_order_by_name": single})
     assert await mock.get_order_by_name(None, "#1234") == single
+
+
+async def test_return_methods_parse_fixtures_like_the_real_adapter() -> None:
+    from apps.api.simulator.scenarios.returns import _ORDER_IN_WINDOW
+
+    mock = MockShopifyAdapter(_ORDER_IN_WINDOW)
+
+    order = await mock.get_returnable_order(None, 1234)
+    calc = await mock.calculate_return(None, order.order_id, lines=[], exchange=[])
+
+    assert (order.name, order.lines[0].line_item_id, order.lines[0].title) == (
+        "#1234",
+        5001,
+        "Camiseta azul L",
+    )
+    assert calc.returned[0].subtotal == Decimal("-29.99")
+    assert await mock.get_exchange_variants(None, [1]) == ()
+
+
+async def test_returnable_order_without_fixture_is_an_error() -> None:
+    with pytest.raises(MockShopifyError, match="order_not_found"):
+        await MockShopifyAdapter({}).get_returnable_order(None, 1)

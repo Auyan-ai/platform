@@ -55,9 +55,21 @@ def _conn_returning(rows: list[MagicMock]) -> MagicMock:
 
 # Cada caso: (función, kwargs, provider, config_key, valor)
 _CASES = [
-    (get_integration_by_chatwoot_account, {"account_id": "167723"}, "chatwoot", "account_id", "167723"),
+    (
+        get_integration_by_chatwoot_account,
+        {"account_id": "167723"},
+        "chatwoot",
+        "account_id",
+        "167723",
+    ),
     (get_integration_by_zendesk_subdomain, {"subdomain": "acme"}, "zendesk", "subdomain", "acme"),
-    (get_integration_by_gorgias_domain, {"domain": "acme.gorgias.com"}, "gorgias", "domain", "acme.gorgias.com"),
+    (
+        get_integration_by_gorgias_domain,
+        {"domain": "acme.gorgias.com"},
+        "gorgias",
+        "domain",
+        "acme.gorgias.com",
+    ),
 ]
 
 

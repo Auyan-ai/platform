@@ -69,7 +69,9 @@ class TestAuditLoggerAsync:
         with (
             patch("apps.api.services.audit.tenant_scope") as mock_scope,
             patch("apps.api.services.audit.get_tenant_pii_salt", return_value="testsalt") as _,
-            patch("apps.api.services.audit.insert_skill_audit_log", new_callable=AsyncMock) as mock_insert,
+            patch(
+                "apps.api.services.audit.insert_skill_audit_log", new_callable=AsyncMock
+            ) as mock_insert,
         ):
             fake_conn = AsyncMock()
             mock_scope.return_value.__aenter__ = AsyncMock(return_value=fake_conn)

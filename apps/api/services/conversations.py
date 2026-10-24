@@ -91,9 +91,7 @@ async def reply_to_conversation(
             f"conversation {conversation_id} not found", code="conversation_not_found"
         )
     if conv.status == "closed":
-        raise ConflictError(
-            "cannot reply to a closed conversation", code="conversation_closed"
-        )
+        raise ConflictError("cannot reply to a closed conversation", code="conversation_closed")
     msg = await insert_message(
         conn,
         tenant_id=tenant_id,
@@ -119,13 +117,9 @@ async def escalate_conversation(
             f"conversation {conversation_id} not found", code="conversation_not_found"
         )
     if conv.status == "escalated":
-        raise ConflictError(
-            "conversation is already escalated", code="already_escalated"
-        )
+        raise ConflictError("conversation is already escalated", code="already_escalated")
     if conv.status == "closed":
-        raise ConflictError(
-            "cannot escalate a closed conversation", code="conversation_closed"
-        )
+        raise ConflictError("cannot escalate a closed conversation", code="conversation_closed")
     escalation = await insert_escalation(
         conn, tenant_id=tenant_id, conversation_id=conversation_id, reason=reason
     )

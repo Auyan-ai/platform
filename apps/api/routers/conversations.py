@@ -22,7 +22,11 @@ from apps.api.services.conversations import (
     reply_to_conversation,
 )
 from apps.api.services.helpdesk_closure import close_external_helpdesk_ticket
-from apps.api.services.media_storage import SIGNED_URL_SECONDS, create_signed_url
+from apps.api.services.media_storage import (
+    SIGNED_URL_SECONDS,
+    create_signed_url,
+    listed_attachments,
+)
 from fastapi import APIRouter, Depends, Path, Query, status
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -72,12 +76,6 @@ class AttachmentUrlOut(BaseModel):
     mime_type: str | None = None
 
 
-def _listed_attachments(raw: Any) -> list[dict[str, Any]]:
-    """Adjuntos que muestra el inbox, en orden. Mismo listado para `MessageOut` y para la
-    vista previa: el índice que manda la web apunta al mismo adjunto."""
-    return [a for a in (raw or []) if isinstance(a, dict) and (a.get("path") or a.get("filename"))]
-
-
 class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -121,7 +119,7 @@ class MessageOut(BaseModel):
                     "kind": a.get("kind") or "file",
                     "mime_type": a.get("mime_type"),
                 }
-                for a in _listed_attachments(raw_attachments)
+                for a in listed_attachments(raw_attachments)
             ],
             "delivery": metadata.get("delivery"),
         }
@@ -243,7 +241,7 @@ async def get_attachment_url(
 ) -> AttachmentUrlOut:
     async with tenant_scope(tenant_id) as conn:
         message = await get_conversation_message(conn, tenant_id, conversation_id, message_id)
-    attachments = _listed_attachments(message.attachments if message else None)
+    attachments = listed_attachments(message.attachments if message else None)
     item = attachments[index] if index < len(attachments) else None
     path = str(item.get("path") or "") if item else ""
     # La ruta del adjunto empieza siempre por el tenant y la conversación (media_storage):

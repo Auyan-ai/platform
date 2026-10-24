@@ -20,7 +20,9 @@ from apps.api.db.queries import (
     get_tenant_playbook,
     list_tool_permissions,
 )
+from apps.api.db.returns_policy import load_current_returns_policy
 from apps.api.services.commerce_context import build_commerce_integration_ctx
+from apps.api.services.returns_policy import ActivePolicy, parse_stored_policy
 
 
 def make_load_tenant_context_node(
@@ -46,6 +48,7 @@ def make_load_tenant_context_node(
             perm_rows = await list_tool_permissions(conn, tenant_id)
             playbook = await get_tenant_playbook(conn, tenant_id)
             facts = await get_tenant_facts(conn, tenant_id)
+            stored_policy = await load_current_returns_policy(conn, tenant_id)
 
             config_dump = config.model_dump(mode="json")
             extra = config_dump.get("extra") or {}
@@ -77,6 +80,19 @@ def make_load_tenant_context_node(
                 "config": commerce_ctx.config,
             }
 
+        policy = parse_stored_policy(stored_policy.policy) if stored_policy else None
+        returns_policy = (
+            ActivePolicy(version=stored_policy.version, policy=policy).to_state()
+            if stored_policy and policy
+            else None
+        )
+        # Un escenario del simulador fija su propia política (None = sin configurar), así
+        # no depende de la que tenga el tenant.
+        fixtures = state.get("simulation_fixtures") or {}
+        if state.get("simulation_mode") and "returns_policy" in fixtures:
+            raw = fixtures["returns_policy"]
+            returns_policy = {"version": 0, "policy": raw} if raw else None
+
         out: dict = {
             "tenant_config": config_dump,
             "tenant_name": tenant.name,
@@ -86,6 +102,7 @@ def make_load_tenant_context_node(
             "commerce_integration_ctx": commerce_integration_ctx,
             "tenant_playbook": playbook.model_dump(mode="json") if playbook else None,
             "tenant_facts": facts.data if facts else None,
+            "returns_policy": returns_policy,
         }
         # Fallback sin AOPs: el tenant puede opt-in a skills vía tenant_config.extra.
         # select_aop (Sprint 7+) sobreescribe estos si el tenant tiene AOPs configurados.

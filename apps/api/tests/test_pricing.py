@@ -94,8 +94,7 @@ class TestComputeLlmCost:
         assert cost == pytest.approx(0.01795)
         assert cost > 0.0
         assert any(
-            r.levelname == "ERROR" and "claude-future-99" in r.getMessage()
-            for r in caplog.records
+            r.levelname == "ERROR" and "claude-future-99" in r.getMessage() for r in caplog.records
         )
 
     def test_fallback_rates_take_the_max_of_each_category(self) -> None:
@@ -184,7 +183,9 @@ class TestModels55Pricing:
 class TestLlmUsageSum:
     def test_adds_every_category(self) -> None:
         a = LLMUsage(input_tokens=1, cache_write_5m_tokens=2, cache_read_tokens=3, output_tokens=4)
-        b = LLMUsage(input_tokens=10, cache_write_1h_tokens=20, cache_read_tokens=30, output_tokens=40)
+        b = LLMUsage(
+            input_tokens=10, cache_write_1h_tokens=20, cache_read_tokens=30, output_tokens=40
+        )
         assert a + b == LLMUsage(
             input_tokens=11,
             cache_write_5m_tokens=2,

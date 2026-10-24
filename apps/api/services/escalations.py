@@ -40,9 +40,7 @@ async def claim_tenant_escalation(
 ) -> Escalation:
     existing = await get_escalation(conn, tenant_id, escalation_id)
     if existing is None:
-        raise NotFoundError(
-            f"escalation {escalation_id} not found", code="escalation_not_found"
-        )
+        raise NotFoundError(f"escalation {escalation_id} not found", code="escalation_not_found")
     result = await claim_escalation(conn, tenant_id, escalation_id, agent_user_id)
     if result is None:
         raise ConflictError(
@@ -59,9 +57,7 @@ async def resolve_tenant_escalation(
 ) -> Escalation:
     existing = await get_escalation(conn, tenant_id, escalation_id)
     if existing is None:
-        raise NotFoundError(
-            f"escalation {escalation_id} not found", code="escalation_not_found"
-        )
+        raise NotFoundError(f"escalation {escalation_id} not found", code="escalation_not_found")
     result = await resolve_escalation(conn, tenant_id, escalation_id)
     if result is None:
         raise ConflictError(

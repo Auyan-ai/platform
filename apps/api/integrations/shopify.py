@@ -29,6 +29,14 @@ from apps.api.integrations.base import (
     MutationNotApplied,
 )
 from apps.api.integrations.registry import IntegrationRegistry
+from apps.api.services.returns import (
+    CalculatedLine,
+    ExchangeVariant,
+    ReturnableLine,
+    ReturnableOrder,
+    ReturnCalculation,
+    ReturnPlan,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -641,77 +649,136 @@ class ShopifyClient:
             raise ShopifyGraphQLError(body["errors"])
         return body["data"]  # type: ignore[no-any-return]
 
-    async def start_return(
+    async def get_returnable_order(self, order_id: int) -> ReturnableOrder:
+        """Pedido con sus líneas devolvibles (enviadas y sin devolver), su envío, su entrega
+        y las etiquetas de cada producto. Scope `read_returns`."""
+        async with httpx.AsyncClient() as client:
+            data = await self._graphql(
+                client, _RETURNABLE_ORDER_QUERY, {"orderId": f"gid://shopify/Order/{order_id}"}
+            )
+        if data.get("order") is None:
+            raise ShopifyActionError(f"order_not_found: {order_id}")
+        return returnable_order_from_graphql(data)
+
+    async def get_exchange_variants(self, variant_ids: list[int]) -> tuple[ExchangeVariant, ...]:
+        """Variantes que se ofrecen a cambio; las que no existen no vienen."""
+        if not variant_ids:
+            return ()
+        async with httpx.AsyncClient() as client:
+            data = await self._graphql(
+                client,
+                _VARIANTS_QUERY,
+                {"ids": [f"gid://shopify/ProductVariant/{v}" for v in variant_ids]},
+            )
+        return exchange_variants_from_graphql(data)
+
+    async def calculate_return(
         self,
         order_id: int,
         *,
-        line_item_id: int,
-        quantity: int,
-        reason: str = "other",
-    ) -> dict[str, Any]:
-        """Inicia la devolución de un artículo. Acción L3.
-
-        Returns solo existe en GraphQL (`returnCreate`; no hay recurso REST). La
-        devolución se hace sobre el *fulfillment line item* → se busca el del
-        `line_item_id` entre los returnable fulfillments del pedido (solo artículos
-        ya enviados y aún no devueltos). El motivo se mapea a una definición de la
-        librería de Shopify (`returnReasonDefinitionId`) + `returnReasonNote` libre.
-        Scopes: `read_returns` + `write_returns`.
-        Devuelve `{"id": int, "status": str, "name": str}`.
-        """
-        order_gid = f"gid://shopify/Order/{order_id}"
-        line_item_gid = f"gid://shopify/LineItem/{line_item_id}"
-        async with httpx.AsyncClient() as client:
-            data = await self._graphql(client, _RETURNABLE_QUERY, {"orderId": order_gid})
-            match = None
-            for fulfillment in data["returnableFulfillments"]["nodes"]:
-                for item in fulfillment["returnableFulfillmentLineItems"]["nodes"]:
-                    if item["fulfillmentLineItem"]["lineItem"]["id"] == line_item_gid:
-                        match = item
-                        break
-                if match:
-                    break
-            if match is None:
-                raise ShopifyActionError("line_item_not_returnable")
-            if quantity > int(match["quantity"]):
-                raise ShopifyActionError("return_quantity_exceeds_returnable")
-
-            handle = return_reason_handle(reason)
-            reasons = await self._graphql(
-                client, _RETURN_REASON_QUERY, {"handles": [handle, _FALLBACK_REASON_HANDLE]}
-            )
-            ids = {n["handle"]: n["id"] for n in reasons["returnReasonDefinitions"]["nodes"]}
-            reason_id = ids.get(handle) or ids.get(_FALLBACK_REASON_HANDLE)
-            if reason_id is None:
-                raise ShopifyActionError("return_reason_definition_not_found")
-            data = await self._graphql(
-                client,
-                _RETURN_CREATE_MUTATION,
-                {
-                    "input": {
-                        "orderId": order_gid,
-                        "returnLineItems": [
-                            {
-                                "fulfillmentLineItemId": match["fulfillmentLineItem"]["id"],
-                                "quantity": quantity,
-                                # Shopify exige motivo: `returnReason` (enum) está
-                                # deprecado → definición de su librería + nota libre.
-                                "returnReasonDefinitionId": reason_id,
-                                "returnReasonNote": reason[:255],
-                            }
-                        ],
-                    }
-                },
-            )
-            result = data["returnCreate"]
-            if result["userErrors"]:
-                raise ShopifyActionError(f"return_create_failed: {result['userErrors']}")
-            ret = result["return"]
-            return {
-                "id": int(str(ret["id"]).rsplit("/", 1)[-1]),
-                "status": str(ret["status"]).lower(),
-                "name": ret.get("name"),
+        lines: list[tuple[str, int]],
+        exchange: list[tuple[int, int]],
+    ) -> ReturnCalculation:
+        """Importes de Shopify para devolver `lines` (fulfillment line item, cantidad) y
+        enviar `exchange` (variante, cantidad), sin crear nada. Scope `read_returns`."""
+        variables = {
+            "input": {
+                "orderId": f"gid://shopify/Order/{order_id}",
+                "returnLineItems": [
+                    {"fulfillmentLineItemId": fli, "quantity": qty} for fli, qty in lines
+                ],
+                "exchangeLineItems": [
+                    {"variantId": f"gid://shopify/ProductVariant/{v}", "quantity": qty}
+                    for v, qty in exchange
+                ],
             }
+        }
+        async with httpx.AsyncClient() as client:
+            data = await self._graphql(client, _RETURN_CALCULATE_QUERY, variables)
+        return return_calculation_from_graphql(data["returnCalculate"])
+
+    async def find_return(self, plan: ReturnPlan) -> CreatedReturn | None:
+        """La devolución que creó `create_return` para este plan, por la marca
+        `return_marker(plan)` que lleva cada una de sus líneas; None si consta que no
+        existe. Pagina todas las devoluciones del pedido: si no puede leerlas enteras,
+        lanza `ShopifyActionError` en vez de decir que no existe."""
+        marker = return_marker(plan)
+        after: str | None = None
+        async with httpx.AsyncClient() as client:
+            for _ in range(_RETURN_PAGES):
+                data = await self._graphql(
+                    client,
+                    _ORDER_RETURNS_QUERY,
+                    {"id": f"gid://shopify/Order/{plan.order_id}", "after": after},
+                )
+                order = data.get("order")
+                if order is None:
+                    raise ShopifyActionError(f"order_not_found: {plan.order_id}")
+                page = order["returns"]
+                for ret in page["nodes"]:
+                    # Todas las líneas de una devolución de Auyan llevan la marca: basta
+                    # con la primera.
+                    notes = [
+                        str(n.get("returnReasonNote") or "")
+                        for n in ret["returnLineItems"]["nodes"]
+                    ]
+                    if any(note.startswith(marker) for note in notes):
+                        return CreatedReturn(
+                            return_id=_gid_int(ret["id"]),
+                            name=str(ret.get("name") or ""),
+                            status=str(ret["status"]).lower(),
+                            reason_handle=plan.shopify_reason or _FALLBACK_REASON_HANDLE,
+                        )
+                if not page["pageInfo"]["hasNextPage"]:
+                    return None
+                after = page["pageInfo"]["endCursor"]
+        raise ShopifyActionError(f"returns_list_truncated: más de {_RETURN_PAGES} páginas")
+
+    async def create_return(self, plan: ReturnPlan) -> CreatedReturn:
+        """Crea la devolución (y el cambio, si lo hay) aprobada en `plan`. Acción L3.
+
+        `returnCreate` la deja en `OPEN`. El motivo es la definición de la librería de
+        Shopify que eligió la tienda; si Shopify ya no la tiene, `other-reason`.
+        Scope `write_returns`.
+
+        Lo que falla antes de enviar `returnCreate`, o sus `userErrors`, es
+        `ShopifyRejected`: consta que no se creó. Un error tras enviarla (timeout, 5xx,
+        `errors` de GraphQL) se propaga tal cual: no se sabe si se creó y quien llama lo
+        comprueba con `find_return`.
+        """
+        wanted = plan.shopify_reason or _FALLBACK_REASON_HANDLE
+        async with httpx.AsyncClient() as client:
+            try:
+                reasons = await self._graphql(
+                    client, _RETURN_REASON_QUERY, {"handles": [wanted, _FALLBACK_REASON_HANDLE]}
+                )
+            except (ShopifyActionError, httpx.HTTPError) as exc:
+                raise ShopifyRejected(f"{type(exc).__name__}: {exc}") from exc
+            ids = {n["handle"]: n["id"] for n in reasons["returnReasonDefinitions"]["nodes"]}
+            reason_id = ids.get(wanted) or ids.get(_FALLBACK_REASON_HANDLE)
+            if reason_id is None:
+                raise ShopifyRejected("return_reason_definition_not_found")
+            data = await self._graphql(
+                client, _RETURN_CREATE_MUTATION, {"input": return_input(plan, reason_id)}
+            )
+        result = data["returnCreate"]
+        if result["userErrors"]:
+            raise ShopifyRejected(f"return_create_failed: {result['userErrors']}")
+        ret = result["return"]
+        return CreatedReturn(
+            return_id=int(str(ret["id"]).rsplit("/", 1)[-1]),
+            name=str(ret.get("name") or ""),
+            status=str(ret["status"]).lower(),
+            reason_handle=wanted if ids.get(wanted) else _FALLBACK_REASON_HANDLE,
+        )
+
+    async def append_order_note(self, order_id: int, text: str) -> None:
+        """Añade `text` a la nota interna del pedido sin borrar lo que hubiera. Si la nota
+        ya lo lleva no la toca: repetirla no duplica el texto."""
+        current = str((await self.get_order(order_id)).get("note") or "").strip()
+        if text.strip() in current:
+            return
+        await self.add_order_note(order_id, f"{current}\n\n{text}" if current else text)
 
 
 class ShopifyActionError(RuntimeError):
@@ -931,31 +998,141 @@ def order_snapshot_from_graphql(node: dict[str, Any]) -> OrderSnapshot:
     )
 
 
-# Motivo libre del agente → handle de la librería de motivos de Shopify.
-_REASON_HANDLES: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("small", "pequeñ", "corto", "estrech"), "too-small"),
-    (("large", "big", "grande", "largo", "ancho"), "too-big"),
-    (
-        ("defect", "damag", "broken", "roto", "rota", "dañad", "mancha", "tara"),
-        "damaged-or-defective",
-    ),
-    (("wrong", "equivocad", "incorrect"), "received-the-wrong-item"),
-    (("described", "descri", "different", "distint"), "item-not-as-described"),
-    (("unwanted", "changed", "mind", "no lo quiero", "arrepent", "cambi"), "changed-my-mind"),
-    (("style", "estilo"), "style"),
-    (("color", "colour"), "color"),
-    (("late", "tarde", "retras"), "arrived-late"),
-)
 _FALLBACK_REASON_HANDLE = "other-reason"
 
 
-def return_reason_handle(reason: str) -> str:
-    """Handle de la librería de motivos de devolución para un motivo en texto libre."""
-    text = reason.strip().lower().replace("_", " ")
-    for needles, handle in _REASON_HANDLES:
-        if any(n in text for n in needles):
-            return handle
-    return _FALLBACK_REASON_HANDLE
+def _gid_int(gid: str) -> int:
+    return int(str(gid).rsplit("/", 1)[-1])
+
+
+def _parse_dt(value: str) -> _dt.datetime:
+    return _dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def returnable_order_from_graphql(data: dict[str, Any]) -> ReturnableOrder:
+    """Parsea `_RETURNABLE_ORDER_QUERY`. Importes y moneda: los de presentación (lo que
+    pagó el cliente). Una línea repartida en varios envíos queda con el primero."""
+    order = data["order"]
+    lines: dict[int, ReturnableLine] = {}
+    for returnable in data["returnableFulfillments"]["nodes"]:
+        fulfillment = returnable["fulfillment"]
+        delivered = fulfillment.get("deliveredAt")
+        for node in returnable["returnableFulfillmentLineItems"]["nodes"]:
+            fli = node["fulfillmentLineItem"]
+            item = fli["lineItem"]
+            product = item.get("product")
+            line_id = _gid_int(item["id"])
+            lines.setdefault(
+                line_id,
+                ReturnableLine(
+                    line_item_id=line_id,
+                    fulfillment_line_item_id=str(fli["id"]),
+                    title=str(item.get("name") or item.get("title") or ""),
+                    returnable_quantity=int(node["quantity"]),
+                    product_id=_gid_int(product["id"]) if product else None,
+                    product_tags=frozenset(product.get("tags") or ()) if product else None,
+                    shipped_at=_parse_dt(fulfillment["createdAt"]),
+                    delivered_at=_parse_dt(delivered) if delivered else None,
+                ),
+            )
+    return ReturnableOrder(
+        order_id=_gid_int(order["id"]),
+        name=str(order.get("name") or ""),
+        ordered_at=_parse_dt(order["processedAt"]),
+        currency=str(order["presentmentCurrencyCode"]),
+        taxes_included=bool(order.get("taxesIncluded")),
+        cancelled=order.get("cancelledAt") is not None,
+        lines=tuple(lines.values()),
+    )
+
+
+def _sellable_stock(node: dict[str, Any]) -> int | None:
+    """Unidades vendibles si la tienda controla stock y no vende sin él; si no, sin tope."""
+    tracked = bool((node.get("inventoryItem") or {}).get("tracked"))
+    if node.get("inventoryPolicy") != "DENY" or not tracked:
+        return None
+    quantity = node.get("inventoryQuantity")
+    return int(quantity) if quantity is not None else None
+
+
+def exchange_variants_from_graphql(data: dict[str, Any]) -> tuple[ExchangeVariant, ...]:
+    return tuple(
+        ExchangeVariant(
+            variant_id=_gid_int(node["id"]),
+            product_id=_gid_int(node["product"]["id"]),
+            title=str(node.get("displayName") or node.get("title") or ""),
+            available=bool(node.get("availableForSale")),
+            stock=_sellable_stock(node),
+        )
+        for node in data.get("nodes") or []
+        if node and node.get("product")
+    )
+
+
+def _presentment(money_bag: dict[str, Any]) -> tuple[Decimal, str]:
+    money = money_bag["presentmentMoney"]
+    return Decimal(str(money["amount"])), str(money["currencyCode"])
+
+
+def return_calculation_from_graphql(node: dict[str, Any]) -> ReturnCalculation:
+    currencies: set[str] = set()
+
+    def _line(raw: dict[str, Any], key: str) -> CalculatedLine:
+        subtotal, cur = _presentment(raw["subtotalSet"])
+        tax, tax_cur = _presentment(raw["totalTaxSet"])
+        currencies.update((cur, tax_cur))
+        return CalculatedLine(key=key, quantity=int(raw["quantity"]), subtotal=subtotal, tax=tax)
+
+    returned = tuple(_line(r, str(r["fulfillmentLineItem"]["id"])) for r in node["returnLineItems"])
+    exchanged = tuple(_line(e, str(e["variant"]["id"])) for e in node["exchangeLineItems"])
+    if len(currencies) != 1:
+        raise ShopifyActionError(f"return_calculation_currency_ambiguous: {currencies}")
+    return ReturnCalculation(currency=currencies.pop(), returned=returned, exchanged=exchanged)
+
+
+def return_marker(plan: ReturnPlan) -> str:
+    return f"auyan:{plan.plan_id}"
+
+
+def return_input(plan: ReturnPlan, reason_definition_id: str) -> dict[str, Any]:
+    """`ReturnInput` de `returnCreate` para el plan aprobado."""
+    percent = plan.settlement.restocking_percent
+    restocking = {"restockingFee": {"percentage": float(percent)}} if percent else {}
+    payload: dict[str, Any] = {
+        "orderId": f"gid://shopify/Order/{plan.order_id}",
+        "requestedAt": plan.requested_at.isoformat(),
+        "returnLineItems": [
+            {
+                "fulfillmentLineItemId": line.fulfillment_line_item_id,
+                "quantity": line.quantity,
+                "returnReasonDefinitionId": reason_definition_id,
+                "returnReasonNote": (
+                    f"{return_marker(plan)} · {plan.reason_label} [{plan.reason_code}]"
+                )[:255],
+                **restocking,
+            }
+            for line in plan.lines
+        ],
+    }
+    if plan.exchange_lines:
+        payload["exchangeLineItems"] = [
+            {"variantId": f"gid://shopify/ProductVariant/{ln.variant_id}", "quantity": ln.quantity}
+            for ln in plan.exchange_lines
+        ]
+    fee = plan.shopify_fee
+    if fee is not None:
+        payload["returnShippingFee"] = {
+            "amount": {"amount": str(fee.amount), "currencyCode": fee.currency}
+        }
+    return payload
+
+
+@dataclass(frozen=True)
+class CreatedReturn:
+    return_id: int
+    name: str
+    status: str  # open, requested, closed, declined, canceled
+    reason_handle: str
 
 
 _CANCEL_REASONS = frozenset({"CUSTOMER", "DECLINED", "FRAUD", "INVENTORY", "STAFF", "OTHER"})
@@ -1027,16 +1204,67 @@ query ReturnReasons($handles: [String!]) {
 }
 """
 
-_RETURNABLE_QUERY = """
-query Returnable($orderId: ID!) {
+_RETURNABLE_ORDER_QUERY = """
+query ReturnableOrder($orderId: ID!) {
+  order(id: $orderId) {
+    id name processedAt cancelledAt taxesIncluded presentmentCurrencyCode
+  }
   returnableFulfillments(orderId: $orderId, first: 20) {
     nodes {
+      fulfillment { createdAt deliveredAt }
       returnableFulfillmentLineItems(first: 100) {
         nodes {
           quantity
-          fulfillmentLineItem { id lineItem { id } }
+          fulfillmentLineItem {
+            id
+            lineItem { id name title product { id tags } }
+          }
         }
       }
+    }
+  }
+}
+"""
+
+_RETURN_PAGES = 10
+
+_ORDER_RETURNS_QUERY = """
+query OrderReturns($id: ID!, $after: String) {
+  order(id: $id) {
+    returns(first: 25, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id name status returnLineItems(first: 1) { nodes { returnReasonNote } } }
+    }
+  }
+}
+"""
+
+_VARIANTS_QUERY = """
+query ExchangeVariants($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on ProductVariant {
+      id displayName availableForSale inventoryPolicy inventoryQuantity
+      inventoryItem { tracked }
+      product { id }
+    }
+  }
+}
+"""
+
+_RETURN_CALCULATE_QUERY = """
+query ReturnCalculate($input: CalculateReturnInput!) {
+  returnCalculate(input: $input) {
+    returnLineItems {
+      quantity
+      fulfillmentLineItem { id }
+      subtotalSet { presentmentMoney { amount currencyCode } }
+      totalTaxSet { presentmentMoney { amount currencyCode } }
+    }
+    exchangeLineItems {
+      quantity
+      variant { id }
+      subtotalSet { presentmentMoney { amount currencyCode } }
+      totalTaxSet { presentmentMoney { amount currencyCode } }
     }
   }
 }
@@ -1249,19 +1477,35 @@ class ShopifyAdapter:
         order_id = await self._resolve_order_id(ctx, order_id)
         return await self._client(ctx).find_refund(order_id, idempotency_key)
 
-    async def start_return(
+    async def get_returnable_order(self, ctx: IntegrationContext, order_id: int) -> ReturnableOrder:
+        order_id = await self._resolve_order_id(ctx, order_id)
+        return await self._client(ctx).get_returnable_order(order_id)
+
+    async def get_exchange_variants(
+        self, ctx: IntegrationContext, variant_ids: list[int]
+    ) -> tuple[ExchangeVariant, ...]:
+        return await self._client(ctx).get_exchange_variants(variant_ids)
+
+    async def calculate_return(
         self,
         ctx: IntegrationContext,
         order_id: int,
         *,
-        line_item_id: int,
-        quantity: int,
-        reason: str = "other",
-    ) -> dict[str, Any]:
-        order_id = await self._resolve_order_id(ctx, order_id)
-        return await self._client(ctx).start_return(
-            order_id, line_item_id=line_item_id, quantity=quantity, reason=reason
-        )
+        lines: list[tuple[str, int]],
+        exchange: list[tuple[int, int]],
+    ) -> ReturnCalculation:
+        return await self._client(ctx).calculate_return(order_id, lines=lines, exchange=exchange)
+
+    async def find_return(
+        self, ctx: IntegrationContext, plan: ReturnPlan
+    ) -> CreatedReturn | None:
+        return await self._client(ctx).find_return(plan)
+
+    async def create_return(self, ctx: IntegrationContext, plan: ReturnPlan) -> CreatedReturn:
+        return await self._client(ctx).create_return(plan)
+
+    async def append_order_note(self, ctx: IntegrationContext, order_id: int, text: str) -> None:
+        await self._client(ctx).append_order_note(order_id, text)
 
 
 # Satisface el type-checker: ShopifyAdapter implementa CommerceProvider structuralmente.

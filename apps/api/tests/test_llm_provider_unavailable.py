@@ -155,7 +155,9 @@ class TestAlerter:
         assert len(sender.sent) == 2
         assert sender.sent[0]["to"] == "ops@example.com"
         assert "credit_balance_exhausted" in sender.sent[0]["subject"]
-        errors = [r for r in caplog.records if r.getMessage().startswith("llm_provider_unavailable")]
+        errors = [
+            r for r in caplog.records if r.getMessage().startswith("llm_provider_unavailable")
+        ]
         assert len(errors) == 4
         assert errors[0].category == "llm_provider_unavailable"
 

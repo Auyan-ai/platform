@@ -109,7 +109,11 @@ def _pair(order: str, email: str) -> Pair:
 @pytest.mark.parametrize(
     ("text", "orders", "contacts"),
     [
-        ("Mi pedido es el #1001 y mi email Ana@Tienda.com", ["1001"], [("email", "ana@tienda.com")]),
+        (
+            "Mi pedido es el #1001 y mi email Ana@Tienda.com",
+            ["1001"],
+            [("email", "ana@tienda.com")],
+        ),
         ("pedido 1001, tel 600 111 222", ["1001"], [("phone", "+34600111222")]),
         ("+34 600 111 222 y pedido #20345", ["20345"], [("phone", "+34600111222")]),
         ("ana1234@tienda.com", [], [("email", "ana1234@tienda.com")]),
@@ -349,7 +353,9 @@ def test_policy_defaults_overrides_and_invalid_values() -> None:
     assert guest_policy(None).guest_max_failures_per_conversation == 5
     custom = guest_policy({"extra": {"identity_policy": {"guest_max_failures_per_tenant_hour": 9}}})
     assert custom.guest_max_failures_per_tenant_hour == 9
-    broken = guest_policy({"extra": {"identity_policy": {"guest_max_failures_per_conversation": 0}}})
+    broken = guest_policy(
+        {"extra": {"identity_policy": {"guest_max_failures_per_conversation": 0}}}
+    )
     assert broken.guest_max_failures_per_conversation == 5
 
 

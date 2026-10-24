@@ -208,7 +208,6 @@ def test_render_global_rules_always_has_base_rules() -> None:
     assert "No inventes" in result or "nunca inventes" in result.lower()
 
 
-
 def test_render_global_rules_includes_conciseness_rule() -> None:
     """Hallazgo 8: el agente no debe repetir info ya dada ni re-anunciar
     reverificaciones internas — regla global, aplica a todos los AOPs."""
@@ -509,7 +508,9 @@ def test_compile_aop_steps_parsed_from_frontmatter() -> None:
 def test_compile_aop_steps_included_in_system_prompt() -> None:
     fm = {
         **SAMPLE_FRONTMATTER,
-        "steps": [{"id": "s1", "name": "Verificar pedido", "decision_point": "¿Número disponible?"}],
+        "steps": [
+            {"id": "s1", "name": "Verificar pedido", "decision_point": "¿Número disponible?"}
+        ],
     }
     aop = _make_aop(yaml_frontmatter=fm)
     config = make_tenant_configuration()
@@ -698,9 +699,7 @@ def test_compile_aop_injects_facts_and_playbook() -> None:
     facts = {"business_hours": "L-V 9-18", "support_email": "x@x.com"}
     playbook = {"brand_voice": "Muy formal.", "policies": "Sin devoluciones."}
 
-    with patch(
-        "apps.api.aops.compiler._resolve_tool_definitions", return_value=[]
-    ):
+    with patch("apps.api.aops.compiler._resolve_tool_definitions", return_value=[]):
         result = compile_aop(aop, config, tenant_facts=facts, tenant_playbook=playbook)
 
     assert "L-V 9-18" in result.system_prompt
@@ -713,9 +712,7 @@ def test_compile_aop_includes_anti_injection_rule() -> None:
     aop = _make_aop()
     config = make_tenant_configuration()
 
-    with patch(
-        "apps.api.aops.compiler._resolve_tool_definitions", return_value=[]
-    ):
+    with patch("apps.api.aops.compiler._resolve_tool_definitions", return_value=[]):
         result = compile_aop(aop, config)
 
     prompt = result.system_prompt.lower()
@@ -728,9 +725,7 @@ def test_compile_aop_no_facts_no_playbook_no_extra_blocks() -> None:
     aop = _make_aop()
     config = make_tenant_configuration()
 
-    with patch(
-        "apps.api.aops.compiler._resolve_tool_definitions", return_value=[]
-    ):
+    with patch("apps.api.aops.compiler._resolve_tool_definitions", return_value=[]):
         result = compile_aop(aop, config)
 
     assert "Datos del cliente" not in result.system_prompt

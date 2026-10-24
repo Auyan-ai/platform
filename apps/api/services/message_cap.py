@@ -65,9 +65,7 @@ async def enforce_message_cap(
     if cap <= 0:
         return None
 
-    count = await count_inbound_messages(
-        conn, tenant_id=tenant_id, conversation_id=conversation_id
-    )
+    count = await count_inbound_messages(conn, tenant_id=tenant_id, conversation_id=conversation_id)
     if count <= cap:
         return None
 
@@ -82,9 +80,7 @@ async def enforce_message_cap(
     )
 
     # Reutilizar escalación activa si ya existe (idempotente ante reintentos).
-    existing = await get_open_escalation_for_conversation(
-        conn, tenant_id, conversation_id
-    )
+    existing = await get_open_escalation_for_conversation(conn, tenant_id, conversation_id)
     if existing is not None:
         return AgentOutcome(
             decision="escalate",

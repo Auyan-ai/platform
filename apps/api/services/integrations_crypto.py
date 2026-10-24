@@ -58,7 +58,7 @@ def get_integration_crypto_key(settings: object) -> bytes:
     if secret is None:
         raise RuntimeError(
             "INTEGRATIONS_SECRET_KEY not configured — "
-            "generate with: python -c \"import secrets; print(secrets.token_hex(32))\""
+            'generate with: python -c "import secrets; print(secrets.token_hex(32))"'
         )
     # Soporta pydantic SecretStr (.get_secret_value()) y str planos (tests).
     raw: str = secret.get_secret_value() if hasattr(secret, "get_secret_value") else str(secret)
@@ -67,7 +67,5 @@ def get_integration_crypto_key(settings: object) -> bytes:
     except ValueError as exc:
         raise ValueError("INTEGRATIONS_SECRET_KEY must be a valid hex string") from exc
     if len(key) != 32:
-        raise ValueError(
-            f"INTEGRATIONS_SECRET_KEY must be 32 bytes (64 hex chars), got {len(key)}"
-        )
+        raise ValueError(f"INTEGRATIONS_SECRET_KEY must be 32 bytes (64 hex chars), got {len(key)}")
     return key

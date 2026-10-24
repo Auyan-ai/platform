@@ -93,9 +93,7 @@ class UpdateShippingAddress(Skill):
     identity_scope = "order"
     min_level = "verified"
 
-    async def prepare_approval(
-        self, ctx: SkillContext, raw_input: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def prepare(self, ctx: SkillContext, raw_input: dict[str, Any]) -> dict[str, Any]:
         inputs = UpdateShippingAddressInput.model_validate(raw_input)
         if not ctx.integration_ctx:
             raise ValueError("shopify_not_configured")

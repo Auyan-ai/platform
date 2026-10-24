@@ -79,6 +79,7 @@ def _make_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.setattr("apps.api.routers.escalations.tenant_scope", _fake_tenant_scope)
 
     from apps.api.core.config import get_settings
+
     app = FastAPI()
     register_exception_handlers(app)
     app.dependency_overrides[get_settings] = lambda: FakeAuthSettings()
@@ -88,7 +89,10 @@ def _make_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
 
 class TestListEscalations:
     def test_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        escalations = [make_escalation(), make_escalation(id=UUID("eeeeeeee-0000-0000-0000-000000000000"))]
+        escalations = [
+            make_escalation(),
+            make_escalation(id=UUID("eeeeeeee-0000-0000-0000-000000000000")),
+        ]
 
         async def _fake_list(conn: Any, tenant_id: UUID, **kwargs: Any) -> Any:
             return escalations
@@ -130,7 +134,9 @@ class TestClaimEscalation:
     def test_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         claimed = make_escalation(status="claimed", assigned_user_id=USER_ID)
 
-        async def _fake_claim(conn: Any, tenant_id: UUID, escalation_id: UUID, agent_user_id: UUID) -> Any:
+        async def _fake_claim(
+            conn: Any, tenant_id: UUID, escalation_id: UUID, agent_user_id: UUID
+        ) -> Any:
             return claimed
 
         monkeypatch.setattr("apps.api.routers.escalations.claim_tenant_escalation", _fake_claim)
@@ -146,7 +152,9 @@ class TestClaimEscalation:
         assert body["assigned_user_id"] == str(USER_ID)
 
     def test_not_pending_returns_409(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        async def _fake_claim(conn: Any, tenant_id: UUID, escalation_id: UUID, agent_user_id: UUID) -> Any:
+        async def _fake_claim(
+            conn: Any, tenant_id: UUID, escalation_id: UUID, agent_user_id: UUID
+        ) -> Any:
             raise ConflictError("not pending", code="escalation_not_pending")
 
         monkeypatch.setattr("apps.api.routers.escalations.claim_tenant_escalation", _fake_claim)
@@ -160,7 +168,9 @@ class TestClaimEscalation:
         assert resp.json()["error"] == "escalation_not_pending"
 
     def test_not_found_returns_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        async def _fake_claim(conn: Any, tenant_id: UUID, escalation_id: UUID, agent_user_id: UUID) -> Any:
+        async def _fake_claim(
+            conn: Any, tenant_id: UUID, escalation_id: UUID, agent_user_id: UUID
+        ) -> Any:
             raise NotFoundError("not found", code="escalation_not_found")
 
         monkeypatch.setattr("apps.api.routers.escalations.claim_tenant_escalation", _fake_claim)

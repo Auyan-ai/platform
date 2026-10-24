@@ -57,9 +57,7 @@ class _SecretLike:
 
 
 def _sign(body: bytes) -> str:
-    return "sha256=" + hmac.new(
-        WEBHOOK_SECRET.encode(), body, hashlib.sha256
-    ).hexdigest()
+    return "sha256=" + hmac.new(WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
 
 
 def _outcome_respond() -> AgentOutcome:
@@ -128,9 +126,7 @@ def _patch_db(
     inbound_msg=None,
 ) -> None:
     """Parchea bootstrap_connection, tenant_scope y queries en el módulo del router."""
-    monkeypatch.setattr(
-        f"{ROUTER_MODULE}.bootstrap_connection", make_fake_bootstrap_connection()
-    )
+    monkeypatch.setattr(f"{ROUTER_MODULE}.bootstrap_connection", make_fake_bootstrap_connection())
     monkeypatch.setattr(f"{ROUTER_MODULE}.tenant_scope", make_fake_tenant_scope())
     monkeypatch.setattr(
         f"{ROUTER_MODULE}.get_tenant_configuration",
@@ -164,13 +160,9 @@ def _patch_db(
     )
     monkeypatch.setattr(
         f"{ROUTER_MODULE}.insert_message",
-        AsyncMock(
-            return_value=inbound_msg if inbound_msg else make_message(id=INBOUND_MSG_ID)
-        ),
+        AsyncMock(return_value=inbound_msg if inbound_msg else make_message(id=INBOUND_MSG_ID)),
     )
-    monkeypatch.setattr(
-        f"{ROUTER_MODULE}.update_conversation_last_message", AsyncMock()
-    )
+    monkeypatch.setattr(f"{ROUTER_MODULE}.update_conversation_last_message", AsyncMock())
 
 
 class TestInboundEndpoint:
@@ -416,9 +408,7 @@ class TestInboundEndpoint:
         _patch_db(monkeypatch, tenant=None)  # get_tenant_by_slug devuelve None
         # Pero create_end_customer etc no se va a llamar porque cortamos antes
         # Reparchamos get_tenant_by_slug a None
-        monkeypatch.setattr(
-            f"{ROUTER_MODULE}.get_tenant_by_slug", AsyncMock(return_value=None)
-        )
+        monkeypatch.setattr(f"{ROUTER_MODULE}.get_tenant_by_slug", AsyncMock(return_value=None))
 
         body = json.dumps(_valid_payload()).encode()
         app = _make_app(agent_service=service)
@@ -504,18 +494,33 @@ class TestMultiTurn:
         find_by_external_mock = AsyncMock(return_value=None)
         create_conv_mock = AsyncMock()
 
-        monkeypatch.setattr(f"{ROUTER_MODULE}.bootstrap_connection", make_fake_bootstrap_connection())
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.bootstrap_connection", make_fake_bootstrap_connection()
+        )
         monkeypatch.setattr(f"{ROUTER_MODULE}.tenant_scope", make_fake_tenant_scope())
-        monkeypatch.setattr(f"{ROUTER_MODULE}.get_tenant_by_slug", AsyncMock(return_value=make_tenant()))
-        monkeypatch.setattr(f"{ROUTER_MODULE}.get_tenant_configuration", AsyncMock(return_value=make_tenant_configuration()))
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.get_tenant_by_slug", AsyncMock(return_value=make_tenant())
+        )
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.get_tenant_configuration",
+            AsyncMock(return_value=make_tenant_configuration()),
+        )
         monkeypatch.setattr(f"{ROUTER_MODULE}.enforce_rate_limit", AsyncMock())
         monkeypatch.setattr(f"{ROUTER_MODULE}.check_tenant_budget", AsyncMock())
-        monkeypatch.setattr(f"{ROUTER_MODULE}.find_end_customer_by_email", AsyncMock(return_value=make_end_customer()))
-        monkeypatch.setattr(f"{ROUTER_MODULE}.create_end_customer", AsyncMock(return_value=make_end_customer()))
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.find_end_customer_by_email",
+            AsyncMock(return_value=make_end_customer()),
+        )
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.create_end_customer", AsyncMock(return_value=make_end_customer())
+        )
         monkeypatch.setattr(f"{ROUTER_MODULE}.find_conversation_by_id", find_by_id_mock)
         monkeypatch.setattr(f"{ROUTER_MODULE}.find_conversation_by_external", find_by_external_mock)
         monkeypatch.setattr(f"{ROUTER_MODULE}.create_conversation", create_conv_mock)
-        monkeypatch.setattr(f"{ROUTER_MODULE}.insert_message", AsyncMock(return_value=make_message(id=INBOUND_MSG_ID)))
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.insert_message",
+            AsyncMock(return_value=make_message(id=INBOUND_MSG_ID)),
+        )
         monkeypatch.setattr(f"{ROUTER_MODULE}.update_conversation_last_message", AsyncMock())
 
         payload = {
@@ -547,18 +552,36 @@ class TestMultiTurn:
         service.process_inbound = AsyncMock(return_value=_outcome_respond())
         create_conv_mock = AsyncMock(return_value=make_conversation())
 
-        monkeypatch.setattr(f"{ROUTER_MODULE}.bootstrap_connection", make_fake_bootstrap_connection())
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.bootstrap_connection", make_fake_bootstrap_connection()
+        )
         monkeypatch.setattr(f"{ROUTER_MODULE}.tenant_scope", make_fake_tenant_scope())
-        monkeypatch.setattr(f"{ROUTER_MODULE}.get_tenant_by_slug", AsyncMock(return_value=make_tenant()))
-        monkeypatch.setattr(f"{ROUTER_MODULE}.get_tenant_configuration", AsyncMock(return_value=make_tenant_configuration()))
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.get_tenant_by_slug", AsyncMock(return_value=make_tenant())
+        )
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.get_tenant_configuration",
+            AsyncMock(return_value=make_tenant_configuration()),
+        )
         monkeypatch.setattr(f"{ROUTER_MODULE}.enforce_rate_limit", AsyncMock())
         monkeypatch.setattr(f"{ROUTER_MODULE}.check_tenant_budget", AsyncMock())
-        monkeypatch.setattr(f"{ROUTER_MODULE}.find_end_customer_by_email", AsyncMock(return_value=None))
-        monkeypatch.setattr(f"{ROUTER_MODULE}.create_end_customer", AsyncMock(return_value=make_end_customer()))
-        monkeypatch.setattr(f"{ROUTER_MODULE}.find_conversation_by_id", AsyncMock(return_value=None))
-        monkeypatch.setattr(f"{ROUTER_MODULE}.find_conversation_by_external", AsyncMock(return_value=None))
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.find_end_customer_by_email", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.create_end_customer", AsyncMock(return_value=make_end_customer())
+        )
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.find_conversation_by_id", AsyncMock(return_value=None)
+        )
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.find_conversation_by_external", AsyncMock(return_value=None)
+        )
         monkeypatch.setattr(f"{ROUTER_MODULE}.create_conversation", create_conv_mock)
-        monkeypatch.setattr(f"{ROUTER_MODULE}.insert_message", AsyncMock(return_value=make_message(id=INBOUND_MSG_ID)))
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.insert_message",
+            AsyncMock(return_value=make_message(id=INBOUND_MSG_ID)),
+        )
         monkeypatch.setattr(f"{ROUTER_MODULE}.update_conversation_last_message", AsyncMock())
 
         payload = {

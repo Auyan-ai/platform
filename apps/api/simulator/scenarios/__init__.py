@@ -132,9 +132,7 @@ async def seed_scenarios(conn: asyncpg.Connection, tenant_id: UUID) -> dict[str,
 
         profile_key = sc["profile"]
         if profile_key not in profile_map:
-            logger.warning(
-                "sim_seed_missing_profile scenario=%s profile=%s", sc["id"], profile_key
-            )
+            logger.warning("sim_seed_missing_profile scenario=%s profile=%s", sc["id"], profile_key)
             continue
 
         # Para el seed, el initial_message de la persona viene del scenario

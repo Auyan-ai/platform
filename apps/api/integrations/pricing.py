@@ -81,9 +81,7 @@ def fallback_rates() -> ModelRates:
 def models_without_price(models: dict[str, str]) -> dict[str, str]:
     """Subconjunto de `rol -> modelo` cuyo modelo no tiene fila en la tabla."""
     return {
-        role: model
-        for role, model in models.items()
-        if model not in LLM_PRICING_PER_MILLION_TOKENS
+        role: model for role, model in models.items() if model not in LLM_PRICING_PER_MILLION_TOKENS
     }
 
 

@@ -71,9 +71,7 @@ def test_build_cutoffs_tenant_override_respected() -> None:
 
 
 def test_build_cutoffs_partial_override_keeps_other_defaults() -> None:
-    config = make_tenant_configuration(
-        extra={"conversation_timeouts": {"chat": 1800}}
-    )
+    config = make_tenant_configuration(extra={"conversation_timeouts": {"chat": 1800}})
     cutoffs, _ = _build_cutoffs(config, NOW)
     assert cutoffs["chat"] == NOW - timedelta(seconds=1800)
     # email no fue overrideado → sigue con el default del módulo
@@ -117,7 +115,9 @@ async def test_close_abandoned_marks_stale_conversations() -> None:
     with (
         patch("apps.api.services.cleanup.tenant_scope") as mock_scope,
         patch("apps.api.services.cleanup.get_stale_conversations", return_value=candidates),
-        patch("apps.api.services.cleanup.mark_conversations_abandoned", return_value=1) as mock_mark,
+        patch(
+            "apps.api.services.cleanup.mark_conversations_abandoned", return_value=1
+        ) as mock_mark,
         patch("apps.api.services.cleanup.get_conversation", AsyncMock(return_value=None)),
         patch("apps.api.services.cleanup.datetime") as mock_dt,
     ):
@@ -226,7 +226,9 @@ async def test_close_abandoned_filters_by_channel_timeout() -> None:
     with (
         patch("apps.api.services.cleanup.tenant_scope") as mock_scope,
         patch("apps.api.services.cleanup.get_stale_conversations", return_value=candidates),
-        patch("apps.api.services.cleanup.mark_conversations_abandoned", return_value=0) as mock_mark,
+        patch(
+            "apps.api.services.cleanup.mark_conversations_abandoned", return_value=0
+        ) as mock_mark,
         patch("apps.api.services.cleanup.datetime") as mock_dt,
     ):
         mock_dt.now.return_value = NOW
@@ -242,16 +244,16 @@ async def test_close_abandoned_filters_by_channel_timeout() -> None:
 @pytest.mark.asyncio
 async def test_close_abandoned_tenant_override_timeout() -> None:
     """Un tenant con email timeout=3600s (1h) cierra un email de 2h de inactividad."""
-    config = make_tenant_configuration(
-        extra={"conversation_timeouts": {"email": 3600}}
-    )
+    config = make_tenant_configuration(extra={"conversation_timeouts": {"email": 3600}})
     stale_email = NOW - timedelta(hours=2)
     candidates = [(CONV_C, "email", stale_email.replace(tzinfo=None))]
 
     with (
         patch("apps.api.services.cleanup.tenant_scope") as mock_scope,
         patch("apps.api.services.cleanup.get_stale_conversations", return_value=candidates),
-        patch("apps.api.services.cleanup.mark_conversations_abandoned", return_value=1) as mock_mark,
+        patch(
+            "apps.api.services.cleanup.mark_conversations_abandoned", return_value=1
+        ) as mock_mark,
         patch("apps.api.services.cleanup.get_conversation", AsyncMock(return_value=None)),
         patch("apps.api.services.cleanup.get_conversation_language", AsyncMock(return_value=None)),
         patch("apps.api.services.cleanup.datetime") as mock_dt,
@@ -370,15 +372,15 @@ def test_build_nudge_cutoffs_returns_ranges_when_enabled() -> None:
     cutoff_min, cutoff_max = default_range
     # cutoff_min = NOW - timeout_default; cutoff_max = NOW - (timeout - nudge_before)
     expected_min = NOW - timedelta(seconds=DEFAULT_TIMEOUTS["default"])
-    expected_max = NOW - timedelta(seconds=DEFAULT_TIMEOUTS["default"] - DEFAULT_NUDGE_BEFORE_SECONDS)
+    expected_max = NOW - timedelta(
+        seconds=DEFAULT_TIMEOUTS["default"] - DEFAULT_NUDGE_BEFORE_SECONDS
+    )
     assert cutoff_min == expected_min
     assert cutoff_max == expected_max
 
 
 def test_build_nudge_cutoffs_custom_nudge_before() -> None:
-    config = make_tenant_configuration(
-        extra={"nudge_enabled": True, "nudge_before_seconds": 7200}
-    )
+    config = make_tenant_configuration(extra={"nudge_enabled": True, "nudge_before_seconds": 7200})
     result = _build_nudge_cutoffs(config, NOW)
     assert result is not None
     _, default_range = result
@@ -550,7 +552,11 @@ async def test_run_abandoned_cleanup_calls_nudge_before_close() -> None:
     [
         ("en", {}, fixed_text("nudge", "en")),
         ("fr", {}, fixed_text("nudge", "fr")),
-        (None, {"languages": {"default": "ca", "supported": ["ca", "es"]}}, fixed_text("nudge", "ca")),
+        (
+            None,
+            {"languages": {"default": "ca", "supported": ["ca", "es"]}},
+            fixed_text("nudge", "ca"),
+        ),
         ("en", {"nudge_message": "Hola, ¿seguimos?"}, fixed_text("nudge", "en")),
         ("es", {"nudge_message": "Hola, ¿seguimos?"}, "Hola, ¿seguimos?"),
         ("en", {"nudge_message": {"en": "Still there?"}}, "Still there?"),

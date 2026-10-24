@@ -121,7 +121,6 @@ class TestGorgiasClient:
         with pytest.raises(ValueError):
             GorgiasClient(domain="x")
 
-
     @pytest.mark.asyncio
     async def test_send_message(self) -> None:
         client = GorgiasClient(domain="d", oauth_token="t")
@@ -170,9 +169,7 @@ class TestGorgiasClient:
         mock_resp.raise_for_status = MagicMock()
 
         with patch("httpx.AsyncClient") as MockHTTP:
-            MockHTTP.return_value.__aenter__.return_value.post = AsyncMock(
-                return_value=mock_resp
-            )
+            MockHTTP.return_value.__aenter__.return_value.post = AsyncMock(return_value=mock_resp)
             await client.send_internal_note(123, "nota interna")
 
         call_kwargs = MockHTTP.return_value.__aenter__.return_value.post.call_args
@@ -187,9 +184,7 @@ class TestGorgiasClient:
         mock_resp.raise_for_status = MagicMock()
 
         with patch("httpx.AsyncClient") as MockHTTP:
-            MockHTTP.return_value.__aenter__.return_value.put = AsyncMock(
-                return_value=mock_resp
-            )
+            MockHTTP.return_value.__aenter__.return_value.put = AsyncMock(return_value=mock_resp)
             await client.update_status(123, "closed")
 
         call_kwargs = MockHTTP.return_value.__aenter__.return_value.put.call_args
@@ -202,9 +197,7 @@ class TestGorgiasClient:
         mock_resp.raise_for_status = MagicMock()
 
         with patch("httpx.AsyncClient") as MockHTTP:
-            MockHTTP.return_value.__aenter__.return_value.put = AsyncMock(
-                return_value=mock_resp
-            )
+            MockHTTP.return_value.__aenter__.return_value.put = AsyncMock(return_value=mock_resp)
             await client.assign_to_team(123, 99)
 
         call_kwargs = MockHTTP.return_value.__aenter__.return_value.put.call_args

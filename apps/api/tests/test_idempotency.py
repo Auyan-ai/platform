@@ -102,9 +102,7 @@ def _outcome_respond() -> AgentOutcome:
     )
 
 
-def _make_idem_record(
-    status: str = "done", response_body: dict | None = None
-) -> IdempotencyRecord:
+def _make_idem_record(status: str = "done", response_body: dict | None = None) -> IdempotencyRecord:
     """Factory para IdempotencyRecord de test."""
     body = response_body or {
         "ok": True,
@@ -141,9 +139,7 @@ def _patch_db_with_idem(
 
     Devuelve (try_insert_mock, get_record_mock, complete_mock, delete_mock).
     """
-    monkeypatch.setattr(
-        f"{ROUTER_MODULE}.bootstrap_connection", make_fake_bootstrap_connection()
-    )
+    monkeypatch.setattr(f"{ROUTER_MODULE}.bootstrap_connection", make_fake_bootstrap_connection())
     monkeypatch.setattr(f"{ROUTER_MODULE}.tenant_scope", make_fake_tenant_scope())
     monkeypatch.setattr(
         f"{ROUTER_MODULE}.get_tenant_by_slug", AsyncMock(return_value=make_tenant())
@@ -162,9 +158,7 @@ def _patch_db_with_idem(
         f"{ROUTER_MODULE}.create_end_customer",
         AsyncMock(return_value=make_end_customer()),
     )
-    monkeypatch.setattr(
-        f"{ROUTER_MODULE}.find_conversation_by_id", AsyncMock(return_value=None)
-    )
+    monkeypatch.setattr(f"{ROUTER_MODULE}.find_conversation_by_id", AsyncMock(return_value=None))
     monkeypatch.setattr(
         f"{ROUTER_MODULE}.find_conversation_by_external", AsyncMock(return_value=None)
     )
@@ -176,27 +170,17 @@ def _patch_db_with_idem(
         f"{ROUTER_MODULE}.insert_message",
         AsyncMock(return_value=make_message(id=INBOUND_MSG_ID)),
     )
-    monkeypatch.setattr(
-        f"{ROUTER_MODULE}.update_conversation_last_message", AsyncMock()
-    )
+    monkeypatch.setattr(f"{ROUTER_MODULE}.update_conversation_last_message", AsyncMock())
 
     try_insert_mock = AsyncMock(return_value=try_insert_return)
     get_record_mock = AsyncMock(return_value=get_record_return)
     complete_mock = AsyncMock()
     delete_mock = AsyncMock()
 
-    monkeypatch.setattr(
-        f"{ROUTER_MODULE}.try_insert_idempotency_key", try_insert_mock
-    )
-    monkeypatch.setattr(
-        f"{ROUTER_MODULE}.get_idempotency_record", get_record_mock
-    )
-    monkeypatch.setattr(
-        f"{ROUTER_MODULE}.complete_idempotency_key", complete_mock
-    )
-    monkeypatch.setattr(
-        f"{ROUTER_MODULE}.delete_idempotency_key", delete_mock
-    )
+    monkeypatch.setattr(f"{ROUTER_MODULE}.try_insert_idempotency_key", try_insert_mock)
+    monkeypatch.setattr(f"{ROUTER_MODULE}.get_idempotency_record", get_record_mock)
+    monkeypatch.setattr(f"{ROUTER_MODULE}.complete_idempotency_key", complete_mock)
+    monkeypatch.setattr(f"{ROUTER_MODULE}.delete_idempotency_key", delete_mock)
 
     return try_insert_mock, get_record_mock, complete_mock, delete_mock
 
@@ -286,9 +270,7 @@ class TestIdempotencyFirstRequest:
         service = AsyncMock()
         service.process_inbound = AsyncMock(return_value=_outcome_respond())
         pending_record = _make_idem_record(status="pending", response_body=None)
-        _, _, complete_mock, _ = _patch_db_with_idem(
-            monkeypatch, try_insert_return=pending_record
-        )
+        _, _, complete_mock, _ = _patch_db_with_idem(monkeypatch, try_insert_return=pending_record)
 
         body = json.dumps(_valid_payload()).encode()
         app = _make_app(agent_service=service)
@@ -305,9 +287,16 @@ class TestIdempotencyFirstRequest:
 
         stored_body = complete_mock.call_args.kwargs["response_body"]
         required_keys = {
-            "ok", "decision", "conversation_id", "inbound_message_id",
-            "output_message_id", "escalation_id", "response_text",
-            "escalation_reason", "trace_id", "error",
+            "ok",
+            "decision",
+            "conversation_id",
+            "inbound_message_id",
+            "output_message_id",
+            "escalation_id",
+            "response_text",
+            "escalation_reason",
+            "trace_id",
+            "error",
         }
         assert required_keys.issubset(stored_body.keys())
 

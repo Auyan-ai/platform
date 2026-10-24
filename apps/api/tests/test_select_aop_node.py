@@ -238,7 +238,13 @@ def test_turn_number_counts_customer_messages() -> None:
 
 
 @pytest.fixture
-def fake_deps(fake_anthropic: AsyncMock, fake_openai: AsyncMock, fake_settings: Any, fake_reasoning_tracker: Any, fake_audit_logger: Any) -> Any:
+def fake_deps(
+    fake_anthropic: AsyncMock,
+    fake_openai: AsyncMock,
+    fake_settings: Any,
+    fake_reasoning_tracker: Any,
+    fake_audit_logger: Any,
+) -> Any:
     from apps.api.agents.dependencies import AgentDependencies
 
     return AgentDependencies(
@@ -256,9 +262,11 @@ async def test_select_aop_returns_empty_when_no_aops(fake_deps: Any) -> None:
     node = make_select_aop_node(fake_deps)
     fake_conn = AsyncMock()
 
-    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
-         _patch_previous(None), \
-         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[]):
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)),
+        _patch_previous(None),
+        patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[]),
+    ):
         result = await node(BASE_STATE)
 
     assert result == {}
@@ -273,11 +281,19 @@ async def test_select_aop_happy_path(fake_deps: Any) -> None:
         return_value=_make_classifier_response("consulta_envio", 0.92)
     )
 
-    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
-         _patch_previous(None), \
-         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
-         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO), \
-         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)),
+        _patch_previous(None),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO),
+        patch(
+            "apps.api.agents.nodes.select_aop.insert_intent_classifier_run",
+            return_value=AsyncMock(),
+        ),
+    ):
         result = await node(BASE_STATE)
 
     assert result["aop_slug"] == "consulta_envio"
@@ -303,11 +319,19 @@ async def test_select_aop_tolerates_missing_optional_fields(fake_deps: Any) -> N
     response.content = [tool_block]
     fake_deps.anthropic.messages.create = AsyncMock(return_value=response)
 
-    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
-         _patch_previous(None), \
-         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
-         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO), \
-         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)),
+        _patch_previous(None),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO),
+        patch(
+            "apps.api.agents.nodes.select_aop.insert_intent_classifier_run",
+            return_value=AsyncMock(),
+        ),
+    ):
         result = await node(BASE_STATE)
 
     assert result["aop_slug"] == "consulta_envio"
@@ -330,11 +354,19 @@ async def test_select_aop_malformed_classifier_output_falls_back_to_default(
     response.content = [tool_block]
     fake_deps.anthropic.messages.create = AsyncMock(return_value=response)
 
-    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
-         _patch_previous(None), \
-         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
-         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=DEFAULT_AOP), \
-         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)),
+        _patch_previous(None),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch("apps.api.agents.nodes.select_aop.load_aop", return_value=DEFAULT_AOP),
+        patch(
+            "apps.api.agents.nodes.select_aop.insert_intent_classifier_run",
+            return_value=AsyncMock(),
+        ),
+    ):
         result = await node(BASE_STATE)
 
     assert result["aop_slug"] == "default"
@@ -350,16 +382,28 @@ async def test_select_aop_falls_back_to_default_on_low_confidence(fake_deps: Any
         return_value=_make_classifier_response("consulta_envio", 0.30)
     )
 
-    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
-         _patch_previous(None), \
-         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
-         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=DEFAULT_AOP) as mock_load, \
-         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)),
+        _patch_previous(None),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch("apps.api.agents.nodes.select_aop.load_aop", return_value=DEFAULT_AOP) as mock_load,
+        patch(
+            "apps.api.agents.nodes.select_aop.insert_intent_classifier_run",
+            return_value=AsyncMock(),
+        ),
+    ):
         result = await node(BASE_STATE)
 
     mock_load.assert_called_once()
     load_args = mock_load.call_args
-    assert load_args[0][2] == "default" or load_args[1].get("slug") == "default" or "default" in str(load_args)
+    assert (
+        load_args[0][2] == "default"
+        or load_args[1].get("slug") == "default"
+        or "default" in str(load_args)
+    )
     assert result["aop_slug"] == "default"
 
 
@@ -372,11 +416,19 @@ async def test_select_aop_falls_back_when_slug_not_in_catalog(fake_deps: Any) ->
         return_value=_make_classifier_response("slug_inventado", 0.95)
     )
 
-    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
-         _patch_previous(None), \
-         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
-         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=DEFAULT_AOP), \
-         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)),
+        _patch_previous(None),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch("apps.api.agents.nodes.select_aop.load_aop", return_value=DEFAULT_AOP),
+        patch(
+            "apps.api.agents.nodes.select_aop.insert_intent_classifier_run",
+            return_value=AsyncMock(),
+        ),
+    ):
         result = await node(BASE_STATE)
 
     assert result["aop_slug"] == "default"
@@ -392,11 +444,21 @@ async def test_select_aop_continuity_keeps_previous_on_weak_switch(fake_deps: An
         return_value=_make_classifier_response("default", 0.50)
     )
 
-    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
-         _patch_previous("consulta_envio"), \
-         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
-         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO) as mock_load, \
-         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)),
+        _patch_previous("consulta_envio"),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO
+        ) as mock_load,
+        patch(
+            "apps.api.agents.nodes.select_aop.insert_intent_classifier_run",
+            return_value=AsyncMock(),
+        ),
+    ):
         result = await node(BASE_STATE)
 
     # Se carga el AOP previo (consulta_envio), no el clasificado (default).
@@ -413,11 +475,21 @@ async def test_select_aop_pivots_on_confident_switch(fake_deps: Any) -> None:
         return_value=_make_classifier_response("consulta_envio", 0.66)
     )
 
-    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
-         _patch_previous("default"), \
-         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
-         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO) as mock_load, \
-         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)),
+        _patch_previous("default"),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO
+        ) as mock_load,
+        patch(
+            "apps.api.agents.nodes.select_aop.insert_intent_classifier_run",
+            return_value=AsyncMock(),
+        ),
+    ):
         result = await node(BASE_STATE)
 
     assert mock_load.call_args[0][2] == "consulta_envio"
@@ -433,11 +505,16 @@ async def test_select_aop_returns_empty_when_default_aop_missing(fake_deps: Any)
         return_value=_make_classifier_response("consulta_envio", 0.20)
     )
 
-    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
-         _patch_previous(None), \
-         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO]), \
-         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=None), \
-         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)),
+        _patch_previous(None),
+        patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO]),
+        patch("apps.api.agents.nodes.select_aop.load_aop", return_value=None),
+        patch(
+            "apps.api.agents.nodes.select_aop.insert_intent_classifier_run",
+            return_value=AsyncMock(),
+        ),
+    ):
         result = await node(BASE_STATE)
 
     assert result == {}
@@ -452,11 +529,16 @@ async def test_select_aop_persists_classifier_run(fake_deps: Any) -> None:
         return_value=_make_classifier_response("consulta_envio", 0.88)
     )
 
-    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
-         _patch_previous(None), \
-         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
-         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO), \
-         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run") as mock_persist:
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)),
+        _patch_previous(None),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO),
+        patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run") as mock_persist,
+    ):
         mock_persist.return_value = AsyncMock()
         await node(BASE_STATE)
 
@@ -476,11 +558,16 @@ async def test_select_aop_marks_reclassification_on_second_turn(fake_deps: Any) 
         return_value=_make_classifier_response("consulta_envio", 0.88)
     )
 
-    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
-         _patch_previous("default"), \
-         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
-         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO), \
-         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run") as mock_persist:
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)),
+        _patch_previous("default"),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO),
+        patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run") as mock_persist,
+    ):
         mock_persist.return_value = AsyncMock()
         await node(BASE_STATE)
 
@@ -495,17 +582,27 @@ async def test_select_aop_detects_ambiguity(fake_deps: Any) -> None:
     fake_conn = AsyncMock()
     fake_deps.anthropic.messages.create = AsyncMock(
         return_value=_make_classifier_response(
-            "consulta_envio", 0.80,
-            alt_slug="cancelacion", alt_confidence=0.65,
+            "consulta_envio",
+            0.80,
+            alt_slug="cancelacion",
+            alt_confidence=0.65,
             ambiguity=True,
         )
     )
 
-    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
-         _patch_previous(None), \
-         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
-         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO), \
-         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)),
+        _patch_previous(None),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO),
+        patch(
+            "apps.api.agents.nodes.select_aop.insert_intent_classifier_run",
+            return_value=AsyncMock(),
+        ),
+    ):
         result = await node(BASE_STATE)
 
     assert result.get("pending_intent") == "cancelacion"
@@ -518,18 +615,27 @@ async def test_select_aop_no_pending_intent_when_alt_low_confidence(fake_deps: A
     fake_conn = AsyncMock()
     fake_deps.anthropic.messages.create = AsyncMock(
         return_value=_make_classifier_response(
-            "consulta_envio", 0.80,
-            alt_slug="cancelacion", alt_confidence=0.40,
+            "consulta_envio",
+            0.80,
+            alt_slug="cancelacion",
+            alt_confidence=0.40,
             ambiguity=True,
         )
     )
 
-    with patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)), \
-         _patch_previous(None), \
-         patch("apps.api.agents.nodes.select_aop.load_active_aops", return_value=[CONSULTA_ENVIO, DEFAULT_AOP]), \
-         patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO), \
-         patch("apps.api.agents.nodes.select_aop.insert_intent_classifier_run", return_value=AsyncMock()):
+    with (
+        patch("apps.api.agents.nodes.select_aop.tenant_scope", _make_fake_tenant_scope(fake_conn)),
+        _patch_previous(None),
+        patch(
+            "apps.api.agents.nodes.select_aop.load_active_aops",
+            return_value=[CONSULTA_ENVIO, DEFAULT_AOP],
+        ),
+        patch("apps.api.agents.nodes.select_aop.load_aop", return_value=CONSULTA_ENVIO),
+        patch(
+            "apps.api.agents.nodes.select_aop.insert_intent_classifier_run",
+            return_value=AsyncMock(),
+        ),
+    ):
         result = await node(BASE_STATE)
 
     assert "pending_intent" not in result
-

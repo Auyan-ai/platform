@@ -36,6 +36,7 @@ class TestRouteAfterReason:
         }
         assert route_after_reason(state) == "execute_skill"  # type: ignore[arg-type]
 
+
 class TestRouteAfterExecuteSkill:
     def test_default_routes_back_to_reason(self) -> None:
         """Sin haber alcanzado max_iter, el loop continúa."""

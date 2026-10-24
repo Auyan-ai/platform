@@ -85,6 +85,8 @@ _ACTION_NAME: dict[str, str] = {
     "shopify.update_shipping_address": "El cambio de dirección",
     "shopify.cancel_order": "La cancelación",
     "shopify.refund_partial": "El reembolso parcial",
+    "shopify.start_return": "La devolución",
+    "shopify.start_exchange": "El cambio",
 }
 
 
@@ -92,6 +94,13 @@ def team_followup_reason(skill_slug: str, output: dict[str, Any]) -> str | None:
     """Motivo para el equipo cuando la acción aprobada se ejecutó pero no quedó
     cerrada. None si no hace falta nadie (sin `outcome` o resultado ya resuelto)."""
     raw = output.get("outcome")
+    if raw is not None and output.get("note_written") is False:
+        action = _ACTION_NAME.get(skill_slug, f"La acción {skill_slug}")
+        return (
+            f"{action} del pedido {output.get('order_id')} se abrió en Shopify "
+            f"({output.get('return_name') or 'sin nombre'}), pero no se pudo escribir la "
+            "liquidación en la nota del pedido. Copiadla desde la aprobación."
+        )
     if raw is None or ActionOutcome(raw).settled:
         return None
     outcome = ActionOutcome(raw)
@@ -116,11 +125,15 @@ def team_followup_reason(skill_slug: str, output: dict[str, Any]) -> str | None:
     )
 
 
-def unknown_outcome_reason(skill_slug: str, inputs: dict[str, Any], error: str) -> str:
-    """Motivo para el equipo cuando no se puede saber si la acción aprobada se aplicó."""
+def unknown_outcome_reason(
+    skill_slug: str, inputs: dict[str, Any], error: str, *, approved: bool = True
+) -> str:
+    """Motivo para el equipo cuando no se puede saber si la acción se aplicó: tras una
+    aprobación, o lanzada sin ella en el turno (`approved=False`)."""
     action = _ACTION_NAME.get(skill_slug, f"La acción {skill_slug}")
+    how = "se aprobó" if approved else "se lanzó sin aprobación humana"
     return (
-        f"{action} del pedido {inputs.get('order_id')} se aprobó, pero no se pudo "
+        f"{action} del pedido {inputs.get('order_id')} {how}, pero no se pudo "
         f"comprobar en Shopify si se aplicó ({error}). No se reintentó: revisad el pedido "
         "en Shopify antes de volver a hacerlo y contestad al cliente."
     )

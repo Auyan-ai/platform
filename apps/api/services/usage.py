@@ -30,9 +30,7 @@ logger = logging.getLogger(__name__)
 def _seconds_until_midnight_utc() -> int:
     """Segundos hasta la próxima medianoche UTC (mínimo 1)."""
     now = datetime.datetime.now(datetime.UTC)
-    tomorrow = (now + datetime.timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
+    tomorrow = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return max(1, int((tomorrow - now).total_seconds()))
 
 

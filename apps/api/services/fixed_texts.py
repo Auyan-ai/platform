@@ -41,6 +41,13 @@ _TEAM_WILL_WRITE = _t(
     "Notre équipe est prévenue et t'écrira dès que ce sera réglé.",
 )
 
+_PASS_TO_TEAM = _t(
+    "Paso tu caso a mi equipo para que lo revise y te escriba.",
+    "I'm passing your case to my team so they can review it and write to you.",
+    "Passo el teu cas al meu equip perquè el revisi i t'escrigui.",
+    "Je transmets ton dossier à mon équipe pour qu'elle l'examine et t'écrive.",
+)
+
 CATALOG: dict[str, Texts] = {
     # ─── Verificación de identidad (ADR 0013 §10) ────────────────────────────────
     "guest_not_verified": _t(
@@ -228,6 +235,126 @@ CATALOG: dict[str, Texts] = {
         "Ta commande apparaît déjà comme annulée. Je transmets ton dossier à mon équipe "
         "pour qu'elle vérifie l'état du remboursement et t'écrive.",
     ),
+    # ─── Devoluciones y cambios (ADR 0014): rechazos que pasan el caso al equipo ─
+    "refusal.returns.policy_missing": _then(
+        _t(
+            "Ahora mismo no puedo gestionar devoluciones ni cambios desde aquí.",
+            "I can't handle returns or exchanges from here right now.",
+            "Ara mateix no puc gestionar devolucions ni canvis des d'aquí.",
+            "Je ne peux pas gérer les retours ni les échanges d'ici pour le moment.",
+        ),
+        _PASS_TO_TEAM,
+    ),
+    "refusal.returns.order_cancelled": _then(
+        _t(
+            "Tu pedido figura como cancelado, así que no puedo abrir una devolución ni un "
+            "cambio.",
+            "Your order shows as cancelled, so I can't open a return or an exchange.",
+            "La teva comanda figura com a cancel·lada, així que no puc obrir una devolució ni "
+            "un canvi.",
+            "Ta commande apparaît comme annulée, donc je ne peux pas ouvrir de retour ni "
+            "d'échange.",
+        ),
+        _PASS_TO_TEAM,
+    ),
+    "refusal.returns.exchanges_disabled": _then(
+        _t(
+            "No puedo gestionar cambios desde aquí.",
+            "I can't handle exchanges from here.",
+            "No puc gestionar canvis des d'aquí.",
+            "Je ne peux pas gérer les échanges d'ici.",
+        ),
+        _PASS_TO_TEAM,
+    ),
+    "refusal.returns.product_excluded": _then(
+        _t(
+            "Según la política de la tienda, este artículo no admite devolución.",
+            "Under the store's policy, this item can't be returned.",
+            "Segons la política de la botiga, aquest article no admet devolució.",
+            "Selon la politique de la boutique, cet article ne peut pas être retourné.",
+        ),
+        _PASS_TO_TEAM,
+    ),
+    "refusal.returns.product_unknown": _then(
+        _t(
+            "No puedo comprobar desde aquí si este artículo admite devolución.",
+            "I can't check from here whether this item can be returned.",
+            "No puc comprovar des d'aquí si aquest article admet devolució.",
+            "Je ne peux pas vérifier d'ici si cet article peut être retourné.",
+        ),
+        _PASS_TO_TEAM,
+    ),
+    "refusal.returns.delivery_date_unknown": _then(
+        _t(
+            "No puedo confirmar desde aquí la fecha de entrega de tu pedido.",
+            "I can't confirm your order's delivery date from here.",
+            "No puc confirmar des d'aquí la data d'entrega de la teva comanda.",
+            "Je ne peux pas confirmer d'ici la date de livraison de ta commande.",
+        ),
+        _PASS_TO_TEAM,
+    ),
+    "refusal.returns.outside_window": _then(
+        _t(
+            "Según la política de la tienda, el plazo para devolver o cambiar este artículo "
+            "terminó el {deadline}.",
+            "Under the store's policy, the period to return or exchange this item ended on "
+            "{deadline}.",
+            "Segons la política de la botiga, el termini per tornar o canviar aquest article "
+            "va acabar el {deadline}.",
+            "Selon la politique de la boutique, le délai pour retourner ou échanger cet "
+            "article a pris fin le {deadline}.",
+        ),
+        _PASS_TO_TEAM,
+    ),
+    "refusal.returns.evidence_unreadable": _then(
+        _t(
+            "Para este motivo hace falta revisar fotos del artículo.",
+            "For this reason, the team needs to review photos of the item.",
+            "Per aquest motiu cal revisar fotos de l'article.",
+            "Pour ce motif, il faut examiner des photos de l'article.",
+        ),
+        _PASS_TO_TEAM,
+    ),
+    "refusal.returns.fees_exceed_refund": _then(
+        _t(
+            "Los gastos de la devolución superan el importe de lo que devuelves, así que no "
+            "puedo abrirla desde aquí.",
+            "The return costs are higher than the value of what you're returning, so I can't "
+            "open it from here.",
+            "Les despeses de la devolució superen l'import del que tornes, així que no la puc "
+            "obrir des d'aquí.",
+            "Les frais de retour dépassent le montant de ce que tu retournes, donc je ne peux "
+            "pas l'ouvrir d'ici.",
+        ),
+        _PASS_TO_TEAM,
+    ),
+    "refusal.returns.shopify_error": _then(
+        _t(
+            "No he podido preparar la devolución con los datos de la tienda en este momento.",
+            "I couldn't prepare the return with the store's data right now.",
+            "No he pogut preparar la devolució amb les dades de la botiga en aquest moment.",
+            "Je n'ai pas pu préparer le retour avec les données de la boutique pour le moment.",
+        ),
+        _PASS_TO_TEAM,
+    ),
+    "refusal.outcome_unknown": _then(
+        _t(
+            "No he podido confirmar si tu solicitud ha quedado registrada.",
+            "I couldn't confirm whether your request went through.",
+            "No he pogut confirmar si la teva sol·licitud ha quedat registrada.",
+            "Je n'ai pas pu confirmer si ta demande a bien été enregistrée.",
+        ),
+        _PASS_TO_TEAM,
+    ),
+    "refusal.returns.no_longer_possible": _then(
+        _t(
+            "No he podido abrir la devolución con los datos de tu pedido.",
+            "I couldn't open the return with your order details.",
+            "No he pogut obrir la devolució amb les dades de la teva comanda.",
+            "Je n'ai pas pu ouvrir le retour avec les informations de ta commande.",
+        ),
+        _PASS_TO_TEAM,
+    ),
     # ─── Aprobaciones L3: confirmación, fallo y rechazo ──────────────────────────
     "done.update_shipping_address": _t(
         "Hemos actualizado la dirección de envío de tu pedido.",
@@ -252,6 +379,12 @@ CATALOG: dict[str, Texts] = {
         "We've started the return of your order.",
         "Hem iniciat la devolució de la teva comanda.",
         "Nous avons lancé le retour de ta commande.",
+    ),
+    "done.start_exchange": _t(
+        "Hemos abierto el cambio de tu pedido.",
+        "We've opened the exchange for your order.",
+        "Hem obert el canvi de la teva comanda.",
+        "Nous avons ouvert l'échange de ta commande.",
     ),
     "done.default": _t(
         "Hemos completado tu solicitud.",
@@ -324,6 +457,16 @@ CATALOG: dict[str, Texts] = {
         "C'est noté ! Je vais lancer le retour de ta commande ; je le transmets à mon "
         "équipe pour confirmation et je te préviens dès qu'il est en cours.",
     ),
+    "gate.start_exchange": _t(
+        "¡Listo! Voy a abrir el cambio de tu pedido; lo paso a mi equipo para confirmarlo "
+        "y te aviso en cuanto esté en marcha.",
+        "Done! I'm going to open the exchange for your order; I'm passing it to my team to "
+        "confirm it and I'll let you know as soon as it's under way.",
+        "Llest! Obriré el canvi de la teva comanda; ho passo al meu equip per confirmar-ho i "
+        "t'aviso tan aviat com estigui en marxa.",
+        "C'est noté ! Je vais ouvrir l'échange de ta commande ; je le transmets à mon équipe "
+        "pour confirmation et je te préviens dès qu'il est en cours.",
+    ),
     "gate.default": _t(
         "¡Perfecto! Ya tengo lo que necesito. Lo paso a mi equipo para una última "
         "comprobación y te confirmo en cuanto esté listo.",
@@ -375,6 +518,16 @@ CATALOG: dict[str, Texts] = {
         "Ton retour est toujours en cours de vérification par mon équipe ; je te préviens "
         "dès qu'il est lancé. Merci de ta patience !",
     ),
+    "waiting.start_exchange": _t(
+        "Tu cambio sigue en revisión con mi equipo; te aviso en cuanto esté en marcha. "
+        "¡Gracias por la paciencia!",
+        "Your exchange is still being reviewed by my team; I'll let you know as soon as it's "
+        "under way. Thanks for your patience!",
+        "El teu canvi segueix en revisió amb el meu equip; t'aviso tan aviat com estigui en "
+        "marxa. Gràcies per la paciència!",
+        "Ton échange est toujours en cours de vérification par mon équipe ; je te préviens "
+        "dès qu'il est lancé. Merci de ta patience !",
+    ),
     "waiting.default": _t(
         "Tu solicitud sigue en revisión con mi equipo; te confirmo en cuanto esté "
         "lista. ¡Gracias por la paciencia!",
@@ -409,6 +562,12 @@ CATALOG: dict[str, Texts] = {
         "Your return is already under way. If you need anything else, I'm here.",
         "La teva devolució ja està en marxa. Si necessites res més, sóc aquí.",
         "Ton retour est déjà en cours. Si tu as besoin d'autre chose, je suis là.",
+    ),
+    "done_followup.start_exchange": _t(
+        "Tu cambio ya quedó en marcha. Si necesitas algo más, aquí estoy.",
+        "Your exchange is already under way. If you need anything else, I'm here.",
+        "El teu canvi ja està en marxa. Si necessites res més, sóc aquí.",
+        "Ton échange est déjà en cours. Si tu as besoin d'autre chose, je suis là.",
     ),
     "done_followup.default": _t(
         "Tu solicitud ya quedó completada. Si necesitas algo más, aquí estoy.",
@@ -523,6 +682,171 @@ CATALOG: dict[str, Texts] = {
             "Nous n'avons pas pu effectuer le remboursement automatiquement.",
         ),
         _TEAM_WILL_WRITE,
+    ),
+    # Devoluciones y cambios: se abrió la devolución, nunca "el dinero ya vuelve".
+    "outcome.start_return.confirmed": _t(
+        "Hemos abierto la devolución de tu pedido.",
+        "We've opened the return for your order.",
+        "Hem obert la devolució de la teva comanda.",
+        "Nous avons ouvert le retour de ta commande.",
+    ),
+    "outcome.start_return.not_confirmed": _then(
+        _t(
+            "No hemos podido confirmar que la devolución quedara abierta.",
+            "We couldn't confirm that the return was opened.",
+            "No hem pogut confirmar que la devolució quedés oberta.",
+            "Nous n'avons pas pu confirmer l'ouverture du retour.",
+        ),
+        _TEAM_WILL_WRITE,
+    ),
+    "outcome.start_exchange.confirmed": _t(
+        "Hemos abierto el cambio de tu pedido.",
+        "We've opened the exchange for your order.",
+        "Hem obert el canvi de la teva comanda.",
+        "Nous avons ouvert l'échange de ta commande.",
+    ),
+    "outcome.start_exchange.not_confirmed": _then(
+        _t(
+            "No hemos podido confirmar que el cambio quedara abierto.",
+            "We couldn't confirm that the exchange was opened.",
+            "No hem pogut confirmar que el canvi quedés obert.",
+            "Nous n'avons pas pu confirmer l'ouverture de l'échange.",
+        ),
+        _TEAM_WILL_WRITE,
+    ),
+    "returns.ship_to": _t(
+        "Envía el artículo a esta dirección: {address}.",
+        "Send the item to this address: {address}.",
+        "Envia l'article a aquesta adreça: {address}.",
+        "Envoie l'article à cette adresse : {address}.",
+    ),
+    "returns.label": _t(
+        "Te enviaremos la etiqueta de devolución.",
+        "We'll send you the return label.",
+        "T'enviarem l'etiqueta de devolució.",
+        "Nous t'enverrons l'étiquette de retour.",
+    ),
+    "returns.shipping_paid_by_store": _t(
+        "El envío de vuelta corre de nuestra cuenta.",
+        "Return shipping is on us.",
+        "L'enviament de tornada va a càrrec nostre.",
+        "Le renvoi est à notre charge.",
+    ),
+    "returns.shipping_reimbursed": _t(
+        "El envío de vuelta va a cargo de la tienda; nuestro equipo te indicará cómo se gestiona.",
+        "Return shipping is on the store; our team will tell you how it's handled.",
+        "L'enviament de tornada va a càrrec de la botiga; el nostre equip t'indicarà com es "
+        "gestiona.",
+        "Le renvoi est à la charge de la boutique ; notre équipe t'indiquera comment il est "
+        "géré.",
+    ),
+    "returns.shipping_paid_by_customer": _t(
+        "El envío de vuelta corre de tu cuenta.",
+        "Return shipping is at your expense.",
+        "L'enviament de tornada va a càrrec teu.",
+        "Le renvoi est à ta charge.",
+    ),
+    "returns.shipping_fee": _t(
+        "Por el envío de vuelta descontaremos {fee} del reembolso.",
+        "We'll deduct {fee} from the refund for return shipping.",
+        "Per l'enviament de tornada descomptarem {fee} del reemborsament.",
+        "Nous déduirons {fee} du remboursement pour le renvoi.",
+    ),
+    "returns.shipping_fee_pending": _t(
+        "Nuestro equipo te confirmará el coste del envío de vuelta.",
+        "Our team will confirm the cost of return shipping.",
+        "El nostre equip et confirmarà el cost de l'enviament de tornada.",
+        "Notre équipe te confirmera le coût du renvoi.",
+    ),
+    "returns.refund_after_receipt": _t(
+        "Cuando recibamos el artículo y lo revisemos, te devolveremos el dinero en un plazo "
+        "de {days} días.",
+        "Once we receive and check the item, we'll refund you within {days} days.",
+        "Quan rebem l'article i el revisem, et retornarem els diners en un termini de "
+        "{days} dies.",
+        "Une fois l'article reçu et vérifié, nous te rembourserons sous {days} jours.",
+    ),
+    "returns.restocking_fee": _t(
+        "Por gastos de reposición descontaremos {fee} del reembolso.",
+        "We'll deduct {fee} from the refund as a restocking fee.",
+        "Per despeses de reposició descomptarem {fee} del reemborsament.",
+        "Nous déduirons {fee} du remboursement pour frais de remise en stock.",
+    ),
+    "returns.nothing_to_refund": _t(
+        "Con los gastos de la devolución descontados, no queda importe por devolverte.",
+        "Once the return costs are deducted, there's no amount left to refund you.",
+        "Amb les despeses de la devolució descomptades, no queda import per retornar-te.",
+        "Une fois les frais de retour déduits, il ne reste aucun montant à te rembourser.",
+    ),
+    "returns.credit_after_receipt": _t(
+        "Cuando recibamos el artículo y lo revisemos, te abonaremos el importe en crédito de "
+        "la tienda en un plazo de {days} días.",
+        "Once we receive and check the item, we'll give you the amount as store credit within "
+        "{days} days.",
+        "Quan rebem l'article i el revisem, t'abonarem l'import en crèdit de la botiga en un "
+        "termini de {days} dies.",
+        "Une fois l'article reçu et vérifié, nous te créditerons le montant en avoir sur la "
+        "boutique sous {days} jours.",
+    ),
+    "returns.exchange_ships_now": _t(
+        "Te enviaremos el artículo de cambio en cuanto el cambio quede confirmado.",
+        "We'll ship the replacement item as soon as the exchange is confirmed.",
+        "T'enviarem l'article de canvi tan bon punt el canvi quedi confirmat.",
+        "Nous t'enverrons l'article d'échange dès que l'échange sera confirmé.",
+    ),
+    "returns.exchange_ships_after_receipt": _t(
+        "Te enviaremos el artículo de cambio cuando recibamos el que devuelves.",
+        "We'll ship the replacement item once we receive the one you're returning.",
+        "T'enviarem l'article de canvi quan rebem el que tornes.",
+        "Nous t'enverrons l'article d'échange dès réception de celui que tu retournes.",
+    ),
+    "returns.exchange_difference_absorbed": _t(
+        "La diferencia de precio corre de nuestra cuenta.",
+        "The price difference is on us.",
+        "La diferència de preu va a càrrec nostre.",
+        "La différence de prix est à notre charge.",
+    ),
+    "returns.exchange_no_refund": _t(
+        "Según la política de la tienda, la diferencia de precio no se reembolsa.",
+        "Under the store's policy, the price difference isn't refunded.",
+        "Segons la política de la botiga, la diferència de preu no es reemborsa.",
+        "Selon la politique de la boutique, la différence de prix n'est pas remboursée.",
+    ),
+    "returns.exchange_you_owe": _t(
+        "Te quedan por pagar {amount}; nuestro equipo te indicará cómo hacerlo.",
+        "You have {amount} left to pay; our team will tell you how.",
+        "Et queden per pagar {amount}; el nostre equip t'indicarà com fer-ho.",
+        "Il te reste {amount} à payer ; notre équipe t'indiquera comment faire.",
+    ),
+    "returns.exchange_you_owe_with_fees": _t(
+        "Te quedan por pagar {amount}, incluidos los gastos de la devolución; nuestro equipo "
+        "te indicará cómo hacerlo.",
+        "You have {amount} left to pay, including the return costs; our team will tell you how.",
+        "Et queden per pagar {amount}, incloses les despeses de la devolució; el nostre equip "
+        "t'indicarà com fer-ho.",
+        "Il te reste {amount} à payer, frais de retour compris ; notre équipe t'indiquera "
+        "comment faire.",
+    ),
+    "returns.exchange_refund": _t(
+        "Cuando recibamos el artículo, te devolveremos {amount} en un plazo de {days} días.",
+        "Once we receive the item, we'll refund {amount} within {days} days.",
+        "Quan rebem l'article, et retornarem {amount} en un termini de {days} dies.",
+        "Une fois l'article reçu, nous te rembourserons {amount} sous {days} jours.",
+    ),
+    "returns.exchange_credit": _t(
+        "Cuando recibamos el artículo, te abonaremos {amount} en crédito de la tienda en un "
+        "plazo de {days} días.",
+        "Once we receive the item, we'll give you {amount} as store credit within {days} days.",
+        "Quan rebem l'article, t'abonarem {amount} en crèdit de la botiga en un termini de "
+        "{days} dies.",
+        "Une fois l'article reçu, nous te créditerons {amount} en avoir sur la boutique sous "
+        "{days} jours.",
+    ),
+    "returns.exchange_difference_pending": _t(
+        "Nuestro equipo te confirmará si hay alguna diferencia de precio.",
+        "Our team will confirm whether there's any price difference.",
+        "El nostre equip et confirmarà si hi ha alguna diferència de preu.",
+        "Notre équipe te confirmera s'il y a une différence de prix.",
     ),
     "outcome.unsettled": _then(
         _t(

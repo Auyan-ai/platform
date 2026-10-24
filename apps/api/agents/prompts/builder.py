@@ -136,6 +136,7 @@ def build_system_blocks(
     conversation_context: str | None = None,
     writing_surface: str | None = None,
     identity_note: str | None = None,
+    returns_policy_note: str | None = None,
     response_language: str | None = None,
 ) -> list[dict]:
     """Compone el system como bloques para Anthropic, optimizado para prompt caching.
@@ -169,6 +170,8 @@ def build_system_blocks(
         dynamic.append(register)
     if identity_note:
         dynamic.append(identity_note)
+    if returns_policy_note:
+        dynamic.append(returns_policy_note)
     if known_facts:
         dynamic.append(_facts_block(known_facts))
     kb = _kb_wrapper(knowledge_chunks)

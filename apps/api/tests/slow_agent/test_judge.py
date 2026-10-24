@@ -91,7 +91,7 @@ async def test_call_judge_no_propose():
 async def test_call_judge_handles_json_embedded_in_text():
     content_block = MagicMock(type="text")
     content_block.text = (
-        'Aquí está mi análisis:\n\n'
+        "Aquí está mi análisis:\n\n"
         '{"should_propose": false, "confidence": 0.8}\n\nEspero que ayude.'
     )
     usage = MagicMock()

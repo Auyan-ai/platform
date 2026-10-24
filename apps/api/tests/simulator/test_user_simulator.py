@@ -134,7 +134,12 @@ class TestNextTurn:
     async def test_calls_anthropic_and_returns_turn(self):
         profile = _make_profile()
         mock_response = MagicMock()
-        mock_response.content = [MagicMock(type="text", text='{"message": "vale", "goal_achieved": false, "give_up": false, "internal_reasoning": "ok"}')]
+        mock_response.content = [
+            MagicMock(
+                type="text",
+                text='{"message": "vale", "goal_achieved": false, "give_up": false, "internal_reasoning": "ok"}',
+            )
+        ]
         mock_response.usage.input_tokens = 200
         mock_response.usage.output_tokens = 30
 
@@ -142,7 +147,10 @@ class TestNextTurn:
         anthropic.messages.create = AsyncMock(return_value=mock_response)
 
         sim = UserSimulator(profile=profile, anthropic=anthropic)
-        history = [{"role": "customer", "content": "Hola"}, {"role": "agent", "content": "¿En qué ayudo?"}]
+        history = [
+            {"role": "customer", "content": "Hola"},
+            {"role": "agent", "content": "¿En qué ayudo?"},
+        ]
         turn = await sim.next_turn(conversation_history=history, turn_number=1)
 
         assert turn.message == "vale"

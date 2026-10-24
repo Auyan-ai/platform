@@ -341,9 +341,7 @@ def test_reply_trigger_definition() -> None:
 
 def test_solved_trigger_definition() -> None:
     t = triggers.solved_trigger("wh-1", "acme")
-    assert {"field": "status", "operator": "value", "value": "solved"} in t["conditions"][
-        "all"
-    ]
+    assert {"field": "status", "operator": "value", "value": "solved"} in t["conditions"]["all"]
     assert "comment_id" not in t["actions"][0]["value"][1]
 
 

@@ -134,7 +134,9 @@ async def test_reason_escalates_before_calling_the_llm(fake_deps, monkeypatch) -
 async def test_no_progress_escalation_speaks_the_conversation_language(
     fake_deps, monkeypatch
 ) -> None:
-    monkeypatch.setattr("apps.api.integrations.anthropic_client.call_claude_with_tools", AsyncMock())
+    monkeypatch.setattr(
+        "apps.api.integrations.anthropic_client.call_claude_with_tools", AsyncMock()
+    )
     state = {
         "tenant_id": "00000000-0000-0000-0000-000000000001",
         "conversation_id": "00000000-0000-0000-0000-000000000002",

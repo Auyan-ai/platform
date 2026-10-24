@@ -40,7 +40,9 @@ def identity_state(
         "channel": channel,
         "inbound_message_id": "m1",
         "conversation_history": [{"id": "m1", "role": "customer", "metadata": metadata}],
-        "identity": sender_identity(IdentityEvidence(email=email, phone=phone), salt=SALT).to_state(),
+        "identity": sender_identity(
+            IdentityEvidence(email=email, phone=phone), salt=SALT
+        ).to_state(),
         "claim_salt": SALT,
     }
     state.update(extra)

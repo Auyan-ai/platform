@@ -17,6 +17,7 @@ def _make_mock_conn(*, closed: bool = False) -> AsyncMock:
     conn.is_closed = MagicMock(return_value=closed)
     return conn
 
+
 # ─── invalidate_aop_cache ────────────────────────────────────────────────────
 
 
@@ -120,9 +121,7 @@ async def test_listener_stop_cancels_task_and_closes_conn():
 
 def test_on_notify_valid_payload_calls_invalidate():
     listener = AopCacheListener()
-    payload = json.dumps(
-        {"tenant_id": "t-1", "slug": "returns_aop", "workspace": "production"}
-    )
+    payload = json.dumps({"tenant_id": "t-1", "slug": "returns_aop", "workspace": "production"})
 
     key = ("t-1", "returns_aop", "production")
     _AOP_CACHE[key] = MagicMock()  # type: ignore[assignment]

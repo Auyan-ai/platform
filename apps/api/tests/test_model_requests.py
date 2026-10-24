@@ -57,9 +57,7 @@ APPROVE = {"verdict": "approve", "reject_kind": "n/a", "reason": "correcto"}
 
 @pytest.fixture(autouse=True)
 def _env(monkeypatch: pytest.MonkeyPatch) -> Iterator[pytest.MonkeyPatch]:
-    monkeypatch.setattr(
-        "apps.api.agents.nodes.reason._tenant_now_str", lambda _facts: FROZEN_NOW
-    )
+    monkeypatch.setattr("apps.api.agents.nodes.reason._tenant_now_str", lambda _facts: FROZEN_NOW)
     for name in ModelRegistry.model_fields:
         monkeypatch.delenv(name.upper(), raising=False)
     get_models.cache_clear()
@@ -152,9 +150,11 @@ async def run_select_aop(
         patch(f"{module}.load_active_aops", AsyncMock(return_value=[CONSULTA_ENVIO, DEFAULT_AOP])),
         patch(
             f"{module}.load_aop",
-            AsyncMock(side_effect=lambda _c, _t, slug: {"consulta_envio": CONSULTA_ENVIO}.get(
-                slug, DEFAULT_AOP
-            )),
+            AsyncMock(
+                side_effect=lambda _c, _t, slug: {"consulta_envio": CONSULTA_ENVIO}.get(
+                    slug, DEFAULT_AOP
+                )
+            ),
         ),
         patch(f"{module}.insert_intent_classifier_run", AsyncMock()),
     ):
@@ -303,7 +303,12 @@ class TestReasonOn55:
             "role": "assistant",
             "content": [
                 {"type": "thinking", "thinking": "", "signature": "sig_hop0"},
-                {"type": "tool_use", "id": "toolu_hop0", "name": "shopify_get_shop_policies", "input": {}},
+                {
+                    "type": "tool_use",
+                    "id": "toolu_hop0",
+                    "name": "shopify_get_shop_policies",
+                    "input": {},
+                },
             ],
         }
 
@@ -343,7 +348,9 @@ class TestReasonOn55:
         api, out = await run_reason(
             fake_deps,
             state,
-            message(thinking(), text("Te cuento..."), stop_reason="end_turn", model="claude-opus-5-5"),
+            message(
+                thinking(), text("Te cuento..."), stop_reason="end_turn", model="claude-opus-5-5"
+            ),
             message(tool_use("respond_or_escalate", RESPOND), model="claude-opus-5-5"),
         )
 
@@ -441,7 +448,9 @@ class TestSuperviseOn55:
         _env.setenv("SUPERVISOR_MODEL_L1_L2", "claude-sonnet-5-5")
         get_models.cache_clear()
 
-        _, out = await run_supervise(fake_deps, _supervise_state(), refusal("cyber", "claude-sonnet-5-5"))
+        _, out = await run_supervise(
+            fake_deps, _supervise_state(), refusal("cyber", "claude-sonnet-5-5")
+        )
 
         assert out["supervisor_verdict"] == "reject"
         assert out["escalation_reason"] == "supervisor_rejected (structural): llm_refusal: cyber"
@@ -461,7 +470,9 @@ class TestTextRolesOn55:
         _env.setenv("JUDGE_SONNET_MODEL", "claude-sonnet-5-5")
         get_models.cache_clear()
         api = RecordingAnthropic(
-            message(thinking(), text('{"ok": true}'), stop_reason="end_turn", model="claude-sonnet-5-5")
+            message(
+                thinking(), text('{"ok": true}'), stop_reason="end_turn", model="claude-sonnet-5-5"
+            )
         )
 
         reply = await call_claude_text(
@@ -535,7 +546,12 @@ class TestTextRolesOn55:
         get_models.cache_clear()
         payload = {"should_propose": False, "confidence": 0.9, "rationale": "bien"}
         api = RecordingAnthropic(
-            message(thinking(), text(json.dumps(payload)), stop_reason="end_turn", model="claude-sonnet-5-5")
+            message(
+                thinking(),
+                text(json.dumps(payload)),
+                stop_reason="end_turn",
+                model="claude-sonnet-5-5",
+            )
         )
 
         verdict = await _call_judge(api.client, _transcript(), "slow_agent_model")
@@ -551,7 +567,12 @@ class TestTextRolesOn55:
         _env.setenv("REPLY_MODEL", "claude-opus-5-5")
         get_models.cache_clear()
         api = RecordingAnthropic(
-            message(thinking(), text("Listo, pedido cancelado."), stop_reason="end_turn", model="claude-opus-5-5")
+            message(
+                thinking(),
+                text("Listo, pedido cancelado."),
+                stop_reason="end_turn",
+                model="claude-opus-5-5",
+            )
         )
 
         msg = await generate_customer_reply(api.client, "shopify.cancel_order", success=True)

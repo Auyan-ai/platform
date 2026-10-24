@@ -45,9 +45,7 @@ def _patch_all_db_and_llm(
     fake_scope = make_fake_tenant_scope()
 
     # --- load_tenant_context ---
-    monkeypatch.setattr(
-        "apps.api.agents.nodes.load_tenant_context.tenant_scope", fake_scope
-    )
+    monkeypatch.setattr("apps.api.agents.nodes.load_tenant_context.tenant_scope", fake_scope)
     monkeypatch.setattr(
         "apps.api.agents.nodes.load_tenant_context.get_tenant_by_id",
         AsyncMock(return_value=make_tenant(status=tenant_status) if tenant_present else None),
@@ -73,6 +71,10 @@ def _patch_all_db_and_llm(
         AsyncMock(return_value=None),
     )
     monkeypatch.setattr(
+        "apps.api.agents.nodes.load_tenant_context.load_current_returns_policy",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
         "apps.api.agents.nodes.load_tenant_context.build_commerce_integration_ctx",
         AsyncMock(return_value=None),
     )
@@ -85,9 +87,7 @@ def _patch_all_db_and_llm(
     )
 
     # --- load_conversation ---
-    monkeypatch.setattr(
-        "apps.api.agents.nodes.load_conversation.tenant_scope", fake_scope
-    )
+    monkeypatch.setattr("apps.api.agents.nodes.load_conversation.tenant_scope", fake_scope)
     monkeypatch.setattr(
         "apps.api.agents.nodes.load_conversation.get_conversation",
         AsyncMock(return_value=make_conversation()),
@@ -102,18 +102,14 @@ def _patch_all_db_and_llm(
     )
 
     # --- select_aop: no-op (tenant sin AOPs → degradación elegante al prompt legacy) ---
-    monkeypatch.setattr(
-        "apps.api.agents.nodes.select_aop.tenant_scope", fake_scope
-    )
+    monkeypatch.setattr("apps.api.agents.nodes.select_aop.tenant_scope", fake_scope)
     monkeypatch.setattr(
         "apps.api.agents.nodes.select_aop.load_active_aops",
         AsyncMock(return_value=[]),
     )
 
     # --- retrieve_knowledge ---
-    monkeypatch.setattr(
-        "apps.api.agents.nodes.retrieve_knowledge.tenant_scope", fake_scope
-    )
+    monkeypatch.setattr("apps.api.agents.nodes.retrieve_knowledge.tenant_scope", fake_scope)
     monkeypatch.setattr(
         "apps.api.agents.nodes.retrieve_knowledge.get_query_embedding",
         AsyncMock(return_value=[0.0] * 1536),
@@ -161,9 +157,7 @@ def _patch_all_db_and_llm(
         "apps.api.agents.nodes.escalate.insert_escalation",
         AsyncMock(return_value=make_escalation()),
     )
-    monkeypatch.setattr(
-        "apps.api.agents.nodes.escalate.update_conversation_status", AsyncMock()
-    )
+    monkeypatch.setattr("apps.api.agents.nodes.escalate.update_conversation_status", AsyncMock())
     monkeypatch.setattr(
         "apps.api.agents.nodes.escalate.insert_message",
         AsyncMock(
@@ -442,16 +436,18 @@ async def test_react_loop_two_iterations(fake_deps, monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "apps.api.agents.nodes.load_tenant_context.list_tool_permissions",
-        AsyncMock(return_value=[
-            TenantToolPermission(
-                id=TENANT_ID,
-                tenant_id=TENANT_ID,
-                skill_slug="test.ping",
-                is_enabled=True,
-                human_approval_required=False,
-                created_at=datetime(2026, 1, 1, tzinfo=UTC),
-            )
-        ]),
+        AsyncMock(
+            return_value=[
+                TenantToolPermission(
+                    id=TENANT_ID,
+                    tenant_id=TENANT_ID,
+                    skill_slug="test.ping",
+                    is_enabled=True,
+                    human_approval_required=False,
+                    created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                )
+            ]
+        ),
     )
 
     responses = [
@@ -463,7 +459,11 @@ async def test_react_loop_two_iterations(fake_deps, monkeypatch) -> None:
             output_tokens=20,
         ),
         FakeAnthropicResponse(
-            {"decision": "respond", "confidence": 0.95, "response_text": "El servicio está activo."},
+            {
+                "decision": "respond",
+                "confidence": 0.95,
+                "response_text": "El servicio está activo.",
+            },
             tool_name="respond_or_escalate",
             tool_id="toolu_iter2",
             input_tokens=120,
@@ -482,7 +482,11 @@ async def test_react_loop_two_iterations(fake_deps, monkeypatch) -> None:
     initial["max_tool_iterations"] = 5
     initial["allowed_skills"] = []
     initial["tool_permissions"] = {
-        "test.ping": {"is_enabled": True, "human_approval_required": False, "threshold_override": None}
+        "test.ping": {
+            "is_enabled": True,
+            "human_approval_required": False,
+            "threshold_override": None,
+        }
     }
 
     final = await graph.ainvoke(initial)
@@ -540,16 +544,18 @@ async def test_react_loop_max_iterations_escalates(fake_deps, monkeypatch) -> No
     )
     monkeypatch.setattr(
         "apps.api.agents.nodes.load_tenant_context.list_tool_permissions",
-        AsyncMock(return_value=[
-            TenantToolPermission(
-                id=TENANT_ID,
-                tenant_id=TENANT_ID,
-                skill_slug="test.loop",
-                is_enabled=True,
-                human_approval_required=False,
-                created_at=datetime(2026, 1, 1, tzinfo=UTC),
-            )
-        ]),
+        AsyncMock(
+            return_value=[
+                TenantToolPermission(
+                    id=TENANT_ID,
+                    tenant_id=TENANT_ID,
+                    skill_slug="test.loop",
+                    is_enabled=True,
+                    human_approval_required=False,
+                    created_at=datetime(2026, 1, 1, tzinfo=UTC),
+                )
+            ]
+        ),
     )
 
     def _always_skill(**kwargs: object) -> FakeAnthropicResponse:
@@ -572,7 +578,11 @@ async def test_react_loop_max_iterations_escalates(fake_deps, monkeypatch) -> No
     initial["tool_iterations"] = 0
     initial["max_tool_iterations"] = 5
     initial["tool_permissions"] = {
-        "test.loop": {"is_enabled": True, "human_approval_required": False, "threshold_override": None}
+        "test.loop": {
+            "is_enabled": True,
+            "human_approval_required": False,
+            "threshold_override": None,
+        }
     }
 
     final = await graph.ainvoke(initial)

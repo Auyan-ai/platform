@@ -35,12 +35,8 @@ async def test_happy_path_with_chunks(fake_deps, monkeypatch) -> None:
         make_knowledge_chunk(content="Otro fragmento.", similarity=0.75),
     ]
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
-    monkeypatch.setattr(
-        f"{MODULE}.get_query_embedding", AsyncMock(return_value=[0.1] * 1536)
-    )
-    monkeypatch.setattr(
-        f"{MODULE}.search_knowledge_chunks", AsyncMock(return_value=chunks)
-    )
+    monkeypatch.setattr(f"{MODULE}.get_query_embedding", AsyncMock(return_value=[0.1] * 1536))
+    monkeypatch.setattr(f"{MODULE}.search_knowledge_chunks", AsyncMock(return_value=chunks))
     node = make_retrieve_knowledge_node(fake_deps)
 
     out = await node(_state())
@@ -75,9 +71,7 @@ async def test_happy_path_with_chunks(fake_deps, monkeypatch) -> None:
 async def test_empty_knowledge_base(fake_deps, monkeypatch) -> None:
     """KB vacía o sin chunks relevantes → retrieved_chunks=[] (no es error)."""
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
-    monkeypatch.setattr(
-        f"{MODULE}.get_query_embedding", AsyncMock(return_value=[0.0] * 1536)
-    )
+    monkeypatch.setattr(f"{MODULE}.get_query_embedding", AsyncMock(return_value=[0.0] * 1536))
     monkeypatch.setattr(f"{MODULE}.search_knowledge_chunks", AsyncMock(return_value=[]))
     node = make_retrieve_knowledge_node(fake_deps)
 
@@ -128,9 +122,7 @@ async def test_search_failure_still_raises_to_guard(fake_deps, monkeypatch) -> N
     """Un fallo de la búsqueda en Postgres NO se degrada: si la DB está caída,
     el resto del turno también va a fallar — mejor fail-fast vía guarded."""
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
-    monkeypatch.setattr(
-        f"{MODULE}.get_query_embedding", AsyncMock(return_value=[0.0] * 1536)
-    )
+    monkeypatch.setattr(f"{MODULE}.get_query_embedding", AsyncMock(return_value=[0.0] * 1536))
     monkeypatch.setattr(
         f"{MODULE}.search_knowledge_chunks",
         AsyncMock(side_effect=RuntimeError("db_down")),
@@ -164,9 +156,7 @@ async def test_uses_rag_settings(fake_deps, monkeypatch) -> None:
     fake_deps.settings.rag_min_similarity = 0.8
     search_mock = AsyncMock(return_value=[])
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
-    monkeypatch.setattr(
-        f"{MODULE}.get_query_embedding", AsyncMock(return_value=[0.0] * 1536)
-    )
+    monkeypatch.setattr(f"{MODULE}.get_query_embedding", AsyncMock(return_value=[0.0] * 1536))
     monkeypatch.setattr(f"{MODULE}.search_knowledge_chunks", search_mock)
     node = make_retrieve_knowledge_node(fake_deps)
 

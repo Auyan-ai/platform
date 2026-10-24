@@ -36,9 +36,7 @@ def message_received(**overrides: Any) -> dict[str, Any]:
             "platformMessageId": "wamid.1",
             "direction": "incoming",
             "text": "¿Dónde está mi pedido?",
-            "attachments": [
-                {"type": "image", "url": "https://zernio.com/api/v1/whatsapp/media/9"}
-            ],
+            "attachments": [{"type": "image", "url": "https://zernio.com/api/v1/whatsapp/media/9"}],
             "sender": {
                 "id": "34600111222",
                 "name": "Ana",
@@ -252,7 +250,9 @@ async def test_adapter_send_outbound_chunks_with_keys(monkeypatch: pytest.Monkey
     sent: list[tuple[str, str | None]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        sent.append((json.loads(request.content)["message"], request.headers.get("Idempotency-Key")))
+        sent.append(
+            (json.loads(request.content)["message"], request.headers.get("Idempotency-Key"))
+        )
         return httpx.Response(200, json={"data": {"messageId": f"wamid.{len(sent)}"}})
 
     adapter = ZernioAdapter()

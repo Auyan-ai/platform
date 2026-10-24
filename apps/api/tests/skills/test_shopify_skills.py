@@ -53,7 +53,9 @@ OWNER_EMAIL = "cliente@example.com"
 CTX = verified_context(email=OWNER_EMAIL, integration_ctx=_SHOPIFY_INTEGRATION_CTX)
 
 # Otro remitente verificado: no es dueño de ningún pedido de prueba.
-CTX_OTHER_SENDER = verified_context(email="ajeno@example.com", integration_ctx=_SHOPIFY_INTEGRATION_CTX)
+CTX_OTHER_SENDER = verified_context(
+    email="ajeno@example.com", integration_ctx=_SHOPIFY_INTEGRATION_CTX
+)
 
 # Sin remitente verificado (ticket de chat): no hay grants.
 CTX_NO_SENDER = verified_context(channel="zendesk", integration_ctx=_SHOPIFY_INTEGRATION_CTX)
@@ -125,8 +127,8 @@ _RAW_PRODUCT = {
     "product_type": "Ropa",
     "status": "active",
     "variants": [
-        {"title": "Small", "price": "19.99", "inventory_quantity": 5},
-        {"title": "Large", "price": "19.99", "inventory_quantity": 0},
+        {"id": 3101, "title": "Small", "price": "19.99", "inventory_quantity": 5},
+        {"id": 3102, "title": "Large", "price": "19.99", "inventory_quantity": 0},
     ],
 }
 
@@ -391,15 +393,14 @@ class TestGetProductInfo:
             "apps.api.integrations.shopify.ShopifyClient",
             return_value=mock_client,
         ):
-            result = await GetProductInfo().execute(
-                CTX, GetProductInfoInput(query="camiseta")
-            )
+            result = await GetProductInfo().execute(CTX, GetProductInfoInput(query="camiseta"))
         assert isinstance(result, GetProductInfoOutput)
         assert result.total_found == 1
         p = result.products[0]
         assert p.title == "Camiseta Auyan"
         assert p.product_type == "Ropa"
         assert len(p.variants) == 2
+        assert [v.variant_id for v in p.variants] == [3101, 3102]
         assert p.variants[0].available is True
         assert p.variants[1].available is False
         assert p.variants[0].price == Money(amount="19.99", currency="USD")
@@ -538,8 +539,10 @@ class TestSkillsRegistered:
     def test_list_for_aop_with_shopify_skills(self) -> None:
         from apps.api.skills.registry import SkillRegistry
 
-        skills = SkillRegistry.list_for_aop([
-            "shopify.list_my_orders",
-            "shopify.get_order_status",
-        ])
+        skills = SkillRegistry.list_for_aop(
+            [
+                "shopify.list_my_orders",
+                "shopify.get_order_status",
+            ]
+        )
         assert len(skills) == 2

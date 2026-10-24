@@ -140,9 +140,7 @@ def _make_app(monkeypatch: pytest.MonkeyPatch, captured: dict) -> FastAPI:
             human_approval_required=kwargs["human_approval_required"],
         )
 
-    monkeypatch.setattr(
-        "apps.api.routers.tool_permissions.upsert_tool_permission", _fake_upsert
-    )
+    monkeypatch.setattr("apps.api.routers.tool_permissions.upsert_tool_permission", _fake_upsert)
 
     from apps.api.core.config import get_settings
 
@@ -173,9 +171,7 @@ class TestL3ApprovalFloor:
         assert resp.json()["error"] == "l3_autonomy_not_acknowledged"
         assert captured == {}  # fail-safe: nunca llegó al upsert
 
-    def test_l3_disable_approval_with_acknowledge_ok(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_l3_disable_approval_with_acknowledge_ok(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Con acknowledge=True el opt-out reconocido se propaga al upsert."""
         captured: dict = {}
         client = TestClient(_make_app(monkeypatch, captured))

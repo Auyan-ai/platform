@@ -72,9 +72,7 @@ class CancelOrder(Skill):
     identity_scope = "order"
     min_level = "guest"
 
-    async def prepare_approval(
-        self, ctx: SkillContext, raw_input: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def prepare(self, ctx: SkillContext, raw_input: dict[str, Any]) -> dict[str, Any]:
         """Rechaza un pedido cancelado o enviado y añade a la tarjeta por dónde vuelve
         el dinero. `refund_payment`, si el LLM lo manda, no llega a la aprobación."""
         inputs = CancelOrderInput.model_validate(raw_input)

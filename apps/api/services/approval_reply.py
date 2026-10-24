@@ -18,12 +18,14 @@ el idioma de la conversación y el idioma por defecto del tenant.
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from apps.api.integrations.anthropic_client import call_claude_text
 from apps.api.services.fixed_texts import CATALOG, FALLBACK_LANGUAGE, LANGUAGE_CODES, fixed_text
 from apps.api.services.language import LANGUAGE_NAMES, reply_language_mismatch
 from apps.api.services.reply_format import strip_emojis, strip_formatting
+from apps.api.services.returns import ReturnPlan, currency_decimals
 from apps.api.skills.shopify._order_guard import ActionOutcome
 
 if TYPE_CHECKING:
@@ -119,7 +121,89 @@ def action_details(
         return fixed_text(
             "address_details", language, tenant_default=tenant_default, address=address
         )
+    if skill_slug in _RETURN_SKILLS and output.get("plan"):
+        plan = ReturnPlan.model_validate(output["plan"])
+        return return_next_steps(plan, language or tenant_default, tenant_default)
     return None
+
+
+_RETURN_SKILLS = frozenset({"shopify.start_return", "shopify.start_exchange"})
+
+
+def _money(amount: Decimal, currency: str, language: str) -> str:
+    text = f"{amount:.{currency_decimals(currency)}f}"
+    return f"{text if language == 'en' else text.replace('.', ',')} {currency}"
+
+
+def return_next_steps(plan: ReturnPlan, language: str, tenant_default: str) -> str:
+    """Qué pasa ahora, según la política del tenant con la que se abrió: cómo vuelve el
+    paquete, quién paga el envío, la tarifa y el plazo. Nunca dice que el dinero ya vuelve."""
+
+    def text(key: str, **params: str) -> str:
+        return fixed_text(key, language, tenant_default=tenant_default, **params)
+
+    s = plan.settlement
+    steps = [
+        text("returns.ship_to", address=plan.return_address)
+        if plan.shipping_method == "customer_ships" and plan.return_address
+        else text("returns.label")
+    ]
+    # En un cambio que el cliente paga no hay reembolso del que descontar: los gastos van
+    # dentro de lo que le queda por pagar.
+    owes = bool(plan.exchange_lines) and s.balance is not None and s.balance < 0
+    if s.fee_pending is not None or s.fee_label_cost:
+        steps.append(text("returns.shipping_fee_pending"))
+    elif s.fee and owes:
+        pass
+    elif s.fee:
+        steps.append(text("returns.shipping_fee", fee=_money(s.fee, s.currency, language)))
+    elif s.shipping_payer == "customer":
+        steps.append(text("returns.shipping_paid_by_customer"))
+    elif plan.shipping_method == "customer_ships":
+        steps.append(text("returns.shipping_reimbursed"))
+    else:
+        steps.append(text("returns.shipping_paid_by_store"))
+    if s.restocking_fee and not owes:
+        fee = _money(s.restocking_fee, s.currency, language)
+        steps.append(text("returns.restocking_fee", fee=fee))
+    days = str(plan.refund_days)
+    credit = s.refund_as == "store_credit"
+    if not plan.exchange_lines:
+        # Un saldo negativo no llega aquí: esa devolución no se abre (`fees_exceed_refund`).
+        if s.balance is not None and s.balance <= 0:
+            steps.append(text("returns.nothing_to_refund"))
+            return " ".join(steps)
+        key = "returns.credit_after_receipt" if credit else "returns.refund_after_receipt"
+        steps.append(text(key, days=days))
+        return " ".join(steps)
+    steps.append(
+        text(
+            "returns.exchange_ships_now"
+            if plan.ship_replacement == "immediately"
+            else "returns.exchange_ships_after_receipt"
+        )
+    )
+    if s.price_rule == "store_absorbs":
+        steps.append(text("returns.exchange_difference_absorbed"))
+    elif s.price_rule == "no_refund":
+        steps.append(text("returns.exchange_no_refund"))
+    if s.balance is None:
+        steps.append(text("returns.exchange_difference_pending"))
+    elif s.balance < 0:
+        owed = _money(-s.balance, s.currency, language)
+        key = (
+            "returns.exchange_you_owe_with_fees"
+            if s.fee or s.restocking_fee
+            else "returns.exchange_you_owe"
+        )
+        steps.append(text(key, amount=owed))
+    else:
+        # Lo que solo se devuelve, en `refund_as`; la diferencia, como diga la tienda.
+        for form, value in s.payouts.items():
+            amount = _money(value, s.currency, language)
+            key = "returns.exchange_credit" if form == "store_credit" else "returns.exchange_refund"
+            steps.append(text(key, amount=amount, days=days))
+    return " ".join(steps)
 
 
 def fallback_message(

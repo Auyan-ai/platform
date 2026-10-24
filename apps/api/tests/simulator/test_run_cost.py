@@ -54,7 +54,9 @@ def _anthropic() -> MagicMock:
     )
 
     async def create(**kwargs: Any) -> SimpleNamespace:
-        return {get_models().simulator_model: sim_turn, get_models().judge_sonnet_model: judge}[kwargs["model"]]
+        return {get_models().simulator_model: sim_turn, get_models().judge_sonnet_model: judge}[
+            kwargs["model"]
+        ]
 
     client = MagicMock()
     client.messages.create = AsyncMock(side_effect=create)
@@ -100,9 +102,7 @@ def finalize(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     monkeypatch.setattr(runner, "ensure_simulation_budget", AsyncMock())
     monkeypatch.setattr(runner, "get_simulation_scenario", AsyncMock(return_value=scenario))
     monkeypatch.setattr(runner, "get_user_profile", AsyncMock(return_value=profile))
-    monkeypatch.setattr(
-        runner, "_setup_run", AsyncMock(return_value=(uuid4(), uuid4(), uuid4()))
-    )
+    monkeypatch.setattr(runner, "_setup_run", AsyncMock(return_value=(uuid4(), uuid4(), uuid4())))
     monkeypatch.setattr(runner, "_persist_customer_message", AsyncMock())
     monkeypatch.setattr(runner, "_persist_escalation_ack", AsyncMock())
     monkeypatch.setattr(runner, "_get_skill_log", AsyncMock(return_value=[]))
@@ -116,9 +116,7 @@ def finalize(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
 async def test_run_cost_sums_agent_cost_and_cached_simulator_and_judge_calls(
     finalize: AsyncMock,
 ) -> None:
-    await runner.run_simulation(
-        uuid4(), TENANT, anthropic=_anthropic(), graph=_graph()
-    )
+    await runner.run_simulation(uuid4(), TENANT, anthropic=_anthropic(), graph=_graph())
 
     # agente: 0.012 USD de final_state["cost_usd"]                         = 1.2 ¢
     # simulador (Haiku): 200*$1 + 1500 lectura caché*$0.10 + 40*$5 = $0.00055 = 0.055 ¢
@@ -170,9 +168,7 @@ async def test_run_leaves_one_langsmith_trace_with_simulation_metadata_and_child
     for child in llm_runs.values():
         assert child["trace_id"] == root["id"]
 
-    turn_update = next(
-        c.kwargs for c in inner.update_run.call_args_list if c.args[0] == turn["id"]
-    )
+    turn_update = next(c.kwargs for c in inner.update_run.call_args_list if c.args[0] == turn["id"])
     assert turn_update["parent_run_id"] == root["id"]
 
     final = next(c.kwargs for c in inner.update_run.call_args_list if c.args[0] == root["id"])
@@ -192,8 +188,13 @@ async def test_a_run_uses_the_scenario_as_the_code_defines_it_not_the_stored_row
 
     ce06 = next(sc for sc in scenarios.ALL_SCENARIOS if sc["id"] == "CE-06")
     stale = SimulationScenario(
-        id=uuid4(), tenant_id=TENANT, name=ce06["name"], aop_slug="order_status",
-        user_profile_id=uuid4(), expected_outcome="viejo", mock_fixtures={"shopify": {}},
+        id=uuid4(),
+        tenant_id=TENANT,
+        name=ce06["name"],
+        aop_slug="order_status",
+        user_profile_id=uuid4(),
+        expected_outcome="viejo",
+        mock_fixtures={"shopify": {}},
         max_turns=3,
     )
     monkeypatch.setattr(runner, "get_simulation_scenario", AsyncMock(return_value=stale))

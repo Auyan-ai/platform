@@ -24,19 +24,23 @@ class TestNeedsSupervision:
 
     def test_aop_require_supervision_supervises_response_after_tools(self):
         # require_supervision + el turno usó herramientas → supervisa la respuesta.
-        assert self._fn({
-            "tenant_config": {"extra": {}},
-            "aop_require_supervision": True,
-            "tool_results": [{"slug": "shopify.get_order_status", "is_error": False}],
-        })
+        assert self._fn(
+            {
+                "tenant_config": {"extra": {}},
+                "aop_require_supervision": True,
+                "tool_results": [{"slug": "shopify.get_order_status", "is_error": False}],
+            }
+        )
 
     def test_aop_require_supervision_skips_plain_response(self):
         # require_supervision PERO respuesta de cortesía sin herramientas → no supervisa.
-        assert not self._fn({
-            "tenant_config": {"extra": {}},
-            "aop_require_supervision": True,
-            "tool_results": [],
-        })
+        assert not self._fn(
+            {
+                "tenant_config": {"extra": {}},
+                "aop_require_supervision": True,
+                "tool_results": [],
+            }
+        )
 
     def test_aop_require_supervision_false_does_not_force(self):
         assert not self._fn({"tenant_config": {"extra": {}}, "aop_require_supervision": False})
@@ -64,19 +68,23 @@ class TestNeedsSupervision:
 
         SkillRegistry._by_slug["test.l1_supervise"] = _L1Skill
         try:
-            assert not self._fn({
-                "tenant_config": {"extra": {}},
-                "pending_tool_call": {"slug": "test.l1_supervise", "input": {}},
-            })
+            assert not self._fn(
+                {
+                    "tenant_config": {"extra": {}},
+                    "pending_tool_call": {"slug": "test.l1_supervise", "input": {}},
+                }
+            )
             # P3: una lectura L1 pendiente NO se supervisa aunque el AOP pida
             # require_supervision y ya haya tool_results. Supervisar la intención
             # de leer es un hop sin valor; el respond que use el dato sí se supervisa.
-            assert not self._fn({
-                "tenant_config": {"extra": {"require_supervision": True}},
-                "aop_require_supervision": True,
-                "tool_results": [{"slug": "shopify.get_order_status", "is_error": False}],
-                "pending_tool_call": {"slug": "test.l1_supervise", "input": {}},
-            })
+            assert not self._fn(
+                {
+                    "tenant_config": {"extra": {"require_supervision": True}},
+                    "aop_require_supervision": True,
+                    "tool_results": [{"slug": "shopify.get_order_status", "is_error": False}],
+                    "pending_tool_call": {"slug": "test.l1_supervise", "input": {}},
+                }
+            )
         finally:
             del SkillRegistry._by_slug["test.l1_supervise"]
 
@@ -103,10 +111,12 @@ class TestNeedsSupervision:
 
         SkillRegistry._by_slug["test.l2_supervise"] = _L2Skill
         try:
-            assert self._fn({
-                "tenant_config": {"extra": {}},
-                "pending_tool_call": {"slug": "test.l2_supervise", "input": {}},
-            })
+            assert self._fn(
+                {
+                    "tenant_config": {"extra": {}},
+                    "pending_tool_call": {"slug": "test.l2_supervise", "input": {}},
+                }
+            )
         finally:
             del SkillRegistry._by_slug["test.l2_supervise"]
 
@@ -133,24 +143,30 @@ class TestNeedsSupervision:
 
         SkillRegistry._by_slug["test.l3_supervise"] = _L3Skill
         try:
-            assert self._fn({
-                "tenant_config": {"extra": {}},
-                "pending_tool_call": {"slug": "test.l3_supervise", "input": {}},
-            })
+            assert self._fn(
+                {
+                    "tenant_config": {"extra": {}},
+                    "pending_tool_call": {"slug": "test.l3_supervise", "input": {}},
+                }
+            )
         finally:
             del SkillRegistry._by_slug["test.l3_supervise"]
 
     def test_require_supervision_flag_supervises_after_tools(self):
-        assert self._fn({
-            "tenant_config": {"extra": {"require_supervision": True}},
-            "tool_results": [{"slug": "x", "is_error": False}],
-        })
+        assert self._fn(
+            {
+                "tenant_config": {"extra": {"require_supervision": True}},
+                "tool_results": [{"slug": "x", "is_error": False}],
+            }
+        )
 
     def test_require_supervision_flag_skips_plain_response(self):
-        assert not self._fn({
-            "tenant_config": {"extra": {"require_supervision": True}},
-            "tool_results": [],
-        })
+        assert not self._fn(
+            {
+                "tenant_config": {"extra": {"require_supervision": True}},
+                "tool_results": [],
+            }
+        )
 
     def test_l3_pending_supervised_even_without_tool_results(self):
         """Una acción L3 pendiente se supervisa siempre, aunque no haya tool_results."""
@@ -176,11 +192,13 @@ class TestNeedsSupervision:
 
         SkillRegistry._by_slug["test.l3_always"] = _L3Skill
         try:
-            assert self._fn({
-                "tenant_config": {"extra": {}},
-                "pending_tool_call": {"slug": "test.l3_always", "input": {}},
-                "tool_results": [],
-            })
+            assert self._fn(
+                {
+                    "tenant_config": {"extra": {}},
+                    "pending_tool_call": {"slug": "test.l3_always", "input": {}},
+                    "tool_results": [],
+                }
+            )
         finally:
             del SkillRegistry._by_slug["test.l3_always"]
 
@@ -188,11 +206,13 @@ class TestNeedsSupervision:
         """supervisor_retried NO apaga la supervisión del turno: la respuesta
         corregida tras un reject tactical se re-supervisa (el anti-loop vive en
         el nodo supervise: segundo reject → escalation_reason → escalate)."""
-        assert self._fn({
-            "tenant_config": {"extra": {"require_supervision": True}},
-            "supervisor_retried": True,
-            "tool_results": [{"slug": "x", "is_error": False}],
-        })
+        assert self._fn(
+            {
+                "tenant_config": {"extra": {"require_supervision": True}},
+                "supervisor_retried": True,
+                "tool_results": [{"slug": "x", "is_error": False}],
+            }
+        )
 
     def test_still_supervises_l2_tool_after_retry(self):
         """Una L2 nueva pedida DESPUÉS de un retry del supervisor se supervisa
@@ -219,11 +239,13 @@ class TestNeedsSupervision:
 
         SkillRegistry._by_slug["test.l2_after_retry"] = _L2Skill
         try:
-            assert self._fn({
-                "tenant_config": {"extra": {}},
-                "pending_tool_call": {"slug": "test.l2_after_retry", "input": {}},
-                "supervisor_retried": True,
-            })
+            assert self._fn(
+                {
+                    "tenant_config": {"extra": {}},
+                    "pending_tool_call": {"slug": "test.l2_after_retry", "input": {}},
+                    "supervisor_retried": True,
+                }
+            )
         finally:
             del SkillRegistry._by_slug["test.l2_after_retry"]
 
@@ -406,7 +428,7 @@ class TestSuperviseNode:
         node = make_supervise_node(fake_deps)
         result = await node(state)
 
-        assert result["supervisor_tokens_in"] == 300   # 100 prev + 200 mock
+        assert result["supervisor_tokens_in"] == 300  # 100 prev + 200 mock
         assert result["supervisor_tokens_out"] == 120  # 40 prev + 80 mock
 
     @pytest.mark.asyncio
@@ -460,49 +482,80 @@ class TestRouteAfterSupervise:
         return route_after_supervise(state)
 
     def test_approve_with_pending_tool_goes_to_execute_skill(self):
-        assert self._route({
-            "supervisor_verdict": "approve",
-            "pending_tool_call": {"slug": "s", "input": {}},
-        }) == "execute_skill"
+        assert (
+            self._route(
+                {
+                    "supervisor_verdict": "approve",
+                    "pending_tool_call": {"slug": "s", "input": {}},
+                }
+            )
+            == "execute_skill"
+        )
 
     def test_approve_respond_goes_to_respond(self):
-        assert self._route({
-            "supervisor_verdict": "approve",
-            "decision": "respond",
-        }) == "respond"
+        assert (
+            self._route(
+                {
+                    "supervisor_verdict": "approve",
+                    "decision": "respond",
+                }
+            )
+            == "respond"
+        )
 
     def test_approve_escalate_goes_to_escalate(self):
-        assert self._route({
-            "supervisor_verdict": "approve",
-            "decision": "escalate",
-        }) == "escalate"
+        assert (
+            self._route(
+                {
+                    "supervisor_verdict": "approve",
+                    "decision": "escalate",
+                }
+            )
+            == "escalate"
+        )
 
     def test_reject_tactical_first_time_goes_to_reason(self):
         # Primer rechazo tactical: nodo setó supervisor_retried=True pero NO escalation_reason
-        assert self._route({
-            "supervisor_verdict": "reject",
-            "supervisor_reject_kind": "tactical",
-            "supervisor_retried": True,
-            # sin escalation_reason → va a reason
-        }) == "reason"
+        assert (
+            self._route(
+                {
+                    "supervisor_verdict": "reject",
+                    "supervisor_reject_kind": "tactical",
+                    "supervisor_retried": True,
+                    # sin escalation_reason → va a reason
+                }
+            )
+            == "reason"
+        )
 
     def test_reject_tactical_second_time_goes_to_escalate(self):
         # Segundo rechazo: el nodo ve supervisor_retried=True y pone
         # escalation_reason (aunque el reject sea tactical) → ruta a escalate.
-        assert self._route({
-            "supervisor_verdict": "reject",
-            "supervisor_reject_kind": "tactical",
-            "supervisor_retried": True,
-            "escalation_reason": "supervisor_rejected (tactical): sigue mal",
-        }) == "escalate"
+        assert (
+            self._route(
+                {
+                    "supervisor_verdict": "reject",
+                    "supervisor_reject_kind": "tactical",
+                    "supervisor_retried": True,
+                    "escalation_reason": "supervisor_rejected (tactical): sigue mal",
+                }
+            )
+            == "escalate"
+        )
 
     def test_reject_structural_goes_to_escalate(self):
         # Rechazo structural: el nodo pone escalation_reason → ruta a escalate
-        assert self._route({
-            "supervisor_verdict": "reject",
-            "supervisor_reject_kind": "structural",
-            "escalation_reason": "supervisor_rejected (structural): AOP incorrecto",
-        }) == "escalate"
+        assert (
+            self._route(
+                {
+                    "supervisor_verdict": "reject",
+                    "supervisor_reject_kind": "structural",
+                    "escalation_reason": "supervisor_rejected (structural): AOP incorrecto",
+                }
+            )
+            == "escalate"
+        )
+
 
 # ──────────────────────────────────────────────────────────
 # El supervisor ve la misma evidencia que reason (#261, #327)
@@ -512,6 +565,34 @@ _STORE_FACTS = {
     "support_email": "soporte@tienda-ejemplo.es",
     "support_phone": "612 345 678",
     "business_hours": "lunes a viernes de 8 a 16h",
+}
+
+_RETURNS_POLICY = {
+    "version": 2,
+    "policy": {
+        "schema_version": 1,
+        "window": {"days": 30, "starts_at": "delivery"},
+        "reasons": [
+            {
+                "code": "too_small",
+                "label": "Talla pequeña",
+                "fault": "customer",
+                "required_evidence": [],
+            }
+        ],
+        "shipping": {
+            "method": "customer_ships",
+            "return_address": "Calle Mayor 1, Madrid",
+            "payer": {"store_fault": "store", "customer_fault": "customer"},
+        },
+        "refund_days": 14,
+        "refund_method": "original_payment",
+        "restocking_fee_percent": {"store_fault": "0", "customer_fault": "0"},
+        "excluded_product_tags": [],
+        "exchanges": {"enabled": False},
+        "returns_require_approval": True,
+        "evidence_requires_approval": True,
+    },
 }
 
 _DELIVERED_ORDER = {
@@ -549,6 +630,7 @@ def _store_state(agent_response: str) -> dict:
         "aop_slug": "order_change",
         "system_prompt": compiled.system_prompt,
         "tenant_facts": _STORE_FACTS,
+        "returns_policy": _RETURNS_POLICY,
         "tenant_config": {"extra": {}, "escalation_threshold": 0.7},
         "conversation_history": [
             {"role": "customer", "content": "Quiero cancelar el pedido #1431."}
@@ -580,6 +662,7 @@ async def test_supervisor_sees_tenant_facts(fake_deps: Any) -> None:
     )
 
     sent = _sent_to_supervisor(fake_deps)
+    assert "- Plazo: 30 días desde la entrega." in sent
     assert "Teléfono de soporte: 612 345 678" in sent
     assert "Horario de atención: lunes a viernes de 8 a 16h" in sent
 
@@ -754,8 +837,9 @@ async def test_euros_for_a_usd_order_are_rejected_in_code(fake_deps: Any) -> Non
     assert result["supervisor_verdict"] == "reject"
     assert result["supervisor_reject_kind"] == "tactical"
     assert result["supervisor_model_used"] == "code"
-    assert "68,95 € (la evidencia lo da en USD); 76,95 € (la evidencia lo da en USD)" in (
-        result["supervisor_feedback"]
+    assert (
+        "68,95 € (la evidencia lo da en USD); 76,95 € (la evidencia lo da en USD)"
+        in (result["supervisor_feedback"])
     )
     assert fake_deps.anthropic.messages.create.await_count == 0
 

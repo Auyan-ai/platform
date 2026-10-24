@@ -84,7 +84,9 @@ class TestProcessInbound:
                 "cost_usd": 0.0003,
             }
         )
-        service = AgentService(graph=graph, observability=_fake_observability(), handle_error=_unused_handle_error)
+        service = AgentService(
+            graph=graph, observability=_fake_observability(), handle_error=_unused_handle_error
+        )
 
         outcome = await service.process_inbound(**_kwargs())
 
@@ -102,7 +104,9 @@ class TestProcessInbound:
                 "escalation_id": "esc-fallback",
             }
         )
-        service = AgentService(graph=graph, observability=_fake_observability(), handle_error=_unused_handle_error)
+        service = AgentService(
+            graph=graph, observability=_fake_observability(), handle_error=_unused_handle_error
+        )
 
         outcome = await service.process_inbound(**_kwargs())
 
@@ -125,7 +129,9 @@ class TestProcessInbound:
                 "escalation_created": True,
             }
         )
-        service = AgentService(graph=graph, observability=_fake_observability(), handle_error=_unused_handle_error)
+        service = AgentService(
+            graph=graph, observability=_fake_observability(), handle_error=_unused_handle_error
+        )
 
         outcome = await service.process_inbound(**_kwargs())
 
@@ -189,7 +195,9 @@ class TestProcessInbound:
         """Verifica que el state inicial pasado al grafo tiene los IDs correctos."""
         graph = AsyncMock()
         graph.ainvoke = AsyncMock(return_value={"decision": "respond", "agent_response": "x"})
-        service = AgentService(graph=graph, observability=_fake_observability(), handle_error=_unused_handle_error)
+        service = AgentService(
+            graph=graph, observability=_fake_observability(), handle_error=_unused_handle_error
+        )
 
         await service.process_inbound(**_kwargs())
 
@@ -204,9 +212,7 @@ class TestProcessInbound:
     @pytest.mark.asyncio
     async def test_finalize_passes_error_level_when_error_present(self) -> None:
         graph = AsyncMock()
-        graph.ainvoke = AsyncMock(
-            return_value={"error": "boom", "decision": None}
-        )
+        graph.ainvoke = AsyncMock(return_value={"error": "boom", "decision": None})
         obs = _fake_observability()
         service = AgentService(graph=graph, observability=obs, handle_error=_unused_handle_error)
 
@@ -224,9 +230,7 @@ class TestProcessInbound:
         obs.trace_id.return_value = None
         obs.finalize_trace = MagicMock()
         graph = AsyncMock()
-        graph.ainvoke = AsyncMock(
-            return_value={"decision": "respond", "agent_response": "ok"}
-        )
+        graph.ainvoke = AsyncMock(return_value={"decision": "respond", "agent_response": "ok"})
         service = AgentService(graph=graph, observability=obs, handle_error=_unused_handle_error)
 
         outcome = await service.process_inbound(**_kwargs())

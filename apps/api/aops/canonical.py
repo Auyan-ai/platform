@@ -155,61 +155,50 @@ CANONICAL_AOPS: list[dict[str, Any]] = [
             "workspace": CANONICAL_WORKSPACE,
             "triggers": {
                 "description": (
-                    "El cliente quiere devolver un producto / iniciar una devolución (la "
-                    "MERCANCÍA de vuelta). Si pide SOLO el dinero sin devolver producto → "
-                    "refunds. Cancelar un pedido no enviado → order_change. Producto "
-                    "dañado/no recibido → complaint."
+                    "El cliente quiere devolver un producto o cambiarlo por otra talla, color "
+                    "u otro artículo (la MERCANCÍA de vuelta). Si pide SOLO el dinero sin "
+                    "devolver producto → refunds. Cancelar un pedido no enviado → order_change. "
+                    "Producto no recibido → complaint."
                 ),
                 "examples": [
                     "quiero devolver esta camiseta",
                     "¿cómo inicio una devolución?",
                     "el producto no me sirve, lo quiero devolver",
+                    "me queda pequeña, ¿me la cambiáis por una M?",
                 ],
             },
             "allowed_skills": [
                 "shopify.get_order_status",
                 "shopify.list_my_orders",
-                "shopify.get_shop_policies",
+                "shopify.get_product_info",
                 "shopify.start_return",
+                "shopify.start_exchange",
             ],
             "required_data": [
                 "Nº de pedido, o que el cliente escriba desde el email o teléfono de la compra",
-                "Qué artículo(s) quiere devolver y el motivo",
+                "Qué artículo(s) quiere devolver, cuántos y el motivo",
+                "En un cambio, qué variante quiere a cambio",
             ],
             "guardrails": [
-                "Antes de mencionar o afirmar CUALQUIER plazo, condición o exclusión de devolución, ten el dato de una fuente real EN ESTE turno: si ya viene en la KB inyectada o en tenant_facts, úsalo directo; si NO lo tienes, llama get_shop_policies ANTES de responder. Nunca sueltes un plazo asumido para corregirlo luego: el dato va primero, la afirmación después.",
-                "Fuera del plazo de la tienda → no inicies la devolución: explícalo con empatía y escala si insiste.",
-                "Productos excluidos por la política (digitales/perecederos) no admiten devolución.",
-                "No inicies start_return hasta tener artículo y motivo confirmados por el cliente.",
+                "No llames start_return ni start_exchange hasta que el cliente confirme artículos, cantidades y motivo.",
+                "El motivo es uno de los códigos de la política que tienes en el turno; si ninguno encaja con lo que cuenta el cliente, pregúntale.",
+                "Plazo, pruebas, exclusiones, envío e importes los comprueba el sistema: no los calcules ni los prometas tú.",
             ],
-            "max_tool_iterations": 5,
+            "max_tool_iterations": 6,
             "confidence_threshold": 0.70,
             "require_supervision": True,
             "escalation_triggers": [
-                "El pedido está fuera del plazo de devolución de la tienda",
                 "El cliente es agresivo o amenazante",
-                "La política excluye el producto y el cliente insiste",
             ],
         },
         "body": (
-            "## Procedimiento: devolución\n"
-            "Objetivo: ayudar a devolver un producto elegible, según la política real de la tienda.\n\n"
+            "## Procedimiento: devolución o cambio\n"
+            "Objetivo: abrir la devolución o el cambio que el cliente pide; el sistema aplica la política de la tienda.\n\n"
             "1. Identifica el pedido: nº → get_order_status; sin nº → list_my_orders.\n"
-            "2. ANTES de afirmar nada sobre plazos: determina plazo, condiciones y exclusiones desde la\n"
-            "   política REAL, en este orden de fuentes: el contexto de la KB inyectado (si lo hay),\n"
-            "   `tenant_facts` (p.ej. plazo de devolución) y `get_shop_policies`. Si el dato ya viene en la\n"
-            "   KB o tenant_facts inyectados, úsalo SIN llamar la tool; si no está, llama `get_shop_policies`\n"
-            "   antes de responder con cualquier plazo. No asumas un plazo que no esté en NINGUNA de esas\n"
-            "   fuentes; si falta en todas, dilo y escala.\n"
-            "3. Elegibilidad: el plazo cuenta desde la RECEPCIÓN del pedido, no desde la compra. Usa la\n"
-            "   primera fecha disponible en este orden: delivered_at (entrega) → fulfilled_at (envío) →\n"
-            "   created_at (creación, solo como último recurso y avisando de que es conservador). Compárala\n"
-            "   con el plazo usando la fecha y hora actual de la tienda.\n"
-            "   - Elegible → continúa.\n"
-            "   - Fuera de plazo / excluido → explícalo con empatía, no inicies, escala si insiste.\n"
-            "4. Confirma con el cliente QUÉ artículo(s) y el MOTIVO.\n"
-            "5. start_return mapeando desde el pedido (order_id, line_item_id, quantity, reason). Queda en aprobación.\n"
-            "   Explica el siguiente paso: enviar el producto, y que el reembolso se emite cuando se reciba y verifique.\n"
+            "2. Confirma con el cliente qué artículo(s) (line_item_id del pedido), cuántos y el motivo, con un código de la política del turno.\n"
+            "3. Si quiere otra talla, color u otro artículo: busca la variante con get_product_info y confírmala con el cliente.\n"
+            "4. Devolución → start_return. Cambio → start_exchange (con exchange_items). Si la tienda lo exige, quedan pendientes de la aprobación del equipo.\n"
+            "5. Si la skill te devuelve un error, haz lo que dice: pide el dato que falta (p. ej. una foto) o elige otro motivo, artículo o variante.\n"
             "6. Si solo quiere el dinero (sin devolver) o pregunta por un reembolso → es refunds; el grafo reclasifica.\n"
             "7. Tono profesional siempre."
         ),
@@ -544,6 +533,7 @@ CANONICAL_TOOL_PERMISSIONS: list[dict[str, Any]] = [
     {"skill_slug": "shopify.tag_order", "is_enabled": True, "human_approval_required": False},
     # L3 — destructivas, con aprobación humana por defecto
     {"skill_slug": "shopify.start_return", "is_enabled": True, "human_approval_required": True},
+    {"skill_slug": "shopify.start_exchange", "is_enabled": True, "human_approval_required": True},
     {"skill_slug": "shopify.refund_partial", "is_enabled": False, "human_approval_required": True},
     {"skill_slug": "shopify.cancel_order", "is_enabled": True, "human_approval_required": True},
     {"skill_slug": "shopify.update_shipping_address", "is_enabled": True, "human_approval_required": True},

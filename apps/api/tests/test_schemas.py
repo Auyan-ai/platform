@@ -22,9 +22,7 @@ class TestRespondDecision:
 
     def test_requires_response_text(self) -> None:
         with pytest.raises(ValidationError, match="response_text"):
-            AgentDecisionTool.model_validate(
-                {"decision": "respond", "confidence": 0.9}
-            )
+            AgentDecisionTool.model_validate({"decision": "respond", "confidence": 0.9})
 
     def test_rejects_empty_response_text(self) -> None:
         with pytest.raises(ValidationError, match="response_text"):

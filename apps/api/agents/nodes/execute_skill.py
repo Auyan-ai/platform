@@ -27,8 +27,12 @@ from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import create_pending_approval, get_recent_approval_for_skill
-from apps.api.integrations.base import IntegrationContext
+from apps.api.integrations.base import IntegrationContext, MutationNotApplied
+from apps.api.services.approval_execution import Applied, ExecutionResult, reconcile
+from apps.api.services.approval_reply import outcome_message
+from apps.api.services.approval_resolution import team_followup_reason, unknown_outcome_reason
 from apps.api.services.channel_routing import is_messaging_channel
+from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.identity import (
     Grant,
     IdentityContext,
@@ -45,8 +49,10 @@ from apps.api.services.identity_guest import (
 )
 from apps.api.services.language import state_languages
 from apps.api.services.pii import redact_inputs
+from apps.api.services.returns import customer_photos
+from apps.api.services.returns_policy import ActivePolicy
 from apps.api.services.skill_access import IdentityVerdict, identity_verdict
-from apps.api.skills.base import Skill, SkillContext, SkillRefusal
+from apps.api.skills.base import Skill, SkillContext, SkillRefusal, SkillRejection
 from apps.api.skills.identity.check_order_contact import CheckOrderContactOutput
 from apps.api.skills.registry import SkillRegistry
 from pydantic import ValidationError
@@ -100,6 +106,9 @@ def build_skill_context(state: AgentState) -> SkillContext:
         phone_region=default_phone_region(state.get("tenant_config"), state.get("tenant_facts")),
         guest_policy=guest_policy(state.get("tenant_config")),
         tenant_facts=dict(state.get("tenant_facts") or {}),
+        returns_policy=ActivePolicy.from_state(state.get("returns_policy")),
+        customer_photos=customer_photos(state.get("conversation_history") or []),
+        attachments_readable=is_messaging_channel(state.get("channel") or ""),
     )
 
 
@@ -156,7 +165,20 @@ async def _refs_point_to_same_order(state: AgentState, ref_a: str, ref_b: str) -
         return False
 
 
-async def _same_order_action(state: AgentState, existing_inputs: dict, new_inputs: dict) -> bool:
+def _requested(skill_cls: type[Skill], inputs: dict[str, Any] | None) -> dict[str, Any]:
+    """Solo los campos que pide el LLM y el pedido: sin lo que añade `prepare` (p. ej. el
+    plan de una devolución)."""
+    fields = {
+        *skill_cls.input_schema.model_json_schema().get("properties", {}),
+        skill_cls.order_input_field,
+        "order_id",
+    }
+    return {k: v for k, v in (inputs or {}).items() if k in fields}
+
+
+async def _same_order_action(
+    state: AgentState, existing_inputs: dict, new_inputs: dict, skill_cls: type[Skill]
+) -> bool:
     """¿El nuevo tool call es la MISMA acción que un approval previo?
 
     Los campos que no son order_id deben coincidir exactamente (p.ej. la
@@ -167,8 +189,8 @@ async def _same_order_action(state: AgentState, existing_inputs: dict, new_input
     de decidir — ignorarlo se tragaba una acción L3 sobre OTRO pedido cuando
     el resto de inputs coincidía (auditoría sesión 67).
     """
-    a = {k: v for k, v in (existing_inputs or {}).items() if k != "order_id"}
-    b = {k: v for k, v in (new_inputs or {}).items() if k != "order_id"}
+    a = skill_cls.approval_key(existing_inputs or {})
+    b = skill_cls.approval_key(new_inputs or {})
     if a != b:
         return False
 
@@ -295,6 +317,23 @@ def _identity_update(state: AgentState, output: Any) -> dict[str, Any]:
     }
 
 
+def _outcome_reply(
+    state: AgentState, skill_cls: type[Skill], slug: str, output: dict[str, Any]
+) -> dict[str, Any]:
+    """Texto fijo del resultado para las skills que no dejan redactarlo al LLM (p. ej. una
+    devolución abierta no promete el dinero). Si no quedó cerrada, escala al equipo."""
+    if not skill_cls.reply_from_outcome:
+        return {}
+    language, default_language = state_languages(state)
+    reply = outcome_message(slug, output, language, default_language)
+    if reply is None:
+        return {}
+    followup = team_followup_reason(slug, output)
+    if followup is None:
+        return {"decision": "respond", "agent_response": reply}
+    return {"decision": "escalate", "agent_response": reply, "escalation_reason": followup}
+
+
 def _l3_requires_human_approval(skill_cls: type[Skill], perm: dict[str, Any]) -> bool:
     """Piso de seguridad para skills L3 (destructivas / irreversibles).
 
@@ -391,6 +430,206 @@ def make_execute_skill_node(
                 "escalation_reason": refusal.team_reason,
             }
 
+        def _reject(
+            rejection: SkillRejection, skill_cls: type[Skill], inputs: dict[str, Any]
+        ) -> dict[str, Any]:
+            # Regla en código que el cliente puede cumplir (otro motivo, la foto que
+            # falta): vuelve al LLM como error tipado para que se lo pida.
+            logger.info(
+                "skill_rejected",
+                extra={
+                    "tenant_id": state.get("tenant_id"),
+                    "conversation_id": state.get("conversation_id"),
+                    "slug": slug,
+                    "code": rejection.code,
+                },
+            )
+            if state.get("conversation_id") and state.get("tenant_id"):
+                auditor.log(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    aop_slug=state.get("aop_slug") or "unknown",
+                    aop_version=state.get("aop_version") or 0,
+                    skill_slug=slug,
+                    skill_tier=skill_cls.tier,
+                    inputs_raw=inputs,
+                    status="rejected_by_permissions",
+                    error_message=f"skill_rejected: {rejection.code}",
+                    langfuse_trace_id=state.get("langfuse_trace_id"),
+                )
+                tracker.emit(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    phase="decision",
+                    event_type="tool_result",
+                    label=slug,
+                    detail={"rejected": rejection.code, "reason": rejection.detail},
+                    status="error",
+                )
+            return _append_and_finish(
+                _error_entry(
+                    tool_use_id=tool_use_id,
+                    slug=slug,
+                    raw_input=inputs,
+                    error=f"skill_rejected: {rejection.code}: {rejection.detail}",
+                )
+            )
+
+        def _execution_failed(
+            exc: Exception, skill_cls: type[Skill], inputs: dict[str, Any], t0: float
+        ) -> dict[str, Any]:
+            latency = int((time.monotonic() - t0) * 1000)
+            logger.warning(
+                "skill_execution_failed",
+                extra={
+                    "tenant_id": state.get("tenant_id"),
+                    "conversation_id": state.get("conversation_id"),
+                    "slug": slug,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            error_msg = f"skill_failed: {type(exc).__name__}: {exc!s}"
+            if state.get("conversation_id") and state.get("tenant_id"):
+                tracker.emit(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    phase="decision",
+                    event_type="tool_result",
+                    label=slug,
+                    detail={"error": error_msg},
+                    status="error",
+                )
+                auditor.log(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    aop_slug=state.get("aop_slug") or "unknown",
+                    aop_version=state.get("aop_version") or 0,
+                    skill_slug=slug,
+                    skill_tier=skill_cls.tier,
+                    inputs_raw=inputs,
+                    status="failed",
+                    error_message=error_msg,
+                    latency_ms=latency,
+                    langfuse_trace_id=state.get("langfuse_trace_id"),
+                )
+            return _append_and_finish(
+                _error_entry(
+                    tool_use_id=tool_use_id,
+                    slug=slug,
+                    raw_input=inputs,
+                    error=error_msg,
+                )
+            )
+
+        def _escalate_unknown(
+            skill_cls: type[Skill], inputs: dict[str, Any], result: ExecutionResult
+        ) -> dict[str, Any]:
+            # Sin aprobación (la política no la exige y hay autonomía L3) y sin saber si
+            # Shopify aplicó la acción: texto fijo que no promete nada y caso al equipo.
+            error = getattr(result, "error", type(result).__name__)
+            reason = unknown_outcome_reason(slug, inputs, error, approved=False)
+            language, default_language = state_languages(state)
+            logger.error(
+                "skill_outcome_unknown",
+                extra={
+                    "tenant_id": state.get("tenant_id"),
+                    "conversation_id": state.get("conversation_id"),
+                    "slug": slug,
+                    "error": error,
+                },
+            )
+            if state.get("conversation_id") and state.get("tenant_id"):
+                auditor.log(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    aop_slug=state.get("aop_slug") or "unknown",
+                    aop_version=state.get("aop_version") or 0,
+                    skill_slug=slug,
+                    skill_tier=skill_cls.tier,
+                    inputs_raw=inputs,
+                    status="failed",
+                    error_message=f"skill_outcome_unknown: {error}",
+                    langfuse_trace_id=state.get("langfuse_trace_id"),
+                )
+                tracker.emit(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    phase="decision",
+                    event_type="tool_result",
+                    label=slug,
+                    detail={"outcome_unknown": error, "reason": reason},
+                    status="error",
+                )
+            return {
+                **_append_and_finish(
+                    _error_entry(
+                        tool_use_id=tool_use_id,
+                        slug=slug,
+                        raw_input=inputs,
+                        error="skill_outcome_unknown",
+                    )
+                ),
+                "decision": "escalate",
+                "agent_response": fixed_text(
+                    "refusal.outcome_unknown", language, tenant_default=default_language
+                ),
+                "escalation_reason": reason,
+            }
+
+        def _awaiting_approval(
+            skill_cls: type[Skill],
+            inputs: dict[str, Any],
+            approval_id: UUID,
+            *,
+            is_repeat: bool,
+            status: str | None,
+        ) -> dict[str, Any]:
+            # Señal al state: route_after_execute_skill detecta pending_approval_id y rutea
+            # a escalate. `status` es el de la aprobación reusada (None si es nueva): el
+            # mensaje al cliente depende de él.
+            auditor.log(
+                tenant_id=state["tenant_id"],
+                conversation_id=state["conversation_id"],
+                aop_slug=state.get("aop_slug") or "unknown",
+                aop_version=state.get("aop_version") or 0,
+                skill_slug=slug,
+                skill_tier=skill_cls.tier,
+                inputs_raw=inputs,
+                status="rejected_by_permissions",
+                error_message="awaiting_human_approval",
+                langfuse_trace_id=state.get("langfuse_trace_id"),
+            )
+            tracker.emit(
+                tenant_id=state["tenant_id"],
+                conversation_id=state["conversation_id"],
+                phase="decision",
+                event_type="tool_result",
+                label=slug,
+                detail={"approval_id": str(approval_id), "status": "awaiting_human_approval"},
+                status="pending",
+            )
+            return {
+                "tool_results": [
+                    *existing_results,
+                    {
+                        "id": tool_use_id,
+                        "slug": slug,
+                        "input": inputs,
+                        "output": None,
+                        "is_error": False,
+                        "error": None,
+                        "awaiting_approval": True,
+                    },
+                ],
+                "pending_tool_call": None,
+                "tool_iterations": iter_count + 1,
+                "pending_approval_id": str(approval_id),
+                "pending_approval_skill_slug": slug,
+                "pending_approval_is_repeat": is_repeat,
+                "pending_approval_reused_status": status,
+                "escalation_reason": f"awaiting_human_approval:{approval_id}",
+            }
+
         # 1) Skill permitida por el AOP (lista vacía = ninguna, fail-safe).
         # Las skills `core` (identidad) las ofrece el código, no el AOP ni el tenant.
         is_core = SkillRegistry.is_core(slug)
@@ -479,48 +718,78 @@ def make_execute_skill_node(
                 )
             )
 
-        # Piso L3: exige aprobación humana salvo opt-out explícito y reconocido.
-        if _l3_requires_human_approval(skill_cls, perm):
+        # La misma petición con una aprobación viva (pending, executing o approved) la
+        # reusa antes de `prepare`: si ya se ejecutó, `prepare` la rechazaría (p. ej. los
+        # artículos de una devolución abierta ya no son devolvibles).
+        if skill_cls.tier == "L3" and state.get("conversation_id") and state.get("tenant_id"):
+            async with tenant_scope(UUID(state["tenant_id"])) as conn:
+                live = await get_recent_approval_for_skill(
+                    conn, UUID(state["tenant_id"]), UUID(state["conversation_id"]), slug
+                )
+            if live is not None and await _same_order_action(
+                state,
+                _requested(skill_cls, live.inputs_raw),
+                _requested(skill_cls, raw_input),
+                skill_cls,
+            ):
+                return _awaiting_approval(
+                    skill_cls, raw_input, live.id, is_repeat=True, status=live.status
+                )
+
+        # El código completa y valida los inputs en los dos caminos, con y sin aprobación
+        # (p. ej. refund_partial: tope y moneda; start_return: el plan de la política).
+        ctx = build_skill_context(state)
+        try:
+            raw_input = await skill_cls().prepare(ctx, raw_input)
+        except SkillRefusal as refusal:
+            return _escalate_refusal(refusal, skill_cls, raw_input)
+        except SkillRejection as rejection:
+            return _reject(rejection, skill_cls, raw_input)
+        except Exception as exc:
+            precheck_error = f"skill_precheck_failed: {type(exc).__name__}: {exc!s}"
+            logger.warning(
+                "skill_precheck_failed",
+                extra={
+                    "tenant_id": state.get("tenant_id"),
+                    "conversation_id": state.get("conversation_id"),
+                    "slug": slug,
+                    "error_type": type(exc).__name__,
+                },
+            )
             if state.get("conversation_id") and state.get("tenant_id"):
-                # La skill valida y completa en código lo que va a aprobar el humano
-                # (p. ej. refund_partial: tope reembolsable y moneda del pedido).
-                try:
-                    raw_input = await skill_cls().prepare_approval(
-                        build_skill_context(state), raw_input
-                    )
-                except SkillRefusal as refusal:
-                    return _escalate_refusal(refusal, skill_cls, raw_input)
-                except Exception as exc:
-                    precheck_error = f"approval_precheck_failed: {type(exc).__name__}: {exc!s}"
-                    logger.warning(
-                        "l3_approval_precheck_failed",
-                        extra={
-                            "tenant_id": state.get("tenant_id"),
-                            "conversation_id": state.get("conversation_id"),
-                            "slug": slug,
-                            "error_type": type(exc).__name__,
-                        },
-                    )
-                    auditor.log(
-                        tenant_id=state["tenant_id"],
-                        conversation_id=state["conversation_id"],
-                        aop_slug=state.get("aop_slug") or "unknown",
-                        aop_version=state.get("aop_version") or 0,
-                        skill_slug=slug,
-                        skill_tier=skill_cls.tier,
-                        inputs_raw=raw_input,
-                        status="failed",
-                        error_message=precheck_error,
-                        langfuse_trace_id=state.get("langfuse_trace_id"),
-                    )
-                    return _append_and_finish(
-                        _error_entry(
-                            tool_use_id=tool_use_id,
-                            slug=slug,
-                            raw_input=raw_input,
-                            error=precheck_error,
-                        )
-                    )
+                tracker.emit(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    phase="decision",
+                    event_type="tool_result",
+                    label=slug,
+                    detail={"error": precheck_error},
+                    status="error",
+                )
+                auditor.log(
+                    tenant_id=state["tenant_id"],
+                    conversation_id=state["conversation_id"],
+                    aop_slug=state.get("aop_slug") or "unknown",
+                    aop_version=state.get("aop_version") or 0,
+                    skill_slug=slug,
+                    skill_tier=skill_cls.tier,
+                    inputs_raw=raw_input,
+                    status="failed",
+                    error_message=precheck_error,
+                    langfuse_trace_id=state.get("langfuse_trace_id"),
+                )
+            return _append_and_finish(
+                _error_entry(
+                    tool_use_id=tool_use_id,
+                    slug=slug,
+                    raw_input=raw_input,
+                    error=precheck_error,
+                )
+            )
+
+        # Piso L3 (salvo opt-out reconocido) o aprobación que exige la propia acción.
+        if _l3_requires_human_approval(skill_cls, perm) or skill_cls.requires_approval(raw_input):
+            if state.get("conversation_id") and state.get("tenant_id"):
                 approval_id = uuid4()
                 tenant_id_uuid = UUID(state["tenant_id"])
                 conv_id_uuid = UUID(state["conversation_id"])
@@ -544,7 +813,7 @@ def make_execute_skill_node(
                         conn, tenant_id_uuid, conv_id_uuid, slug
                     )
                     if existing is not None and await _same_order_action(
-                        state, existing.inputs_raw, raw_input
+                        state, existing.inputs_raw, raw_input, skill_cls
                     ):
                         approval_id = existing.id
                         is_repeat = True
@@ -566,52 +835,9 @@ def make_execute_skill_node(
                             langfuse_trace_id=state.get("langfuse_trace_id"),
                         )
 
-                auditor.log(
-                    tenant_id=state["tenant_id"],
-                    conversation_id=state["conversation_id"],
-                    aop_slug=state.get("aop_slug") or "unknown",
-                    aop_version=state.get("aop_version") or 0,
-                    skill_slug=slug,
-                    skill_tier=skill_cls.tier,
-                    inputs_raw=raw_input,
-                    status="rejected_by_permissions",
-                    error_message="awaiting_human_approval",
-                    langfuse_trace_id=state.get("langfuse_trace_id"),
+                return _awaiting_approval(
+                    skill_cls, raw_input, approval_id, is_repeat=is_repeat, status=reused_status
                 )
-                tracker.emit(
-                    tenant_id=state["tenant_id"],
-                    conversation_id=state["conversation_id"],
-                    phase="decision",
-                    event_type="tool_result",
-                    label=slug,
-                    detail={"approval_id": str(approval_id), "status": "awaiting_human_approval"},
-                    status="pending",
-                )
-
-                # Devolver señal especial al state — route_after_execute_skill
-                # detecta pending_approval_id y rutea a escalate.
-                new_iter = iter_count + 1
-                return {
-                    "tool_results": [
-                        *existing_results,
-                        {
-                            "id": tool_use_id,
-                            "slug": slug,
-                            "input": raw_input,
-                            "output": None,
-                            "is_error": False,
-                            "error": None,
-                            "awaiting_approval": True,
-                        },
-                    ],
-                    "pending_tool_call": None,
-                    "tool_iterations": new_iter,
-                    "pending_approval_id": str(approval_id),
-                    "pending_approval_skill_slug": slug,
-                    "pending_approval_is_repeat": is_repeat,
-                    "pending_approval_reused_status": reused_status,
-                    "escalation_reason": f"awaiting_human_approval:{approval_id}",
-                }
             # Sin tenant/conversation en state (no debería pasar en prod) → error.
             return _append_and_finish(
                 _error_entry(
@@ -636,7 +862,6 @@ def make_execute_skill_node(
             )
 
         # 5) Ejecutar con tracking de latencia.
-        ctx = build_skill_context(state)
         if skill_cls.requires_idempotency:
             ctx = dataclasses.replace(ctx, idempotency_key=tool_use_id)
         skill = skill_cls()
@@ -645,49 +870,18 @@ def make_execute_skill_node(
             output = await skill.execute(ctx, validated_input)
         except SkillRefusal as refusal:
             return _escalate_refusal(refusal, skill_cls, raw_input)
+        except SkillRejection as rejection:
+            return _reject(rejection, skill_cls, raw_input)
         except Exception as exc:
-            latency = int((time.monotonic() - t0) * 1000)
-            logger.warning(
-                "skill_execution_failed",
-                extra={
-                    "tenant_id": state.get("tenant_id"),
-                    "conversation_id": state.get("conversation_id"),
-                    "slug": slug,
-                    "error_type": type(exc).__name__,
-                },
-            )
-            error_msg = f"skill_failed: {type(exc).__name__}: {exc!s}"
-            if state.get("conversation_id") and state.get("tenant_id"):
-                tracker.emit(
-                    tenant_id=state["tenant_id"],
-                    conversation_id=state["conversation_id"],
-                    phase="decision",
-                    event_type="tool_result",
-                    label=slug,
-                    detail={"error": error_msg},
-                    status="error",
-                )
-                auditor.log(
-                    tenant_id=state["tenant_id"],
-                    conversation_id=state["conversation_id"],
-                    aop_slug=state.get("aop_slug") or "unknown",
-                    aop_version=state.get("aop_version") or 0,
-                    skill_slug=slug,
-                    skill_tier=skill_cls.tier,
-                    inputs_raw=raw_input,
-                    status="failed",
-                    error_message=error_msg,
-                    latency_ms=latency,
-                    langfuse_trace_id=state.get("langfuse_trace_id"),
-                )
-            return _append_and_finish(
-                _error_entry(
-                    tool_use_id=tool_use_id,
-                    slug=slug,
-                    raw_input=raw_input,
-                    error=error_msg,
-                )
-            )
+            if skill_cls.requires_idempotency and not isinstance(exc, MutationNotApplied):
+                # Tras enviar la mutación no se sabe si se aplicó: se lee el proveedor y,
+                # si no consta, al equipo. Nunca vuelve al LLM ni se reintenta.
+                settled = await reconcile(skill, ctx, validated_input, exc)
+                if not isinstance(settled, Applied):
+                    return _escalate_unknown(skill_cls, raw_input, settled)
+                output = skill_cls.output_schema.model_validate(settled.output)
+            else:
+                return _execution_failed(exc, skill_cls, raw_input, t0)
 
         # 6) Éxito.
         latency = int((time.monotonic() - t0) * 1000)
@@ -722,6 +916,10 @@ def make_execute_skill_node(
                 latency_ms=latency,
                 langfuse_trace_id=state.get("langfuse_trace_id"),
             )
-        return {**_append_and_finish(result_entry), **_identity_update(state, output)}
+        return {
+            **_append_and_finish(result_entry),
+            **_identity_update(state, output),
+            **_outcome_reply(state, skill_cls, slug, result_entry["output"]),
+        }
 
     return _node

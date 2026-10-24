@@ -285,7 +285,9 @@ class TestZendeskCallback:
             patch("apps.api.routers.oauth_zendesk.tenant_scope") as mock_scope,
             patch("apps.api.routers.oauth_zendesk.upsert_integration", new_callable=AsyncMock),
             patch("apps.api.routers.oauth_zendesk.encrypt_credentials", return_value=b"encrypted"),
-            patch("apps.api.routers.oauth_zendesk.get_integration_crypto_key", return_value=b"k" * 32),
+            patch(
+                "apps.api.routers.oauth_zendesk.get_integration_crypto_key", return_value=b"k" * 32
+            ),
             patch("httpx.AsyncClient") as MockHttp,
         ):
             mock_http_inst = AsyncMock()

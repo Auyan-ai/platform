@@ -24,7 +24,10 @@ Defaults cuando no hay fixture para un método:
   las listas del escenario (`search_orders_by_email`, `search_orders_by_phone`,
   `get_orders_by_customer_id`): en Shopify un pedido listado también se encuentra suelto.
 - lecturas que devuelven listas → []
-- escrituras (cancel/return/update/note/tag) → dict de éxito genérico
+- escrituras (cancel/update/note/tag) → dict de éxito genérico
+- devoluciones: `get_returnable_order` y `calculate_return` exigen fixture (la data de
+  la query GraphQL, mismo parser que el adapter real); `create_return` abre `#SIM-R1`;
+  `get_exchange_variants` sin fixture no encuentra ninguna variante
 - `get_shop_currency` → None (la skill de productos falla: la moneda nunca se supone)
 - `get_refundable_balance` → error `order_has_no_refundable_payment`. Un reembolso
   necesita la fixture `{"captured": "45.00", "refunded": "0", "currency": "GBP"}`;
@@ -44,10 +47,20 @@ from decimal import Decimal
 from typing import Any
 
 from apps.api.integrations.shopify import (
+    CreatedReturn,
     IssuedRefund,
     OrderSnapshot,
     RefundableBalance,
+    exchange_variants_from_graphql,
     order_snapshot_from_graphql,
+    return_calculation_from_graphql,
+    returnable_order_from_graphql,
+)
+from apps.api.services.returns import (
+    ExchangeVariant,
+    ReturnableOrder,
+    ReturnCalculation,
+    ReturnPlan,
 )
 
 _ORDER_LIST_METHODS = (
@@ -91,9 +104,7 @@ class MockShopifyAdapter:
             raise MockShopifyError(data["_error"])
         return data
 
-    def _listed_order(
-        self, matches: Callable[[dict[str, Any]], bool]
-    ) -> dict[str, Any] | None:
+    def _listed_order(self, matches: Callable[[dict[str, Any]], bool]) -> dict[str, Any] | None:
         for method in _ORDER_LIST_METHODS:
             orders = self.fixtures.get(method)
             if not isinstance(orders, list):
@@ -123,9 +134,7 @@ class MockShopifyAdapter:
 
     # ── Métodos extendidos usados por las skills ───────────────────────────────
 
-    async def get_order_by_name(
-        self, ctx: Any, order_name: str
-    ) -> dict[str, Any] | None:
+    async def get_order_by_name(self, ctx: Any, order_name: str) -> dict[str, Any] | None:
         if "get_order_by_name" in self.fixtures:
             return self._resolve("get_order_by_name", None)
         wanted = _order_number(order_name)
@@ -149,14 +158,10 @@ class MockShopifyAdapter:
     async def get_policies(self, ctx: Any) -> list[dict[str, Any]]:
         return self._resolve("get_policies", [])
 
-    async def add_order_note(
-        self, ctx: Any, order_id: int, note: str
-    ) -> dict[str, Any]:
+    async def add_order_note(self, ctx: Any, order_id: int, note: str) -> dict[str, Any]:
         return self._resolve("add_order_note", dict(_WRITE_DEFAULT))
 
-    async def tag_order(
-        self, ctx: Any, order_id: int, tags_to_add: list[str]
-    ) -> dict[str, Any]:
+    async def tag_order(self, ctx: Any, order_id: int, tags_to_add: list[str]) -> dict[str, Any]:
         return self._resolve("tag_order", dict(_WRITE_DEFAULT))
 
     async def cancel_order(
@@ -220,13 +225,42 @@ class MockShopifyAdapter:
     async def find_refund(self, ctx: Any, order_id: int, idempotency_key: str) -> None:
         return None
 
-    async def start_return(
+    async def get_returnable_order(self, ctx: Any, order_id: int) -> ReturnableOrder:
+        data = self._resolve("get_returnable_order", None)
+        if data is None:
+            raise MockShopifyError(f"order_not_found: {order_id}")
+        return returnable_order_from_graphql(data)
+
+    async def get_exchange_variants(
+        self, ctx: Any, variant_ids: list[int]
+    ) -> tuple[ExchangeVariant, ...]:
+        return exchange_variants_from_graphql(self._resolve("get_exchange_variants", {}))
+
+    async def calculate_return(
         self,
         ctx: Any,
         order_id: int,
         *,
-        line_item_id: int,
-        quantity: int,
-        reason: str = "other",
-    ) -> dict[str, Any]:
-        return self._resolve("start_return", dict(_WRITE_DEFAULT))
+        lines: list[tuple[str, int]],
+        exchange: list[tuple[int, int]],
+    ) -> ReturnCalculation:
+        data = self._resolve("calculate_return", None)
+        if data is None:
+            raise MockShopifyError("calculate_return_fixture_missing")
+        return return_calculation_from_graphql(data)
+
+    async def find_return(self, ctx: Any, plan: ReturnPlan) -> CreatedReturn | None:
+        # En simulación no hay intentos anteriores: la devolución del plan no existe.
+        return None
+
+    async def create_return(self, ctx: Any, plan: ReturnPlan) -> CreatedReturn:
+        data = self._resolve("create_return", {"id": 9001, "name": "#SIM-R1", "status": "open"})
+        return CreatedReturn(
+            return_id=int(data["id"]),
+            name=str(data["name"]),
+            status=str(data["status"]),
+            reason_handle=plan.shopify_reason or "other-reason",
+        )
+
+    async def append_order_note(self, ctx: Any, order_id: int, text: str) -> None:
+        self._resolve("append_order_note", None)

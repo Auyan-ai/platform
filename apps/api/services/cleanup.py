@@ -58,15 +58,15 @@ DEFAULT_NUDGE_BEFORE_SECONDS = 3_600  # 1 h antes del cierre
 
 # Timeouts por canal (segundos). Overrideable por tenant via extra.conversation_timeouts.
 DEFAULT_TIMEOUTS: dict[str, int] = {
-    "email": 259_200,     # 72 h — email es asíncrono, dar más margen
-    "chat": 86_400,       # 24 h
-    "widget": 86_400,     # 24 h
+    "email": 259_200,  # 72 h — email es asíncrono, dar más margen
+    "chat": 86_400,  # 24 h
+    "widget": 86_400,  # 24 h
     "whatsapp": 172_800,  # 48 h
-    "instagram": 172_800, # 48 h
-    "zendesk": 259_200,   # 72 h
+    "instagram": 172_800,  # 48 h
+    "zendesk": 259_200,  # 72 h
     "intercom": 259_200,  # 72 h
     "chatwoot": 172_800,  # 48 h
-    "default": 172_800,   # 48 h — fallback para canales nuevos
+    "default": 172_800,  # 48 h — fallback para canales nuevos
 }
 
 
@@ -85,11 +85,7 @@ def _build_cutoffs(
     merged = {**DEFAULT_TIMEOUTS, **overrides}
 
     default_cutoff = now - timedelta(seconds=merged.get("default", DEFAULT_TIMEOUTS["default"]))
-    cutoffs = {
-        ch: now - timedelta(seconds=secs)
-        for ch, secs in merged.items()
-        if ch != "default"
-    }
+    cutoffs = {ch: now - timedelta(seconds=secs) for ch, secs in merged.items() if ch != "default"}
     return cutoffs, default_cutoff
 
 

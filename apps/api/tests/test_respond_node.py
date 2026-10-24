@@ -35,9 +35,7 @@ def _state(**overrides) -> dict:
 
 @pytest.mark.asyncio
 async def test_happy_path_persists_message(fake_deps, monkeypatch) -> None:
-    out_msg = make_message(
-        id=OUTBOUND_MSG_ID, role="agent_ai", direction="outbound", content="x"
-    )
+    out_msg = make_message(id=OUTBOUND_MSG_ID, role="agent_ai", direction="outbound", content="x")
     insert_mock = AsyncMock(return_value=out_msg)
     update_mock = AsyncMock()
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
@@ -126,7 +124,11 @@ async def test_blank_response_escalates_as_empty_reply(fake_deps, monkeypatch) -
 
     out = await node(_state(agent_response="   "))
 
-    assert out == {"decision": "escalate", "escalation_reason": "empty_reply", "agent_response": None}
+    assert out == {
+        "decision": "escalate",
+        "escalation_reason": "empty_reply",
+        "agent_response": None,
+    }
     insert_mock.assert_not_called()
 
 
@@ -285,5 +287,9 @@ async def test_reply_that_is_only_emoji_is_treated_as_empty(fake_deps, monkeypat
         fake_deps, monkeypatch, _state(channel="chat", agent_response="😊")
     )
 
-    assert out == {"decision": "escalate", "escalation_reason": "empty_reply", "agent_response": None}
+    assert out == {
+        "decision": "escalate",
+        "escalation_reason": "empty_reply",
+        "agent_response": None,
+    }
     insert_mock.assert_not_called()

@@ -425,9 +425,7 @@ async def run_guest_checks(
             continue
         claim = pair.contact.claim(salt, ctx.phone_region)
         order_id = int(attempt.order["id"]) if attempt.order else None
-        valid_until = (
-            moment + timedelta(hours=policy.grant_ttl_hours) if attempt.order else None
-        )
+        valid_until = moment + timedelta(hours=policy.grant_ttl_hours) if attempt.order else None
         inserted = await insert_guest_check(
             conn,
             tenant_id=tenant_id,

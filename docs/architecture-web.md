@@ -123,7 +123,8 @@ platform/
 │       │   │   ├── conversations/page.tsx
 │       │   │   ├── conversations/[id]/page.tsx
 │       │   │   ├── escalations/page.tsx
-│       │   │   └── facts/page.tsx
+│       │   │   ├── facts/page.tsx
+│       │   │   └── returns/page.tsx
 │       │   ├── layout.tsx                         # root: providers (Query, Theme)
 │       │   └── globals.css
 │       ├── components/
@@ -245,6 +246,7 @@ export function apiClient(jwt: string, tenantId?: string) {
 | 12 | `/clients/[tenantId]/conversations` | `GET /conversations` | Vista cliente de conversaciones. |
 | 13 | `/clients/[tenantId]/escalations` | `GET /escalations` | Vista cliente de escalaciones. |
 | 14 | `/clients/[tenantId]/facts` | `GET/PUT /tenants/me/facts` | Datos factuales editables por el cliente. |
+| 15 | `/clients/[tenantId]/returns` y `/dashboard/tenants/[tenantId]/returns` | `GET/PUT /tenants/me/returns-policy` | Política de devoluciones y cambios ([ADR 0014](adr/0014-devoluciones-y-cambios-politica-del-tenant.md)): la edita el cliente y el `super_admin`, sin valores por defecto, con historial de versiones y 409 si otra persona guardó antes. Formulario compartido `components/returns-policy/ReturnsPolicyForm.tsx`; validación en `lib/returns-policy.ts` (zod, mismas reglas que el modelo del API). |
 
 ---
 

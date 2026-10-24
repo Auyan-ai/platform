@@ -5,6 +5,11 @@ export type Fault = 'store' | 'customer'
 export type Payer = 'store' | 'customer'
 export type ShippingMethod = 'customer_ships' | 'store_label'
 export type ExchangeKind = 'variant' | 'product'
+export type RefundMethod = 'original_payment' | 'store_credit' | 'customer_choice'
+export type HigherPrice = 'customer_pays' | 'store_absorbs' | 'not_allowed'
+export type LowerPrice = 'refund_difference' | 'store_credit' | 'no_refund'
+export type ShipReplacement = 'immediately' | 'after_receipt'
+export type FeeMode = 'fixed' | 'label_cost'
 
 export interface ReturnsPolicy {
   schema_version: 1
@@ -20,12 +25,23 @@ export interface ReturnsPolicy {
     method: ShippingMethod
     return_address: string | null
     payer: { store_fault: Payer; customer_fault: Payer }
+    customer_fee_mode: FeeMode | null
     customer_fee: { amount: string; currency: string } | null
   }
   refund_days: number
+  refund_method: RefundMethod
+  restocking_fee_percent: { store_fault: string; customer_fault: string }
   excluded_product_tags: string[]
-  exchanges: { enabled: boolean; kinds: ExchangeKind[] }
+  exchanges: {
+    enabled: boolean
+    kinds: ExchangeKind[]
+    requires_approval?: boolean | null
+    higher_price?: HigherPrice | null
+    lower_price?: LowerPrice | null
+    ship_replacement?: ShipReplacement | null
+  }
   returns_require_approval: boolean
+  evidence_requires_approval: boolean
 }
 
 export interface ReasonRow {
@@ -45,18 +61,29 @@ export interface PolicyForm {
   returnAddress: string
   payerStoreFault: Payer | ''
   payerCustomerFault: Payer | ''
+  feeMode: FeeMode | ''
   feeAmount: string
   feeCurrency: string
   refundDays: string
+  refundMethod: RefundMethod | ''
+  restockStore: string
+  restockCustomer: string
   excludedTags: string
   exchangesEnabled: boolean | null
   exchangeKinds: ExchangeKind[]
+  exchangeApproval: boolean | null
+  higherPrice: HigherPrice | ''
+  lowerPrice: LowerPrice | ''
+  shipReplacement: ShipReplacement | ''
   requireApproval: boolean | null
+  evidenceApproval: boolean | null
 }
 
 export type FieldErrors = Record<string, string[]>
 
-export const MAX_REASONS = 20
+// Límites técnicos del API (services/returns_policy.py), no reglas de negocio.
+export const MAX_REASONS = 50
+export const MAX_DAYS = 3650
 
 export const SHOPIFY_REASONS = [
   'damaged-or-defective',
@@ -80,13 +107,22 @@ export function emptyForm(): PolicyForm {
     returnAddress: '',
     payerStoreFault: '',
     payerCustomerFault: '',
+    feeMode: '',
     feeAmount: '',
     feeCurrency: '',
     refundDays: '',
+    refundMethod: '',
+    restockStore: '',
+    restockCustomer: '',
     excludedTags: '',
     exchangesEnabled: null,
     exchangeKinds: [],
+    exchangeApproval: null,
+    higherPrice: '',
+    lowerPrice: '',
+    shipReplacement: '',
     requireApproval: null,
+    evidenceApproval: null,
   }
 }
 
@@ -123,13 +159,22 @@ export function fromPolicy(policy: ReturnsPolicy | null): PolicyForm {
     returnAddress: policy.shipping.return_address ?? '',
     payerStoreFault: policy.shipping.payer.store_fault,
     payerCustomerFault: policy.shipping.payer.customer_fault,
+    feeMode: policy.shipping.customer_fee_mode ?? '',
     feeAmount: policy.shipping.customer_fee?.amount ?? '',
     feeCurrency: policy.shipping.customer_fee?.currency ?? '',
     refundDays: String(policy.refund_days),
+    refundMethod: policy.refund_method,
+    restockStore: String(policy.restocking_fee_percent.store_fault),
+    restockCustomer: String(policy.restocking_fee_percent.customer_fault),
     excludedTags: policy.excluded_product_tags.join(', '),
     exchangesEnabled: policy.exchanges.enabled,
     exchangeKinds: policy.exchanges.kinds,
+    exchangeApproval: policy.exchanges.requires_approval ?? null,
+    higherPrice: policy.exchanges.higher_price ?? '',
+    lowerPrice: policy.exchanges.lower_price ?? '',
+    shipReplacement: policy.exchanges.ship_replacement ?? '',
     requireApproval: policy.returns_require_approval,
+    evidenceApproval: policy.evidence_requires_approval,
   }
 }
 
@@ -141,10 +186,15 @@ function wholeNumber(raw: string): number | undefined {
 export function parseTags(raw: string): string[] {
   const seen = new Set<string>()
   for (const part of raw.split(',')) {
-    const tag = part.trim()
+    const tag = part.trim().toLocaleLowerCase('es')
     if (tag) seen.add(tag)
   }
   return [...seen]
+}
+
+function percent(raw: string): string | undefined {
+  const text = raw.trim().replace(',', '.')
+  return text === '' ? undefined : text
 }
 
 // Borrador con el mismo contorno que ReturnsPolicy pero con huecos (undefined) donde el
@@ -170,8 +220,9 @@ function toDraft(form: PolicyForm): unknown {
         store_fault: form.payerStoreFault || undefined,
         customer_fault: form.payerCustomerFault || undefined,
       },
+      customer_fee_mode: storeLabel && customerPays ? form.feeMode || undefined : null,
       customer_fee:
-        storeLabel && customerPays
+        storeLabel && customerPays && form.feeMode === 'fixed'
           ? {
               amount: form.feeAmount.trim().replace(',', '.'),
               currency: form.feeCurrency.trim().toUpperCase(),
@@ -179,12 +230,24 @@ function toDraft(form: PolicyForm): unknown {
           : null,
     },
     refund_days: wholeNumber(form.refundDays),
-    excluded_product_tags: parseTags(form.excludedTags),
-    exchanges: {
-      enabled: form.exchangesEnabled ?? undefined,
-      kinds: form.exchangesEnabled ? form.exchangeKinds : [],
+    refund_method: form.refundMethod || undefined,
+    restocking_fee_percent: {
+      store_fault: percent(form.restockStore),
+      customer_fault: percent(form.restockCustomer),
     },
+    excluded_product_tags: parseTags(form.excludedTags),
+    exchanges: form.exchangesEnabled
+      ? {
+          enabled: true,
+          kinds: form.exchangeKinds,
+          requires_approval: form.exchangeApproval ?? undefined,
+          higher_price: form.higherPrice || undefined,
+          lower_price: form.lowerPrice || undefined,
+          ship_replacement: form.shipReplacement || undefined,
+        }
+      : { enabled: form.exchangesEnabled ?? undefined, kinds: [] },
     returns_require_approval: form.requireApproval ?? undefined,
+    evidence_requires_approval: form.evidenceApproval ?? undefined,
   }
 }
 
@@ -194,6 +257,18 @@ const requiredInt = (min: number, max: number, missing: string, range: string) =
     .int(range)
     .min(min, range)
     .max(max, range)
+
+const percentSchema = z
+  .string({ required_error: 'Indica el porcentaje (0 si no cobras)' })
+  .regex(/^\d{1,3}(\.\d{1,2})?$/, 'Porcentaje no válido (máximo 2 decimales)')
+  .refine((value) => Number(value) <= 100, 'Máximo 100 %')
+
+const EXCHANGE_TERMS = [
+  ['requires_approval', 'Indica si los cambios necesitan tu aprobación'],
+  ['higher_price', 'Elige qué pasa si el artículo nuevo cuesta más'],
+  ['lower_price', 'Elige qué pasa si el artículo nuevo cuesta menos'],
+  ['ship_replacement', 'Elige cuándo sale el artículo de cambio'],
+] as const
 
 const payerSchema = z.enum(['store', 'customer'], {
   errorMap: () => ({ message: 'Elige quién paga' }),
@@ -221,7 +296,7 @@ export const policySchema = z
   .object({
     schema_version: z.literal(1),
     window: z.object({
-      days: requiredInt(1, 365, 'Indica los días', 'Entre 1 y 365 días'),
+      days: requiredInt(1, MAX_DAYS, 'Indica los días', `Entre 1 y ${MAX_DAYS} días`),
       starts_at: z.enum(['delivery', 'shipment', 'order'], {
         errorMap: () => ({ message: 'Elige desde qué evento cuenta el plazo' }),
       }),
@@ -240,16 +315,25 @@ export const policySchema = z
         .max(300, 'Máximo 300 caracteres')
         .nullable(),
       payer: z.object({ store_fault: payerSchema, customer_fault: payerSchema }),
+      customer_fee_mode: z
+        .enum(['fixed', 'label_cost'], {
+          errorMap: () => ({ message: 'Elige cuánto paga el cliente por la etiqueta' }),
+        })
+        .nullable(),
       customer_fee: z
         .object({
           amount: z
             .string()
-            .regex(/^\d{1,8}(\.\d{1,2})?$/, 'Importe no válido (máximo 2 decimales)'),
+            .regex(/^\d{1,9}(\.\d{1,3})?$/, 'Importe no válido (máximo 3 decimales)'),
           currency: z.string().regex(/^[A-Z]{3}$/, 'Moneda de 3 letras, por ejemplo EUR'),
         })
         .nullable(),
     }),
-    refund_days: requiredInt(1, 60, 'Indica los días', 'Entre 1 y 60 días'),
+    refund_days: requiredInt(1, MAX_DAYS, 'Indica los días', `Entre 1 y ${MAX_DAYS} días`),
+    refund_method: z.enum(['original_payment', 'store_credit', 'customer_choice'], {
+      errorMap: () => ({ message: 'Elige cómo se devuelve el dinero' }),
+    }),
+    restocking_fee_percent: z.object({ store_fault: percentSchema, customer_fault: percentSchema }),
     excluded_product_tags: z.array(z.string().min(1)),
     exchanges: z.object({
       enabled: z.boolean({
@@ -257,10 +341,18 @@ export const policySchema = z
         invalid_type_error: 'Indica si admites cambios',
       }),
       kinds: z.array(z.enum(['variant', 'product'])),
+      requires_approval: z.boolean().optional(),
+      higher_price: z.enum(['customer_pays', 'store_absorbs', 'not_allowed']).optional(),
+      lower_price: z.enum(['refund_difference', 'store_credit', 'no_refund']).optional(),
+      ship_replacement: z.enum(['immediately', 'after_receipt']).optional(),
     }),
     returns_require_approval: z.boolean({
       required_error: 'Indica si las devoluciones necesitan tu aprobación',
       invalid_type_error: 'Indica si las devoluciones necesitan tu aprobación',
+    }),
+    evidence_requires_approval: z.boolean({
+      required_error: 'Indica si las devoluciones con foto necesitan tu aprobación',
+      invalid_type_error: 'Indica si las devoluciones con foto necesitan tu aprobación',
     }),
   })
   .superRefine((policy, ctx) => {
@@ -287,24 +379,17 @@ export const policySchema = z
           message: 'Si el cliente envía, indica la dirección de devolución',
         })
       }
-      if (shipping.customer_fee) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['shipping', 'customer_fee'],
-          message: 'La tarifa solo vale cuando la tienda pone la etiqueta',
-        })
-      }
-    } else if (customerPays && !shipping.customer_fee) {
+    } else if (customerPays && shipping.customer_fee_mode === undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['shipping', 'customer_fee'],
-        message: 'Si el cliente paga con etiqueta de la tienda, indica la tarifa',
+        path: ['shipping', 'customer_fee_mode'],
+        message: 'Elige cuánto paga el cliente por la etiqueta',
       })
-    } else if (!customerPays && shipping.customer_fee) {
+    } else if (shipping.customer_fee_mode === 'fixed' && !shipping.customer_fee) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['shipping', 'customer_fee'],
-        message: 'La tarifa sobra: la tienda paga siempre el envío de vuelta',
+        message: 'Indica la tarifa fija',
       })
     }
     if (exchanges.enabled && exchanges.kinds.length === 0) {
@@ -313,6 +398,13 @@ export const policySchema = z
         path: ['exchanges', 'kinds'],
         message: 'Elige al menos un tipo de cambio',
       })
+    }
+    if (exchanges.enabled) {
+      for (const [term, message] of EXCHANGE_TERMS) {
+        if (exchanges[term] === undefined) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['exchanges', term], message })
+        }
+      }
     }
   })
 

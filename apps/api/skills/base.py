@@ -17,6 +17,8 @@ from apps.api.services.identity import (
     order_claims,
 )
 from apps.api.services.identity_guest import GuestPolicy
+from apps.api.services.returns import PhotoRef
+from apps.api.services.returns_policy import ActivePolicy
 from pydantic import BaseModel
 
 SkillTier = Literal["L1", "L2", "L3"]
@@ -43,6 +45,16 @@ class SkillRefusal(Exception):
 
 class ReconcileUnknown(Exception):
     """No se puede saber, leyendo el proveedor, si una ejecución ya se aplicó."""
+
+
+class SkillRejection(Exception):
+    """La skill no puede actuar todavía por algo que el cliente puede corregir (otro motivo,
+    la foto que falta, otra variante). Vuelve al LLM como error tipado `code: detail`."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(f"{code}: {detail}")
+        self.code = code
+        self.detail = detail
 
 
 class SkillInput(BaseModel):
@@ -88,6 +100,12 @@ class SkillContext:
     # Clave estable de esta ejecución (el id de la aprobación L3, o el del tool call del
     # turno). Solo llega a las skills con `requires_idempotency`.
     idempotency_key: str | None = field(default=None)
+    # Política de devoluciones vigente (ADR 0014). None = sin configurar: las skills de
+    # devolución y cambio rechazan y escalan.
+    returns_policy: ActivePolicy | None = field(default=None)
+    # Fotos que el cliente mandó en la conversación y si el canal trae adjuntos a Auyan.
+    customer_photos: tuple[PhotoRef, ...] = field(default=())
+    attachments_readable: bool = field(default=False)
 
     def order_claims(self, order: dict[str, Any]) -> frozenset[ClaimHash]:
         return order_claims(order, salt=self.claim_salt, region=self.phone_region)
@@ -125,6 +143,9 @@ class Skill(ABC):
     # Skill del propio sistema: la ofrece el código a todo tenant con commerce, sin pasar por
     # el AOP ni por `tenant_tool_permissions`. Solo para skills de identidad, de tier L1.
     core: ClassVar[bool] = False
+    # Ejecutada sin aprobación, el cliente recibe el texto fijo de su `outcome`
+    # (`services/approval_reply.outcome_message`) y el turno no vuelve al LLM.
+    reply_from_outcome: ClassVar[bool] = False
 
     @abstractmethod
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
@@ -139,18 +160,29 @@ class Skill(ABC):
         """
         raise ReconcileUnknown(f"{self.slug} no sabe reconciliar")
 
-    async def prepare_approval(
-        self, ctx: SkillContext, raw_input: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Inputs que se guardan en la aprobación L3 y ve el humano. Por defecto, los
-        del LLM tal cual.
+    async def prepare(self, ctx: SkillContext, raw_input: dict[str, Any]) -> dict[str, Any]:
+        """Inputs con los que se ejecuta la skill y que ve el humano si hay aprobación. Por
+        defecto, los del LLM tal cual.
 
-        Una skill la sobrescribe para rechazar antes de pedir aprobación lo que fallaría
-        al ejecutar, o para añadir datos derivados en código (p. ej. la moneda del
-        pedido). Si lanza, no se crea la aprobación: un `SkillRefusal` escala con su
-        mensaje fijo y cualquier otro error vuelve al LLM.
+        Corre antes de decidir si hace falta aprobación, en los dos caminos. Una skill la
+        sobrescribe para rechazar lo que fallaría al ejecutar o para añadir datos que decide
+        el código (p. ej. la moneda del pedido): lo que devuelve sustituye a lo del LLM. Un
+        `SkillRefusal` escala con su mensaje fijo, un `SkillRejection` vuelve al LLM como
+        error tipado y cualquier otro error vuelve al LLM tal cual.
         """
         return raw_input
+
+    @classmethod
+    def approval_key(cls, inputs: dict[str, Any]) -> dict[str, Any]:
+        """Lo que distingue una acción de otra sobre el mismo pedido, para reusar su
+        aprobación pendiente. Por defecto, todos los inputs salvo `order_id` (que se
+        compara aparte, resuelto al id interno)."""
+        return {k: v for k, v in inputs.items() if k != "order_id"}
+
+    @classmethod
+    def requires_approval(cls, prepared: dict[str, Any]) -> bool:
+        """Aprobación humana que exige la propia acción, además del piso L3 del tenant."""
+        return False
 
     def to_anthropic_tool(self) -> dict[str, Any]:
         """Serializa la skill como tool definition para la API de Anthropic."""
