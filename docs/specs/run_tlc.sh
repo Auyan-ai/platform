@@ -119,7 +119,7 @@ case "$mode" in
     log="$out/trace-$name.log"
     (cd "$work" && "${java_cmd[@]}" tlc2.TLC -workers 1 -cleanup -metadir "$work/states-trace" \
         -config trace.cfg "$module.tla") >"$log" 2>&1 || true
-    python3 "$here/tlc_trace.py" "$log" --hide "${HIDE:-lease,hClicks,arrived,unclaimed,tAppr,faults,hTent,hRel,lockedBy,tKind}"
+    python3 "$here/tlc_trace.py" "$log" --hide "${HIDE:-lease,hClicks,arrived,unclaimed,tAppr,faults,tKind,attempt,hAtt,rAppr,rAtt,rRes,unknownOut}"
     ;;
   safety)
     log="$out/safety.log"
