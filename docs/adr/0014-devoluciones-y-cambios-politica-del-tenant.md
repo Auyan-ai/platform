@@ -130,7 +130,8 @@ producto, `taxesIncluded`, moneda) y devuelve un plan o un rechazo tipado.
 | `item_not_returnable`, `quantity_exceeds_returnable` | El LLM | Error tipado, con las líneas devolvibles |
 | `exchange_kind_not_allowed`, `exchange_variant_unavailable` (sin stock para todas las unidades), `exchange_variant_repeated`, `exchange_quantity_exceeds_returned`, `exchange_price_higher` (cuando la tienda no lo admite) | El LLM | Error tipado: ofrece otra opción |
 | `refund_preference_missing` (la tienda deja elegir) | El LLM | Error tipado: pregunta al cliente |
-| `shopify_error` (fallo al leer, calcular o crear en Shopify) | El equipo | Texto fijo y escalado |
+| `shopify_error` (fallo al leer o calcular en Shopify, antes de crear nada) | El equipo | Texto fijo y escalado |
+| Fallo después de enviar `returnCreate` (timeout, 5xx, error GraphQL) | El código | Resultado desconocido: `reconcile` busca la devolución por la marca `auyan:<plan_id>`; si existe, se da por aplicada; si no se puede saber, `failed` y escalado al equipo sin prometer nada (`refusal.outcome_unknown`) |
 
 Lo que escala usa `SkillRefusal` (texto fijo al cliente, razón al equipo). Lo que el cliente
 puede arreglar usa `SkillRejection`, nuevo: vuelve al LLM como error tipado. Los dos quedan en
