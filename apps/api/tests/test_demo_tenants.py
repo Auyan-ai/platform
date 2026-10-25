@@ -261,7 +261,9 @@ class TestDemoTurnState:
         self, fake_deps: Any, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         module = "apps.api.agents.nodes.load_tenant_context"
-        build_ctx = AsyncMock(return_value=SimpleNamespace(tenant_id=TENANT_ID, credentials={"token": "x"}, config={}))
+        build_ctx = AsyncMock(
+            return_value=SimpleNamespace(tenant_id=TENANT_ID, credentials={"token": "x"}, config={})
+        )
         monkeypatch.setattr(f"{module}.tenant_scope", make_fake_tenant_scope())
         monkeypatch.setattr(f"{module}.get_tenant_by_id", AsyncMock(return_value=_demo()))
         monkeypatch.setattr(
@@ -359,7 +361,7 @@ class TestCreateDemoEndpoint:
     ) -> None:
         tenant = _demo()
         create = AsyncMock(return_value=tenant)
-        ingestion = MagicMock()
+        ingestion = AsyncMock(return_value=None)
         monkeypatch.setattr("apps.api.routers.tenants.create_demo_tenant", create)
         monkeypatch.setattr("apps.api.routers.tenants.start_demo_ingestion", ingestion)
         monkeypatch.setattr(
@@ -378,7 +380,8 @@ class TestCreateDemoEndpoint:
         assert body["origin"] == "demo"
         assert body["slug"] == "demo-thinkingmu-ab12cd"
         assert body["demo_source_url"] == "https://www.thinkingmu.com"
-        ingestion.assert_called_once_with(tenant)
+        ingestion.assert_awaited_once()
+        assert ingestion.await_args.args[1] is tenant
 
     def test_invalid_url_returns_422(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -414,3 +417,25 @@ def _clear_user_cache() -> Any:
     reset_user_cache()
     yield
     reset_user_cache()
+
+
+class TestStartDemoIngestion:
+    async def test_queues_the_ingestion_of_the_demo_store(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        tenant = _demo()
+        ingestion_id = uuid4()
+        enqueue = AsyncMock(return_value=ingestion_id)
+        monkeypatch.setattr(demo_tenants, "enqueue_site_ingestion", enqueue)
+        requested_by = uuid4()
+        conn = _conn()
+
+        result = await demo_tenants.start_demo_ingestion(conn, tenant, requested_by=requested_by)
+
+        assert result == ingestion_id
+        enqueue.assert_awaited_once_with(
+            conn,
+            tenant_id=tenant.id,
+            root_url="https://www.thinkingmu.com",
+            requested_by=requested_by,
+        )

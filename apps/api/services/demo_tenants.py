@@ -11,13 +11,14 @@ import logging
 import secrets
 import string
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 from apps.api.aops.canonical import CANONICAL_TOOL_PERMISSIONS
 from apps.api.core.config import Settings
 from apps.api.db.models import Tenant
 from apps.api.db.queries import upsert_tool_permission
+from apps.api.db.site_ingestions import enqueue_site_ingestion
 from apps.api.integrations.demo_catalog import normalize_domain
 from apps.api.services.tenant_provisioning import scaffold_tenant
 from fastapi import HTTPException, status
@@ -133,17 +134,29 @@ async def _restrict_to_read_only_skills(conn: asyncpg.Connection, tenant: Tenant
         )
 
 
-def start_demo_ingestion(tenant: Tenant) -> None:
-    """Punto de integración con el motor de ingesta (ADR 0015 §2 y §4).
+async def start_demo_ingestion(
+    conn: asyncpg.Connection, tenant: Tenant, *, requested_by: UUID | None
+) -> UUID | None:
+    """Encola la ingesta del sitio de la demo (ADR 0015 §2). El worker del API la procesa.
 
-    Hoy no hace nada salvo loguear. El PR de ingesta lo rellena: lanza la ingesta del
-    sitio `tenant.demo_source_url` y la extracción de borradores.
-    """
+    Aplicar lo leído como `applied_unconfirmed` llega con los borradores (PR 5): hasta entonces
+    las fuentes quedan como submissions pendientes de la demo."""
+    if not tenant.demo_source_url:
+        logger.error("demo_ingestion_without_source_url tenant_id=%s", tenant.id)
+        return None
+    ingestion_id = await enqueue_site_ingestion(
+        conn,
+        tenant_id=tenant.id,
+        root_url=f"https://{normalize_domain(tenant.demo_source_url)}",
+        requested_by=requested_by,
+    )
     logger.info(
-        "demo_ingestion_not_wired tenant_id=%s source_url=%s",
+        "demo_ingestion_queued tenant_id=%s ingestion_id=%s source_url=%s",
         tenant.id,
+        ingestion_id,
         tenant.demo_source_url,
     )
+    return ingestion_id
 
 
 def demo_state_overrides(tenant: Tenant, *, simulation_mode: bool = False) -> dict[str, object]:
