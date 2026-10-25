@@ -1305,6 +1305,31 @@ async def _enable_hnsw_iterative_scan(conn: asyncpg.Connection) -> None:
         logger.warning("pgvector_iterative_scan_unavailable: pgvector < 0.8, sin escaneo iterativo")
 
 
+async def list_kb_documents_for_context(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    max_chars: int,
+) -> list[dict]:
+    """Documentos vivos de la KB, en orden fijo (título, id), con su tamaño en caracteres.
+
+    `content` solo viene si la KB entera cabe en `max_chars`: una KB grande se resuelve por
+    RAG y no hace falta traerla por la red en cada turno. Una sola consulta.
+    """
+    rows = await conn.fetch(
+        """
+        SELECT title, source, char_length(content) AS chars,
+               CASE WHEN sum(char_length(content)) OVER () <= $2 THEN content END AS content
+          FROM knowledge_base_documents
+         WHERE tenant_id = $1 AND deleted_at IS NULL
+         ORDER BY title, id
+        """,
+        tenant_id,
+        max_chars,
+    )
+    return [dict(r) for r in rows]
+
+
 async def search_knowledge_chunks(
     conn: asyncpg.Connection,
     tenant_id: UUID,

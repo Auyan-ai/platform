@@ -5,6 +5,9 @@ mensajes del cliente (un seguimiento como "¿Y a Canarias?" no dice nada solo),
 se embebe vía OpenAI y se buscan los top-K por similitud coseno con un umbral
 opcional (config; 0 = sin umbral).
 
+Si el tenant tiene la KB entera en el prompt (`knowledge.mode == "full_context"`, ver
+`services.knowledge_mode`), el nodo no embebe ni busca: `reason` lee los documentos.
+
 Si la KB está vacía o no hay chunks suficientemente similares, `retrieved_chunks`
 queda vacío — el agente igual puede decidir respond/escalate sin contexto extra.
 """
@@ -21,6 +24,7 @@ from apps.api.db.client import tenant_scope
 from apps.api.db.models import KnowledgeChunk, ReasoningStatus
 from apps.api.db.queries import search_knowledge_chunks
 from apps.api.integrations.openai_embeddings import get_query_embedding
+from apps.api.services.knowledge_mode import KnowledgeContext
 
 logger = logging.getLogger(__name__)
 
@@ -54,19 +58,27 @@ def _emit_retrieval_event(
     chunks: list[KnowledgeChunk],
     query_messages: int = 0,
     error_type: str | None = None,
+    knowledge: KnowledgeContext | None = None,
 ) -> None:
-    """Un evento por turno con lo que recuperó el RAG. Sin contenido de chunks."""
+    """Un evento por turno: lo que recuperó el RAG o la KB entera en contexto. Sin contenido."""
     if not state.get("conversation_id"):
         return
-    if error_type is not None:
+    mode_stats = knowledge.summary() if knowledge else {}
+    if knowledge is not None and knowledge.mode == "full_context":
+        noun = "doc" if knowledge.doc_count == 1 else "docs"
+        label = f"Knowledge in context ({knowledge.doc_count} {noun})"
+        detail: dict[str, object] = dict(mode_stats)
+        status: ReasoningStatus = "done"
+    elif error_type is not None:
         label = "Knowledge retrieval failed"
-        detail: dict[str, object] = {
+        detail = {
             "chunk_count": 0,
             "query_messages": query_messages,
             "error_type": error_type,
             "chunks": [],
+            **mode_stats,
         }
-        status: ReasoningStatus = "error"
+        status = "error"
     else:
         noun = "chunk" if len(chunks) == 1 else "chunks"
         label = f"Knowledge retrieved ({len(chunks)} {noun})"
@@ -82,6 +94,7 @@ def _emit_retrieval_event(
                 }
                 for c in chunks
             ],
+            **mode_stats,
         }
         status = "done"
     deps.reasoning_tracker.emit(
@@ -100,6 +113,13 @@ def make_retrieve_knowledge_node(
 ) -> Callable[[AgentState], Awaitable[dict]]:
     async def _node(state: AgentState) -> dict:
         tenant_id = UUID(state["tenant_id"])
+        knowledge = KnowledgeContext.from_state(state.get("knowledge"))
+        mode_stats = knowledge.summary() if knowledge else {}
+
+        if knowledge is not None and knowledge.mode == "full_context":
+            _emit_retrieval_event(deps, state, chunks=[], knowledge=knowledge)
+            return {"retrieved_chunks": [], "retrieval_summary": dict(mode_stats)}
+
         query, query_messages = build_retrieval_query(
             state.get("conversation_history") or [],
             state["inbound_message_content"],
@@ -125,7 +145,12 @@ def make_retrieve_knowledge_node(
                 },
             )
             _emit_retrieval_event(
-                deps, state, chunks=[], query_messages=query_messages, error_type=type(exc).__name__
+                deps,
+                state,
+                chunks=[],
+                query_messages=query_messages,
+                error_type=type(exc).__name__,
+                knowledge=knowledge,
             )
             return {
                 "retrieved_chunks": [],
@@ -134,6 +159,7 @@ def make_retrieve_knowledge_node(
                     "chunk_count": 0,
                     "top_similarity": None,
                     "error_type": type(exc).__name__,
+                    **mode_stats,
                 },
             }
 
@@ -146,13 +172,16 @@ def make_retrieve_knowledge_node(
                 min_similarity=deps.settings.rag_min_similarity,
             )
 
-        _emit_retrieval_event(deps, state, chunks=chunks, query_messages=query_messages)
+        _emit_retrieval_event(
+            deps, state, chunks=chunks, query_messages=query_messages, knowledge=knowledge
+        )
         return {
             "retrieved_chunks": [c.model_dump(mode="json") for c in chunks],
             "retrieval_summary": {
                 "query_messages": query_messages,
                 "chunk_count": len(chunks),
                 "top_similarity": round(max(c.similarity for c in chunks), 4) if chunks else None,
+                **mode_stats,
             },
         }
 

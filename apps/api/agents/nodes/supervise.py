@@ -32,6 +32,7 @@ from typing import Any, Literal
 
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes.reason import agent_system_blocks
+from apps.api.agents.prompts.builder import stable_and_turn_blocks
 from apps.api.agents.state import AgentState
 from apps.api.core.config import get_models
 from apps.api.integrations.anthropic_client import (
@@ -149,16 +150,15 @@ def _select_supervisor_model(state: AgentState) -> str:
     return model
 
 
-def _supervisor_system(agent_prompt: str) -> list[dict[str, Any]]:
-    """El system prompt del agente es estable por tenant y AOP: cierra el prefijo
-    cacheado (tools + instrucciones del supervisor + prompt del agente)."""
+def _supervisor_system(stable_blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Los bloques estables del agente (KB entera si la hay y prompt) son estables por tenant
+    y AOP: cierran el prefijo cacheado (tools + instrucciones del supervisor + lo que vio el
+    agente). Mantienen su `cache_control`."""
+    first, *rest = stable_blocks
     return [
         {"type": "text", "text": _SUPERVISOR_SYSTEM},
-        {
-            "type": "text",
-            "text": _AGENT_PROMPT_HEADER + agent_prompt,
-            "cache_control": {"type": "ephemeral"},
-        },
+        {**first, "text": _AGENT_PROMPT_HEADER + first["text"]},
+        *rest,
     ]
 
 
@@ -361,13 +361,13 @@ def make_supervise_node(
                     detail={"model": model},
                     status="pending",
                 )
-            agent_prompt, *turn_blocks = agent_system_blocks(state)
+            stable_blocks, turn_blocks = stable_and_turn_blocks(agent_system_blocks(state))
             turn_context = "\n\n".join(b["text"] for b in turn_blocks)
             outcome = await call_claude_for_decision(
                 client=deps.anthropic,
                 model=model,
                 role=_supervisor_role(state),
-                system=_supervisor_system(agent_prompt["text"]),
+                system=_supervisor_system(stable_blocks),
                 messages=[
                     {"role": "user", "content": _build_supervisor_prompt(state, turn_context)}
                 ],

@@ -45,6 +45,7 @@ from apps.api.integrations.pricing import compute_llm_cost
 from apps.api.services.conversation_progress import no_progress_reason
 from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.identity import IdentityContext
+from apps.api.services.knowledge_mode import KnowledgeContext
 from apps.api.services.language import state_languages
 from apps.api.services.returns_policy import ActivePolicy, policy_note
 from apps.api.services.skill_access import visible_skills
@@ -97,13 +98,15 @@ def turn_now(state: AgentState) -> str:
 
 
 def agent_system_blocks(state: AgentState) -> list[dict[str, Any]]:
-    """El system de `reason`: prompt compilado (cacheado) + bloque volátil del turno.
+    """El system de `reason`: KB entera y prompt compilado (cacheados) + bloque volátil del turno.
 
     El supervisor lo lee como evidencia: si viera menos que el agente, rechazaría como
     inventado lo que el agente sacó de ahí (#261, #327)."""
+    knowledge = KnowledgeContext.from_state(state.get("knowledge"))
     return build_system_blocks(
         state["system_prompt"],
         state.get("retrieved_chunks", []),
+        knowledge_documents=knowledge.documents if knowledge else (),
         current_date=turn_now(state),
         known_facts=state.get("known_facts"),
         supervisor_feedback=state.get("supervisor_feedback"),

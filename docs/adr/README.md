@@ -27,6 +27,7 @@ un ADR nuevo que la supersede y se actualiza el `Estado` del viejo.
 | [0013](0013-verificacion-identidad-por-niveles.md) | Verificación de identidad en dos niveles (`guest` con número de pedido + contacto, `verified` por remitente, sesión firmada u OTP) decidida en código, con gate único y OTP opcional | Propuesta |
 | [0014](0014-devoluciones-y-cambios-politica-del-tenant.md) | Devoluciones y cambios: política del tenant, decidida en código y sin valores por defecto | Propuesta |
 | [0015](0015-url-a-agente.md) | De la URL de la tienda al agente: un motor de ingesta de fuentes oficiales para demos y onboarding, con citas verificadas en código | Propuesta |
+| [0016](0016-kb-entera-en-contexto.md) | La KB entera en el prompt (con caché) cuando cabe en el presupuesto, RAG cuando no | Aceptada |
 
 ## Estados posibles
 

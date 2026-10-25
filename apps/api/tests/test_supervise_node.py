@@ -873,3 +873,31 @@ async def test_amount_quoted_in_supervisor_feedback_is_not_evidence(fake_deps: A
 
     assert result["escalation_reason"].startswith("supervisor_rejected (tactical)")
     assert "68,95 €" in result["escalation_reason"]
+
+
+class TestSupervisorSystemWithFullKnowledge:
+    def test_supervisor_sees_the_kb_and_the_prompt_both_cached(self):
+        from apps.api.agents.nodes.reason import agent_system_blocks
+        from apps.api.agents.nodes.supervise import _supervisor_system
+        from apps.api.agents.prompts.builder import stable_and_turn_blocks
+
+        state = {
+            "system_prompt": "AOP_BASE",
+            "knowledge": {
+                "mode": "full_context",
+                "total_tokens": 10,
+                "doc_count": 1,
+                "documents": [
+                    {"title": "Envíos", "source": "https://x.es/e", "content": "Gratis desde 110 €."}
+                ],
+            },
+        }
+
+        stable, turn = stable_and_turn_blocks(agent_system_blocks(state))
+        system = _supervisor_system(stable)
+
+        assert len(turn) == 1 and "Gratis" not in turn[0]["text"]
+        assert [("cache_control" in b) for b in system] == [False, True, True]
+        assert "Gratis desde 110 €." in system[1]["text"]
+        assert system[1]["text"].startswith("# Evidencia: system prompt del agente")
+        assert system[2]["text"] == "AOP_BASE"

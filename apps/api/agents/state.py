@@ -43,6 +43,9 @@ class AgentState(TypedDict, total=False):
     # Política de devoluciones vigente {version, policy} o None (ADR 0014).
     returns_policy: dict | None
 
+    # KnowledgeContext.to_state(): modo, tokens, nº de docs y, en full_context, los documentos.
+    knowledge: dict
+
     # --- Producido por load_conversation ---
     conversation_history: list[dict]
     end_customer: dict
