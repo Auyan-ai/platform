@@ -23,6 +23,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
+from apps.api.agents.commerce_mode import commerce_mode, demo_catalog_domain
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
@@ -92,13 +93,26 @@ def build_skill_context(state: AgentState) -> SkillContext:
             config=commerce_data.get("config", {}),
         )
 
-    # En modo simulación, inyectamos un mock de commerce con respuestas predefinidas.
-    commerce_mock: Any = None
-    if state.get("simulation_mode"):
+    # El modo de comercio decide el adaptador (agents/commerce_mode.py). `live` no inyecta
+    # nada: las skills construyen el ShopifyAdapter real con `integration_ctx`.
+    commerce_adapter: Any = None
+    mode = commerce_mode(state)
+    if mode == "mock":
         from apps.api.simulator.mocks import MockShopifyAdapter
 
         shopify_fixtures = (state.get("simulation_fixtures") or {}).get("shopify", {})
-        commerce_mock = MockShopifyAdapter(shopify_fixtures)
+        commerce_adapter = MockShopifyAdapter(shopify_fixtures)
+    elif mode == "demo_catalog":
+        from apps.api.integrations.demo_catalog import DemoCatalogAdapter
+
+        domain = demo_catalog_domain(state)
+        commerce_adapter = DemoCatalogAdapter(domain)
+        # Nunca las credenciales del tenant: la demo solo trae el dominio público.
+        integration_ctx = IntegrationContext(
+            tenant_id=UUID(state["tenant_id"]),
+            credentials={},
+            config={"store_domain": domain},
+        )
 
     # Solo cuenta el contacto que el origen del mensaje verifica (ADR 0013): lo escribió el
     # intake en `identity_evidence`. Un email de chat lo teclea el visitante.
@@ -111,7 +125,7 @@ def build_skill_context(state: AgentState) -> SkillContext:
         tenant_id=state["tenant_id"],
         conversation_id=state["conversation_id"],
         integration_ctx=integration_ctx,
-        commerce_mock=commerce_mock,
+        commerce_mock=commerce_adapter,
         customer_email=evidence.email,
         customer_phone=evidence.phone,
         identity=IdentityContext.from_state(state.get("identity")),

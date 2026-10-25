@@ -74,6 +74,7 @@ class ProductSummary(BaseModel):
     status: str
     variants: list[ProductVariant]
     description_snippet: str  # primeros 300 chars del body sin HTML
+    tags: list[str] = []  # etiquetas de la tienda (material, colección…)
 
 
 class PolicyInfo(BaseModel):
@@ -161,13 +162,24 @@ def map_order_summary(raw: dict[str, Any]) -> OrderSummary:
     )
 
 
+def _tag_list(raw: Any) -> list[str]:
+    """Etiquetas como lista: la Admin REST las da en un string separado por comas."""
+    if isinstance(raw, str):
+        return [t.strip() for t in raw.split(",") if t.strip()]
+    return [str(t) for t in raw or []]
+
+
 def map_product_summary(raw: dict[str, Any], shop_currency: str) -> ProductSummary:
     variants = [
         ProductVariant(
             variant_id=v["id"],
             title=v.get("title", ""),
             price=Money(amount=str(v.get("price", "0.00")), currency=shop_currency),
-            available=(v.get("inventory_quantity", 0) or 0) > 0,
+            available=(
+                bool(v["available"])
+                if "available" in v
+                else (v.get("inventory_quantity", 0) or 0) > 0
+            ),
         )
         for v in raw.get("variants", [])
     ]
@@ -178,4 +190,5 @@ def map_product_summary(raw: dict[str, Any], shop_currency: str) -> ProductSumma
         status=raw.get("status", ""),
         variants=variants,
         description_snippet=strip_html(raw.get("body_html") or "")[:300],
+        tags=_tag_list(raw.get("tags")),
     )

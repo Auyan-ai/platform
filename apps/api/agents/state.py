@@ -198,6 +198,11 @@ class AgentState(TypedDict, total=False):
     # la compra y es `verified`. "chat" no aporta remitente: solo cuenta lo que teclea
     # (email o teléfono + número de pedido), como el visitante de un chat, y corre `guest`.
     simulation_identity: str
+    # commerce_mode: qué adaptador de comercio usa el turno (agents/commerce_mode.py).
+    # Ausente: `mock` si simulation_mode, `live` si no. `demo_catalog` lee el catálogo
+    # público del dominio `demo_catalog_domain`, sin credenciales y de solo lectura.
+    commerce_mode: Literal["live", "mock", "demo_catalog"]
+    demo_catalog_domain: str
     # forced_aop_slug: si está presente en modo simulación, select_aop carga ese AOP
     # directamente sin llamar al intent classifier. Permite que los scenarios controlen
     # qué AOP usa el grafo, aislando el test del clasificador de intent.

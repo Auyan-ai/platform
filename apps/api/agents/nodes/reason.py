@@ -22,6 +22,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, Literal
 
+from apps.api.agents.commerce_mode import commerce_mode
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._reply import surface_of
 from apps.api.agents.prompts.builder import (
@@ -251,7 +252,7 @@ def _visible_skills(state: AgentState) -> list[str]:
         state.get("allowed_skills") or [],
         state.get("tool_permissions") or {},
         IdentityContext.from_state(state.get("identity")),
-        commerce=bool(state.get("commerce_integration_ctx") or state.get("simulation_mode")),
+        commerce=bool(state.get("commerce_integration_ctx") or commerce_mode(state) != "live"),
     )
 
 

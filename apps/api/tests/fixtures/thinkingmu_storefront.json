@@ -1,0 +1,252 @@
+{
+ "search_tere": {
+  "data": {
+   "products": {
+    "nodes": [
+     {
+      "id": "gid://shopify/Product/15075579658566",
+      "title": "Top naranja Esqué Tere",
+      "handle": "esque-orange-tere-top",
+      "productType": "Tops",
+      "description": "Top naranja Esqué Tere hecho de poliéster reciclado diseñado en colaboración con la artista y diseñadora Júlia Esqué, que ha creado distintos estampados inspirados en la cestería y el trabajo artesanal, a partir de papeles de colores. → Cuello redondo→ Manga larga→ Slim fit→ Detalles del tejido: tul→ Tejido: poliéster reciclado, gramaje 100 gsm (Tejido ligero)→ Detalles de la prenda: diseño estampado→ Largo de la prenda: regular Ref: WTP00214 Medidas en talla S: 60 cm largo total, 38 cm ancho pecho y 35,5 cm ancho de espalda con 60 cm largo de manga.",
+      "tags": [
+       "ACT W40 AW26",
+       "AW25",
+       "AW26",
+       "BACKTO",
+       "BEST",
+       "CARGA 1 AW25",
+       "celebration",
+       "DROP 2.1 AW25",
+       "Mujer",
+       "Naranja",
+       "OUTLET AW",
+       "OUTLET SS",
+       "Poliéster Reciclado",
+       "Tere",
+       "Tops"
+      ],
+      "onlineStoreUrl": "https://thinkingmu.com/products/esque-orange-tere-top",
+      "variants": {
+       "nodes": [
+        {
+         "id": "gid://shopify/ProductVariant/54803676496198",
+         "title": "XS",
+         "availableForSale": true,
+         "price": {
+          "amount": "64.9",
+          "currencyCode": "EUR"
+         }
+        },
+        {
+         "id": "gid://shopify/ProductVariant/54803676528966",
+         "title": "S",
+         "availableForSale": false,
+         "price": {
+          "amount": "64.9",
+          "currencyCode": "EUR"
+         }
+        },
+        {
+         "id": "gid://shopify/ProductVariant/54803676561734",
+         "title": "M",
+         "availableForSale": false,
+         "price": {
+          "amount": "64.9",
+          "currencyCode": "EUR"
+         }
+        },
+        {
+         "id": "gid://shopify/ProductVariant/54803676594502",
+         "title": "L",
+         "availableForSale": true,
+         "price": {
+          "amount": "64.9",
+          "currencyCode": "EUR"
+         }
+        },
+        {
+         "id": "gid://shopify/ProductVariant/54803676627270",
+         "title": "XL",
+         "availableForSale": false,
+         "price": {
+          "amount": "64.9",
+          "currencyCode": "EUR"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "id": "gid://shopify/Product/15075579822406",
+      "title": "Top azul Esqué Tere",
+      "handle": "esque-blue-tere-top",
+      "productType": "Tops",
+      "description": "Top azul Esqué Tere hecho de poliéster reciclado diseñado en colaboración con la artista y diseñadora Júlia Esqué, que ha creado distintos estampados inspirados en la cestería y el trabajo artesanal, a partir de papeles de colores. → Cuello redondo→ Manga larga→ Slim fit→ Detalles del tejido: tul→ Tejido: poliéster reciclado, gramaje 100 gsm (Tejido ligero)→ Detalles de la prenda: diseño estampado→ Largo de la prenda: regular Ref: WTP00236 Medidas en talla S: 60 cm largo total, 38 cm ancho pecho y 35,5 cm ancho de espalda con 60 cm largo de manga.",
+      "tags": [
+       "AW25",
+       "Azul",
+       "BACKTO",
+       "BEST",
+       "CARGA 1 AW25",
+       "celebration",
+       "DROP 2.1 AW25",
+       "Mujer",
+       "OUT 2 AW26",
+       "OUTLET AW",
+       "OUTLET SS",
+       "Poliéster Reciclado",
+       "Tere",
+       "Tops",
+       "XMAS",
+       "XMAS-MUJER"
+      ],
+      "onlineStoreUrl": "https://thinkingmu.com/products/esque-blue-tere-top",
+      "variants": {
+       "nodes": [
+        {
+         "id": "gid://shopify/ProductVariant/54803676922182",
+         "title": "XS",
+         "availableForSale": true,
+         "price": {
+          "amount": "64.9",
+          "currencyCode": "EUR"
+         }
+        },
+        {
+         "id": "gid://shopify/ProductVariant/54803676954950",
+         "title": "S",
+         "availableForSale": false,
+         "price": {
+          "amount": "64.9",
+          "currencyCode": "EUR"
+         }
+        },
+        {
+         "id": "gid://shopify/ProductVariant/54803676987718",
+         "title": "M",
+         "availableForSale": false,
+         "price": {
+          "amount": "64.9",
+          "currencyCode": "EUR"
+         }
+        },
+        {
+         "id": "gid://shopify/ProductVariant/54803677020486",
+         "title": "L",
+         "availableForSale": true,
+         "price": {
+          "amount": "64.9",
+          "currencyCode": "EUR"
+         }
+        },
+        {
+         "id": "gid://shopify/ProductVariant/54803677053254",
+         "title": "XL",
+         "availableForSale": false,
+         "price": {
+          "amount": "64.9",
+          "currencyCode": "EUR"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "id": "gid://shopify/Product/15637702672710",
+      "title": "Top rojo transparente Tere",
+      "handle": "noir-print-red-tere-top",
+      "productType": "Tops",
+      "description": "Top rojo transparente Tere hecho de poliéster reciclado → Cuello redondo→ Manga larga→ Slim fit→ Detalles de la prenda: transparente→ Detalles: diseño estampado→ Largo de la prenda: regularRef: WTP00283Medidas en talla S: 60 cm largo total, 38 cm ancho pecho y 35.5 cm ancho de espalda con 60 cm largo de manga.",
+      "tags": [
+       "Aplica Descuento",
+       "AW26",
+       "CARGA 2 AW26",
+       "DROP 9 AW26",
+       "FP",
+       "IVALO DROP6 AW26",
+       "Mujer",
+       "NEW IN",
+       "Poliéster Reciclado",
+       "PUSH",
+       "RETRO",
+       "Rojo",
+       "SLYGAD DROP6 AW26",
+       "Tere",
+       "Tops"
+      ],
+      "onlineStoreUrl": "https://thinkingmu.com/products/noir-print-red-tere-top",
+      "variants": {
+       "nodes": [
+        {
+         "id": "gid://shopify/ProductVariant/56902828917062",
+         "title": "XS",
+         "availableForSale": true,
+         "price": {
+          "amount": "79.9",
+          "currencyCode": "EUR"
+         }
+        },
+        {
+         "id": "gid://shopify/ProductVariant/56902828949830",
+         "title": "S",
+         "availableForSale": true,
+         "price": {
+          "amount": "79.9",
+          "currencyCode": "EUR"
+         }
+        },
+        {
+         "id": "gid://shopify/ProductVariant/56902828982598",
+         "title": "M",
+         "availableForSale": true,
+         "price": {
+          "amount": "79.9",
+          "currencyCode": "EUR"
+         }
+        },
+        {
+         "id": "gid://shopify/ProductVariant/56902829015366",
+         "title": "L",
+         "availableForSale": true,
+         "price": {
+          "amount": "79.9",
+          "currencyCode": "EUR"
+         }
+        },
+        {
+         "id": "gid://shopify/ProductVariant/56902829048134",
+         "title": "XL",
+         "availableForSale": true,
+         "price": {
+          "amount": "79.9",
+          "currencyCode": "EUR"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "extensions": {
+   "cost": {
+    "requestedQueryCost": 33
+   }
+  }
+ },
+ "shop_currency": {
+  "data": {
+   "shop": {
+    "paymentSettings": {
+     "currencyCode": "EUR"
+    }
+   }
+  },
+  "extensions": {
+   "cost": {
+    "requestedQueryCost": 2
+   }
+  }
+ }
+}
