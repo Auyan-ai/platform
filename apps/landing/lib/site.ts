@@ -41,6 +41,11 @@ export const siteRoutes = [
     changeFrequency: 'monthly',
   },
   {
+    path: '/bot',
+    priority: 0.3,
+    changeFrequency: 'yearly',
+  },
+  {
     path: '/blog',
     priority: 0.5,
     changeFrequency: 'weekly',
