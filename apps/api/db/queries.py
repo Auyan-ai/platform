@@ -5180,7 +5180,8 @@ async def update_tenant_lifecycle_state(
         UPDATE tenants
            SET agent_lifecycle_state = $2::agent_lifecycle_state
          WHERE id = $1 AND deleted_at IS NULL
-         RETURNING id, slug, name, status, agent_lifecycle_state
+         RETURNING id, slug, name, status, agent_lifecycle_state, plan_tier,
+                   origin, demo_expires_at, demo_source_url
         """,
         tenant_id,
         state,
