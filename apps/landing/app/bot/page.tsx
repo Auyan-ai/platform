@@ -9,7 +9,7 @@ export const metadata = createPageMetadata({
   path: '/bot',
 })
 
-const userAgent = 'AuyanBot/<versión> (+https://auyan.es/bot)'
+const userAgent = 'AuyanBot/<versión> (+https://auyan.ai/bot)'
 
 const reads = [
   'La Storefront API pública de Shopify y su Storefront MCP.',
