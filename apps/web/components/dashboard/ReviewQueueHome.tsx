@@ -1,12 +1,14 @@
 'use client'
 
 import { CreateTenantDialog } from '@/components/dashboard/CreateTenantDialog'
+import { NewDemoDialog } from '@/components/dashboard/NewDemoDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useAdminReviewQueue } from '@/lib/api/hooks/tenants'
+import { useAdminReviewQueue, useAdminTenants } from '@/lib/api/hooks/tenants'
+import { demoBadgeLabel, isDemo } from '@/lib/demo'
 import { cn } from '@/lib/utils'
 import type { components } from '@auyan/shared/api-types'
 import { CheckCircle2, ClipboardCheck, FileBarChart2, FileText, Sparkles } from 'lucide-react'
@@ -48,6 +50,8 @@ function countForType(item: ReviewQueueItem, type: QueueType) {
 export function ReviewQueueHome() {
   const [filter, setFilter] = useState<QueueFilter>('all')
   const { data, isLoading, isError } = useAdminReviewQueue()
+  const { data: tenants } = useAdminTenants()
+  const demos = (tenants ?? []).filter(isDemo)
   const activeTypes = ROLE_TYPES[filter]
 
   const rows = useMemo(() => {
@@ -84,6 +88,7 @@ export function ReviewQueueHome() {
               {isLoading ? '...' : totals}
             </p>
           </div>
+          <NewDemoDialog />
           <CreateTenantDialog />
         </div>
       </div>
@@ -158,6 +163,27 @@ export function ReviewQueueHome() {
             </Card>
           ))}
         </div>
+      )}
+
+      {demos.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold text-foreground">Demos</h2>
+          <div className="grid gap-2">
+            {demos.map((demo) => (
+              <Link key={demo.id} href={`/tenants/${demo.id}/knowledge`}>
+                <Card className="flex flex-wrap items-center justify-between gap-3 p-(--density-card-p) transition-colors hover:bg-surface-muted">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{demo.name}</p>
+                    <p className="truncate text-xs text-foreground-muted">
+                      {demo.demo_source_url ?? demo.slug}
+                    </p>
+                  </div>
+                  <Badge variant="warning">{demoBadgeLabel(demo.demo_expires_at)}</Badge>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        </section>
       )}
 
       <Button asChild variant="secondary" size="sm">

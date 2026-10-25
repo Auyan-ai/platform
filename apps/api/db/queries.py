@@ -119,7 +119,8 @@ async def get_tenant_by_id(conn: asyncpg.Connection, tenant_id: UUID) -> Tenant 
     """Bootstrap: traer tenant por id. Útil para validar existencia."""
     row = await conn.fetchrow(
         """
-        SELECT id, slug, name, status, agent_lifecycle_state, plan_tier
+        SELECT id, slug, name, status, agent_lifecycle_state, plan_tier,
+               origin, demo_expires_at, demo_source_url
           FROM tenants
          WHERE id = $1 AND deleted_at IS NULL
         """,
@@ -132,7 +133,8 @@ async def get_tenant_by_slug(conn: asyncpg.Connection, slug: str) -> Tenant | No
     """Bootstrap: traer tenant por slug. Se ejecuta SIN tenant scope."""
     row = await conn.fetchrow(
         """
-        SELECT id, slug, name, status, agent_lifecycle_state, plan_tier
+        SELECT id, slug, name, status, agent_lifecycle_state, plan_tier,
+               origin, demo_expires_at, demo_source_url
           FROM tenants
          WHERE slug = $1 AND deleted_at IS NULL
         """,
@@ -1781,13 +1783,36 @@ async def list_all_tenants(conn: asyncpg.Connection) -> list[Tenant]:
     """Super-admin: listar todos los tenants activos sin tenant_scope."""
     rows = await conn.fetch(
         """
-        SELECT id, slug, name, status, agent_lifecycle_state, plan_tier
+        SELECT id, slug, name, status, agent_lifecycle_state, plan_tier,
+               origin, demo_expires_at, demo_source_url
           FROM tenants
          WHERE deleted_at IS NULL
          ORDER BY name
         """,
     )
     return [Tenant(**dict(r)) for r in rows]
+
+
+async def soft_delete_expired_demo_tenants(
+    conn: asyncpg.Connection, now: datetime
+) -> list[tuple[UUID, str]]:
+    """Borra en blando las demos con `demo_expires_at` vencido. Devuelve (id, slug).
+
+    Solo toca `origin = 'demo'`: un tenant cliente nunca caduca. Idempotente: las ya
+    borradas no vuelven a salir. Corre con bootstrap_connection (cross-tenant).
+    """
+    rows = await conn.fetch(
+        """
+        UPDATE tenants
+           SET deleted_at = $1
+         WHERE origin = 'demo'
+           AND deleted_at IS NULL
+           AND demo_expires_at <= $1
+        RETURNING id, slug
+        """,
+        now,
+    )
+    return [(r["id"], r["slug"]) for r in rows]
 
 
 async def list_admin_review_queue(conn: asyncpg.Connection) -> list[dict[str, Any]]:
@@ -1849,6 +1874,7 @@ async def list_admin_review_queue(conn: asyncpg.Connection) -> list[dict[str, An
         LEFT JOIN approvals ON approvals.tenant_id = t.id
         LEFT JOIN proposals ON proposals.tenant_id = t.id
         WHERE t.deleted_at IS NULL
+          AND t.origin = 'client'
         ORDER BY total_pending DESC, t.name ASC
         """
     )

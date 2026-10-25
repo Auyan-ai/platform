@@ -168,6 +168,10 @@ class Settings(BaseSettings):
     # 900 = 15 minutos. Overrideable vía CLEANUP_INTERVAL_SECONDS en entorno.
     cleanup_interval_seconds: int = 900
 
+    # --- Demos (ADR 0015 §5) ---
+    # Días hasta que una demo caduca y el job de limpieza la borra en blando.
+    demo_ttl_days: int = Field(default=30, ge=1)
+
     # --- Worker de turnos inbound (cola `inbound_jobs`, #260) ---
     # Turnos concurrentes por instancia (conversaciones distintas; la misma conversación
     # nunca corre en paralelo). Sondeo de respaldo y lease con heartbeat, en segundos.

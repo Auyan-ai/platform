@@ -45,6 +45,7 @@ from apps.api.db.queries import (
     list_all_tenants,
     mark_conversations_abandoned,
     mark_conversations_nudged,
+    soft_delete_expired_demo_tenants,
 )
 from apps.api.services.channel_routing import is_messaging_channel
 from apps.api.services.fixed_texts import fixed_text
@@ -281,3 +282,16 @@ async def run_abandoned_cleanup() -> dict[str, int]:
             logger.exception("cleanup_tenant_error tenant=%s", tenant.slug)
 
     return results
+
+
+async def expire_demo_tenants(now: datetime | None = None) -> int:
+    """Borra en blando las demos caducadas (ADR 0015 §5). Retorna cuántas.
+
+    Solo marca `deleted_at`; nada se borra de verdad. Un fallo se loguea y propaga al
+    llamador, que no debe dejar que detenga el resto del ciclo de limpieza.
+    """
+    async with bootstrap_connection() as conn:
+        expired = await soft_delete_expired_demo_tenants(conn, now or datetime.now(UTC))
+    for tenant_id, slug in expired:
+        logger.info("demo_tenant_expired tenant_id=%s slug=%s", tenant_id, slug)
+    return len(expired)

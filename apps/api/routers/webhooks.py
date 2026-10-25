@@ -42,6 +42,7 @@ from apps.api.db.queries import (
 )
 from apps.api.services.agent_resolution import finalize_agent_resolution
 from apps.api.services.conversations import reopen_if_resolved
+from apps.api.services.demo_tenants import reject_demo_intake
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
 from apps.api.services.identity import EVIDENCE_KEY, build_identity_evidence
 from apps.api.services.identity_guest import PROVIDED_CONTACT_KEY, build_provided_contact
@@ -162,6 +163,7 @@ async def inbound(
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, detail=f"tenant_not_found: {payload.tenant_slug}"
         )
+    reject_demo_intake(tenant, source="inbound")
     if tenant.status != "active":
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, detail=f"tenant_not_active: status={tenant.status}"

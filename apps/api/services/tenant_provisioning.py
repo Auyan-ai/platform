@@ -23,13 +23,14 @@ tolerar re-provisioning del mismo email a un tenant nuevo.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID, uuid4
 
 import asyncpg
 import httpx
 from apps.api.aops.canonical import provision_canonical_aops
 from apps.api.core.config import Settings
-from apps.api.db.models import AgentLifecycleState, PlanTier, Tenant
+from apps.api.db.models import AgentLifecycleState, PlanTier, Tenant, TenantOrigin
 
 # Prompt base que nace con cada tenant. Es el fallback legacy: en runtime
 # select_aop sobreescribe system_prompt con el AOP compilado (todo tenant nace
@@ -135,6 +136,9 @@ async def scaffold_tenant(
     company_name: str,
     plan_tier: PlanTier,
     lifecycle_state: AgentLifecycleState,
+    origin: TenantOrigin = "client",
+    demo_expires_at: datetime | None = None,
+    demo_source_url: str | None = None,
 ) -> Tenant:
     """Asegura el tenant y todo lo que el agente necesita para arrancar. Idempotente.
 
@@ -157,16 +161,22 @@ async def scaffold_tenant(
 
     row = await conn.fetchrow(
         """
-        INSERT INTO tenants (id, slug, name, plan_tier, agent_lifecycle_state)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO tenants
+          (id, slug, name, plan_tier, agent_lifecycle_state,
+           origin, demo_expires_at, demo_source_url)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (id) DO UPDATE SET slug = tenants.slug
-        RETURNING id, slug, name, status, agent_lifecycle_state, plan_tier
+        RETURNING id, slug, name, status, agent_lifecycle_state, plan_tier,
+                  origin, demo_expires_at, demo_source_url
         """,
         tenant_id,
         slug,
         company_name,
         plan_tier,
         lifecycle_state,
+        origin,
+        demo_expires_at,
+        demo_source_url,
     )
     assert row is not None
     tenant = Tenant(**dict(row))

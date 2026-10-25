@@ -62,6 +62,7 @@ from apps.api.integrations.zendesk import (
     ZendeskInboundComment,
     verify_zendesk_signature,
 )
+from apps.api.services.demo_tenants import reject_demo_intake
 from apps.api.services.handoff_events import handle_helpdesk_event
 from apps.api.services.inbound_intake import notify_inbound_worker, persist_and_enqueue_inbound
 from apps.api.services.integrations_crypto import decrypt_credentials, get_integration_crypto_key
@@ -184,6 +185,7 @@ async def zendesk_webhook(
     # 6. Cargar tenant + rate limit + budget.
     async with bootstrap_connection() as conn:
         tenant = await get_tenant_by_id(conn, tenant_id)
+    reject_demo_intake(tenant, source="zendesk")
     if tenant is None or tenant.status != "active":
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="tenant_inactive")
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useAdminTenants } from '@/lib/api/hooks/tenants'
+import { demoBadgeLabel, isDemo } from '@/lib/demo'
 import { cn } from '@/lib/utils'
 import type { components } from '@auyan/shared/api-types'
 import { ChevronDown, ChevronUp } from 'lucide-react'
@@ -103,7 +104,12 @@ export function TenantSwitcher({ activeTenantId, expanded = true }: TenantSwitch
                 )}
                 aria-label={t.status}
               />
-              <span className="truncate text-foreground-body">{t.name}</span>
+              <span className="min-w-0 flex-1 truncate text-foreground-body">{t.name}</span>
+              {isDemo(t) && (
+                <span className="shrink-0 text-[11px] text-warning-foreground">
+                  {demoBadgeLabel(t.demo_expires_at)}
+                </span>
+              )}
             </button>
           ))}
         </div>

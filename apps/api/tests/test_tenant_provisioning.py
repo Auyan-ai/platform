@@ -610,7 +610,7 @@ class TestProvisionSameRows:
 
         tenant_insert = conn.fetchrow.await_args_list[0]
         assert "INSERT INTO tenants" in tenant_insert.args[0]
-        assert tenant_insert.args[2:] == ("lunaria-2", "Lunaria 2", "founding", "discovery")
+        assert tenant_insert.args[2:] == ("lunaria-2", "Lunaria 2", "founding", "discovery", "client", None, None)
         statements = " | ".join(_sql(conn))
         for table in (
             "INSERT INTO users",
