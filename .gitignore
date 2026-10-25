@@ -243,7 +243,7 @@ apps/landing/.turbo/
 *.tsbuildinfo
 
 # pnpm
-node_modules/
+node_modules
 .pnpm-debug.log*
 
 # Env files locales (el .env.local de apps/web)

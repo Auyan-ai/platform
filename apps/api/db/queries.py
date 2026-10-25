@@ -42,6 +42,7 @@ from apps.api.db.models import (
     InternalRole,
     InternalUser,
     KnowledgeChunk,
+    KnowledgeDocumentSummary,
     Message,
     MessageDirection,
     MessageRole,
@@ -78,6 +79,7 @@ from apps.api.db.models import (
     WeeklyReport,
     WeeklyReportStatus,
 )
+from apps.api.services.kb_source_key import canonical_source_key, content_sha256
 
 logger = logging.getLogger(__name__)
 
@@ -1293,6 +1295,16 @@ async def reactivate_escalated_conversation(
 # ============================================================
 
 
+async def _enable_hnsw_iterative_scan(conn: asyncpg.Connection) -> None:
+    """`SET LOCAL hnsw.iterative_scan` (pgvector >= 0.8). En una versión anterior el parámetro
+    no existe: se avisa y la búsqueda sigue correcta pero sin rellenar el `top_k`."""
+    try:
+        async with conn.transaction():  # savepoint: un SET fallido no aborta la transacción
+            await conn.execute("SET LOCAL hnsw.iterative_scan = relaxed_order")
+    except asyncpg.InvalidNameError:
+        logger.warning("pgvector_iterative_scan_unavailable: pgvector < 0.8, sin escaneo iterativo")
+
+
 async def search_knowledge_chunks(
     conn: asyncpg.Connection,
     tenant_id: UUID,
@@ -1305,7 +1317,13 @@ async def search_knowledge_chunks(
     Estrategia: ORDER BY + LIMIT en una subquery para que el índice HNSW se aplique,
     después filtra por similitud mínima fuera del index scan. Para K pequeños y
     `min_similarity` razonable, sobre-pedir no impacta.
+
+    Los chunks borrados se excluyen dentro del escaneo HNSW: con
+    `hnsw.iterative_scan = relaxed_order` (pgvector >= 0.8) el índice sigue leyendo hasta
+    reunir `top_k` chunks vivos, así que los muertos no ocupan el `top_k`. El `SET LOCAL`
+    exige transacción; `tenant_scope` ya abre una.
     """
+    await _enable_hnsw_iterative_scan(conn)
     rows = await conn.fetch(
         """
         SELECT id, document_id, document_title, content, similarity
@@ -1317,6 +1335,7 @@ async def search_knowledge_chunks(
               JOIN knowledge_base_documents d
                 ON d.id = c.document_id AND d.tenant_id = c.tenant_id
              WHERE c.tenant_id = $1
+               AND c.deleted_at IS NULL
                AND d.deleted_at IS NULL
              ORDER BY c.embedding <=> $2::vector
              LIMIT $3
@@ -1341,14 +1360,16 @@ async def create_knowledge_document_with_chunks(
     content: str,
     metadata: dict[str, Any],
     chunks: list[tuple[str, list[float]]],
+    source_key: str | None = None,
+    content_sha256: str | None = None,
 ) -> UUID:
     """Inserta un documento RAG y sus chunks ya embedidos."""
     document_id = uuid4()
     await conn.execute(
         """
         INSERT INTO knowledge_base_documents
-          (id, tenant_id, title, source, content, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+          (id, tenant_id, title, source, content, metadata, source_key, content_sha256)
+        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
         """,
         document_id,
         tenant_id,
@@ -1356,6 +1377,8 @@ async def create_knowledge_document_with_chunks(
         source,
         content,
         metadata,  # el codec del pool serializa a jsonb (no json.dumps manual)
+        source_key,
+        content_sha256,
     )
     # NOTA: pasamos `embedding` (lista Python) directamente. El pool tiene
     # `register_vector(conn)` en _init_connection (apps/api/db/client.py) que
@@ -1385,6 +1408,56 @@ async def create_knowledge_document_with_chunks(
         rows,
     )
     return document_id
+
+
+async def soft_delete_knowledge_document(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    document_id: UUID,
+) -> bool:
+    """Borra en blando un documento vivo y marca sus chunks. False si no había documento vivo."""
+    deleted = await conn.fetchval(
+        """
+        UPDATE knowledge_base_documents
+           SET deleted_at = now()
+         WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+        RETURNING id
+        """,
+        tenant_id,
+        document_id,
+    )
+    if deleted is None:
+        return False
+    await conn.execute(
+        """
+        UPDATE knowledge_base_chunks
+           SET deleted_at = now()
+         WHERE tenant_id = $1 AND document_id = $2 AND deleted_at IS NULL
+        """,
+        tenant_id,
+        document_id,
+    )
+    return True
+
+
+async def list_knowledge_documents(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+) -> list[KnowledgeDocumentSummary]:
+    rows = await conn.fetch(
+        """
+        SELECT d.id, d.title, d.source, d.source_key, d.created_at,
+               COUNT(c.id) FILTER (WHERE c.deleted_at IS NULL) AS chunk_count
+          FROM knowledge_base_documents d
+          LEFT JOIN knowledge_base_chunks c
+            ON c.document_id = d.id AND c.tenant_id = d.tenant_id
+         WHERE d.tenant_id = $1 AND d.deleted_at IS NULL
+         GROUP BY d.id
+         ORDER BY d.created_at DESC
+        """,
+        tenant_id,
+    )
+    return [KnowledgeDocumentSummary(**dict(r)) for r in rows]
 
 
 async def get_tenant_metrics(conn: asyncpg.Connection, tenant_id: UUID) -> dict[str, int]:
@@ -4937,8 +5010,8 @@ async def compute_onboarding_checklist(
 ) -> OnboardingChecklist:
     """Evalúa las cuatro condiciones que gatean discovery → building.
 
-    'KB con contenido' = ≥1 submission no borrada; el CHECK de la tabla ya
-    garantiza que cada submission tiene contenido o URL.
+    'KB con contenido' = ≥1 submission aprobada y no borrada: una pendiente, rechazada o
+    sustituida no indexa nada, así que no cuenta.
     """
     row = await conn.fetchrow(
         """
@@ -4961,6 +5034,7 @@ async def compute_onboarding_checklist(
           EXISTS(
             SELECT 1 FROM tenant_knowledge_submissions
              WHERE tenant_id = $1 AND deleted_at IS NULL
+               AND status = 'approved'::tenant_knowledge_submission_status
           ) AS has_knowledge
         """,
         tenant_id,
@@ -5003,6 +5077,23 @@ def _tenant_knowledge_submission_from_row(
     if isinstance(d.get("metadata"), str):
         d["metadata"] = json.loads(d["metadata"])
     return TenantKnowledgeSubmission(**d)
+
+
+def _source_key_or_none(source_url: str | None) -> str | None:
+    if not source_url or not source_url.strip():
+        return None
+    try:
+        return canonical_source_key(source_url)
+    except ValueError:
+        return None
+
+
+async def _lock_source_key(conn: asyncpg.Connection, tenant_id: UUID, source_key: str) -> None:
+    """Lock consultivo de transacción sobre (tenant_id, source_key)."""
+    await conn.execute(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        f"kb-source:{tenant_id}:{source_key}",
+    )
 
 
 async def list_tenant_knowledge_submissions(
@@ -5058,12 +5149,29 @@ async def create_tenant_knowledge_submission(
     metadata: dict[str, Any] | None = None,
     submitted_by: UUID | None = None,
 ) -> TenantKnowledgeSubmission:
+    source_key = _source_key_or_none(source_url)
+    if source_key is not None:
+        # Serializa las altas de la misma fuente: la pendiente anterior pasa a 'superseded'
+        # y queda como mucho una pendiente por (tenant_id, source_key).
+        await _lock_source_key(conn, tenant_id, source_key)
+        await conn.execute(
+            """
+            UPDATE tenant_knowledge_submissions
+               SET status = 'superseded'::tenant_knowledge_submission_status,
+                   review_note = 'Sustituida por una submission más nueva de la misma fuente'
+             WHERE tenant_id = $1 AND source_key = $2
+               AND status = 'pending_review'::tenant_knowledge_submission_status
+               AND deleted_at IS NULL
+            """,
+            tenant_id,
+            source_key,
+        )
     row = await conn.fetchrow(
         """
         INSERT INTO tenant_knowledge_submissions
           (tenant_id, title, source_type, source_url, original_filename,
-           content, notes, metadata, submitted_by)
-        VALUES ($1, $2, $3::tenant_knowledge_source_type, $4, $5, $6, $7, $8::jsonb, $9)
+           content, notes, metadata, submitted_by, source_key)
+        VALUES ($1, $2, $3::tenant_knowledge_source_type, $4, $5, $6, $7, $8::jsonb, $9, $10)
         RETURNING *
         """,
         tenant_id,
@@ -5075,6 +5183,7 @@ async def create_tenant_knowledge_submission(
         notes,
         metadata or {},  # el codec del pool serializa a jsonb (no json.dumps manual)
         submitted_by,
+        source_key,
     )
     return _tenant_knowledge_submission_from_row(row)
 
@@ -5135,6 +5244,21 @@ async def approve_tenant_knowledge_submission_with_document(
     if submission.status != "pending_review":
         return None
 
+    source_key = submission.source_key or _source_key_or_none(submission.source_url)
+    if source_key is not None:
+        await _lock_source_key(conn, tenant_id, source_key)
+        live = await conn.fetchrow(
+            """
+            SELECT id FROM knowledge_base_documents
+             WHERE tenant_id = $1 AND source_key = $2 AND deleted_at IS NULL
+               FOR UPDATE
+            """,
+            tenant_id,
+            source_key,
+        )
+        if live is not None:
+            await soft_delete_knowledge_document(conn, tenant_id, live["id"])
+
     document_id = await create_knowledge_document_with_chunks(
         conn,
         tenant_id,
@@ -5148,6 +5272,8 @@ async def approve_tenant_knowledge_submission_with_document(
             "reviewed_by": str(reviewed_by),
         },
         chunks=chunks,
+        source_key=source_key,
+        content_sha256=content_sha256(submission.content),
     )
     updated = await conn.fetchrow(
         """

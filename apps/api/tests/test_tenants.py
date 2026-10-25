@@ -1864,6 +1864,77 @@ class TestTenantKnowledgeSubmissionsEndpoints:
         assert approve_mock.await_args.kwargs["reviewed_by"] == USER_ID
         assert approve_mock.await_args.kwargs["chunks"][0][1] == [0.1] * 1536
 
+    def test_approve_kb_submission_whose_content_is_only_its_url_returns_400(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from apps.api.db.models import TenantKnowledgeSubmission
+
+        submission_id = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        url = "https://tienda.com/politica-de-envios"
+        pending = TenantKnowledgeSubmission(
+            id=submission_id,
+            tenant_id=TENANT_ID,
+            title="Envíos",
+            source_type="url",
+            source_url=url,
+            content=url,
+            status="pending_review",
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.get_tenant_knowledge_submission",
+            AsyncMock(return_value=pending),
+        )
+        approve_mock = AsyncMock()
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.approve_tenant_knowledge_submission_with_document",
+            approve_mock,
+        )
+        app = _make_super_admin_app(monkeypatch)
+        app.state.agent_deps = SimpleNamespace(openai=object())
+        client = TestClient(app)
+
+        resp = client.post(
+            f"/tenants/me/kb-submissions/{submission_id}/approve",
+            headers={"Authorization": f"Bearer {_make_jwt()}", "X-Tenant-Id": str(TENANT_ID)},
+            json={},
+        )
+
+        assert resp.status_code == 400
+        approve_mock.assert_not_awaited()
+
+    def test_list_and_delete_kb_documents(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from apps.api.db.models import KnowledgeDocumentSummary
+
+        doc_id = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
+        summary = KnowledgeDocumentSummary(
+            id=doc_id,
+            title="Envíos",
+            source="https://www.tienda.com/envios/",
+            source_key="tienda.com/envios",
+            created_at=datetime(2026, 10, 25, tzinfo=UTC),
+            chunk_count=3,
+        )
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.list_knowledge_documents",
+            AsyncMock(return_value=[summary]),
+        )
+        delete_mock = AsyncMock(side_effect=[True, False])
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.soft_delete_knowledge_document", delete_mock
+        )
+        client = TestClient(_make_super_admin_app(monkeypatch))
+        headers = {"Authorization": f"Bearer {_make_jwt()}", "X-Tenant-Id": str(TENANT_ID)}
+
+        listed = client.get("/tenants/me/kb-documents", headers=headers)
+        deleted = client.delete(f"/tenants/me/kb-documents/{doc_id}", headers=headers)
+        missing = client.delete(f"/tenants/me/kb-documents/{doc_id}", headers=headers)
+
+        assert listed.status_code == 200
+        assert listed.json()[0]["source_key"] == "tienda.com/envios"
+        assert listed.json()[0]["chunk_count"] == 3
+        assert deleted.status_code == 204
+        assert missing.status_code == 404
+
 
 class TestEvaluateAndAdvanceLifecycle:
     """Tests del service: discovery → building gateado por checklist."""

@@ -16,12 +16,14 @@ const STATUS_LABELS: Record<KnowledgeSubmissionStatus, string> = {
   pending_review: 'En revisión',
   approved: 'Procesado',
   rejected: 'Rechazado',
+  superseded: 'Sustituido',
 }
 
 const STATUS_ICON = {
   pending_review: Clock3,
   approved: CheckCircle2,
   rejected: XCircle,
+  superseded: XCircle,
 } satisfies Record<KnowledgeSubmissionStatus, typeof Clock3>
 
 function StatusCard({

@@ -53,7 +53,7 @@ export function KbUploadStep({ tenantId }: { tenantId: string }) {
         source_type: sourceType,
         source_url: sourceUrl.trim() || null,
         original_filename: null,
-        content: content.trim() || sourceUrl.trim(),
+        content: content.trim(),
         notes: notes.trim() || null,
       })
       setTitle('')

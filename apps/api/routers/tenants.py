@@ -34,6 +34,7 @@ from apps.api.db.queries import (
     list_admin_review_queue,
     list_all_tenants,
     list_integrations_for_tenant,
+    list_knowledge_documents,
     list_outbound_email_jobs,
     list_outbound_email_templates,
     list_tenant_knowledge_submissions,
@@ -43,6 +44,7 @@ from apps.api.db.queries import (
     merge_tenant_facts,
     merge_tenant_playbook,
     reject_tenant_knowledge_submission,
+    soft_delete_knowledge_document,
     submit_tenant_onboarding,
     submit_weekly_report_for_review,
     update_outbound_email_template,
@@ -327,7 +329,7 @@ class TenantLifecycleUpdate(BaseModel):
 
 
 KnowledgeSourceType = Literal["text", "url", "file"]
-KnowledgeSubmissionStatus = Literal["pending_review", "approved", "rejected"]
+KnowledgeSubmissionStatus = Literal["pending_review", "approved", "rejected", "superseded"]
 
 
 class TenantKnowledgeSubmissionResponse(BaseModel):
@@ -338,6 +340,7 @@ class TenantKnowledgeSubmissionResponse(BaseModel):
     title: str
     source_type: KnowledgeSourceType
     source_url: str | None = None
+    source_key: str | None = None
     original_filename: str | None = None
     content: str = ""
     notes: str | None = None
@@ -366,6 +369,17 @@ class TenantKnowledgeSubmissionCreate(BaseModel):
         if not self.content.strip() and not self.source_url:
             raise ValueError("Debes enviar contenido o una URL de origen.")
         return self
+
+
+class KnowledgeDocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str
+    source: str | None = None
+    source_key: str | None = None
+    created_at: datetime.datetime
+    chunk_count: int
 
 
 class TenantKnowledgeSubmissionReview(BaseModel):
@@ -1614,7 +1628,9 @@ async def approve_my_kb_submission(
         raise HTTPException(status_code=404, detail="Submission no encontrado")
     if submission.status != "pending_review":
         raise HTTPException(status_code=409, detail="Submission ya revisado")
-    if not submission.content.strip():
+    if not submission.content.strip() or (
+        submission.source_url and submission.content.strip() == submission.source_url.strip()
+    ):
         raise HTTPException(status_code=400, detail="Submission sin contenido indexable")
 
     chunks = chunk_text_for_kb(submission.content)
@@ -1643,6 +1659,32 @@ async def approve_my_kb_submission(
     if approved is None:
         raise HTTPException(status_code=409, detail="Submission ya revisado")
     return TenantKnowledgeSubmissionResponse.model_validate(approved)
+
+
+@router.get(
+    "/me/kb-documents",
+    response_model=list[KnowledgeDocumentResponse],
+    summary="Lista los documentos indexados en la KB del tenant — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def list_my_kb_documents(tenant_id: TenantIdDep) -> list[KnowledgeDocumentResponse]:
+    async with tenant_scope(tenant_id) as conn:
+        rows = await list_knowledge_documents(conn, tenant_id)
+    return [KnowledgeDocumentResponse.model_validate(row) for row in rows]
+
+
+@router.delete(
+    "/me/kb-documents/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+    summary="Borra en blando un documento de la KB y sus chunks — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def delete_my_kb_document(document_id: UUID, tenant_id: TenantIdDep) -> None:
+    async with tenant_scope(tenant_id) as conn:
+        deleted = await soft_delete_knowledge_document(conn, tenant_id, document_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
 
 
 @router.post(
