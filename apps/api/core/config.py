@@ -145,6 +145,9 @@ class Settings(BaseSettings):
     rag_min_similarity: float = 0.0
     # Mensajes del cliente (los últimos) que forman la consulta del RAG.
     rag_query_messages: int = 3
+    # KB que cabe entera en el prompt (tokens estimados); más grande va por RAG. Override por
+    # tenant: tenant_configurations.extra['kb_full_context_token_budget'].
+    kb_full_context_token_budget: int = 50_000
     history_limit: int = 20
     # Intentos por llamada y tope de cada intento; el total lo acota LLM_CALL_BUDGET_SECONDS.
     llm_max_retries: int = 3

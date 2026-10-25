@@ -52,6 +52,7 @@ class FakeSettings:
     rag_top_k: int = 20
     rag_min_similarity: float = 0.0
     rag_query_messages: int = 3
+    kb_full_context_token_budget: int = 50_000
     history_limit: int = 20
     llm_max_retries: int = 3
     llm_timeout_seconds: int = 30

@@ -267,3 +267,65 @@ def test_settings_defaults_have_no_similarity_floor() -> None:
     assert fields["rag_min_similarity"].default == 0.0
     assert fields["rag_top_k"].default == 20
     assert fields["rag_query_messages"].default == 3
+
+
+def _knowledge(mode: str, tokens: int = 1200, docs: int = 3) -> dict:
+    documents = (
+        [{"title": "Envíos", "source": None, "content": "Gratis desde 110 €."}]
+        if mode == "full_context"
+        else []
+    )
+    return {"mode": mode, "total_tokens": tokens, "doc_count": docs, "documents": documents}
+
+
+@pytest.mark.asyncio
+async def test_full_context_turn_never_embeds_or_searches(fake_deps, monkeypatch) -> None:
+    embed_mock = AsyncMock(return_value=[0.0] * 1536)
+    search_mock = AsyncMock(return_value=[])
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(f"{MODULE}.get_query_embedding", embed_mock)
+    monkeypatch.setattr(f"{MODULE}.search_knowledge_chunks", search_mock)
+    node = make_retrieve_knowledge_node(fake_deps)
+    state = _state()
+    state["knowledge"] = _knowledge("full_context")
+
+    out = await node(state)
+
+    embed_mock.assert_not_awaited()
+    search_mock.assert_not_awaited()
+    stats = {"mode": "full_context", "total_tokens": 1200, "doc_count": 3}
+    assert out["retrieved_chunks"] == []
+    assert out["retrieval_summary"] == stats
+    [event] = fake_deps.reasoning_tracker.events
+    assert event["label"] == "Knowledge in context (3 docs)"
+    assert event["detail"] == stats
+
+
+@pytest.mark.asyncio
+async def test_retrieval_tenant_is_unchanged_and_records_mode(fake_deps, monkeypatch) -> None:
+    chunks = [make_knowledge_chunk(content="Envíos.", similarity=0.7)]
+    embed_mock = AsyncMock(return_value=[0.1] * 1536)
+    monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
+    monkeypatch.setattr(f"{MODULE}.get_query_embedding", embed_mock)
+    monkeypatch.setattr(f"{MODULE}.search_knowledge_chunks", AsyncMock(return_value=chunks))
+    node = make_retrieve_knowledge_node(fake_deps)
+    state = _state()
+    state["knowledge"] = _knowledge("retrieval", tokens=80_000, docs=40)
+
+    out = await node(state)
+
+    embed_mock.assert_awaited_once()
+    assert len(out["retrieved_chunks"]) == 1
+    assert out["retrieval_summary"] == {
+        "query_messages": 1,
+        "chunk_count": 1,
+        "top_similarity": 0.7,
+        "mode": "retrieval",
+        "total_tokens": 80_000,
+        "doc_count": 40,
+    }
+    [event] = fake_deps.reasoning_tracker.events
+    assert event["label"] == "Knowledge retrieved (1 chunk)"
+    assert event["detail"]["mode"] == "retrieval"
+    assert event["detail"]["total_tokens"] == 80_000
+    assert event["detail"]["doc_count"] == 40

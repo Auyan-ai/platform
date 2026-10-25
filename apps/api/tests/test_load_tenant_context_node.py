@@ -31,6 +31,7 @@ def _patch_module(
     playbook=None,
     facts=None,
     returns_policy=None,
+    kb_rows=(),
 ) -> None:
     monkeypatch.setattr(f"{MODULE}.tenant_scope", make_fake_tenant_scope())
     monkeypatch.setattr(f"{MODULE}.get_tenant_by_id", AsyncMock(return_value=tenant))
@@ -41,6 +42,9 @@ def _patch_module(
     monkeypatch.setattr(f"{MODULE}.get_tenant_facts", AsyncMock(return_value=facts))
     monkeypatch.setattr(
         f"{MODULE}.load_current_returns_policy", AsyncMock(return_value=returns_policy)
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.list_kb_documents_for_context", AsyncMock(return_value=list(kb_rows))
     )
     monkeypatch.setattr(
         f"{MODULE}.build_commerce_integration_ctx",
@@ -351,3 +355,79 @@ async def test_a_simulator_scenario_fixes_its_own_policy(fake_deps, monkeypatch)
 
     assert with_policy["returns_policy"] == {"version": 0, "policy": _POLICY}
     assert without["returns_policy"] is None
+
+
+def _kb_row(title: str, content: str | None, chars: int | None = None) -> dict:
+    return {
+        "title": title,
+        "source": f"https://x.es/{title}",
+        "chars": len(content or "") if chars is None else chars,
+        "content": content,
+    }
+
+
+@pytest.mark.asyncio
+async def test_small_kb_loads_in_full_context_mode(fake_deps, monkeypatch) -> None:
+    _patch_module(
+        monkeypatch,
+        tenant=make_tenant(),
+        config=make_tenant_configuration(),
+        system_prompt="Eres el agente de Acme.",
+        kb_rows=[_kb_row("Envíos", "Gratis desde 110 €."), _kb_row("Devoluciones", "30 días.")],
+    )
+    node = make_load_tenant_context_node(fake_deps)
+
+    out = await node(_state())
+
+    assert out["knowledge"]["mode"] == "full_context"
+    assert out["knowledge"]["doc_count"] == 2
+    assert out["knowledge"]["total_tokens"] == 8  # ceil((19 + 8) / 3.5)
+    assert [d["title"] for d in out["knowledge"]["documents"]] == ["Envíos", "Devoluciones"]
+
+
+@pytest.mark.asyncio
+async def test_large_kb_falls_back_to_retrieval_without_documents(fake_deps, monkeypatch) -> None:
+    fake_deps.settings.kb_full_context_token_budget = 100
+    _patch_module(
+        monkeypatch,
+        tenant=make_tenant(),
+        config=make_tenant_configuration(),
+        system_prompt="Eres el agente de Acme.",
+        kb_rows=[_kb_row("Grande", None, chars=4000)],
+    )
+    node = make_load_tenant_context_node(fake_deps)
+
+    out = await node(_state())
+
+    assert out["knowledge"] == {
+        "mode": "retrieval",
+        "total_tokens": 1143,
+        "doc_count": 1,
+        "documents": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_tenant_budget_override_beats_the_system_default(fake_deps, monkeypatch) -> None:
+    """Misma KB (4000 caracteres): con el defecto del sistema cabe, con el del tenant no."""
+    rows = [_kb_row("Grande", "x" * 4000)]
+    _patch_module(
+        monkeypatch,
+        tenant=make_tenant(),
+        config=make_tenant_configuration(),
+        system_prompt="Eres el agente de Acme.",
+        kb_rows=rows,
+    )
+    default_out = await make_load_tenant_context_node(fake_deps)(_state())
+    _patch_module(
+        monkeypatch,
+        tenant=make_tenant(),
+        config=make_tenant_configuration(extra={"kb_full_context_token_budget": 500}),
+        system_prompt="Eres el agente de Acme.",
+        kb_rows=rows,
+    )
+
+    override_out = await make_load_tenant_context_node(fake_deps)(_state())
+
+    assert default_out["knowledge"]["mode"] == "full_context"
+    assert override_out["knowledge"]["mode"] == "retrieval"

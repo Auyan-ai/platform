@@ -19,10 +19,16 @@ from apps.api.db.queries import (
     get_tenant_configuration,
     get_tenant_facts,
     get_tenant_playbook,
+    list_kb_documents_for_context,
     list_tool_permissions,
 )
 from apps.api.db.returns_policy import load_current_returns_policy
 from apps.api.services.commerce_context import build_commerce_integration_ctx
+from apps.api.services.knowledge_mode import (
+    KnowledgeContext,
+    kb_token_budget,
+    max_chars_for_budget,
+)
 from apps.api.services.returns_policy import ActivePolicy, parse_stored_policy
 
 
@@ -55,6 +61,15 @@ def make_load_tenant_context_node(
             extra = config_dump.get("extra") or {}
             commerce_ctx = await build_commerce_integration_ctx(
                 conn, tenant_id, extra=extra
+            )
+            # Aquí y no en retrieve_knowledge: ya hay conexión abierta y el presupuesto vive
+            # en `extra`; el modo queda fijo para todo el turno (reason y supervise lo leen).
+            budget = kb_token_budget(extra, deps.settings.kb_full_context_token_budget)
+            knowledge = KnowledgeContext.decide(
+                await list_kb_documents_for_context(
+                    conn, tenant_id, max_chars=max_chars_for_budget(budget)
+                ),
+                budget=budget,
             )
 
         # Construir mapa slug → {is_enabled, human_approval_required, threshold_override}
@@ -104,6 +119,7 @@ def make_load_tenant_context_node(
             "tenant_playbook": playbook.model_dump(mode="json") if playbook else None,
             "tenant_facts": facts.data if facts else None,
             "returns_policy": returns_policy,
+            "knowledge": knowledge.to_state(),
         }
         # Fallback sin AOPs: el tenant puede opt-in a skills vía tenant_config.extra.
         # select_aop (Sprint 7+) sobreescribe estos si el tenant tiene AOPs configurados.
