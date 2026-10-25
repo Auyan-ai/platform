@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from apps.api.services.site_ingestion.fetcher import FetchSession
 
 STORE_API_PREFIX = "wc/store"
+# El índice completo pesa más de 1 MB en una tienda con plugins; esto es todo lo que se lee.
+INDEX_FIELDS = "name,description,namespaces"
 
 
 @dataclass(frozen=True)
@@ -59,7 +61,7 @@ async def probe_wordpress(session: FetchSession, origin: str) -> WordPressIndex 
     """
     for pretty in (True, False):
         blocked_before = session.stats.blocked_by_robots
-        response = await session.get(rest_url(origin, "/", pretty=pretty))
+        response = await session.get(rest_url(origin, "/", pretty=pretty, _fields=INDEX_FIELDS))
         if session.stats.blocked_by_robots > blocked_before:
             return None
         if response is None or response.status_code != 200:

@@ -13,6 +13,7 @@ from apps.api.services.site_ingestion.orchestrator import collect_site
 from apps.api.tests.site_ingestion_replay import Replay, SleepLog
 
 ORIGIN = "https://tienda-prueba-auyan.test"
+INDEX_QUERY = "_fields=name,description,namespaces"
 INDEX = {
     "name": "Tienda X",
     "description": "",
@@ -38,7 +39,7 @@ def _json(body: object, **headers: str) -> httpx.Response:
 def _wp(replay: Replay, *, index=INDEX, pages=(), posts=()) -> None:
     def override(request: httpx.Request) -> httpx.Response | None:
         url = str(request.url)
-        if url in (f"{ORIGIN}/wp-json/", f"{ORIGIN}/?rest_route=/"):
+        if url in (f"{ORIGIN}/wp-json/?{INDEX_QUERY}", f"{ORIGIN}/?rest_route=/&{INDEX_QUERY}"):
             return _json(index)
         if "/wp/v2/pages" in url:
             return _json(list(pages), **{"X-WP-TotalPages": "1"})
@@ -85,7 +86,7 @@ async def test_recorded_rest_route_form_when_wp_json_is_blocked() -> None:
     assert [d.source_key for d in collection.docs_by_source[SourceName.WORDPRESS_API]] == [
         "tienda-prueba-auyan.test/faq"
     ]
-    assert f"{ORIGIN}/?rest_route=/" in replay.urls()
+    assert f"{ORIGIN}/?rest_route=/&{INDEX_QUERY}" in replay.urls()
     assert any("rest_route=/wp/v2/pages" in u for u in replay.urls())
 
 
@@ -94,7 +95,7 @@ async def test_wp_json_html_catch_all_falls_back_to_rest_route() -> None:
     replay.overrides.append(
         lambda r: (
             httpx.Response(200, text="<html>home</html>", headers={"content-type": "text/html"})
-            if str(r.url) == f"{ORIGIN}/wp-json/"
+            if str(r.url) == f"{ORIGIN}/wp-json/?{INDEX_QUERY}"
             else None
         )
     )
@@ -169,7 +170,7 @@ async def test_pages_are_paginated_by_total_pages_header() -> None:
 
     def override(request: httpx.Request) -> httpx.Response | None:
         url = str(request.url)
-        if url == f"{ORIGIN}/wp-json/":
+        if url == f"{ORIGIN}/wp-json/?{INDEX_QUERY}":
             return _json(INDEX)
         if "/wp/v2/pages" in url:
             seen.append(url)

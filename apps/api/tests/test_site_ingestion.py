@@ -103,8 +103,8 @@ async def test_mimitos_html_from_sitemap_to_markdown() -> None:
     assert replay.urls()[:10] == [
         "https://mimitos.es/robots.txt",
         "https://mimitos.es/api/2025-07/graphql.json",
-        "https://mimitos.es/wp-json/",
-        "https://mimitos.es/?rest_route=/",
+        "https://mimitos.es/wp-json/?_fields=name,description,namespaces",
+        "https://mimitos.es/?rest_route=/&_fields=name,description,namespaces",
         "https://mimitos.es/llms-full.txt",
         "https://mimitos.es/llms.txt",
         "https://mimitos.es/agents.md",
