@@ -498,6 +498,7 @@ class TenantKnowledgeSubmission(_BaseModel):
     reviewed_at: datetime | None = None
     review_note: str | None = None
     processed_document_id: UUID | None = None
+    ingestion_id: UUID | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     deleted_at: datetime | None = None
