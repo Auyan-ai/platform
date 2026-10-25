@@ -248,8 +248,8 @@ class TestDemoTurnState:
             "demo_catalog_domain": "www.thinkingmu.com",
         }
 
-    def test_simulator_keeps_the_mock_but_still_gets_no_credentials(self) -> None:
-        overrides = demo_state_overrides(_demo(), simulation_mode=True)
+    def test_scripted_simulator_keeps_the_mock_but_still_gets_no_credentials(self) -> None:
+        overrides = demo_state_overrides(_demo(), scripted_commerce=True)
 
         assert overrides == {"commerce_integration_ctx": None}
 
@@ -279,6 +279,42 @@ class TestDemoTurnState:
 
         assert out["commerce_mode"] == "demo_catalog"
         assert out["demo_catalog_domain"] == "www.thinkingmu.com"
+        assert out["commerce_integration_ctx"] is None
+        build_ctx.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("fixtures", "expected_mode"),
+        [({}, "demo_catalog"), ({"shopify": {"get_order": {}}}, None)],
+        ids=["probar-agente", "escenario-guionizado"],
+    )
+    async def test_simulated_demo_turn_uses_catalog_unless_scripted(
+        self,
+        fake_deps: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        fixtures: dict[str, Any],
+        expected_mode: str | None,
+    ) -> None:
+        module = "apps.api.agents.nodes.load_tenant_context"
+        build_ctx = AsyncMock()
+        monkeypatch.setattr(f"{module}.tenant_scope", make_fake_tenant_scope())
+        monkeypatch.setattr(f"{module}.get_tenant_by_id", AsyncMock(return_value=_demo()))
+        monkeypatch.setattr(
+            f"{module}.get_tenant_configuration",
+            AsyncMock(return_value=make_tenant_configuration()),
+        )
+        monkeypatch.setattr(f"{module}.get_active_system_prompt", AsyncMock(return_value="p"))
+        monkeypatch.setattr(f"{module}.list_tool_permissions", AsyncMock(return_value=[]))
+        monkeypatch.setattr(f"{module}.get_tenant_playbook", AsyncMock(return_value=None))
+        monkeypatch.setattr(f"{module}.get_tenant_facts", AsyncMock(return_value=None))
+        monkeypatch.setattr(f"{module}.load_current_returns_policy", AsyncMock(return_value=None))
+        monkeypatch.setattr(f"{module}.build_commerce_integration_ctx", build_ctx)
+
+        out = await make_load_tenant_context_node(fake_deps)(
+            {"tenant_id": str(TENANT_ID), "simulation_mode": True, "simulation_fixtures": fixtures}
+        )
+
+        assert out.get("commerce_mode") == expected_mode
         assert out["commerce_integration_ctx"] is None
         build_ctx.assert_not_awaited()
 
