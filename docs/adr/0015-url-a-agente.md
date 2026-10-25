@@ -36,11 +36,12 @@ User-Agent que se identifica como bot:
 
 | Fuente | Resultado |
 |---|---|
-| HTML de tiendas Shopify | 6 de 7 devuelven 429 desde la primera petición. Shopify exige [Web Bot Auth](https://shopify.dev/docs/api/storefront#identifying-bots-with-web-bot-auth), una firma que crea la tienda en su admin. |
+| HTML de tiendas Shopify | Desde la IP local de pruebas, 6 de 7 devolvieron 429 desde la primera petición. **Desde Cloud Run (s87, revisión `00052`) Thinking MU sirvió el HTML a AuyanBot sin ningún 429**: los 429 dependían de la IP, no del User-Agent. Para lo que se bloquee, Shopify ofrece [Web Bot Auth](https://shopify.dev/docs/api/storefront#identifying-bots-with-web-bot-auth), una firma que crea la tienda en su admin. |
 | HTML de webs que no son Shopify | Funciona. Mimitos dio 22 páginas y Hawkers 41. Nude Project no tiene sitemap. |
 | Storefront API de Shopify sin token (`/api/<versión>/graphql.json`) | Funciona en todas. Da las políticas completas (Alohas, 1.139 palabras de devoluciones), las páginas con su texto y el catálogo. Las páginas montadas con secciones del tema salen vacías. |
 | Storefront MCP (`/api/mcp`, `search_shop_policies_and_faqs`) | Funciona. Solo aporta si la tienda rellenó su FAQ en Shopify (Singularu, 11 de 18 preguntas). El resto, 4 de 18 respuestas genéricas. |
 | `llms-full.txt` y `agents.md` | Shopify los genera en todas las tiendas, pero el texto por defecto son instrucciones de compra por UCP. Solo vale el que la tienda reescribió (Scalpers, 2.096 palabras con hechos, FAQ y tono). |
+| WooCommerce y WordPress (s87, `productos-espanoles.com`) | Store API pública (`wc/store`) con precio, stock y atributos, y REST de WordPress (`wp/v2/pages`) con el contenido de las páginas, sin credenciales. Mismo patrón que Shopify (#422). |
 | Admin API con el token de Marea | Los scopes no incluyen `read_content`. No hace falta: la Storefront API pública da lo mismo. |
 
 Con la Storefront API, la página de envíos y la de devoluciones, las 4 tiendas medidas
