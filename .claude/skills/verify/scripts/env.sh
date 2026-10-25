@@ -16,9 +16,10 @@ mkdir -p "$RUN_DIR" "$EVID_DIR"
 load_staging_env() {
   [ -f "$REPO/.env.staging" ] || { echo "falta $REPO/.env.staging" >&2; return 1; }
   set -a; . "$REPO/.env.staging"; set +a
-  # The local API shares the staging DB with Cloud Run. Without these two lines the local
-  # process would also claim real helpdesk jobs from `inbound_jobs` and run the abandoned-
-  # conversation cleanup against live tenants.
+  # The local API shares the staging DB with Cloud Run. Without these lines the local
+  # process would also claim real helpdesk jobs from `inbound_jobs`, claim queued
+  # `site_ingestions`, and run the abandoned-conversation cleanup against live tenants.
   export INBOUND_WORKER_CONCURRENCY=0
+  export SITE_INGESTION_WORKER_CONCURRENCY=0
   export CLEANUP_INTERVAL_SECONDS=86400
 }

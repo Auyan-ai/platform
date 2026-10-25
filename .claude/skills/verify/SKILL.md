@@ -32,9 +32,11 @@ bloquean; las `FAIL` sí.
 ```
 - Puertos fijos 8000/3000: `ALLOWED_ORIGINS` de staging solo admite `localhost:3000`. Si el puerto está
   ocupado por algo que **no** arrancó este skill, `up.sh` se niega (no hay doble drive sobre una instancia ajena).
-- `up.sh` fuerza `INBOUND_WORKER_CONCURRENCY=0` y `CLEANUP_INTERVAL_SECONDS=86400`. Motivo: la API local y
-  Cloud Run comparten la tabla `inbound_jobs`; con el worker encendido, el proceso local **robaría jobs reales
-  de Zendesk/Gorgias/Chatwoot de staging y los respondería con código sin desplegar**. No lo quites.
+- `up.sh` fuerza `INBOUND_WORKER_CONCURRENCY=0`, `SITE_INGESTION_WORKER_CONCURRENCY=0` y
+  `CLEANUP_INTERVAL_SECONDS=86400`. Motivo: la API local y Cloud Run comparten las tablas `inbound_jobs` y
+  `site_ingestions`; con los workers encendidos, el proceso local **robaría jobs reales de Zendesk/Gorgias/Chatwoot
+  de staging y los respondería con código sin desplegar**, y reclamaría las ingestas encoladas. No lo quites.
+  Para probar una ingesta en local, córrela en línea con `scripts/ingest_site.py`.
 - La web recibe `NEXT_PUBLIC_SUPABASE_URL/ANON_KEY` de staging y `NEXT_PUBLIC_API_URL=http://localhost:8000` por
   entorno del proceso (gana a `apps/web/.env.local`).
 - **La web necesita la API local.** El dashboard le pregunta a `localhost:8000/users/me` quién es el usuario; sin API, toda página

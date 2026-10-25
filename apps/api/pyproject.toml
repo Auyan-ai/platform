@@ -42,6 +42,9 @@ lingua-language-detector = "^2.0.0"
 httpx = "^0.27.0"
 python-dotenv = "^1.0.0"
 
+# Ingesta de la web de la tienda (ADR 0015): HTML → markdown del contenido principal
+trafilatura = "^2.0.0"
+
 # Auth
 pyjwt = {extras = ["crypto"], version = "^2.10.0"}
 cryptography = ">=44.0"

@@ -92,7 +92,7 @@ def product_from_storefront(node: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _retry_after_seconds(response: httpx.Response) -> float:
+def retry_after_seconds(response: httpx.Response) -> float:
     raw = response.headers.get("Retry-After")
     try:
         return max(float(raw), 0.0) if raw is not None else _DEFAULT_RETRY_AFTER_SECONDS
@@ -127,7 +127,7 @@ class DemoCatalogAdapter:
                 )
                 if response.status_code != 429:
                     break
-                wait = _retry_after_seconds(response)
+                wait = retry_after_seconds(response)
                 if attempt == MAX_RETRIES or wait > MAX_RETRY_AFTER_SECONDS:
                     raise DemoCatalogError(f"rate_limited: retry_after={wait}s")
                 logger.info(
