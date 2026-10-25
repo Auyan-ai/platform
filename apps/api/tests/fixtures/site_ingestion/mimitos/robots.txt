@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /visita.php
+Disallow: /*?q=
+Disallow: /*?dominio=
+
+Sitemap: https://mimitos.es/sitemap.xml

@@ -11,15 +11,11 @@ usuario pueda crear bases. En CI (sin la variable) se saltan.
 
 from __future__ import annotations
 
-import os
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-import httpx
 import pytest
-from apps.api.db import client as db_client
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import (
     approve_tenant_knowledge_submission_with_document,
@@ -31,32 +27,23 @@ from apps.api.db.queries import (
     soft_delete_knowledge_document,
 )
 from apps.api.services.kb_source_key import canonical_source_key
+from apps.api.tests.pg_support import (
+    MIGRATIONS,
+    apply_migrations,
+    create_migrated_database,
+    drop_database,
+    migrated_pool,
+    requires_pg,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     import asyncpg
 
-DSN = os.environ.get("AUYAN_TEST_DATABASE_URL")
-pytestmark = pytest.mark.skipif(not DSN, reason="AUYAN_TEST_DATABASE_URL no configurada")
+pytestmark = requires_pg
 
-MIGRATIONS = Path(__file__).resolve().parents[3] / "supabase" / "migrations"
 LIFECYCLE_MIGRATION = "20261025000001_kb_document_lifecycle.sql"
-
-_SUPABASE_PRELUDE = """
-create schema if not exists auth;
-create table if not exists auth.users (id uuid primary key, email text);
-create schema if not exists storage;
-create table if not exists storage.buckets (
-  id text primary key, name text, public boolean, file_size_limit bigint,
-  allowed_mime_types text[]
-);
-do $$ begin create role authenticated nologin; exception when duplicate_object then null; end $$;
-do $$ begin create role anon nologin; exception when duplicate_object then null; end $$;
-do $$ begin create role service_role nologin; exception when duplicate_object then null; end $$;
-do $$ begin create role supabase_auth_admin nologin;
-  exception when duplicate_object then null; end $$;
-"""
 
 DIM = 1536
 REVIEWER = uuid.uuid4()
@@ -68,60 +55,10 @@ def _vec(axis: int) -> list[float]:
     return v
 
 
-async def _apply(conn: asyncpg.Connection, names: list[Path]) -> None:
-    has_pgcrypto = await conn.fetchval(
-        "select exists(select 1 from pg_available_extensions where name = 'pgcrypto')"
-    )
-    for path in names:
-        sql = path.read_text()
-        if not has_pgcrypto:
-            sql = sql.replace("create extension if not exists pgcrypto;", "")
-        await conn.execute(sql)
-
-
-async def _new_db(monkeypatch: pytest.MonkeyPatch, *, stop_before_lifecycle: bool) -> tuple:
-    import asyncpg
-
-    admin = await asyncpg.connect(DSN)
-    if not await admin.fetchval(
-        "select exists(select 1 from pg_available_extensions where name = 'vector')"
-    ):
-        await admin.close()
-        pytest.skip("el Postgres de pruebas no tiene pgvector")
-    db = f"auyan_kb_{uuid.uuid4().hex[:8]}"
-    await admin.execute(f"create database {db}")
-    await admin.close()
-    dsn = str(httpx.URL(DSN).copy_with(path=f"/{db}"))
-    setup = await asyncpg.connect(dsn)
-    await setup.execute(_SUPABASE_PRELUDE)
-    files = sorted(MIGRATIONS.glob("*.sql"))
-    if stop_before_lifecycle:
-        files = [f for f in files if f.name < LIFECYCLE_MIGRATION]
-    await _apply(setup, files)
-    return db, dsn, setup
-
-
-async def _drop(db: str) -> None:
-    import asyncpg
-
-    admin = await asyncpg.connect(DSN)
-    await admin.execute(f"drop database {db} with (force)")
-    await admin.close()
-
-
 @pytest.fixture
 async def pool(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[asyncpg.Pool]:
-    import asyncpg
-
-    db, dsn, setup = await _new_db(monkeypatch, stop_before_lifecycle=False)
-    await setup.close()
-    p = await asyncpg.create_pool(dsn, min_size=2, max_size=6, init=db_client._init_connection)
-    monkeypatch.setattr(db_client, "_pool", p)
-    try:
+    async with migrated_pool(monkeypatch) as p:
         yield p
-    finally:
-        await p.close()
-        await _drop(db)
 
 
 async def _tenant(pool: asyncpg.Pool) -> uuid.UUID:
@@ -132,7 +69,9 @@ async def _tenant(pool: asyncpg.Pool) -> uuid.UUID:
             tid,
             f"t-{tid.hex[:8]}",
         )
-        await conn.execute("insert into auth.users (id) values ($1) on conflict do nothing", REVIEWER)
+        await conn.execute(
+            "insert into auth.users (id) values ($1) on conflict do nothing", REVIEWER
+        )
     return tid
 
 
@@ -308,9 +247,7 @@ async def test_only_an_approved_submission_satisfies_has_knowledge(pool: asyncpg
             conn, tid, title="FAQ", source_type="text", content="algo"
         )
         pending = (await compute_onboarding_checklist(conn, tid)).has_knowledge
-        rejected = await reject_tenant_knowledge_submission(
-            conn, tid, sub.id, reviewed_by=REVIEWER
-        )
+        rejected = await reject_tenant_knowledge_submission(conn, tid, sub.id, reviewed_by=REVIEWER)
         after_reject = (await compute_onboarding_checklist(conn, tid)).has_knowledge
     await _submit_and_approve(tid, url=None, content="otra", axis=0)
     async with tenant_scope(tid) as conn:
@@ -340,12 +277,10 @@ async def test_sql_and_python_canonical_keys_agree(pool: asyncpg.Pool, url: str)
 async def test_migration_keeps_the_newest_live_duplicate_and_soft_deletes_the_rest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db, _dsn, conn = await _new_db(monkeypatch, stop_before_lifecycle=True)
+    db, _dsn, conn = await create_migrated_database(stop_before=LIFECYCLE_MIGRATION)
     try:
         tid = uuid.uuid4()
-        await conn.execute(
-            "insert into tenants (id, slug, name) values ($1, 'dup', 'Tienda')", tid
-        )
+        await conn.execute("insert into tenants (id, slug, name) values ($1, 'dup', 'Tienda')", tid)
 
         async def doc(source: str | None, created: str) -> uuid.UUID:
             did = uuid.uuid4()
@@ -374,7 +309,7 @@ async def test_migration_keeps_the_newest_live_duplicate_and_soft_deletes_the_re
         other = await doc("https://tienda.com/otra", "2026-01-01")
         plain = await doc("manual", "2026-01-01")
 
-        await _apply(conn, [MIGRATIONS / LIFECYCLE_MIGRATION])
+        await apply_migrations(conn, [MIGRATIONS / LIFECYCLE_MIGRATION])
 
         rows = {
             r["id"]: r
@@ -388,7 +323,7 @@ async def test_migration_keeps_the_newest_live_duplicate_and_soft_deletes_the_re
         }
     finally:
         await conn.close()
-        await _drop(db)
+        await drop_database(db)
 
     assert [rows[i]["dead"] for i in (oldest, middle, newest)] == [True, True, False]
     assert [rows[i]["live_chunks"] for i in (oldest, middle, newest)] == [0, 0, 1]

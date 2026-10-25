@@ -80,8 +80,9 @@ crear una firma Web Bot Auth para Auyan. Es opcional y llega en una fase posteri
 
 Tope por ingesta: 60 páginas, 150 peticiones y 2 peticiones simultáneas por dominio. Cada
 fuente tiene una **clave canónica** (`source_key`): la URL sin esquema, sin `www`, sin barra
-final y sin query; la URL de la política que devuelve la Storefront API; y
-`mcp:faq/<pregunta>` para las respuestas del MCP. Se guarda con el tipo, el hash SHA-256 del
+final y sin query; para una política, su URL pública en la tienda (`<dominio>/policies/<handle>`),
+no la de checkout que devuelve la Storefront API (`checkout.shopify.com/<id>/policies/<n>.html`,
+con ids internos); y `mcp:faq/<pregunta de la tienda>` para las respuestas del MCP. Se guarda con el tipo, el hash SHA-256 del
 texto normalizado y la fecha de lectura.
 
 ### 3. KB: una fuente es un documento, y se puede sustituir

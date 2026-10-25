@@ -5266,8 +5266,10 @@ async def create_tenant_knowledge_submission(
     notes: str | None = None,
     metadata: dict[str, Any] | None = None,
     submitted_by: UUID | None = None,
+    source_key: str | None = None,
+    ingestion_id: UUID | None = None,
 ) -> TenantKnowledgeSubmission:
-    source_key = _source_key_or_none(source_url)
+    source_key = source_key or _source_key_or_none(source_url)
     if source_key is not None:
         # Serializa las altas de la misma fuente: la pendiente anterior pasa a 'superseded'
         # y queda como mucho una pendiente por (tenant_id, source_key).
@@ -5288,8 +5290,9 @@ async def create_tenant_knowledge_submission(
         """
         INSERT INTO tenant_knowledge_submissions
           (tenant_id, title, source_type, source_url, original_filename,
-           content, notes, metadata, submitted_by, source_key)
-        VALUES ($1, $2, $3::tenant_knowledge_source_type, $4, $5, $6, $7, $8::jsonb, $9, $10)
+           content, notes, metadata, submitted_by, source_key, ingestion_id)
+        VALUES ($1, $2, $3::tenant_knowledge_source_type, $4, $5, $6, $7, $8::jsonb, $9, $10,
+                $11)
         RETURNING *
         """,
         tenant_id,
@@ -5302,6 +5305,7 @@ async def create_tenant_knowledge_submission(
         metadata or {},  # el codec del pool serializa a jsonb (no json.dumps manual)
         submitted_by,
         source_key,
+        ingestion_id,
     )
     return _tenant_knowledge_submission_from_row(row)
 

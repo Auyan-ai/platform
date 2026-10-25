@@ -1,0 +1,38 @@
+[
+ {
+  "method": "GET",
+  "url": "https://mimitos.es/robots.txt",
+  "status": 200,
+  "headers": {
+   "content-type": "text/plain; charset=utf-8"
+  },
+  "file": "robots.txt"
+ },
+ {
+  "method": "GET",
+  "url": "https://mimitos.es/sitemap.xml",
+  "status": 200,
+  "headers": {
+   "content-type": "application/xml; charset=utf-8"
+  },
+  "file": "sitemap.xml"
+ },
+ {
+  "method": "GET",
+  "url": "https://mimitos.es/",
+  "status": 200,
+  "headers": {
+   "content-type": "text/html; charset=utf-8"
+  },
+  "file": "home.html"
+ },
+ {
+  "method": "GET",
+  "url": "https://mimitos.es/blog/cuidado-durante-las-vacaciones",
+  "status": 200,
+  "headers": {
+   "content-type": "text/html; charset=utf-8"
+  },
+  "file": "cuidado-durante-las-vacaciones.html"
+ }
+]

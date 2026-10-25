@@ -613,7 +613,9 @@ async def create_tenant(
     summary="Crear una demo desde la URL de una tienda — sólo super_admin",
     dependencies=[Depends(require_role("super_admin"))],
 )
-async def create_demo(payload: CreateDemoRequest, settings: SettingsDep) -> TenantResponse:
+async def create_demo(
+    payload: CreateDemoRequest, settings: SettingsDep, auth: AuthDep, request: Request
+) -> TenantResponse:
     async with bootstrap_connection() as conn:
         try:
             tenant = await create_demo_tenant(conn, settings=settings, url=payload.url)
@@ -627,7 +629,10 @@ async def create_demo(payload: CreateDemoRequest, settings: SettingsDep) -> Tena
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="demo_slug_agotado: reintenta en unos segundos",
             ) from exc
-    start_demo_ingestion(tenant)
+        await start_demo_ingestion(conn, tenant, requested_by=auth.user_id)
+    worker = getattr(request.app.state, "site_ingestion_worker", None)
+    if worker is not None:
+        worker.notify()
     return TenantResponse.model_validate(tenant)
 
 
@@ -1552,9 +1557,7 @@ async def connect_chatwoot(
     )
 
 
-async def _ensure_chatwoot_webhook(
-    client: ChatwootClient, settings: SettingsDep
-) -> bool:
+async def _ensure_chatwoot_webhook(client: ChatwootClient, settings: SettingsDep) -> bool:
     """Registra el webhook entrante de Auyan en Chatwoot, sin duplicar.
 
     Devuelve False (sin fallar la conexión) si no hay api_base_url configurado

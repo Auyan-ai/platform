@@ -7,7 +7,7 @@ Lifespan ordenado:
         3. Construir clientes LLM (Anthropic, OpenAI) y observabilidad.
         4. Compilar el grafo + crear AgentService.
         5. Exponer en app.state.
-        6. Arrancar jobs de fondo (cleanup, AOP listener, worker de turnos inbound).
+        6. Arrancar jobs de fondo (cleanup, AOP listener, workers de turnos inbound e ingestas).
     shutdown:
         1. Flush de observabilidad (manda los traces pendientes).
         2. Cerrar pool de Postgres.
@@ -54,6 +54,7 @@ from apps.api.routers.proposals import router as proposals_router
 from apps.api.routers.reasoning import router as reasoning_router
 from apps.api.routers.returns_policy import router as returns_policy_router
 from apps.api.routers.simulations import router as simulations_router
+from apps.api.routers.site_ingestions import router as site_ingestions_router
 from apps.api.routers.tenants import router as tenants_router
 from apps.api.routers.tool_permissions import router as tool_permissions_router
 from apps.api.routers.users import router as users_router
@@ -70,6 +71,7 @@ from apps.api.services.email_sender import EmailSender
 from apps.api.services.inbound_worker import InboundWorker
 from apps.api.services.llm_alert import LLMProviderAlerter, configure_alerter
 from apps.api.services.reasoning import ReasoningTracker
+from apps.api.services.site_ingestion.worker import SiteIngestionWorker
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -179,12 +181,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     inbound_worker.start()
     app.state.inbound_worker = inbound_worker
 
+    site_ingestion_worker = SiteIngestionWorker(
+        concurrency=settings.site_ingestion_worker_concurrency,
+        poll_interval_seconds=settings.site_ingestion_worker_poll_seconds,
+        lease_seconds=settings.site_ingestion_worker_lease_seconds,
+    )
+    site_ingestion_worker.start()
+    app.state.site_ingestion_worker = site_ingestion_worker
+
     try:
         yield
     finally:
         logger.info("shutdown_initiated")
         # Primero el worker: libera el job en curso mientras el pool sigue vivo.
         await inbound_worker.stop()
+        await site_ingestion_worker.stop()
         cleanup_task.cancel()
         await asyncio.gather(cleanup_task, return_exceptions=True)
         await aop_listener.stop()
@@ -236,6 +247,7 @@ app.include_router(tool_permissions_router)
 app.include_router(returns_policy_router)
 app.include_router(simulations_router)
 app.include_router(billing_router)
+app.include_router(site_ingestions_router)
 
 
 @app.get("/health", tags=["health"])

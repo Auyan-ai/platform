@@ -179,6 +179,10 @@ class Settings(BaseSettings):
     inbound_worker_poll_seconds: float = 5.0
     inbound_worker_lease_seconds: int = 120
 
+    site_ingestion_worker_concurrency: int = 1
+    site_ingestion_worker_poll_seconds: float = 15.0
+    site_ingestion_worker_lease_seconds: int = 120
+
     # --- Intent classifier (Sprint 7+) ---
     # Confidence mínima para usar el AOP seleccionado. Por debajo, se usa 'default'.
     intent_min_confidence: float = 0.60

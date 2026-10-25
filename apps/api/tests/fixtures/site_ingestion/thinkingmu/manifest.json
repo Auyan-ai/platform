@@ -1,0 +1,107 @@
+[
+ {
+  "method": "GET",
+  "url": "https://thinkingmu.com/robots.txt",
+  "status": 200,
+  "headers": {
+   "content-type": "text/plain; charset=utf-8"
+  },
+  "file": "robots.txt"
+ },
+ {
+  "method": "POST",
+  "url": "https://thinkingmu.com/api/2025-07/graphql.json",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "file": "shop_probe.json",
+  "match": "AuyanShopProbe"
+ },
+ {
+  "method": "POST",
+  "url": "https://thinkingmu.com/api/2025-07/graphql.json",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "file": "store_content.json",
+  "match": "AuyanStoreContent"
+ },
+ {
+  "method": "POST",
+  "url": "https://thinkingmu.com/api/mcp",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "file": "mcp_self_serve_returns.json",
+  "match": "What is the return policy and how many days do I have?"
+ },
+ {
+  "method": "POST",
+  "url": "https://thinkingmu.com/api/mcp",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "file": "mcp_ships_to.json",
+  "match": "Do you ship internationally? Which countries?"
+ },
+ {
+  "method": "POST",
+  "url": "https://thinkingmu.com/api/mcp",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "file": "mcp_pickup.json",
+  "match": "How can I track my order?"
+ },
+ {
+  "method": "GET",
+  "url": "https://thinkingmu.com/llms-full.txt",
+  "status": 200,
+  "headers": {
+   "content-type": "text/markdown; charset=utf-8"
+  },
+  "file": "llms-full.txt"
+ },
+ {
+  "method": "GET",
+  "url": "https://thinkingmu.com/sitemap.xml",
+  "status": 200,
+  "headers": {
+   "content-type": "application/xml; charset=utf-8"
+  },
+  "file": "sitemap.xml"
+ },
+ {
+  "method": "GET",
+  "url": "https://thinkingmu.com/sitemap_pages_1.xml?from=84759740461&to=174083014982",
+  "status": 200,
+  "headers": {
+   "content-type": "application/xml; charset=utf-8"
+  },
+  "file": "sitemap_pages_1.xml"
+ },
+ {
+  "method": "GET",
+  "url": "https://thinkingmu.com/pages/*",
+  "status": 429,
+  "headers": {
+   "content-type": "text/plain",
+   "retry-after": "60"
+  },
+  "file": "html_429.txt"
+ },
+ {
+  "method": "POST",
+  "url": "https://thinkingmu.com/api/mcp",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=utf-8"
+  },
+  "file": "mcp_empty.json"
+ }
+]
