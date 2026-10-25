@@ -49,8 +49,9 @@ DOCUMENT_ID = UUID("77777777-7777-7777-7777-777777777777")
 class FakeSettings:
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
-    rag_top_k: int = 5
-    rag_min_similarity: float = 0.6
+    rag_top_k: int = 20
+    rag_min_similarity: float = 0.0
+    rag_query_messages: int = 3
     history_limit: int = 20
     llm_max_retries: int = 3
     llm_timeout_seconds: int = 30
