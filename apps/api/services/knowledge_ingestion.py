@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from apps.api.integrations.openai_embeddings import get_query_embedding
+from apps.api.integrations.openai_embeddings import get_embeddings
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -35,19 +36,18 @@ def chunk_text_for_kb(
     return chunks
 
 
-async def embed_kb_chunks(
-    openai_client: AsyncOpenAI,
-    chunks: list[str],
-    *,
-    settings: Any,
-) -> list[tuple[str, list[float]]]:
-    embedded: list[tuple[str, list[float]]] = []
-    for chunk in chunks:
-        embedding = await get_query_embedding(
+Embedder = Callable[[list[str]], Awaitable[list[list[float]]]]
+
+
+def make_embedder(openai_client: AsyncOpenAI, *, settings: Any) -> Embedder:
+    """Embedder por lotes: una lista de textos entra, sus vectores salen en el mismo orden."""
+
+    async def embed(texts: list[str]) -> list[list[float]]:
+        return await get_embeddings(
             openai_client,
-            chunk,
+            texts,
             model=settings.embedding_model,
             max_retries=settings.llm_max_retries,
         )
-        embedded.append((chunk, embedding))
-    return embedded
+
+    return embed

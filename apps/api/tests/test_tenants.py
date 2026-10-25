@@ -108,6 +108,7 @@ def _make_super_admin_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
         yield AsyncMock()
 
     monkeypatch.setattr("apps.api.routers.tenants.tenant_scope", _fake_tenant_scope)
+    monkeypatch.setattr("apps.api.services.kb_approval.tenant_scope", _fake_tenant_scope)
 
     from apps.api.core.config import get_settings
 
@@ -1837,17 +1838,17 @@ class TestTenantKnowledgeSubmissionsEndpoints:
             }
         )
         monkeypatch.setattr(
-            "apps.api.routers.tenants.get_tenant_knowledge_submission",
+            "apps.api.services.kb_approval.get_tenant_knowledge_submission",
             AsyncMock(return_value=pending),
         )
         approve_mock = AsyncMock(return_value=approved)
         monkeypatch.setattr(
-            "apps.api.routers.tenants.approve_tenant_knowledge_submission_with_document",
+            "apps.api.services.kb_approval.approve_tenant_knowledge_submission_with_document",
             approve_mock,
         )
         monkeypatch.setattr(
-            "apps.api.routers.tenants.embed_kb_chunks",
-            AsyncMock(return_value=[("Los pedidos tardan 24-48 horas hábiles.", [0.1] * 1536)]),
+            "apps.api.routers.tenants.make_embedder",
+            lambda *_a, **_k: AsyncMock(return_value=[[0.1] * 1536]),
         )
         app = _make_super_admin_app(monkeypatch)
         app.state.agent_deps = SimpleNamespace(openai=object())
@@ -1863,6 +1864,7 @@ class TestTenantKnowledgeSubmissionsEndpoints:
         assert resp.json()["status"] == "approved"
         assert approve_mock.await_args.kwargs["reviewed_by"] == USER_ID
         assert approve_mock.await_args.kwargs["chunks"][0][1] == [0.1] * 1536
+        assert approve_mock.await_args.kwargs["confirmation"] == "confirmed"
 
     def test_approve_kb_submission_whose_content_is_only_its_url_returns_400(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1881,12 +1883,12 @@ class TestTenantKnowledgeSubmissionsEndpoints:
             status="pending_review",
         )
         monkeypatch.setattr(
-            "apps.api.routers.tenants.get_tenant_knowledge_submission",
+            "apps.api.services.kb_approval.get_tenant_knowledge_submission",
             AsyncMock(return_value=pending),
         )
         approve_mock = AsyncMock()
         monkeypatch.setattr(
-            "apps.api.routers.tenants.approve_tenant_knowledge_submission_with_document",
+            "apps.api.services.kb_approval.approve_tenant_knowledge_submission_with_document",
             approve_mock,
         )
         app = _make_super_admin_app(monkeypatch)

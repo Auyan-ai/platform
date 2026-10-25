@@ -1,4 +1,5 @@
 import { KnowledgeReviewQueue } from '@/components/knowledge/KnowledgeReviewQueue'
+import { SiteIngestions } from '@/components/knowledge/SiteIngestions'
 
 interface Props {
   params: Promise<{ tenantId: string }>
@@ -19,6 +20,7 @@ export default async function TenantKnowledgePage({ params }: Props) {
         </p>
       </div>
 
+      <SiteIngestions tenantId={tenantId} />
       <KnowledgeReviewQueue tenantId={tenantId} />
     </div>
   )

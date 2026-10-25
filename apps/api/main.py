@@ -69,6 +69,7 @@ from apps.api.services.audit import AuditLogger
 from apps.api.services.cleanup import expire_demo_tenants, run_abandoned_cleanup
 from apps.api.services.email_sender import EmailSender
 from apps.api.services.inbound_worker import InboundWorker
+from apps.api.services.knowledge_ingestion import make_embedder
 from apps.api.services.llm_alert import LLMProviderAlerter, configure_alerter
 from apps.api.services.reasoning import ReasoningTracker
 from apps.api.services.site_ingestion.worker import SiteIngestionWorker
@@ -185,6 +186,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         concurrency=settings.site_ingestion_worker_concurrency,
         poll_interval_seconds=settings.site_ingestion_worker_poll_seconds,
         lease_seconds=settings.site_ingestion_worker_lease_seconds,
+        embedder=make_embedder(openai, settings=settings),
     )
     site_ingestion_worker.start()
     app.state.site_ingestion_worker = site_ingestion_worker

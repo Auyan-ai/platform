@@ -41,6 +41,7 @@ from apps.api.db.models import (
     IntentClassifierRun,
     InternalRole,
     InternalUser,
+    KbConfirmation,
     KnowledgeChunk,
     KnowledgeDocumentSummary,
     Message,
@@ -5315,7 +5316,7 @@ async def reject_tenant_knowledge_submission(
     tenant_id: UUID,
     submission_id: UUID,
     *,
-    reviewed_by: UUID,
+    reviewed_by: UUID | None,
     review_note: str | None = None,
 ) -> TenantKnowledgeSubmission | None:
     row = await conn.fetchrow(
@@ -5344,9 +5345,10 @@ async def approve_tenant_knowledge_submission_with_document(
     tenant_id: UUID,
     submission_id: UUID,
     *,
-    reviewed_by: UUID,
+    reviewed_by: UUID | None,
     review_note: str | None,
     chunks: list[tuple[str, list[float]]],
+    confirmation: KbConfirmation = "confirmed",
 ) -> TenantKnowledgeSubmission | None:
     row = await conn.fetchrow(
         """
@@ -5391,7 +5393,8 @@ async def approve_tenant_knowledge_submission_with_document(
             **submission.metadata,
             "source_submission_id": str(submission.id),
             "source_type": submission.source_type,
-            "reviewed_by": str(reviewed_by),
+            "confirmation": confirmation,
+            **({"reviewed_by": str(reviewed_by)} if reviewed_by else {}),
         },
         chunks=chunks,
         source_key=source_key,
