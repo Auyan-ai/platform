@@ -25,7 +25,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-BOT_USER_AGENT = "AuyanBot/0.1 (+https://auyan.ai/bot)"
+BOT_USER_AGENT = "AuyanBot/0.1 (+https://auyan.es/bot)"
 STOREFRONT_API_VERSION = "2025-07"
 MAX_RETRIES = 2
 MAX_RETRY_AFTER_SECONDS = 10.0

@@ -51,7 +51,7 @@ contraseña.
 
 - [ ] Crear `apps/landing/app/bot/page.tsx`: qué es AuyanBot, qué lee, que respeta
   `robots.txt` y cómo bloquearlo (`User-agent: AuyanBot`).
-- [ ] Verificar: `curl -I https://auyan.ai/bot` devuelve 200. Tiene que estar publicada antes
+- [ ] Verificar: `curl -I https://auyan.es/bot` devuelve 200. Tiene que estar publicada antes
   del primer crawl en vivo del PR 3, también en staging.
 
 ## PR 1. Dar ciclo de vida a la KB

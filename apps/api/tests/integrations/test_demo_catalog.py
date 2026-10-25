@@ -68,7 +68,7 @@ async def test_requests_identify_as_auyanbot_on_the_public_storefront_endpoint()
     await adapter.search_products(None, "Tere")
 
     assert str(seen[0].url) == "https://thinkingmu.com/api/2025-07/graphql.json"
-    assert seen[0].headers["User-Agent"] == BOT_USER_AGENT == "AuyanBot/0.1 (+https://auyan.ai/bot)"
+    assert seen[0].headers["User-Agent"] == BOT_USER_AGENT == "AuyanBot/0.1 (+https://auyan.es/bot)"
     assert "X-Shopify-Storefront-Access-Token" not in seen[0].headers
     assert "Authorization" not in seen[0].headers
 
