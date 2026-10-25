@@ -219,6 +219,11 @@ async def _clear_kb(conn: asyncpg.Connection, tenant_id: str) -> int:
         "WHERE tenant_id = $1::uuid AND deleted_at IS NULL",
         tenant_id,
     )
+    await conn.execute(
+        "UPDATE knowledge_base_chunks SET deleted_at = now() "
+        "WHERE tenant_id = $1::uuid AND deleted_at IS NULL",
+        tenant_id,
+    )
     count = int(result.split()[-1])
     return count
 

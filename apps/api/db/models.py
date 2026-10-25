@@ -37,7 +37,7 @@ AgentLifecycleState = Literal[
 ]
 PlanTier = Literal["founding", "standard", "trial"]
 TenantKnowledgeSourceType = Literal["text", "url", "file"]
-TenantKnowledgeSubmissionStatus = Literal["pending_review", "approved", "rejected"]
+TenantKnowledgeSubmissionStatus = Literal["pending_review", "approved", "rejected", "superseded"]
 WeeklyReportStatus = Literal["draft", "pending_review", "approved", "sent"]
 OutboundEmailJobStatus = Literal["queued", "sending", "sent", "failed", "canceled"]
 
@@ -483,6 +483,7 @@ class TenantKnowledgeSubmission(_BaseModel):
     title: str
     source_type: TenantKnowledgeSourceType
     source_url: str | None = None
+    source_key: str | None = None
     original_filename: str | None = None
     content: str = ""
     notes: str | None = None
@@ -496,6 +497,17 @@ class TenantKnowledgeSubmission(_BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     deleted_at: datetime | None = None
+
+
+class KnowledgeDocumentSummary(_BaseModel):
+    """Documento indexado de la KB con su conteo de chunks vivos."""
+
+    id: UUID
+    title: str
+    source: str | None = None
+    source_key: str | None = None
+    created_at: datetime
+    chunk_count: int
 
 
 # ─── Weekly Reports (Bloque 1, Sub-PR 1.5) ──────────────────────────────────
