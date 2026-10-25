@@ -1,4 +1,5 @@
 import { ClientKnowledgeBase } from '@/components/knowledge/ClientKnowledgeBase'
+import { PendingConfirmationBanner } from '@/components/knowledge/PendingConfirmationBanner'
 
 interface Props {
   params: Promise<{ tenantId: string }>
@@ -19,6 +20,7 @@ export default async function ClientKnowledgePage({ params }: Props) {
         </p>
       </div>
 
+      <PendingConfirmationBanner tenantId={tenantId} />
       <ClientKnowledgeBase tenantId={tenantId} />
     </div>
   )

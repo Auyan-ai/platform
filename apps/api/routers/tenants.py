@@ -12,6 +12,11 @@ import httpx
 from apps.api.core.config import get_settings
 from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id, require_role
 from apps.api.db.client import bootstrap_connection, tenant_scope
+from apps.api.db.kb_confirmation import (
+    UnconfirmedDocument,
+    confirm_kb_documents,
+    list_unconfirmed_kb_documents,
+)
 from apps.api.db.models import IntegrationGroup, OnboardingChecklist
 from apps.api.db.queries import (
     approve_weekly_report,
@@ -46,7 +51,6 @@ from apps.api.db.queries import (
     submit_tenant_onboarding,
     submit_weekly_report_for_review,
     update_outbound_email_template,
-    update_tenant_lifecycle_state,
     update_weekly_report_draft,
     upsert_integration,
     upsert_tenant_facts,
@@ -70,6 +74,7 @@ from apps.api.services.integrations_crypto import (
 )
 from apps.api.services.kb_approval import FailureCode, approve_submissions_batch
 from apps.api.services.knowledge_ingestion import make_embedder
+from apps.api.services.tenant_promotion import promote_demo_tenant
 from apps.api.services.tenant_provisioning import (
     ProvisionRequest,
     SlugTakenError,
@@ -83,6 +88,7 @@ from apps.api.services.tenants import (
     get_tenant_insights,
     get_tenant_metrics,
     list_tenant_integration_groups,
+    set_lifecycle_state,
 )
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -125,6 +131,40 @@ class CreateTenantRequest(BaseModel):
     plan_tier: Literal["founding", "standard", "trial"] = "founding"
     tenant_admin_email: str = Field(..., pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=320)
     tenant_admin_name: str = Field(..., min_length=1, max_length=200)
+
+
+class PromoteTenantRequest(BaseModel):
+    admin_email: str = Field(..., pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$", max_length=320)
+    admin_name: str = Field(..., min_length=1, max_length=200)
+    plan_tier: Literal["founding", "standard", "trial"] = "founding"
+    slug: str = Field(..., pattern=r"^[a-z][a-z0-9-]{1,49}$")
+
+
+class ConfirmKbDocumentsRequest(BaseModel):
+    """O una lista de documentos, o `all: true`. Nunca las dos ni ninguna."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    document_ids: list[UUID] | None = Field(default=None, min_length=1, max_length=500)
+    all_documents: Annotated[bool, Field(alias="all")] = False
+
+    @model_validator(mode="after")
+    def _exactly_one_selector(self) -> ConfirmKbDocumentsRequest:
+        if (self.document_ids is None) == (not self.all_documents):
+            raise ValueError("indica document_ids o all=true, no ambos ni ninguno")
+        return self
+
+
+class ConfirmKbDocumentsResponse(BaseModel):
+    confirmed: int
+    remaining_unconfirmed: int
+
+
+class UnconfirmedKbDocumentResponse(BaseModel):
+    id: UUID
+    title: str
+    source: str | None = None
+    created_at: datetime.datetime
 
 
 class CreateTenantResponse(BaseModel):
@@ -289,6 +329,8 @@ class OnboardingChecklistResponse(BaseModel):
     has_knowledge: bool
     complete: bool
     agent_lifecycle_state: str
+    unconfirmed_kb_documents: int = 0
+    has_returns_policy: bool = False
 
 
 class IntegrationStatusResponse(BaseModel):
@@ -633,6 +675,55 @@ async def create_demo(
     if worker is not None:
         worker.notify()
     return TenantResponse.model_validate(tenant)
+
+
+@router.post(
+    "/{tenant_id}/promote",
+    response_model=CreateTenantResponse,
+    summary="Convertir una demo en cliente e invitar a su admin — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def promote_tenant(
+    tenant_id: UUID,
+    payload: PromoteTenantRequest,
+    auth: AuthDep,
+    settings: SettingsDep,
+) -> CreateTenantResponse:
+    async with bootstrap_connection() as conn:
+        internal_user = await get_internal_user_by_auth_id(conn, auth.user_id)
+        if internal_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="super_admin sin registro en internal_users — no puede asignarse como AIDE",
+            )
+        async with httpx.AsyncClient() as http:
+            try:
+                result = await promote_demo_tenant(
+                    conn,
+                    http,
+                    settings,
+                    tenant_id=tenant_id,
+                    admin_email=payload.admin_email,
+                    admin_name=payload.admin_name,
+                    plan_tier=payload.plan_tier,
+                    slug=payload.slug,
+                    creator_internal_user_id=internal_user.id,
+                )
+            except SlugTakenError:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"slug '{payload.slug}' ya está en uso",
+                ) from None
+            except SupabaseAdminError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Supabase Admin: {exc}",
+                ) from exc
+    return CreateTenantResponse(
+        tenant=TenantResponse.model_validate(result.tenant),
+        tenant_admin_user_id=result.tenant_admin_user_id,
+        invite_sent=True,
+    )
 
 
 @router.get(
@@ -1345,6 +1436,8 @@ def _checklist_response(
         has_knowledge=checklist.has_knowledge,
         complete=checklist.complete,
         agent_lifecycle_state=agent_lifecycle_state,
+        unconfirmed_kb_documents=checklist.unconfirmed_kb_documents,
+        has_returns_policy=checklist.has_returns_policy,
     )
 
 
@@ -1588,11 +1681,7 @@ async def update_my_tenant_lifecycle(
     tenant_id: TenantIdDep,
 ) -> TenantResponse:
     async with tenant_scope(tenant_id) as conn:
-        tenant = await update_tenant_lifecycle_state(
-            conn,
-            tenant_id,
-            body.agent_lifecycle_state,
-        )
+        tenant = await set_lifecycle_state(conn, tenant_id, body.agent_lifecycle_state)
     return TenantResponse.model_validate(tenant)
 
 
@@ -1697,6 +1786,44 @@ async def list_my_kb_documents(tenant_id: TenantIdDep) -> list[KnowledgeDocument
     async with tenant_scope(tenant_id) as conn:
         rows = await list_knowledge_documents(conn, tenant_id)
     return [KnowledgeDocumentResponse.model_validate(row) for row in rows]
+
+
+@router.get(
+    "/me/kb-documents/unconfirmed",
+    response_model=list[UnconfirmedKbDocumentResponse],
+    summary="Documentos de la KB traídos de la web y pendientes de confirmar",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def list_my_unconfirmed_kb_documents(
+    tenant_id: TenantIdDep,
+) -> list[UnconfirmedKbDocumentResponse]:
+    async with tenant_scope(tenant_id) as conn:
+        docs: list[UnconfirmedDocument] = await list_unconfirmed_kb_documents(conn, tenant_id)
+    return [
+        UnconfirmedKbDocumentResponse(
+            id=d.id, title=d.title, source=d.source, created_at=d.created_at
+        )
+        for d in docs
+    ]
+
+
+@router.post(
+    "/me/kb-documents/confirm",
+    response_model=ConfirmKbDocumentsResponse,
+    summary="Confirma documentos de la KB traídos de la web (ids o all=true)",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def confirm_my_kb_documents(
+    body: ConfirmKbDocumentsRequest,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+) -> ConfirmKbDocumentsResponse:
+    async with tenant_scope(tenant_id) as conn:
+        confirmed = await confirm_kb_documents(
+            conn, tenant_id, None if body.all_documents else body.document_ids, auth.user_id
+        )
+        remaining = len(await list_unconfirmed_kb_documents(conn, tenant_id))
+    return ConfirmKbDocumentsResponse(confirmed=confirmed, remaining_unconfirmed=remaining)
 
 
 @router.delete(

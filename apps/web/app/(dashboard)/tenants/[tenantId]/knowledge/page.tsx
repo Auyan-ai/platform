@@ -1,3 +1,4 @@
+import { DemoTenantBar } from '@/components/dashboard/DemoTenantBar'
 import { KnowledgeReviewQueue } from '@/components/knowledge/KnowledgeReviewQueue'
 import { SiteIngestions } from '@/components/knowledge/SiteIngestions'
 
@@ -10,6 +11,7 @@ export default async function TenantKnowledgePage({ params }: Props) {
 
   return (
     <div className="space-y-6">
+      <DemoTenantBar tenantId={tenantId} />
       <div>
         <p className="text-xs font-medium uppercase tracking-wider text-foreground-muted">
           Knowledge ops

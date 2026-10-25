@@ -466,6 +466,13 @@ class OnboardingChecklist(_BaseModel):
     has_commerce_integration: bool = False
     has_helpdesk_integration: bool = False
     has_knowledge: bool = False
+    # Pendientes de confirmación (ADR 0015 §6): no gatean building, sí shadow y active.
+    unconfirmed_kb_documents: int = 0
+    has_returns_policy: bool = False
+
+    @property
+    def pending_confirmation(self) -> bool:
+        return self.unconfirmed_kb_documents > 0
 
     @property
     def complete(self) -> bool:

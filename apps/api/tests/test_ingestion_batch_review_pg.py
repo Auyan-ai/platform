@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from apps.api.db.client import tenant_scope
+from apps.api.db.kb_confirmation import confirm_kb_documents
 from apps.api.db.queries import create_tenant_knowledge_submission
 from apps.api.db.site_ingestions import (
     claim_next_site_ingestion,
@@ -21,7 +22,7 @@ from apps.api.db.site_ingestions import (
 )
 from apps.api.routers import site_ingestions as router
 from apps.api.routers.site_ingestions import IngestionApprove
-from apps.api.services.kb_approval import approve_submissions_batch, confirm_kb_documents
+from apps.api.services.kb_approval import approve_submissions_batch
 from apps.api.services.site_ingestion.auto_approve import DEMO_REVIEW_NOTE
 from apps.api.services.site_ingestion.worker import SiteIngestionWorker
 from apps.api.tests.pg_support import migrated_pool, requires_pg
