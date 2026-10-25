@@ -331,3 +331,60 @@ async def test_migration_keeps_the_newest_live_duplicate_and_soft_deletes_the_re
     assert rows[other]["source_key"] == "tienda.com/otra"
     assert rows[plain]["source_key"] is None
     assert rows[plain]["dead"] is False
+
+
+async def test_same_text_under_another_key_is_flagged_not_dropped(pool: asyncpg.Pool) -> None:
+    """#420: carga manual (sin clave) con el texto de un documento vivo con URL."""
+    tid = await _tenant(pool)
+    text = "Devoluciones en 30 días."
+    doc_id = await _submit_and_approve(
+        tid, url="https://checkout.shopify.com/1/policies/2.html", content=text, axis=0
+    )
+
+    async with tenant_scope(tid) as conn:
+        manual = await create_tenant_knowledge_submission(
+            conn, tid, title="Política", source_type="text", content=f"  {text}\n"
+        )
+        web = await create_tenant_knowledge_submission(
+            conn,
+            tid,
+            title="Política web",
+            source_type="url",
+            source_url="https://tienda.com/policies/refund-policy",
+            content=text,
+        )
+        distinct = await create_tenant_knowledge_submission(
+            conn,
+            tid,
+            title="Envíos",
+            source_type="url",
+            source_url="https://tienda.com/policies/shipping",
+            content="Envíos en 48 horas.",
+        )
+
+    assert manual.metadata["duplicate_of"] == str(doc_id)
+    assert manual.metadata["duplicate_kind"] == "document"
+    assert web.metadata["duplicate_of"] == str(doc_id)
+    assert "duplicate_of" not in distinct.metadata
+
+
+async def test_same_text_as_a_pending_submission_under_another_key_is_flagged(
+    pool: asyncpg.Pool,
+) -> None:
+    tid = await _tenant(pool)
+    async with tenant_scope(tid) as conn:
+        first = await create_tenant_knowledge_submission(
+            conn, tid, title="A", source_type="url", source_url="https://t.com/a", content="igual"
+        )
+        second = await create_tenant_knowledge_submission(
+            conn, tid, title="B", source_type="url", source_url="https://t.com/b", content="igual"
+        )
+        same_key = await create_tenant_knowledge_submission(
+            conn, tid, title="B2", source_type="url", source_url="https://t.com/b", content="igual"
+        )
+
+    assert "duplicate_of" not in first.metadata
+    assert second.metadata["duplicate_of"] == str(first.id)
+    assert second.metadata["duplicate_kind"] == "submission"
+    # reemplaza a `second` (misma clave) pero sigue duplicando a `first` (otra clave)
+    assert same_key.metadata["duplicate_of"] == str(first.id)

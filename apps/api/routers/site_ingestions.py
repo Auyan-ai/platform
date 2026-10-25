@@ -144,6 +144,8 @@ class IngestionSubmissionOut(BaseModel):
     priority: str | None
     source: str | None
     words: int | None
+    duplicate_of: str | None = None
+    duplicate_kind: str | None = None
     review_note: str | None
 
 
@@ -193,6 +195,8 @@ async def list_site_ingestion_submissions(
             priority=row.metadata.get("priority"),
             source=row.metadata.get("source"),
             words=row.metadata.get("words"),
+            duplicate_of=row.metadata.get("duplicate_of"),
+            duplicate_kind=row.metadata.get("duplicate_kind"),
             review_note=row.review_note,
         )
         for row in rows
