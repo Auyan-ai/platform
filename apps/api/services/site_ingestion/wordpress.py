@@ -7,6 +7,7 @@ el índice para que el resto de lecturas (páginas, entradas) use la misma.
 
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -47,8 +48,8 @@ def _index_from_json(origin: str, body: Any, *, pretty: bool) -> WordPressIndex 
     return WordPressIndex(
         origin=origin,
         pretty=pretty,
-        name=str(body.get("name") or "").strip(),
-        description=str(body.get("description") or "").strip(),
+        name=html.unescape(str(body.get("name") or "")).strip(),
+        description=html.unescape(str(body.get("description") or "")).strip(),
         namespaces=frozenset(str(ns) for ns in body["namespaces"]),
     )
 

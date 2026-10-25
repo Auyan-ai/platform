@@ -52,6 +52,11 @@ def _clean(text: Any) -> str:
     return html.unescape(str(text or "")).strip()
 
 
+def _slug_from_permalink(permalink: Any) -> str:
+    """WooCommerce antiguo no trae `slug` en la Store API: sale de la URL del producto."""
+    return str(permalink or "").rstrip("/").rsplit("/", 1)[-1]
+
+
 def _extra_tags(node: dict[str, Any]) -> list[str]:
     tags = [_clean(t.get("name")) for t in node.get("tags") or []]
     for attr in node.get("attributes") or []:
@@ -116,7 +121,7 @@ def product_from_store_api(
     return {
         "id": int(node["id"]),
         "title": _clean(node.get("name")),
-        "handle": node.get("slug", ""),
+        "handle": node.get("slug") or _slug_from_permalink(node.get("permalink")),
         "product_type": _clean(categories[0].get("name")) if categories else "",
         "status": "active",
         "body_html": node.get("description") or node.get("short_description") or "",
@@ -171,7 +176,11 @@ class WooCommerceDemoCatalogAdapter(DemoCatalogBase):
 
     def _client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
-            transport=self._transport, headers={"User-Agent": BOT_USER_AGENT}, timeout=10
+            transport=self._transport,
+            headers={"User-Agent": BOT_USER_AGENT},
+            timeout=10,
+            follow_redirects=True,
+            max_redirects=3,
         )
 
     def _remember_currency(self, node: dict[str, Any]) -> None:

@@ -234,3 +234,36 @@ def test_catalog_is_chosen_by_the_demo_platform() -> None:
 async def test_platform_without_a_public_catalog_rejects_search() -> None:
     with pytest.raises(DemoCatalogUnavailable):
         await demo_catalog_for(DOMAIN, "wordpress").search_products(None, "x")
+
+
+async def test_real_legacy_store_without_v1_and_without_slug() -> None:
+    """productos-espanoles.com (WooCommerce antiguo): `/wc/store/v1` da 404, `/wc/store`
+    responde y el producto no trae `slug`."""
+    replay = Replay(("productos_espanoles",))
+    adapter = WooCommerceDemoCatalogAdapter(
+        "productos-espanoles.com", transport=replay.transport(), sleep=SleepLog()
+    )
+
+    products = await adapter.search_products(None, "aceite", limit=3)
+
+    assert products == [
+        {
+            "id": 5698,
+            "title": "Aceite Oliva",
+            "handle": "aceite-oliva",
+            "product_type": "Aceites",
+            "status": "active",
+            "body_html": products[0]["body_html"],
+            "tags": [],
+            "online_store_url": "https://www.productos-espanoles.com/producto/aceite-oliva/",
+            "variants": [
+                {"id": 5698, "title": "Default Title", "price": "0.00", "available": True}
+            ],
+        }
+    ]
+    assert "Lorem ipsum" in products[0]["body_html"]
+    assert await adapter.get_shop_currency(None) == "USD"
+    assert replay.urls() == [
+        "https://productos-espanoles.com/wp-json/wc/store/v1/products?search=aceite&per_page=3",
+        "https://productos-espanoles.com/wp-json/wc/store/products?search=aceite&per_page=3",
+    ]

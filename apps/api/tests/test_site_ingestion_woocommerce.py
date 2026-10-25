@@ -220,3 +220,23 @@ async def test_only_cx_relevant_posts_are_kept() -> None:
     assert [d.source_key for d in posts] == ["tienda-prueba-auyan.test/guia-de-tallas"]
     discarded = collection.stats.sources["wordpress_api"].discarded
     assert discarded["not_cx_relevant"] >= 1
+
+
+async def test_productos_espanoles_real_store_with_www_redirects_and_html_entities() -> None:
+    """Grabado con AuyanBot el 2026-10-25 (20 peticiones, sin 429). Las páginas se recortaron a
+    faq, contact y about."""
+    replay = Replay(("productos_espanoles",))
+
+    collection = await collect_site(
+        "productos-espanoles.com", transport=replay.transport(), sleep=SleepLog()
+    )
+
+    assert collection.platform is Platform.WOOCOMMERCE
+    assert collection.stats.store_name == "Productos Españoles"
+    docs = {d.source_key: d for d in collection.docs_by_source[SourceName.WORDPRESS_API]}
+    assert sorted(docs) == [
+        "productos-espanoles.com/about",
+        "productos-espanoles.com/contact",
+        "productos-espanoles.com/faq",
+    ]
+    assert docs["productos-espanoles.com/faq"].words == 587
