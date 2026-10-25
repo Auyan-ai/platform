@@ -3002,6 +3002,16 @@ export interface components {
              * @enum {string}
              */
             plan_tier: "founding" | "standard" | "trial";
+            /**
+             * Origin
+             * @default client
+             * @enum {string}
+             */
+            origin: "client" | "demo";
+            /** Demo Expires At */
+            demo_expires_at?: string | null;
+            /** Demo Source Url */
+            demo_source_url?: string | null;
         };
         /** TenantUsageResponse */
         TenantUsageResponse: {

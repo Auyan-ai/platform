@@ -60,6 +60,11 @@ from apps.api.integrations.shopify import (
     ShopifyClient,
     exchange_client_credentials,
 )
+from apps.api.services.demo_tenants import (
+    DemoSlugExhaustedError,
+    create_demo_tenant,
+    start_demo_ingestion,
+)
 from apps.api.services.doctor import DoctorReport, TenantNotFoundError, run_tenant_doctor
 from apps.api.services.integrations_crypto import (
     encrypt_credentials,
@@ -106,6 +111,13 @@ class TenantResponse(BaseModel):
     status: str
     agent_lifecycle_state: str = "initial"
     plan_tier: Literal["founding", "standard", "trial"] = "founding"
+    origin: Literal["client", "demo"] = "client"
+    demo_expires_at: datetime.datetime | None = None
+    demo_source_url: str | None = None
+
+
+class CreateDemoRequest(BaseModel):
+    url: str = Field(..., min_length=3, max_length=2048)
 
 
 class CreateTenantRequest(BaseModel):
@@ -592,6 +604,31 @@ async def create_tenant(
         tenant_admin_user_id=result.tenant_admin_user_id,
         invite_sent=result.invite_sent,
     )
+
+
+@router.post(
+    "/demos",
+    response_model=TenantResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Crear una demo desde la URL de una tienda — sólo super_admin",
+    dependencies=[Depends(require_role("super_admin"))],
+)
+async def create_demo(payload: CreateDemoRequest, settings: SettingsDep) -> TenantResponse:
+    async with bootstrap_connection() as conn:
+        try:
+            tenant = await create_demo_tenant(conn, settings=settings, url=payload.url)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"url_invalida: {payload.url!r} no es el dominio de una tienda",
+            ) from exc
+        except DemoSlugExhaustedError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="demo_slug_agotado: reintenta en unos segundos",
+            ) from exc
+    start_demo_ingestion(tenant)
+    return TenantResponse.model_validate(tenant)
 
 
 @router.get(

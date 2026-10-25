@@ -65,7 +65,7 @@ from apps.api.routers.webhooks_zernio import router as webhooks_zernio_router
 from apps.api.services.aop_listener import AopCacheListener
 from apps.api.services.approval_execution import recover_stale_executions
 from apps.api.services.audit import AuditLogger
-from apps.api.services.cleanup import run_abandoned_cleanup
+from apps.api.services.cleanup import expire_demo_tenants, run_abandoned_cleanup
 from apps.api.services.email_sender import EmailSender
 from apps.api.services.inbound_worker import InboundWorker
 from apps.api.services.llm_alert import LLMProviderAlerter, configure_alerter
@@ -80,8 +80,8 @@ logger = logging.getLogger(__name__)
 
 
 async def _cleanup_loop(interval_seconds: int) -> None:
-    """Cada `interval_seconds` corre `run_abandoned_cleanup` y reconcilia las aprobaciones
-    L3 colgadas en `executing` (#376). Se cancela en shutdown."""
+    """Cada `interval_seconds` corre `run_abandoned_cleanup`, caduca las demos y reconcilia
+    las aprobaciones L3 colgadas en `executing` (#376). Se cancela en shutdown."""
     while True:
         try:
             await asyncio.sleep(interval_seconds)
@@ -92,6 +92,12 @@ async def _cleanup_loop(interval_seconds: int) -> None:
             break
         except Exception:
             logger.exception("cleanup_job_error")
+        try:
+            await expire_demo_tenants()
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("demo_expiry_job_error")
         try:
             recovered = await recover_stale_executions()
             if recovered:

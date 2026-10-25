@@ -36,6 +36,7 @@ AgentLifecycleState = Literal[
     "initial", "discovery", "building", "shadow", "ramping", "active", "paused", "churned"
 ]
 PlanTier = Literal["founding", "standard", "trial"]
+TenantOrigin = Literal["client", "demo"]
 TenantKnowledgeSourceType = Literal["text", "url", "file"]
 TenantKnowledgeSubmissionStatus = Literal["pending_review", "approved", "rejected", "superseded"]
 WeeklyReportStatus = Literal["draft", "pending_review", "approved", "sent"]
@@ -53,6 +54,9 @@ class Tenant(_BaseModel):
     status: str
     agent_lifecycle_state: AgentLifecycleState = "initial"
     plan_tier: PlanTier = "founding"
+    origin: TenantOrigin = "client"
+    demo_expires_at: datetime | None = None
+    demo_source_url: str | None = None
 
 
 class TenantConfiguration(_BaseModel):

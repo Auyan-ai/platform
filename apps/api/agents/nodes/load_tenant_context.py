@@ -24,6 +24,7 @@ from apps.api.db.queries import (
 )
 from apps.api.db.returns_policy import load_current_returns_policy
 from apps.api.services.commerce_context import build_commerce_integration_ctx
+from apps.api.services.demo_tenants import demo_state_overrides
 from apps.api.services.knowledge_mode import (
     KnowledgeContext,
     kb_token_budget,
@@ -59,8 +60,11 @@ def make_load_tenant_context_node(
 
             config_dump = config.model_dump(mode="json")
             extra = config_dump.get("extra") or {}
-            commerce_ctx = await build_commerce_integration_ctx(
-                conn, tenant_id, extra=extra
+            # Una demo nunca carga credenciales de comercio (services/demo_tenants.py).
+            commerce_ctx = (
+                None
+                if tenant.origin == "demo"
+                else await build_commerce_integration_ctx(conn, tenant_id, extra=extra)
             )
             # Aquí y no en retrieve_knowledge: ya hay conexión abierta y el presupuesto vive
             # en `extra`; el modo queda fijo para todo el turno (reason y supervise lo leen).
@@ -121,6 +125,7 @@ def make_load_tenant_context_node(
             "returns_policy": returns_policy,
             "knowledge": knowledge.to_state(),
         }
+        out.update(demo_state_overrides(tenant, simulation_mode=bool(state.get("simulation_mode"))))
         # Fallback sin AOPs: el tenant puede opt-in a skills vía tenant_config.extra.
         # select_aop (Sprint 7+) sobreescribe estos si el tenant tiene AOPs configurados.
         if isinstance(extra.get("allowed_skills"), list):

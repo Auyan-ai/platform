@@ -11,6 +11,7 @@ import dataclasses
 import hashlib
 import hmac
 import json
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 from apps.api.agents.service import AgentOutcome
@@ -442,6 +443,35 @@ class TestInboundEndpoint:
             )
 
         assert r.status_code == 403
+        service.process_inbound.assert_not_called()
+
+    def test_demo_tenant_is_rejected_with_explicit_reason(self, monkeypatch) -> None:
+        service = AsyncMock()
+        _patch_db(monkeypatch)
+        monkeypatch.setattr(
+            f"{ROUTER_MODULE}.get_tenant_by_slug",
+            AsyncMock(
+                return_value=make_tenant(
+                    slug="demo-alohas-ab12cd",
+                    origin="demo",
+                    demo_expires_at=datetime(2026, 11, 24, tzinfo=UTC),
+                    demo_source_url="https://alohas.es",
+                )
+            ),
+        )
+
+        body = json.dumps(_valid_payload()).encode()
+        app = _make_app(agent_service=service)
+
+        with TestClient(app) as client:
+            r = client.post(
+                "/webhooks/inbound",
+                content=body,
+                headers={"X-Auyan-Signature": _sign(body)},
+            )
+
+        assert r.status_code == 403
+        assert r.json()["detail"] == "tenant_is_demo"
         service.process_inbound.assert_not_called()
 
     def test_signature_validated_before_payload_parsing(self, monkeypatch) -> None:

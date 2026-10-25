@@ -89,6 +89,7 @@ async def list_targets(conn: asyncpg.Connection, tenant_id: UUID | None) -> list
           LEFT JOIN tenant_configurations tc ON tc.tenant_id = t.id
          WHERE t.deleted_at IS NULL
            AND t.status = 'active'
+           AND t.origin = 'client'
            AND ($1::uuid IS NULL OR t.id = $1)
          ORDER BY t.slug
         """,

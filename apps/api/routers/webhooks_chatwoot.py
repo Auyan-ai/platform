@@ -31,6 +31,7 @@ from apps.api.db.queries import (
     get_tenant_configuration,
 )
 from apps.api.integrations.chatwoot import ChatwootAdapter, verify_chatwoot_signature
+from apps.api.services.demo_tenants import reject_demo_intake
 from apps.api.services.inbound_intake import notify_inbound_worker, persist_and_enqueue_inbound
 from apps.api.services.integrations_crypto import decrypt_credentials, get_integration_crypto_key
 from apps.api.services.rate_limit import enforce_rate_limit
@@ -128,6 +129,7 @@ async def chatwoot_webhook(
     # 5. Cargar tenant + rate limit + budget.
     async with bootstrap_connection() as conn:
         tenant = await get_tenant_by_id(conn, tenant_id)
+    reject_demo_intake(tenant, source="chatwoot")
     if tenant is None or tenant.status != "active":
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="tenant_inactive")
 
