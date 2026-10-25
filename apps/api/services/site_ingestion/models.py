@@ -49,12 +49,15 @@ def predecessors_of(target: IngestionStatus) -> list[str]:
 
 class Platform(StrEnum):
     SHOPIFY = "shopify"
+    WOOCOMMERCE = "woocommerce"
+    WORDPRESS = "wordpress"
     OTHER = "other"
 
 
 class SourceName(StrEnum):
     STOREFRONT_API = "storefront_api"
     STOREFRONT_MCP = "storefront_mcp"
+    WORDPRESS_API = "wordpress_api"
     AGENT_FILES = "agent_files"
     HTML = "html"
 

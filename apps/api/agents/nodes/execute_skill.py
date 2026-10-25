@@ -103,10 +103,10 @@ def build_skill_context(state: AgentState) -> SkillContext:
         shopify_fixtures = (state.get("simulation_fixtures") or {}).get("shopify", {})
         commerce_adapter = MockShopifyAdapter(shopify_fixtures)
     elif mode == "demo_catalog":
-        from apps.api.integrations.demo_catalog import DemoCatalogAdapter
+        from apps.api.integrations.demo_catalog_registry import demo_catalog_for
 
         domain = demo_catalog_domain(state)
-        commerce_adapter = DemoCatalogAdapter(domain)
+        commerce_adapter = demo_catalog_for(domain, state.get("demo_catalog_platform"))
         # Nunca las credenciales del tenant: la demo solo trae el dominio público.
         integration_ctx = IntegrationContext(
             tenant_id=UUID(state["tenant_id"]),

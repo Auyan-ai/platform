@@ -1,0 +1,472 @@
+[
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/robots.txt",
+  "status": 200,
+  "headers": {
+   "content-type": "text/plain; charset=utf-8"
+  },
+  "file": "00-get-robots-txt.txt"
+ },
+ {
+  "method": "POST",
+  "url": "https://tienda-prueba-auyan.test/api/2025-07/graphql.json",
+  "status": 200,
+  "headers": {
+   "content-type": "text/html; charset=UTF-8"
+  },
+  "file": "01-post-api-2025-07-graphql-json.html"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "02-get-wp-json.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wp/v2/pages?per_page=100&page=1&_fields=slug,title,content,link,modified",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "6",
+   "x-wp-totalpages": "1"
+  },
+  "file": "03-get-wp-json-wp-v2-pages-per-page-100-page-1-fields-slug-title-co.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wp/v2/posts?per_page=20&page=1&_fields=slug,title,content,link,modified",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "1",
+   "x-wp-totalpages": "1"
+  },
+  "file": "04-get-wp-json-wp-v2-posts-per-page-20-page-1-fields-slug-title-con.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/llms-full.txt",
+  "status": 301,
+  "headers": {
+   "content-type": "text/html; charset=UTF-8",
+   "location": "https://tienda-prueba-auyan.test/llms-full.txt/"
+  },
+  "file": "05-get-llms-full-txt.html"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/llms-full.txt/",
+  "status": 200,
+  "headers": {
+   "content-type": "text/html; charset=UTF-8"
+  },
+  "file": "01-post-api-2025-07-graphql-json.html"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/llms.txt",
+  "status": 301,
+  "headers": {
+   "content-type": "text/html; charset=UTF-8",
+   "location": "https://tienda-prueba-auyan.test/llms.txt/"
+  },
+  "file": "05-get-llms-full-txt.html"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/agents.md",
+  "status": 301,
+  "headers": {
+   "content-type": "text/html; charset=UTF-8",
+   "location": "https://tienda-prueba-auyan.test/agents.md/"
+  },
+  "file": "05-get-llms-full-txt.html"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/agents.md/",
+  "status": 200,
+  "headers": {
+   "content-type": "text/html; charset=UTF-8"
+  },
+  "file": "01-post-api-2025-07-graphql-json.html"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-sitemap.xml",
+  "status": 200,
+  "headers": {
+   "content-type": "application/xml; charset=UTF-8"
+  },
+  "file": "10-get-wp-sitemap-xml.xml"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-sitemap-posts-post-1.xml",
+  "status": 200,
+  "headers": {
+   "content-type": "application/xml; charset=UTF-8"
+  },
+  "file": "11-get-wp-sitemap-posts-post-1-xml.xml"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-sitemap-posts-page-1.xml",
+  "status": 200,
+  "headers": {
+   "content-type": "application/xml; charset=UTF-8"
+  },
+  "file": "12-get-wp-sitemap-posts-page-1-xml.xml"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-sitemap-taxonomies-category-1.xml",
+  "status": 200,
+  "headers": {
+   "content-type": "application/xml; charset=UTF-8"
+  },
+  "file": "13-get-wp-sitemap-taxonomies-category-1-xml.xml"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-sitemap-users-1.xml",
+  "status": 200,
+  "headers": {
+   "content-type": "application/xml; charset=UTF-8"
+  },
+  "file": "14-get-wp-sitemap-users-1-xml.xml"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/",
+  "status": 200,
+  "headers": {
+   "content-type": "text/html; charset=UTF-8"
+  },
+  "file": "01-post-api-2025-07-graphql-json.html"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/v1/products?search=sudadera&per_page=10",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "1",
+   "x-wp-totalpages": "1"
+  },
+  "file": "16-get-wp-json-wc-store-v1-products-search-sudadera-per-page-10.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/v1/products?parent=12&type=variation&per_page=100",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "3",
+   "x-wp-totalpages": "1"
+  },
+  "file": "17-get-wp-json-wc-store-v1-products-parent-12-type-variation-per-pa.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/v1/products?search=camiseta&per_page=10",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "1",
+   "x-wp-totalpages": "1"
+  },
+  "file": "18-get-wp-json-wc-store-v1-products-search-camiseta-per-page-10.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/v1/products?search=pantal%C3%B3n&per_page=10",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "1",
+   "x-wp-totalpages": "1"
+  },
+  "file": "19-get-wp-json-wc-store-v1-products-search-pantal-c3-b3n-per-page-1.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/v1/products?search=zzzxxx&per_page=10",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "0",
+   "x-wp-totalpages": "0"
+  },
+  "file": "20-get-wp-json-wc-store-v1-products-search-zzzxxx-per-page-10.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/v1/products/12",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "21-get-wp-json-wc-store-v1-products-12.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/v1/products/13",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "22-get-wp-json-wc-store-v1-products-13.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/v1/products/999999",
+  "status": 404,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "23-get-wp-json-wc-store-v1-products-999999.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/v1/products?per_page=1",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "3",
+   "x-wp-totalpages": "3"
+  },
+  "file": "16-get-wp-json-wc-store-v1-products-search-sudadera-per-page-10.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/?rest_route=/",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "02-get-wp-json.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/?rest_route=/wp/v2/pages&per_page=100&page=1&_fields=slug,title,content,link,modified",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "6",
+   "x-wp-totalpages": "1"
+  },
+  "file": "26-get-rest-route-wp-v2-pages-per-page-100-page-1-fields-slug-title.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/?rest_route=/wp/v2/posts&per_page=20&page=1&_fields=slug,title,content,link,modified",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "1",
+   "x-wp-totalpages": "1"
+  },
+  "file": "04-get-wp-json-wp-v2-posts-per-page-20-page-1-fields-slug-title-con.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/llms.txt/",
+  "status": 200,
+  "headers": {
+   "content-type": "text/html; charset=UTF-8"
+  },
+  "file": "01-post-api-2025-07-graphql-json.html"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/?rest_route=/wc/store/v1/products&search=sudadera&per_page=10",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "1",
+   "x-wp-totalpages": "1"
+  },
+  "file": "16-get-wp-json-wc-store-v1-products-search-sudadera-per-page-10.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/?rest_route=/wc/store/v1/products&parent=12&type=variation&per_page=100",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "3",
+   "x-wp-totalpages": "1"
+  },
+  "file": "17-get-wp-json-wc-store-v1-products-parent-12-type-variation-per-pa.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/?rest_route=/wc/store/v1/products&search=camiseta&per_page=10",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "1",
+   "x-wp-totalpages": "1"
+  },
+  "file": "31-get-rest-route-wc-store-v1-products-search-camiseta-per-page-10.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/?rest_route=/wc/store/v1/products&search=pantal%C3%B3n&per_page=10",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "1",
+   "x-wp-totalpages": "1"
+  },
+  "file": "19-get-wp-json-wc-store-v1-products-search-pantal-c3-b3n-per-page-1.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/?rest_route=/wc/store/v1/products&search=zzzxxx&per_page=10",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "0",
+   "x-wp-totalpages": "0"
+  },
+  "file": "20-get-wp-json-wc-store-v1-products-search-zzzxxx-per-page-10.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/?rest_route=/wc/store/v1/products/12",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "21-get-wp-json-wc-store-v1-products-12.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/?rest_route=/wc/store/v1/products/13",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "22-get-wp-json-wc-store-v1-products-13.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/?rest_route=/wc/store/v1/products/999999",
+  "status": 404,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "23-get-wp-json-wc-store-v1-products-999999.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/?rest_route=/wc/store/v1/products&per_page=1",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "3",
+   "x-wp-totalpages": "3"
+  },
+  "file": "16-get-wp-json-wc-store-v1-products-search-sudadera-per-page-10.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/products?search=sudadera&per_page=10",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "1",
+   "x-wp-totalpages": "1"
+  },
+  "file": "38-get-wp-json-wc-store-products-search-sudadera-per-page-10.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/products?parent=12&type=variation&per_page=100",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "3",
+   "x-wp-totalpages": "1"
+  },
+  "file": "39-get-wp-json-wc-store-products-parent-12-type-variation-per-page-.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/products?search=camiseta&per_page=10",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "1",
+   "x-wp-totalpages": "1"
+  },
+  "file": "40-get-wp-json-wc-store-products-search-camiseta-per-page-10.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/products?search=pantal%C3%B3n&per_page=10",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "1",
+   "x-wp-totalpages": "1"
+  },
+  "file": "41-get-wp-json-wc-store-products-search-pantal-c3-b3n-per-page-10.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/products?search=zzzxxx&per_page=10",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "0",
+   "x-wp-totalpages": "0"
+  },
+  "file": "20-get-wp-json-wc-store-v1-products-search-zzzxxx-per-page-10.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/products/12",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "43-get-wp-json-wc-store-products-12.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/products/13",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "44-get-wp-json-wc-store-products-13.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/products/999999",
+  "status": 404,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "23-get-wp-json-wc-store-v1-products-999999.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://tienda-prueba-auyan.test/wp-json/wc/store/products?per_page=1",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8",
+   "x-wp-total": "3",
+   "x-wp-totalpages": "3"
+  },
+  "file": "38-get-wp-json-wc-store-products-search-sudadera-per-page-10.json"
+ }
+]
