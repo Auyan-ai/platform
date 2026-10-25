@@ -113,7 +113,8 @@ function BatchReview({ tenantId, ingestion }: { tenantId: string; ingestion: Sit
   }
 
   const pending = data.filter((item) => item.status === 'pending_review')
-  const isChecked = (item: IngestionSubmission) => overrides[item.id] ?? item.priority !== 'low'
+  const isChecked = (item: IngestionSubmission) =>
+    overrides[item.id] ?? (item.priority !== 'low' && !item.duplicate_of)
   const keep = pending.filter(isChecked)
   const excluded = pending.filter((item) => !isChecked(item))
 
@@ -176,6 +177,12 @@ function BatchReview({ tenantId, ingestion }: { tenantId: string; ingestion: Sit
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
+                {item.duplicate_of && (
+                  <Badge variant="warning" title={`Mismo texto que ${item.duplicate_of}`}>
+                    Duplicado de{' '}
+                    {item.duplicate_kind === 'submission' ? 'una pendiente' : 'un documento vivo'}
+                  </Badge>
+                )}
                 {item.priority === 'low' && <Badge variant="muted">Prioridad baja</Badge>}
                 <Badge variant={isPending ? 'warning' : 'secondary'}>
                   {SUBMISSION_STATUS_LABEL[item.status]}
