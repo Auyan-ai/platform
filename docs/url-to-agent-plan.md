@@ -111,27 +111,28 @@ Cambia lo que recupera el agente de todos los tenants, así que va solo y con su
 
 ## PR 3. Leer la web de la tienda (motor de ingesta, sin LLM)
 
-- [ ] Migración `site_ingestions` como cola con lease: `tenant_id`, `root_url`, `platform`,
+- [x] Migración `site_ingestions` como cola con lease: `tenant_id`, `root_url`, `platform`,
   `status` (`queued`, `fetching`, `extracting`, `ready`, `failed`), `failure_reason`,
   `attempts`, `locked_until`, `stats jsonb`, `cost_usd`, `langsmith_trace_id`, timestamps,
   `deleted_at`, RLS e índice único parcial de una ingesta no terminada por tenant.
-- [ ] `services/site_ingestion/fetcher.py`: User-Agent de AuyanBot, `robots.txt`, 2 peticiones
+- [x] `services/site_ingestion/fetcher.py`: User-Agent de AuyanBot, `robots.txt`, 2 peticiones
   por dominio, `Retry-After`, tope de 60 páginas y 150 peticiones.
-- [ ] `services/site_ingestion/sources/`: un módulo por fuente del ADR. Cada uno devuelve
+- [x] `services/site_ingestion/sources/`: un módulo por fuente del ADR. Cada uno devuelve
   `SourceDoc(source_key, url, kind, title, markdown, sha256)`. Se descartan la plantilla por
   defecto de `llms-full.txt` y las respuestas genéricas del MCP.
-- [ ] Parseo de HTML con trafilatura en `asyncio.to_thread`.
-- [ ] Orquestador: deduplica por hash y crea submissions `pending_review` con `ingestion_id`.
-- [ ] Worker en el lifespan que reclama jobs con lease, y endpoints
+- [x] Parseo de HTML con trafilatura en `asyncio.to_thread`.
+- [x] Orquestador: deduplica por hash y crea submissions `pending_review` con `ingestion_id`.
+- [x] Worker en el lifespan que reclama jobs con lease, y endpoints
   `POST /tenants/me/site-ingestions` y `GET .../{id}`.
-- [ ] Script `scripts/ingest_site.py --tenant <slug> --url <url> [--dry-run]`.
-- [ ] Unit con respuestas grabadas de tiendas reales (`httpx.MockTransport`): Storefront API
+- [x] Script `scripts/ingest_site.py --tenant <slug> --url <url> [--dry-run]`.
+- [x] Unit con respuestas grabadas de tiendas reales (`httpx.MockTransport`): Storefront API
   de Thinking Mu, sitemap de Mimitos, 429 con `Retry-After`, `robots.txt` que bloquea, lease
   expirado que se vuelve a reclamar.
-- [ ] Vivo: ingestar las 5 tiendas de referencia en un tenant de pruebas de staging. Anotar
+- [ ] Vivo: ingestar las 5 tiendas de referencia en un tenant de pruebas de staging (hecho en
+  `--dry-run`, sin base; la ingesta real espera a aplicar la migración en staging). Anotar
   fuentes, palabras, peticiones, 429 y segundos de cada una. Un turno inbound que llega durante
   una ingesta no se retrasa.
-- [ ] Reingestar la misma tienda no crea ninguna submission.
+- [x] Reingestar la misma tienda no crea ninguna submission.
 
 ## PR 4. Revisar una ingesta por lotes
 
