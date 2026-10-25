@@ -13,7 +13,9 @@ separado. Orden y dependencias:
 |---|---|---|
 | 0 | Página pública del bot | Nada |
 | 1 | Ciclo de vida de la KB | Nada |
-| 2 | Troceo por secciones y embeddings por lotes | PR 1 |
+| 2a | Arreglar la recuperación de la KB (#410): sin umbral, top 20, consulta con la conversación | PR 1 |
+| 2b | KB entera en contexto cuando cabe, con selector automático (ADR §11) | PR 2a |
+| 2 | Troceo por secciones y embeddings por lotes (solo afecta a KBs grandes; baja de prioridad) | PR 2b |
 | 3 | Motor de ingesta, sin LLM | PR 0, PR 1 |
 | 4 | Revisión por lotes | PR 3 |
 | 5 | Borradores con cita | PR 3 y saldo de Anthropic (#371) |
@@ -44,7 +46,8 @@ final con las tiendas de referencia.
 | Cortesía con el sitio | Peticiones por ingesta y 429 recibidos | ≤ 150 peticiones; ningún reintento sin respetar `Retry-After` |
 
 Tiendas de referencia: Thinking Mu, Ecoalf, Alohas y Singularu (Shopify), y Mimitos (no
-Shopify). Marea solo sirve para el camino de "convertir en cliente": su tienda tiene
+Shopify). En staging, el tenant `thinkingmu-prueba` tiene la KB de Thinking MU cargada desde
+sus 9 fuentes oficiales (41 chunks) y es donde se mide la batería del apéndice. Marea solo sirve para el camino de "convertir en cliente": su tienda tiene
 contraseña.
 
 ## PR 0. Publicar la página del bot
@@ -77,6 +80,23 @@ contraseña.
   contenido da 400; una submission rechazada no cuenta para el checklist.
 - [ ] Vivo (`/verify`, staging): aprobar, sustituir y borrar un documento en Marea. Un turno del
   agente deja de recuperar el chunk borrado.
+
+## PR 2a. Arreglar la recuperación de la KB (#410)
+
+- [ ] `rag_top_k = 20` y `rag_min_similarity = 0.0` por defecto.
+- [ ] La consulta del embedding usa los últimos 3 mensajes del cliente, no solo el último.
+- [ ] Vivo: medición sobre `thinkingmu-prueba` en staging, de 6/12 a 12/12.
+
+## PR 2b. Meter la KB entera cuando cabe
+
+- [ ] `choose_knowledge_mode(total_tokens, budget)` pura; presupuesto 50.000 por defecto,
+  configurable por tenant.
+- [ ] En `full_context`, sin embeddings ni búsqueda: la KB entera como bloque cacheado antes
+  del AOP, con título y URL por documento. Las demás llamadas que hoy reciben fragmentos
+  (supervisor, judge) usan la misma fuente.
+- [ ] Modo, tamaño y número de documentos en LangSmith y en los eventos de razonamiento.
+- [ ] Vivo sin LLM: los bloques del system reales de `thinkingmu-prueba` y `marea-studio`.
+- [ ] Vivo con saldo de Anthropic: la batería del apéndice antes y después.
 
 ## PR 2. Trocear por secciones y pedir embeddings por lotes
 

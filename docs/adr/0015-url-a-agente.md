@@ -202,6 +202,31 @@ Un bucle del lifespan del API, como el de limpieza, reingesta cada semana los te
 equipo, porque una política que cambia en la web y no en el agente es una respuesta incorrecta
 al cliente final.
 
+### 11. Cómo llega el conocimiento al agente: KB entera o búsqueda
+
+Anthropic recomienda no usar RAG cuando la base de conocimiento cabe en el prompt (menos de
+unos 200.000 tokens) y meterla entera con prompt caching ([Contextual
+Retrieval](https://www.anthropic.com/news/contextual-retrieval)). La KB de una tienda ocupa
+10-20k tokens (Thinking MU: 6.950 palabras en 9 fuentes oficiales).
+
+Medido en la sesión 87 (#410): con la búsqueda de entonces (top 5 y similitud mínima 0,6),
+el agente recuperaba la respuesta en 6 de 12 preguntas con dato sobre Thinking MU, y en las 6
+restantes no recibía ningún fragmento. En staging, 380 de 394 turnos de Marea en 60 días no
+recuperaron nada. Sin umbral y con top 20, 12 de 12; con la KB entera, 12 de 12.
+
+- **El modo se elige en código**, con una función pura: `full_context` si el tamaño estimado
+  de los documentos vivos cabe en el presupuesto, `retrieval` si no. El presupuesto por
+  defecto es 50.000 tokens, configurable por tenant: por debajo del límite de Anthropic porque
+  cada turno hace varias llamadas al LLM y el contexto largo degrada el recuerdo del modelo.
+  La estimación es determinista sobre el texto (sin llamar a Anthropic) y conservadora.
+- **En `full_context`**, la KB va como bloque propio del system, cacheado y antes del AOP
+  (que cambia según el intent), con el título y la URL de cada documento para poder citar.
+- **En `retrieval`**, top 20 sin umbral y consulta construida con los últimos mensajes del
+  cliente, no solo con el último. Contexto por fragmento, BM25 y reranking quedan para cuando
+  haya un tenant con KB grande que lo necesite.
+- Cada turno registra el modo, el tamaño estimado y el número de documentos en LangSmith y en
+  los eventos de razonamiento.
+
 ## Alternativas descartadas
 
 | Opción | Por qué no |
