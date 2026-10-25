@@ -11,6 +11,7 @@ existentes no cambian de comportamiento.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal, get_args
 from uuid import UUID
 
@@ -18,6 +19,8 @@ from apps.api.agents.state import AgentState
 from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.commerce import CommerceAdapter
 from apps.api.services.commerce_context import commerce_adapter
+
+logger = logging.getLogger(__name__)
 
 CommerceMode = Literal["live", "mock", "demo_catalog"]
 
@@ -55,7 +58,11 @@ def resolve_commerce(
     state: AgentState,
 ) -> tuple[IntegrationContext | None, CommerceAdapter | None]:
     """La integración y el adapter de comercio del turno. `(None, None)` en `live` sin
-    integración: las skills de comercio fallan con `commerce_not_configured`."""
+    integración: las skills de comercio fallan con `commerce_not_configured`.
+
+    Un proveedor sin adapter registrado es un error de configuración del tenant: se loguea
+    como error y el turno sigue sin comercio, para que las preguntas que no tocan pedidos
+    no escalen todas."""
     integration = _integration_from_state(state)
     mode = commerce_mode(state)
     if mode == "mock":
@@ -76,4 +83,13 @@ def resolve_commerce(
         return demo, DemoCatalogAdapter(domain)
     if integration is None:
         return None, None
-    return integration, commerce_adapter(integration)
+    try:
+        return integration, commerce_adapter(integration)
+    except ValueError as exc:
+        logger.error(
+            "commerce_adapter_unresolved tenant_id=%s provider=%r: %s",
+            integration.tenant_id,
+            integration.provider,
+            exc,
+        )
+        return None, None

@@ -32,11 +32,14 @@ def capability_missing(
     """La capacidad que la skill necesita y el adapter del turno no tiene, o None.
 
     `capabilities=None` es un turno sin adapter de comercio: no falta ninguna, y la skill
-    falla al ejecutar con `commerce_not_configured`."""
-    need = skill_cls.required_capability
-    if need is None or capabilities is None or need in capabilities:
+    falla al ejecutar con `commerce_not_configured`. Toda skill que toca un pedido lo lee
+    antes (gate de identidad, guardas de las L3), así que además necesita `order_read`."""
+    if capabilities is None:
         return None
-    return need
+    needs = [skill_cls.required_capability]
+    if skill_cls.identity_scope != "public":
+        needs.insert(0, CommerceCapability.ORDER_READ)
+    return next((n for n in needs if n is not None and n not in capabilities), None)
 
 
 def skill_visible(skill_cls: type[Skill], identity: IdentityContext) -> bool:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
@@ -61,18 +62,28 @@ def test_live_without_integration_has_no_adapter() -> None:
     assert ctx.integration_ctx is None
 
 
-def test_live_with_an_unregistered_provider_fails_loudly() -> None:
+def test_live_with_an_unregistered_provider_logs_an_error_and_runs_without_commerce(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     state = _state(commerce_integration_ctx={**COMMERCE_CTX, "provider": "prestashop"})
 
-    with pytest.raises(ValueError, match="unknown_integration: commerce/prestashop"):
-        build_skill_context(state)
+    with caplog.at_level(logging.ERROR, logger="apps.api.agents.commerce_mode"):
+        ctx = build_skill_context(state)
+
+    assert ctx.commerce is None
+    assert "unknown_integration: commerce/prestashop" in caplog.text
 
 
-def test_live_without_provider_fails_loudly() -> None:
+def test_live_without_provider_logs_an_error_and_runs_without_commerce(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     state = _state(commerce_integration_ctx={**COMMERCE_CTX, "provider": None})
 
-    with pytest.raises(ValueError, match="commerce_provider_missing"):
-        build_skill_context(state)
+    with caplog.at_level(logging.ERROR, logger="apps.api.agents.commerce_mode"):
+        ctx = build_skill_context(state)
+
+    assert ctx.commerce is None
+    assert "commerce_provider_missing" in caplog.text
 
 
 def test_demo_catalog_gets_the_public_adapter_and_never_the_credentials() -> None:

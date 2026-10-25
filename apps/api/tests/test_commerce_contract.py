@@ -169,3 +169,15 @@ async def test_a_call_without_the_capability_escalates_with_its_reason(
     assert audit["error_message"] == "skill_refused: commerce_capability_missing"
     event = fake_deps.reasoning_tracker.events[-1]  # type: ignore[attr-defined]
     assert event["detail"]["refused"] == "commerce_capability_missing"
+
+
+def test_a_skill_that_touches_an_order_also_needs_order_read() -> None:
+    from apps.api.services.skill_access import capability_missing
+    from apps.api.skills.shopify.cancel_order import CancelOrder
+
+    only_cancel = frozenset({CommerceCapability.CANCEL})
+    both = frozenset({CommerceCapability.CANCEL, CommerceCapability.ORDER_READ})
+
+    assert capability_missing(CancelOrder, only_cancel) == CommerceCapability.ORDER_READ
+    assert capability_missing(CancelOrder, both) is None
+    assert capability_missing(GetProductInfo, frozenset({CommerceCapability.PRODUCT_READ})) is None
