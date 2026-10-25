@@ -1,8 +1,8 @@
-"""Skill L1: busca información de productos en Shopify."""
+"""Skill L1: busca información de productos de la tienda."""
 
 from __future__ import annotations
 
-from apps.api.integrations.shopify import ShopifyAdapter
+from apps.api.integrations.commerce import CommerceCapability
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._models import ProductSummary, map_product_summary
@@ -20,8 +20,9 @@ class GetProductInfoOutput(SkillOutput):
 @SkillRegistry.register
 class GetProductInfo(Skill):
     slug = "shopify.get_product_info"
+    required_capability = CommerceCapability.PRODUCT_READ
     description = (
-        "Busca productos activos en Shopify por nombre o keyword. "
+        "Busca productos activos de la tienda por nombre o keyword. "
         "Devuelve título, tipo, variantes (precio, disponibilidad) y descripción. "
         "Cada precio trae su moneda (la de la tienda): úsala tal cual, sin convertir."
     )
@@ -32,9 +33,7 @@ class GetProductInfo(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, GetProductInfoInput)
-        if not ctx.integration_ctx:
-            raise ValueError("shopify_not_configured")
-        adapter = ctx.commerce_mock or ShopifyAdapter()
+        adapter = ctx.require_commerce()
         raw_products = await adapter.search_products(ctx.integration_ctx, inputs.query)
         if not raw_products:
             return GetProductInfoOutput(products=[], total_found=0)

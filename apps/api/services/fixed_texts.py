@@ -94,6 +94,16 @@ CATALOG: dict[str, Texts] = {
         "transmets ton dossier à une personne de l'équipe pour qu'elle l'examine et te "
         "réponde.",
     ),
+    # La tienda del tenant no ofrece la acción (ADR 0016 §3).
+    "commerce_capability_missing": _then(
+        _t(
+            "Esto no lo puedo gestionar yo desde aquí.",
+            "I can't handle this myself from here.",
+            "Això no ho puc gestionar jo des d'aquí.",
+            "Je ne peux pas gérer cela moi-même d'ici.",
+        ),
+        _PASS_TO_TEAM,
+    ),
     # ─── Adjuntos y acuses de escalado ───────────────────────────────────────────
     "media_without_text": _t(
         "¡Gracias! Hemos recibido tu archivo, pero no podemos verlo. ¿Nos cuentas por "

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apps.api.integrations.shopify import ShopifyAdapter
+from apps.api.integrations.commerce import CommerceCapability
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._models import PolicyInfo, strip_html
@@ -19,6 +19,7 @@ class GetShopPoliciesOutput(SkillOutput):
 @SkillRegistry.register
 class GetShopPolicies(Skill):
     slug = "shopify.get_shop_policies"
+    required_capability = CommerceCapability.POLICIES
     description = (
         "Devuelve las políticas oficiales de la tienda (devolución, envío, privacidad, términos). "
         "Úsala cuando el cliente pregunte por garantías, devoluciones o condiciones de compra. "
@@ -31,9 +32,7 @@ class GetShopPolicies(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, GetShopPoliciesInput)
-        if not ctx.integration_ctx:
-            raise ValueError("shopify_not_configured")
-        adapter = ctx.commerce_mock or ShopifyAdapter()
+        adapter = ctx.require_commerce()
         raw_policies = await adapter.get_policies(ctx.integration_ctx)
 
         policies = [

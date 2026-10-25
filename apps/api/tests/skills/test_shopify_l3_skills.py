@@ -13,11 +13,15 @@ from uuid import UUID
 
 import pytest
 from apps.api.integrations.base import IntegrationContext, MutationNotApplied
-from apps.api.integrations.shopify import (
+from apps.api.integrations.commerce import (
+    CommerceActionError,
     IssuedRefund,
     MarkedRefund,
     RefundableBalance,
+)
+from apps.api.integrations.shopify import (
     ShopifyActionError,
+    ShopifyAdapter,
     snapshot_transaction,
 )
 from apps.api.skills.base import SkillContext, SkillRefusal
@@ -52,6 +56,7 @@ CTX = SkillContext(
     tenant_id="11111111-1111-1111-1111-111111111111",
     conversation_id="22222222-2222-2222-2222-222222222222",
     integration_ctx=_SHOPIFY_INTEGRATION_CTX,
+    commerce=ShopifyAdapter(),
 )
 
 CTX_NO_SHOPIFY = SkillContext(
@@ -94,7 +99,7 @@ def _ctx(adapter: AsyncMock) -> SkillContext:
         tenant_id=CTX.tenant_id,
         conversation_id=CTX.conversation_id,
         integration_ctx=_SHOPIFY_INTEGRATION_CTX,
-        commerce_mock=adapter,
+        commerce=adapter,
     )
 
 
@@ -297,8 +302,8 @@ class TestCancelOrder:
         )
 
     @pytest.mark.asyncio
-    async def test_raises_if_shopify_not_configured(self) -> None:
-        with pytest.raises(ValueError, match="shopify_not_configured"):
+    async def test_raises_if_commerce_not_configured(self) -> None:
+        with pytest.raises(ValueError, match="commerce_not_configured"):
             await CancelOrder().execute(CTX_NO_SHOPIFY, CancelOrderInput(order_id=1001))
 
 
@@ -376,8 +381,8 @@ class TestUpdateShippingAddress:
         adapter.update_shipping_address.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_raises_if_shopify_not_configured(self) -> None:
-        with pytest.raises(ValueError, match="shopify_not_configured"):
+    async def test_raises_if_commerce_not_configured(self) -> None:
+        with pytest.raises(ValueError, match="commerce_not_configured"):
             await UpdateShippingAddress().execute(CTX_NO_SHOPIFY, _ADDRESS_INPUT)
 
 
@@ -403,7 +408,8 @@ class TestRefundPartial:
             return_value=IssuedRefund(refund_id=9001, amount=Decimal("12.50"), currency="GBP")
         )
         out = await RefundPartial().execute(
-            replace(_ctx(adapter), idempotency_key="aprob-1"), RefundPartialInput(order_id=1001, amount="12.50")
+            replace(_ctx(adapter), idempotency_key="aprob-1"),
+            RefundPartialInput(order_id=1001, amount="12.50"),
         )
         assert isinstance(out, RefundPartialOutput)
         assert (out.refund_id, out.amount, out.outcome, out.success) == (
@@ -436,9 +442,7 @@ class TestRefundPartial:
         )
 
         adapter.refund_partial.assert_not_awaited()
-        adapter.find_refund.assert_awaited_once_with(
-            _SHOPIFY_INTEGRATION_CTX, 1001, "aprob-1"
-        )
+        adapter.find_refund.assert_awaited_once_with(_SHOPIFY_INTEGRATION_CTX, 1001, "aprob-1")
         assert isinstance(out, RefundPartialOutput)
         assert (out.refund_id, out.amount, out.outcome) == (
             9001,
@@ -470,7 +474,8 @@ class TestRefundPartial:
             return_value=IssuedRefund(refund_id=9001, amount=Decimal("5"), currency="EUR")
         )
         out = await RefundPartial().execute(
-            replace(_ctx(adapter), idempotency_key="aprob-1"), RefundPartialInput(order_id=1001, amount="5")
+            replace(_ctx(adapter), idempotency_key="aprob-1"),
+            RefundPartialInput(order_id=1001, amount="5"),
         )
         assert (out.outcome, out.refund_mode, out.success) == (
             ActionOutcome.REFUND_MANUAL,
@@ -485,9 +490,9 @@ class TestRefundPartial:
         assert "currency" not in inputs.model_dump()
 
     @pytest.mark.asyncio
-    async def test_raises_if_shopify_not_configured(self) -> None:
+    async def test_raises_if_commerce_not_configured(self) -> None:
         skill = RefundPartial()
-        with pytest.raises(ValueError, match="shopify_not_configured"):
+        with pytest.raises(ValueError, match="commerce_not_configured"):
             await skill.execute(CTX_NO_SHOPIFY, RefundPartialInput(order_id=1, amount="1.00"))
 
     @pytest.mark.asyncio
@@ -512,7 +517,7 @@ class TestRefundPartial:
             instance.get_order_by_name = AsyncMock(return_value=None)
             instance.get_refundable_balance = AsyncMock(return_value=_GBP_BALANCE)
 
-            with pytest.raises(ShopifyActionError, match="refund_amount_exceeds_refundable"):
+            with pytest.raises(CommerceActionError, match="refund_amount_exceeds_refundable"):
                 await RefundPartial().prepare(CTX, {"order_id": 1001, "amount": "45.01"})
 
     def test_anthropic_tool_shape(self) -> None:

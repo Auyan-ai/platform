@@ -48,7 +48,7 @@ from apps.api.services.approval_resolution import (
     team_followup_reason,
     unknown_outcome_reason,
 )
-from apps.api.services.commerce_context import build_commerce_integration_ctx
+from apps.api.services.commerce_context import build_commerce_integration_ctx, commerce_adapter
 from apps.api.services.helpdesk_delivery import deliver_message_to_helpdesk
 from apps.api.services.helpdesk_escalation import push_escalation_to_helpdesk_safe
 from apps.api.services.language import conversation_text_languages
@@ -115,8 +115,8 @@ async def load_execution_context(
     approval: PendingApproval,
     skill_cls: type[Skill],
 ) -> ExecutionContext:
-    """El mismo contexto que el grafo (creds de commerce e idioma), con la aprobación como
-    clave de idempotencia para las skills que la usan."""
+    """El mismo contexto que el grafo (integración y adapter de comercio, idioma), con la
+    aprobación como clave de idempotencia para las skills que la usan."""
     tenant_config = await get_tenant_configuration(conn, tenant_id)
     extra = (tenant_config.extra if tenant_config else None) or {}
     integration_ctx = await build_commerce_integration_ctx(conn, tenant_id, extra=extra)
@@ -129,6 +129,7 @@ async def load_execution_context(
         tenant_id=str(tenant_id),
         conversation_id=str(approval.conversation_id),
         integration_ctx=integration_ctx,
+        commerce=commerce_adapter(integration_ctx) if integration_ctx is not None else None,
         idempotency_key=str(approval.id) if skill_cls.requires_idempotency else None,
     )
     return ExecutionContext(skill_ctx, language, tenant_default)

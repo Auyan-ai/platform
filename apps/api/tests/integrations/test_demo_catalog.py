@@ -79,7 +79,7 @@ async def test_get_product_info_reports_sold_out_variant_as_unavailable() -> Non
         tenant_id=TENANT,
         conversation_id="c",
         integration_ctx=IntegrationContext(UUID(TENANT), {}, {}),
-        commerce_mock=adapter,
+        commerce=adapter,
     )
 
     out = await GetProductInfo().execute(ctx, GetProductInfoInput(query="Tere"))
@@ -165,7 +165,7 @@ async def test_order_lookup_through_skill_layer_becomes_commerce_unavailable() -
         tenant_id=TENANT,
         conversation_id="c",
         integration_ctx=IntegrationContext(UUID(TENANT), {}, {}),
-        commerce_mock=_adapter(lambda request: httpx.Response(500)),
+        commerce=_adapter(lambda request: httpx.Response(500)),
     )
 
     with pytest.raises(OrderLookupError, match="DemoCatalogUnavailable"):

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal
 
 from apps.api.integrations.base import IntegrationContext
+from apps.api.integrations.commerce import CommerceAdapter, CommerceCapability
 from apps.api.services.identity import (
     ClaimHash,
     IdentityContext,
@@ -71,13 +72,11 @@ class SkillContext:
 
     tenant_id: str
     conversation_id: str
-    # IntegrationContext para skills de commerce (Shopify). None si no hay integración activa.
+    # Credenciales de la integración de comercio. None si el tenant no tiene ninguna.
     integration_ctx: IntegrationContext | None = field(default=None)
-    # Adapter commerce inyectado: el mock en modo `mock` y el catálogo público en `demo_catalog`;
-    # None en `live` (las skills construyen el ShopifyAdapter real). Nombre histórico (Sub-PR 0.10).
-    # Tipo Any porque las skills llaman métodos fuera del protocolo CommerceProvider
-    # (get_order_by_name, get_policies, etc.) y solo existe un provider commerce.
-    commerce_mock: Any = field(default=None)
+    # Adapter de comercio del turno, ya resuelto: el del proveedor del tenant en `live`, el
+    # mock en `mock` y el catálogo público en `demo_catalog`. None = sin comercio.
+    commerce: CommerceAdapter | None = field(default=None)
     # Contacto VERIFICADO del remitente del mensaje (ADR 0013): el email solo si el
     # mensaje llega por correo o formulario web, el teléfono E.164 solo por WhatsApp.
     # Nunca lo que teclee el cliente o el LLM. Es el que usa `list_my_orders` para buscar.
@@ -107,6 +106,12 @@ class SkillContext:
     # Fotos que el cliente mandó en la conversación y si el canal trae adjuntos a Auyan.
     customer_photos: tuple[PhotoRef, ...] = field(default=())
     attachments_readable: bool = field(default=False)
+
+    def require_commerce(self) -> CommerceAdapter:
+        """El adapter del turno. Sin integración de comercio, `commerce_not_configured`."""
+        if self.commerce is None:
+            raise ValueError("commerce_not_configured")
+        return self.commerce
 
     def order_claims(self, order: dict[str, Any]) -> frozenset[ClaimHash]:
         return order_claims(order, salt=self.claim_salt, region=self.phone_region)
@@ -144,6 +149,9 @@ class Skill(ABC):
     # Skill del propio sistema: la ofrece el código a todo tenant con commerce, sin pasar por
     # el AOP ni por `tenant_tool_permissions`. Solo para skills de identidad, de tier L1.
     core: ClassVar[bool] = False
+    # Capacidad de la tienda que necesita (ADR 0016 §3). Si el adapter del turno no la
+    # tiene, la skill no se ofrece al LLM y `execute_skill` la rechaza. None = no usa la tienda.
+    required_capability: ClassVar[CommerceCapability | None] = None
     # Ejecutada sin aprobación, el cliente recibe el texto fijo de su `outcome`
     # (`services/approval_reply.outcome_message`) y el turno no vuelve al LLM.
     reply_from_outcome: ClassVar[bool] = False

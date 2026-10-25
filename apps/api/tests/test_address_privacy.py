@@ -57,7 +57,7 @@ def _ctx(customer_email: str | None, mock: Any, **extra: Any) -> SkillContext:
         tenant_id=str(TENANT_ID),
         conversation_id="c",
         integration_ctx=IntegrationContext(tenant_id=TENANT_ID, credentials={}, config={}),
-        commerce_mock=mock,
+        commerce=mock,
         customer_email=customer_email,
         **extra,
     )

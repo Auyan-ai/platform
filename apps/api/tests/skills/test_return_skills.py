@@ -11,7 +11,7 @@ from uuid import UUID
 import httpx
 import pytest
 from apps.api.integrations.base import IntegrationContext, MutationNotApplied
-from apps.api.integrations.shopify import CreatedReturn
+from apps.api.integrations.commerce import CreatedReturn
 from apps.api.services.approval_execution import (
     Applied,
     NotApplied,
@@ -191,7 +191,7 @@ def _ctx(shopify: FakeShopify, policy: ActivePolicy | None = None, **kw: Any) ->
             tenant_id=UUID("11111111-1111-1111-1111-111111111111"),
             credentials={"domain": "marea.myshopify.com", "access_token": "tok"},
         ),
-        commerce_mock=shopify,
+        commerce=shopify,
         returns_policy=policy,
         **kw,
     )

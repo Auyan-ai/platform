@@ -1,4 +1,4 @@
-"""Construye el IntegrationContext de commerce (Shopify) de un tenant.
+"""Construye el IntegrationContext de comercio de un tenant y resuelve su adapter.
 
 Fuente única de la lógica sensible de cripto (descifrado + token exchange Shopify).
 Lo usan tanto `load_tenant_context` (hot path del agente) como el endpoint de
@@ -19,7 +19,10 @@ from apps.api.db.queries import (
     get_integration_credentials_encrypted,
     get_primary_integration_for_kind,
 )
+from apps.api.integrations import shopify
 from apps.api.integrations.base import IntegrationContext
+from apps.api.integrations.commerce import CommerceAdapter
+from apps.api.integrations.registry import IntegrationRegistry
 from apps.api.services.integrations_crypto import decrypt_credentials, get_integration_crypto_key
 
 if TYPE_CHECKING:
@@ -59,9 +62,7 @@ async def build_commerce_integration_ctx(
                     and creds.get("client_id")
                     and creds.get("client_secret")
                 ):
-                    from apps.api.integrations.shopify import ensure_shopify_access_token
-
-                    access_token, _expires = await ensure_shopify_access_token(
+                    access_token, _expires = await shopify.ensure_shopify_access_token(
                         tenant_id=tenant_id,
                         domain=creds["domain"],
                         client_id=creds["client_id"],
@@ -70,7 +71,10 @@ async def build_commerce_integration_ctx(
                     creds = {"domain": creds["domain"], "access_token": access_token}
 
                 return IntegrationContext(
-                    tenant_id=tenant_id, credentials=creds, config=config_jsonb
+                    tenant_id=tenant_id,
+                    credentials=creds,
+                    config=config_jsonb,
+                    provider=integration.provider,
                 )
             except Exception:
                 logger.warning("commerce_integration_decrypt_failed tenant_id=%s", tenant_id)
@@ -83,5 +87,14 @@ async def build_commerce_integration_ctx(
             tenant_id=tenant_id,
             credentials={"domain": shopify_domain, "token": shopify_token},
             config={},
+            provider="shopify",
         )
     return None
+
+
+def commerce_adapter(integration: IntegrationContext) -> CommerceAdapter:
+    """El adapter registrado para el proveedor de la integración de comercio."""
+    if integration.provider is None:
+        raise ValueError("commerce_provider_missing")
+    adapter_cls: type[CommerceAdapter] = IntegrationRegistry.get("commerce", integration.provider)
+    return adapter_cls()

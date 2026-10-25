@@ -57,7 +57,7 @@ def _ctx(adapter: Any | None = None) -> SkillContext:
         tenant_id=str(TENANT_ID),
         conversation_id=str(CONVERSATION_ID),
         integration_ctx=IntegrationContext(tenant_id=TENANT_ID, credentials={}, config={}),
-        commerce_mock=adapter or _adapter(),
+        commerce=adapter or _adapter(),
         claim_salt=SALT,
     )
 

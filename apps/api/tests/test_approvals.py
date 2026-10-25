@@ -222,7 +222,9 @@ def _wire(monkeypatch: pytest.MonkeyPatch, *, channel: str = "zendesk", delivere
     return w
 
 
-def _make_app(monkeypatch: pytest.MonkeyPatch, router_under_test=None) -> tuple[FastAPI, TestClient]:
+def _make_app(
+    monkeypatch: pytest.MonkeyPatch, router_under_test=None
+) -> tuple[FastAPI, TestClient]:
     async def _fake_lookup(user_id: UUID, settings: Any) -> UserRecord:
         return UserRecord(tenant_id=TENANT_ID, role="tenant_admin", email="a@b.com")
 
@@ -239,7 +241,9 @@ def _make_app(monkeypatch: pytest.MonkeyPatch, router_under_test=None) -> tuple[
     app = FastAPI()
     register_exception_handlers(app)
     app.dependency_overrides[get_settings] = lambda: FakeAuthSettings()
-    for r in [router_under_test] if router_under_test else [approvals_router, tool_permissions_router]:
+    for r in (
+        [router_under_test] if router_under_test else [approvals_router, tool_permissions_router]
+    ):
         app.include_router(r)
     return app, TestClient(app, raise_server_exceptions=False)
 
@@ -646,9 +650,9 @@ class TestRejectAction:
         assert resp.json()["approval_status"] == "rejected"
         assert w.reject.await_args.kwargs["reviewed_by"] == USER_ID
         assert w.insert_message.await_args.kwargs["author_user_id"] == USER_ID
-        assert w.deliver.await_args.kwargs["content"] == w.insert_message.await_args.kwargs[
-            "content"
-        ]
+        assert (
+            w.deliver.await_args.kwargs["content"] == w.insert_message.await_args.kwargs["content"]
+        )
         # Solo se cierra la escalación del gate; la acción no se hizo.
         assert w.release_own.await_args.kwargs["approval_id"] == APPROVAL_ID
         w.release_all.assert_not_awaited()
@@ -678,9 +682,7 @@ class TestSimulatedApproval:
     ) -> None:
         _app, client = _make_app(monkeypatch, approvals_router)
         w = _wire(monkeypatch)
-        monkeypatch.setattr(
-            f"{ROUTER}.is_simulation_conversation", AsyncMock(return_value=True)
-        )
+        monkeypatch.setattr(f"{ROUTER}.is_simulation_conversation", AsyncMock(return_value=True))
 
         resp = client.post(
             f"/approvals/{APPROVAL_ID}/{action}", json={"comment": "desde el panel"}, headers=AUTH
@@ -798,7 +800,7 @@ def _return_in_flight(monkeypatch: pytest.MonkeyPatch, *, created_before_failing
         f"{SERVICE}.build_commerce_integration_ctx",
         AsyncMock(return_value=IntegrationContext(tenant_id=TENANT_ID, credentials={})),
     )
-    monkeypatch.setattr("apps.api.skills.shopify.start_return.ShopifyAdapter", lambda: shopify)
+    monkeypatch.setattr(f"{SERVICE}.commerce_adapter", lambda integration: shopify)
     return shopify
 
 
@@ -822,9 +824,7 @@ class TestStaleExecutionRecovery:
             shopify = FakeShopify()
             inputs = StartReturn.input_schema.model_validate(prepared)
             asyncio.run(StartReturn().execute(_ctx(shopify), inputs))
-            monkeypatch.setattr(
-                "apps.api.skills.shopify.start_return.ShopifyAdapter", lambda: shopify
-            )
+            monkeypatch.setattr(f"{SERVICE}.commerce_adapter", lambda integration: shopify)
         stale = _sample_approval(
             "executing",
             skill_slug="shopify.start_return",

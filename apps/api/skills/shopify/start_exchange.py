@@ -6,6 +6,7 @@ y `evidence_requires_approval`), además del piso L3 de `tenant_tool_permissions
 
 from __future__ import annotations
 
+from apps.api.integrations.commerce import CommerceCapability
 from apps.api.services.returns import RequestedExchange
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify.start_return import StartReturnInput, _ReturnSkill
@@ -25,8 +26,9 @@ class StartExchangeInput(StartReturnInput):
 @SkillRegistry.register
 class StartExchange(_ReturnSkill):
     slug = "shopify.start_exchange"
+    required_capability = CommerceCapability.EXCHANGES
     description = (
-        "Abre un cambio en un pedido de Shopify: el cliente devuelve artículos y recibe otros "
+        "Abre un cambio en un pedido de la tienda: el cliente devuelve artículos y recibe otros "
         "en el mismo pedido. Úsala cuando el cliente haya confirmado qué devuelve, cuántos, "
         "el motivo y qué variante quiere a cambio (`variant_id` de get_product_info). "
         "`reason_code` es uno de los códigos de la política de la tienda que tienes en el "

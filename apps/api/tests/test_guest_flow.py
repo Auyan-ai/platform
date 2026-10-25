@@ -13,6 +13,7 @@ from apps.api.agents.nodes import execute_skill
 from apps.api.agents.nodes.execute_skill import make_execute_skill_node
 from apps.api.agents.nodes.resolve_identity import make_resolve_identity_node
 from apps.api.integrations.base import IntegrationContext
+from apps.api.integrations.commerce import ALL_CAPABILITIES, CommerceCapability
 from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.identity import (
     Grant,
@@ -66,7 +67,7 @@ def _commerce(monkeypatch: pytest.MonkeyPatch, adapter: Any | None = None) -> No
         return dataclasses.replace(
             real(state),
             integration_ctx=IntegrationContext(tenant_id=TENANT_ID, credentials={}, config={}),
-            commerce_mock=adapter or _adapter(),
+            commerce=adapter or _adapter(),
         )
 
     monkeypatch.setattr(f"{NODE}.build_skill_context", _ctx)
@@ -387,11 +388,16 @@ async def test_the_fallback_skill_is_offered_only_on_order_aops_without_a_grant(
     assert not SkillRegistry.is_core("shopify.get_order_status")
     none = IdentityContext()
 
-    def offered(slugs: list[str], identity: IdentityContext, commerce: bool = True) -> bool:
-        return CHECK in visible_skills(slugs, ENABLED, identity, commerce=commerce)
+    def offered(
+        slugs: list[str],
+        identity: IdentityContext,
+        capabilities: frozenset[CommerceCapability] | None = ALL_CAPABILITIES,
+    ) -> bool:
+        return CHECK in visible_skills(slugs, ENABLED, identity, capabilities=capabilities)
 
     assert offered(ORDER_SLUGS, none)
-    assert not offered(ORDER_SLUGS, none, commerce=False)
+    assert not offered(ORDER_SLUGS, none, capabilities=None)
+    assert not offered(ORDER_SLUGS, none, capabilities=frozenset())
     assert not offered(["shopify.get_product_info"], none)
     assert not offered([], none)
     assert not offered(ORDER_SLUGS, IdentityContext((Grant("guest", "order_contact", order_id=1),)))
@@ -400,8 +406,11 @@ async def test_the_fallback_skill_is_offered_only_on_order_aops_without_a_grant(
 
 async def test_non_order_aops_keep_the_cheap_model_path() -> None:
     only_product = ["shopify.get_product_info"]
-    assert visible_skills(only_product, ENABLED, IdentityContext(), commerce=True) == only_product
-    assert visible_skills([], ENABLED, IdentityContext(), commerce=True) == []
+    everything = ALL_CAPABILITIES
+    assert visible_skills(only_product, ENABLED, IdentityContext(), capabilities=everything) == (
+        only_product
+    )
+    assert visible_skills([], ENABLED, IdentityContext(), capabilities=everything) == []
 
 
 async def test_the_fallback_skill_grants_guest_and_updates_the_turn(

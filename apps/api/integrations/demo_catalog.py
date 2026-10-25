@@ -8,9 +8,9 @@ moneda ISO), de modo que `get_product_info` no distingue de dónde vienen.
 Cortesía con el sitio: el User-Agent nos identifica siempre como AuyanBot, un 429 se reintenta
 solo respetando `Retry-After` y con tope, y nada se envía sin ese encabezado.
 
-Todo lo que no es catálogo (pedidos, reembolsos, devoluciones, políticas) lanza
-`DemoCatalogUnavailable`: las skills lo tratan como tienda no disponible y el agente escala
-con razón explícita.
+Solo declara `product_read`: las skills de pedidos, reembolsos, devoluciones y políticas no
+se ofrecen en una demo (ADR 0016 §3). Si aun así se llama a algo que no es catálogo, lanza
+`DemoCatalogUnavailable`.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
+from apps.api.integrations.commerce import CommerceCapability
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,8 @@ def retry_after_seconds(response: httpx.Response) -> float:
 
 class DemoCatalogAdapter:
     """Catálogo en vivo de una tienda pública. Sin credenciales, solo lectura."""
+
+    capabilities = frozenset({CommerceCapability.PRODUCT_READ})
 
     def __init__(
         self,

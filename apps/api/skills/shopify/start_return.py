@@ -14,7 +14,7 @@ from datetime import UTC, date, datetime
 from typing import Any, ClassVar, TypeVar
 
 from apps.api.integrations.base import MutationNotApplied
-from apps.api.integrations.shopify import CreatedReturn, ShopifyAdapter
+from apps.api.integrations.commerce import CommerceCapability, CreatedReturn
 from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.returns import (
     Eligible,
@@ -126,9 +126,7 @@ class _ReturnSkill(Skill):
             {k: v for k, v in raw_input.items() if k != "plan"}
         )
         assert isinstance(inputs, StartReturnInput)
-        if not ctx.integration_ctx:
-            raise ValueError("shopify_not_configured")
-        adapter = ctx.commerce_mock or ShopifyAdapter()
+        adapter = ctx.require_commerce()
         exchange = self._exchange(inputs)
         order = await _shopify(
             ctx,
@@ -221,10 +219,8 @@ class _ReturnSkill(Skill):
         assert isinstance(inputs, StartReturnInput)
         if inputs.plan is None:
             raise ValueError("return_plan_missing")
-        if not ctx.integration_ctx:
-            raise ValueError("shopify_not_configured")
+        adapter = ctx.require_commerce()
         plan = inputs.plan
-        adapter = ctx.commerce_mock or ShopifyAdapter()
         existing = await _before_sending(
             "buscar la devolución del plan", adapter.find_return(ctx.integration_ctx, plan)
         )
@@ -268,9 +264,9 @@ class _ReturnSkill(Skill):
 
         Solo escribe, si falta, la nota de la liquidación, que no se duplica."""
         assert isinstance(inputs, StartReturnInput)
-        if inputs.plan is None or not ctx.integration_ctx:
+        adapter = ctx.commerce
+        if inputs.plan is None or adapter is None:
             raise ReconcileUnknown("return_plan_missing")
-        adapter = ctx.commerce_mock or ShopifyAdapter()
         try:
             found = await adapter.find_return(ctx.integration_ctx, inputs.plan)
         except Exception as exc:
@@ -380,8 +376,9 @@ def _no_longer_possible(plan: ReturnPlan, order: Any) -> str | None:
 @SkillRegistry.register
 class StartReturn(_ReturnSkill):
     slug = "shopify.start_return"
+    required_capability = CommerceCapability.RETURNS
     description = (
-        "Abre la devolución de uno o varios artículos de un pedido de Shopify, sin cambio. "
+        "Abre la devolución de uno o varios artículos de un pedido de la tienda, sin cambio. "
         "Úsala cuando el cliente haya confirmado qué artículos devuelve, cuántos y el "
         "motivo. `reason_code` es uno de los códigos de la política de la tienda que tienes "
         "en el turno. El sistema comprueba plazo, motivo, pruebas y envío, y calcula el "
