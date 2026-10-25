@@ -4545,6 +4545,71 @@ async def insert_simulation_run(
     return SimulationRun(**dict(row))
 
 
+async def insert_interactive_run(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    aop_slug: str,
+    conversation_id: UUID,
+    triggered_by: UUID | None,
+) -> SimulationRun:
+    """Sesión de "Probar agente": fila `running` marcada `termination_reason='interactive'`,
+    sin escenario. El gasto de sus turnos se acumula en `cost_cents` mientras sigue abierta."""
+    row = await conn.fetchrow(
+        """
+        INSERT INTO simulation_runs
+            (tenant_id, scenario_id, aop_slug, conversation_id, triggered_by, status,
+             termination_reason, transcript, turns_count, cost_cents)
+        VALUES ($1, NULL, $2, $3, $4, 'running', 'interactive', '[]'::jsonb, 0, 0)
+        RETURNING id, tenant_id, scenario_id, aop_slug, aop_version, conversation_id,
+                  batch_id, status, termination_reason, turns_count, transcript,
+                  judge_eval, assertions_results, assertions_passed, assertions_total,
+                  triggered_by, tokens_simulator, tokens_agent, tokens_judge,
+                  cost_cents, started_at, completed_at, langsmith_trace_id
+        """,
+        tenant_id,
+        aop_slug,
+        conversation_id,
+        triggered_by,
+    )
+    assert row is not None
+    return SimulationRun(**dict(row))
+
+
+async def append_interactive_turn(
+    conn: asyncpg.Connection,
+    run_id: UUID,
+    tenant_id: UUID,
+    *,
+    entries: list[dict],
+    cost_cents: float,
+    tokens_agent: int,
+) -> SimulationRun | None:
+    """Añade las entradas del turno al transcript y suma su coste y tokens, en un solo UPDATE."""
+    row = await conn.fetchrow(
+        """
+        UPDATE simulation_runs
+           SET transcript    = COALESCE(transcript, '[]'::jsonb) || $3::jsonb,
+               turns_count   = COALESCE(turns_count, 0) + 1,
+               cost_cents    = COALESCE(cost_cents, 0) + $4,
+               tokens_agent  = tokens_agent + $5,
+               updated_at    = NOW()
+         WHERE id = $1 AND tenant_id = $2 AND termination_reason = 'interactive'
+        RETURNING id, tenant_id, scenario_id, aop_slug, aop_version, conversation_id,
+                  batch_id, status, termination_reason, turns_count, transcript,
+                  judge_eval, assertions_results, assertions_passed, assertions_total,
+                  triggered_by, tokens_simulator, tokens_agent, tokens_judge,
+                  cost_cents, started_at, completed_at, langsmith_trace_id
+        """,
+        run_id,
+        tenant_id,
+        entries,
+        cost_cents,
+        tokens_agent,
+    )
+    return SimulationRun(**dict(row)) if row else None
+
+
 async def set_simulation_run_trace_id(
     conn: asyncpg.Connection, run_id: UUID, tenant_id: UUID, trace_id: UUID
 ) -> None:
@@ -4681,14 +4746,15 @@ async def list_runs_for_batch(
 
 
 async def get_tenant_sim_cost_cents_today(conn: asyncpg.Connection, tenant_id: UUID) -> float:
-    """Suma cost_cents de runs terminados del tenant en las últimas 24h. Para el cost cap."""
+    """Suma cost_cents de runs terminados y chats interactivos del tenant en 24h (cost cap)."""
     row = await conn.fetchrow(
         """
         SELECT COALESCE(SUM(cost_cents), 0) AS total
           FROM simulation_runs
          WHERE tenant_id = $1
            AND started_at >= NOW() - INTERVAL '1 day'
-           AND status IN ('passed', 'partial', 'failed', 'errored')
+           AND (status IN ('passed', 'partial', 'failed', 'errored')
+                OR (status = 'running' AND termination_reason = 'interactive'))
         """,
         tenant_id,
     )
@@ -4702,7 +4768,8 @@ async def get_global_sim_cost_cents_today(conn: asyncpg.Connection) -> float:
         SELECT COALESCE(SUM(cost_cents), 0) AS total
           FROM simulation_runs
          WHERE started_at >= NOW() - INTERVAL '1 day'
-           AND status IN ('passed', 'partial', 'failed', 'errored')
+           AND (status IN ('passed', 'partial', 'failed', 'errored')
+                OR (status = 'running' AND termination_reason = 'interactive'))
         """
     )
     return float(row["total"]) if row else 0.0

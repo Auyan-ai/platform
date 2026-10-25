@@ -1,0 +1,70 @@
+name: thinkingmu
+description: >-
+  Batería de la demo de Thinking MU (docs/url-to-agent-plan.md, apéndice). Las respuestas
+  correctas salen de las fuentes oficiales de la tienda, leídas el 25-oct-2026. `chatbase` es
+  su resultado ese día. Ninguna pregunta es seguimiento de otra: cada una abre un chat nuevo.
+questions:
+  - id: 1
+    ask: "¿Cuánto cuesta el envío a Canarias?"
+    expected: "19,90 €, gratis desde 140 €, 3-5 días hábiles"
+    chatbase: "✅"
+  - id: 2
+    ask: "¿Cuántos días tengo para devolver algo?"
+    expected: "30 días naturales desde la compra"
+    chatbase: "✅"
+  - id: 3
+    ask: "¿Puedo devolver un bañador?"
+    expected: "Sí; sin precinto, probar sobre la ropa interior, con manchas no se acepta"
+    chatbase: "✅"
+  - id: 4
+    ask: "¿Puedo devolver ropa interior?"
+    expected: "No, por higiene"
+    chatbase: "✅"
+  - id: 5
+    ask: "¿Cuánto me cuesta devolver desde Canarias?"
+    expected: "9,90 € descontados del reembolso (punto de recogida)"
+    chatbase: "✅"
+  - id: 6
+    ask: "Me llegó una prenda defectuosa, ¿qué hago?"
+    expected: "Escribir a shop@thinkingmu.com"
+    chatbase: "✅"
+  - id: 7
+    ask: "Vivo en Portugal, ¿cuánto cuesta devolver?"
+    expected: "Las fuentes dicen 3,90 € y 6,90 €: avisar y remitir a la tienda"
+    chatbase: "✅"
+  - id: 8
+    ask: "Compré desde Reino Unido, ¿tengo 30 días?"
+    expected: "No, 20 días"
+    chatbase: "No se preguntó"
+  - id: 9
+    ask: "¿El envío es gratis?"
+    expected: "Gratis desde 110 € en España; la promo general acaba el 1/11"
+    chatbase: "✅ hasta el 1/11"
+  - id: 10
+    ask: "¿Puedo pagar con Klarna?"
+    expected: "Sin dato legible: decirlo, sin insinuar"
+    chatbase: "⚠️ insinúa"
+  - id: 11
+    ask: "Uso una M en Zara, ¿qué talla soy?"
+    expected: "Sin tabla de tallas: decirlo, sin orientar"
+    chatbase: "⚠️ se ofrece a orientar"
+  - id: 12
+    ask: "¿A qué hora abre la tienda de San Sebastián?"
+    expected: "Sin dato legible: decirlo"
+    chatbase: "No se preguntó"
+  - id: 13
+    ask: "¿Dónde está mi pedido #12345?"
+    expected: "En la demo, escalar con razón explícita"
+    chatbase: "✅ deriva al email"
+  - id: 14
+    ask: "¿Te queda la M del top Tere?"
+    expected: "Stock real por talla del catálogo"
+    chatbase: "No probado"
+  - id: 15
+    ask: "Quiero cancelar mi pedido"
+    expected: "En la demo, explicar que en producción se cancela con aprobación"
+    chatbase: "Manda al email"
+  - id: 16
+    ask: "Me equivoqué de dirección, ¿la cambias?"
+    expected: "Igual que la 15"
+    chatbase: "No probado"
