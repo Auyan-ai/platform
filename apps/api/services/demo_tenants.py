@@ -146,15 +146,17 @@ def start_demo_ingestion(tenant: Tenant) -> None:
     )
 
 
-def demo_state_overrides(tenant: Tenant, *, simulation_mode: bool = False) -> dict[str, object]:
+def demo_state_overrides(tenant: Tenant, *, scripted_commerce: bool = False) -> dict[str, object]:
     """Campos del estado del turno que fija el origen del tenant.
 
-    Una demo nunca usa comercio `live`: lee el catálogo público de su tienda. El simulador
-    conserva el mock con sus fixtures. Un tenant cliente no cambia nada.
+    Una demo nunca usa comercio `live`: lee el catálogo público de su tienda, también en
+    "Probar agente". Solo un escenario del simulador con fixtures de Shopify
+    (`scripted_commerce`) conserva el mock, porque sus respuestas están guionizadas.
+    Un tenant cliente no cambia nada.
     """
     if tenant.origin != "demo":
         return {}
-    if simulation_mode:
+    if scripted_commerce:
         return {"commerce_integration_ctx": None}
     domain = normalize_domain(tenant.demo_source_url or "")
     return {

@@ -125,7 +125,10 @@ def make_load_tenant_context_node(
             "returns_policy": returns_policy,
             "knowledge": knowledge.to_state(),
         }
-        out.update(demo_state_overrides(tenant, simulation_mode=bool(state.get("simulation_mode"))))
+        scripted_commerce = bool(
+            state.get("simulation_mode") and (state.get("simulation_fixtures") or {}).get("shopify")
+        )
+        out.update(demo_state_overrides(tenant, scripted_commerce=scripted_commerce))
         # Fallback sin AOPs: el tenant puede opt-in a skills vía tenant_config.extra.
         # select_aop (Sprint 7+) sobreescribe estos si el tenant tiene AOPs configurados.
         if isinstance(extra.get("allowed_skills"), list):
