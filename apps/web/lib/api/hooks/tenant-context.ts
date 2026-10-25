@@ -49,7 +49,7 @@ export interface TenantOnboarding {
   updated_at: string | null
 }
 
-export type KnowledgeSubmissionStatus = 'pending_review' | 'approved' | 'rejected'
+export type KnowledgeSubmissionStatus = 'pending_review' | 'approved' | 'rejected' | 'superseded'
 export type KnowledgeSourceType = 'text' | 'url' | 'file'
 export type WeeklyReportStatus = 'draft' | 'pending_review' | 'approved' | 'sent'
 export type OutboundEmailJobStatus = 'queued' | 'sending' | 'sent' | 'failed' | 'canceled'
@@ -60,6 +60,7 @@ export interface TenantKnowledgeSubmission {
   title: string
   source_type: KnowledgeSourceType
   source_url: string | null
+  source_key: string | null
   original_filename: string | null
   content: string
   notes: string | null
@@ -72,6 +73,15 @@ export interface TenantKnowledgeSubmission {
   processed_document_id: string | null
   created_at: string | null
   updated_at: string | null
+}
+
+export interface KnowledgeDocument {
+  id: string
+  title: string
+  source: string | null
+  source_key: string | null
+  created_at: string
+  chunk_count: number
 }
 
 export interface OnboardingChecklist {
@@ -298,6 +308,7 @@ export async function tenantContextFetch<T>(
       err,
     )
   }
+  if (resp.status === 204) return undefined as T
   return resp.json() as Promise<T>
 }
 
@@ -518,6 +529,32 @@ export function useTenantKnowledgeSubmissions(
   })
 }
 
+export function useKnowledgeDocuments(tenantId: string) {
+  return useQuery({
+    queryKey: queryKeys.tenants.kbDocuments(tenantId),
+    queryFn: async () => {
+      const token = await getToken()
+      return tenantContextFetch<KnowledgeDocument[]>(token, tenantId, '/tenants/me/kb-documents')
+    },
+    staleTime: 20_000,
+  })
+}
+
+export function useDeleteKnowledgeDocument(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (documentId: string) => {
+      const token = await getToken()
+      return tenantContextFetch<void>(token, tenantId, `/tenants/me/kb-documents/${documentId}`, {
+        method: 'DELETE',
+      })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.kbDocuments(tenantId) })
+    },
+  })
+}
+
 export function useTenantInsights(tenantId: string, days = 14) {
   return useQuery({
     queryKey: queryKeys.tenants.insights(tenantId, days),
@@ -585,6 +622,7 @@ export function useApproveTenantKnowledgeSubmission(tenantId: string) {
       qc.invalidateQueries({
         queryKey: queryKeys.tenants.kbSubmissions(tenantId, 'pending_review'),
       })
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.kbDocuments(tenantId) })
     },
   })
 }

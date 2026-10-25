@@ -53,7 +53,7 @@ export function Step6Kb({ tenantId, onContinue, onSkip, onBack }: StepProps) {
         source_type: sourceType,
         source_url: sourceUrl.trim() || null,
         original_filename: null,
-        content: content.trim() || sourceUrl.trim(),
+        content: content.trim(),
         notes: null,
       })
       setTitle('')

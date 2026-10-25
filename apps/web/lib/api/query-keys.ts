@@ -22,6 +22,7 @@ export const queryKeys = {
     doctor: (tenantId: string) => ['tenants', tenantId, 'doctor'] as const,
     kbSubmissions: (tenantId: string, status?: string) =>
       ['tenants', tenantId, 'kb-submissions', status ?? 'all'] as const,
+    kbDocuments: (tenantId: string) => ['tenants', tenantId, 'kb-documents'] as const,
     weeklyReports: (tenantId: string, status?: string) =>
       ['tenants', tenantId, 'weekly-reports', status ?? 'all'] as const,
     outboundEmailTemplates: (tenantId: string) =>
