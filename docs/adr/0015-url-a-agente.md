@@ -58,7 +58,7 @@ tenant.**
 
 ### 1. Acceso: bot identificado, sin evasión
 
-User-Agent `AuyanBot/<versión> (+https://auyan.es/bot)`, con una página pública que explica
+User-Agent `AuyanBot/<versión> (+https://auyan.ai/bot)`, con una página pública que explica
 qué leemos y cómo bloquearnos. Se respeta `robots.txt`. Ante un 429 se espera lo que diga
 `Retry-After` (o un back-off exponencial) y, si se repite, se abandona esa fuente y se anota.
 No se falsea el User-Agent, no se usan proxies residenciales ni servicios que esquiven la
@@ -226,7 +226,7 @@ al cliente final.
 - Cada respuesta del agente que use la KB se puede rastrear hasta una URL de la tienda.
 - Gasto nuevo de LLM por ingesta, con su propio libro de costes (estimado: unos céntimos por
   tienda con Sonnet y menos de 20.000 palabras de fuentes; está pendiente de medir).
-- Se publica `auyan.es/bot`.
+- Se publica `auyan.ai/bot`.
 
 ## Apéndice: comparación con Chatbase (25-oct-2026, Thinking MU)
 
