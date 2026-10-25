@@ -1069,9 +1069,43 @@ class TestTenantOnboardingEndpoints:
         facts_mock = AsyncMock(return_value=TenantFacts(tenant_id=TENANT_ID))
         monkeypatch.setattr("apps.api.routers.tenants.submit_tenant_onboarding", submit_mock)
         monkeypatch.setattr("apps.api.routers.tenants.evaluate_and_advance_lifecycle", advance_mock)
-        monkeypatch.setattr("apps.api.routers.tenants.upsert_tenant_playbook", playbook_mock)
-        monkeypatch.setattr("apps.api.routers.tenants.upsert_tenant_facts", facts_mock)
+        monkeypatch.setattr("apps.api.routers.tenants.merge_tenant_playbook", playbook_mock)
+        monkeypatch.setattr("apps.api.routers.tenants.merge_tenant_facts", facts_mock)
         return submit_mock, advance_mock, playbook_mock, facts_mock
+
+    def test_submit_merges_instead_of_overwriting(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """El submit usa las variantes de fusión y nunca manda valores que blanqueen:
+        los campos que el wizard no rellena van vacíos (la query conserva el existente)
+        y product_overview/policies ni se mencionan."""
+        from apps.api.db.models import OnboardingChecklist, TenantOnboarding
+
+        onboarding = TenantOnboarding(
+            tenant_id=TENANT_ID,
+            current_step=9,
+            completed_steps=[1],
+            submitted_at=datetime.now(UTC),
+            step_data={"1": {"company_name": "Marea"}, "2": {"voice_traits": ""}},
+        )
+        checklist = OnboardingChecklist(
+            onboarding_submitted=True,
+            has_commerce_integration=True,
+            has_helpdesk_integration=True,
+            has_knowledge=True,
+        )
+        _, _, playbook_mock, facts_mock = self._patch_submit_dependencies(
+            monkeypatch, onboarding=onboarding, lifecycle_state="building", checklist=checklist
+        )
+        client = TestClient(_make_app(monkeypatch))
+        resp = client.post(
+            "/tenants/me/onboarding/submit",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+        )
+        assert resp.status_code == 200
+        kwargs = playbook_mock.call_args.kwargs
+        assert kwargs["brand_voice"] == ""
+        assert "product_overview" not in kwargs
+        assert "policies" not in kwargs
+        assert facts_mock.call_args.kwargs["data"] == {"company_name": "Marea"}
 
     def test_submit_onboarding_advances_to_building_when_checklist_complete(
         self, monkeypatch: pytest.MonkeyPatch

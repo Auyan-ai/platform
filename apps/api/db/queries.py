@@ -4686,6 +4686,54 @@ async def upsert_tenant_playbook(
     return TenantPlaybook(**dict(row))
 
 
+async def merge_tenant_playbook(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    brand_voice: str = "",
+    product_overview: str = "",
+    policies: str = "",
+    escalation_notes: str = "",
+    agent_instructions: str = "",
+    edited_by: UUID | None = None,
+) -> TenantPlaybook:
+    """Como `upsert_tenant_playbook`, pero fusiona: un campo vacío nunca pisa el existente.
+
+    Cada columna toma el valor nuevo solo si no está vacío; si lo está, conserva la
+    que ya había. Lo usa el envío del wizard, que no debe borrar lo ingerido de la web.
+    """
+    row = await conn.fetchrow(
+        """
+        INSERT INTO tenant_playbook
+          (tenant_id, brand_voice, product_overview, policies,
+           escalation_notes, agent_instructions, last_edited_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (tenant_id) DO UPDATE SET
+          brand_voice        = COALESCE(NULLIF(EXCLUDED.brand_voice, ''),
+                                        tenant_playbook.brand_voice),
+          product_overview   = COALESCE(NULLIF(EXCLUDED.product_overview, ''),
+                                        tenant_playbook.product_overview),
+          policies           = COALESCE(NULLIF(EXCLUDED.policies, ''),
+                                        tenant_playbook.policies),
+          escalation_notes   = COALESCE(NULLIF(EXCLUDED.escalation_notes, ''),
+                                        tenant_playbook.escalation_notes),
+          agent_instructions = COALESCE(NULLIF(EXCLUDED.agent_instructions, ''),
+                                        tenant_playbook.agent_instructions),
+          last_edited_by     = EXCLUDED.last_edited_by,
+          version            = tenant_playbook.version + 1
+        RETURNING *
+        """,
+        tenant_id,
+        brand_voice,
+        product_overview,
+        policies,
+        escalation_notes,
+        agent_instructions,
+        edited_by,
+    )
+    return TenantPlaybook(**dict(row))
+
+
 async def update_tenant_playbook_section(
     conn: asyncpg.Connection,
     tenant_id: UUID,
@@ -4761,6 +4809,43 @@ async def upsert_tenant_facts(
         edited_by,
     )
     return TenantFacts(**dict(row))
+
+
+def _is_blank_fact(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+async def merge_tenant_facts(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    data: dict[str, Any],
+    edited_by: UUID | None = None,
+) -> TenantFacts:
+    """Como `upsert_tenant_facts`, pero fusiona claves en vez de reemplazar `data`.
+
+    Las claves existentes que `data` no menciona se conservan; las que `data` trae
+    vacías (None o texto en blanco) se ignoran, así que nunca borran un valor. Una
+    clave con valor no vacío gana sobre la existente (fusión superficial de jsonb).
+    """
+    incoming = {k: v for k, v in data.items() if not _is_blank_fact(v)}
+    row = await conn.fetchrow(
+        """
+        INSERT INTO tenant_facts (tenant_id, data, last_edited_by)
+        VALUES ($1, $2::jsonb, $3)
+        ON CONFLICT (tenant_id) DO UPDATE SET
+          data           = tenant_facts.data || EXCLUDED.data,
+          last_edited_by = EXCLUDED.last_edited_by,
+          version        = tenant_facts.version + 1
+        RETURNING *
+        """,
+        tenant_id,
+        incoming,  # el codec del pool serializa a jsonb (no json.dumps manual)
+        edited_by,
+    )
+    d = dict(row)
+    if isinstance(d.get("data"), str):
+        d["data"] = json.loads(d["data"])
+    return TenantFacts(**d)
 
 
 # ============================================================

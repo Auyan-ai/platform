@@ -53,3 +53,48 @@ def test_client_views_exclude_simulated_conversations(reader: object) -> None:
     reads = _CONVERSATION_ROWS.findall(sql)
     assert reads
     assert sql.count("is_simulation") == len(reads), reads
+
+
+def test_merge_tenant_playbook_never_blanks_existing_columns() -> None:
+    """El wizard manda "" en lo que no pregunta: cada columna solo cambia si el valor
+    nuevo no está vacío (NULLIF + COALESCE); si no, conserva la existente."""
+    sql = inspect.getsource(queries.merge_tenant_playbook)
+    for column in (
+        "brand_voice",
+        "product_overview",
+        "policies",
+        "escalation_notes",
+        "agent_instructions",
+    ):
+        assert re.search(
+            rf"{column}\s*=\s*COALESCE\(NULLIF\(EXCLUDED\.{column}, ''\),\s*"
+            rf"tenant_playbook\.{column}\)",
+            sql,
+        ), column
+
+
+def test_merge_tenant_facts_merges_jsonb_instead_of_replacing() -> None:
+    sql = inspect.getsource(queries.merge_tenant_facts)
+    assert "tenant_facts.data || EXCLUDED.data" in sql
+    assert "data           = EXCLUDED.data" not in sql
+
+
+@pytest.mark.asyncio
+async def test_merge_tenant_facts_drops_blank_incoming_values() -> None:
+    from unittest.mock import AsyncMock
+    from uuid import uuid4
+
+    tenant_id = uuid4()
+    conn = AsyncMock()
+    conn.fetchrow.return_value = {
+        "tenant_id": tenant_id,
+        "data": {"company_name": "Marea", "shipping": "48h"},
+    }
+    facts = await queries.merge_tenant_facts(
+        conn,
+        tenant_id,
+        {"company_name": "Marea", "support_email": "", "business_hours": None, "x": "  "},
+    )
+    sent = conn.fetchrow.await_args.args[2]
+    assert sent == {"company_name": "Marea"}
+    assert facts.data == {"company_name": "Marea", "shipping": "48h"}

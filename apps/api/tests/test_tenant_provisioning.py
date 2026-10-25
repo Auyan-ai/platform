@@ -15,7 +15,9 @@ from apps.api.services.tenant_provisioning import (
     SlugTakenError,
     SupabaseAdminError,
     _find_user_by_email,
+    attach_tenant_admin,
     provision_tenant,
+    scaffold_tenant,
 )
 
 # ---------------------------------------------------------------------------
@@ -570,3 +572,171 @@ class TestCreateTenantEndpoint:
         payload = self._payload() | {"tenant_admin_email": "no-arroba"}
         resp = client.post("/tenants", json=payload)
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Piezas del alta: scaffold_tenant y attach_tenant_admin
+# ---------------------------------------------------------------------------
+
+
+def _noop_aops(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    mock = AsyncMock(return_value={"created": 8, "updated": 0, "skipped": 0, "tool_permissions": 11})
+    monkeypatch.setattr("apps.api.services.tenant_provisioning.provision_canonical_aops", mock)
+    return mock
+
+
+def _sql(conn: MagicMock) -> list[str]:
+    return [call.args[0] for call in conn.execute.await_args_list]
+
+
+def _ok_http() -> httpx.AsyncClient:
+    return _make_http(
+        httpx.MockTransport(lambda r: httpx.Response(200, json={"id": str(AUTH_USER_ID)}))
+    )
+
+
+class TestProvisionSameRows:
+    @pytest.mark.asyncio
+    async def test_provision_writes_the_same_statements_as_before(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Mismo conjunto de escrituras que el alta monolítica: tenants (lifecycle
+        'discovery'), users, tenant_onboarding, tenant_assignments, config, prompt y AOPs."""
+        conn = _make_conn()
+        aops = _noop_aops(monkeypatch)
+        result = await provision_tenant(
+            conn, settings=_make_settings(), http=_ok_http(), request=_make_request()
+        )
+
+        tenant_insert = conn.fetchrow.await_args_list[0]
+        assert "INSERT INTO tenants" in tenant_insert.args[0]
+        assert tenant_insert.args[2:] == ("lunaria-2", "Lunaria 2", "founding", "discovery")
+        statements = " | ".join(_sql(conn))
+        for table in (
+            "INSERT INTO users",
+            "INSERT INTO tenant_onboarding",
+            "INSERT INTO tenant_assignments",
+            "INSERT INTO tenant_configurations",
+            "INSERT INTO tenant_prompts",
+        ):
+            assert statements.count(table) == 1, table
+        assert conn.execute.await_count == 5
+        aops.assert_awaited_once_with(conn, result.tenant.id, created_by=None)
+        assert result.tenant_admin_user_id == AUTH_USER_ID
+        conn.transaction.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_failed_invite_touches_no_db_writes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        conn = _make_conn()
+        _noop_aops(monkeypatch)
+        http = _make_http(httpx.MockTransport(lambda r: httpx.Response(500, text="boom")))
+        with pytest.raises(SupabaseAdminError):
+            await provision_tenant(
+                conn, settings=_make_settings(), http=http, request=_make_request()
+            )
+        conn.execute.assert_not_awaited()
+        conn.fetchrow.assert_not_awaited()
+        conn.transaction.assert_not_called()
+
+
+class TestScaffoldTenant:
+    @pytest.mark.asyncio
+    async def test_every_write_is_guarded_and_repeatable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        conn = _make_conn()
+        aops = _noop_aops(monkeypatch)
+        tenant_id = uuid4()
+        for _ in range(2):
+            await scaffold_tenant(
+                conn,
+                tenant_id=tenant_id,
+                slug="lunaria-2",
+                company_name="Lunaria 2",
+                plan_tier="trial",
+                lifecycle_state="initial",
+            )
+        first = conn.fetchrow.await_args_list[0]
+        assert "ON CONFLICT (id)" in first.args[0]
+        assert first.args[1] == tenant_id
+        assert first.args[5] == "initial"
+        assert conn.execute.await_count == 6
+        for sql in _sql(conn):
+            assert "ON CONFLICT" in sql or "WHERE NOT EXISTS" in sql, sql
+        assert aops.await_count == 2
+        conn.transaction.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_without_id_reuses_live_tenant_with_same_slug(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        conn = _make_conn()
+        _noop_aops(monkeypatch)
+        existing = uuid4()
+        conn.fetchval = AsyncMock(return_value=existing)
+        await scaffold_tenant(
+            conn,
+            tenant_id=None,
+            slug="lunaria-2",
+            company_name="Lunaria 2",
+            plan_tier="trial",
+            lifecycle_state="initial",
+        )
+        assert conn.fetchrow.await_args_list[0].args[1] == existing
+
+    @pytest.mark.asyncio
+    async def test_without_id_creates_new_tenant_when_slug_free(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        conn = _make_conn()
+        _noop_aops(monkeypatch)
+        await scaffold_tenant(
+            conn,
+            tenant_id=None,
+            slug="nuevo",
+            company_name="Nuevo",
+            plan_tier="trial",
+            lifecycle_state="initial",
+        )
+        assert isinstance(conn.fetchrow.await_args_list[0].args[1], UUID)
+
+
+class TestAttachTenantAdmin:
+    @pytest.mark.asyncio
+    async def test_twice_does_not_duplicate_rows(self) -> None:
+        conn = _make_conn()
+        tenant_id = uuid4()
+        ids = [
+            await attach_tenant_admin(
+                conn,
+                _ok_http(),
+                _make_settings(),
+                tenant_id=tenant_id,
+                email="admin@lunaria.test",
+                name="Admin",
+                creator_internal_user_id=CREATOR_INTERNAL_USER_ID,
+            )
+            for _ in range(2)
+        ]
+        assert ids == [AUTH_USER_ID, AUTH_USER_ID]
+        sqls = _sql(conn)
+        assert len(sqls) == 4
+        assert all("ON CONFLICT" in sql for sql in sqls)
+
+    @pytest.mark.asyncio
+    async def test_failed_invite_touches_no_db(self) -> None:
+        conn = _make_conn()
+        http = _make_http(httpx.MockTransport(lambda r: httpx.Response(500, text="boom")))
+        with pytest.raises(SupabaseAdminError):
+            await attach_tenant_admin(
+                conn,
+                http,
+                _make_settings(),
+                tenant_id=uuid4(),
+                email="admin@lunaria.test",
+                name="Admin",
+                creator_internal_user_id=CREATOR_INTERNAL_USER_ID,
+            )
+        conn.execute.assert_not_awaited()
