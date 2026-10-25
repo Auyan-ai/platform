@@ -679,6 +679,7 @@ TerminationReason = Literal[
     "escalated_by_agent",
     "agent_loop_detected",
     "error",
+    "interactive",
 ]
 
 

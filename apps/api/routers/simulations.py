@@ -9,6 +9,9 @@ Endpoints:
   GET  /simulations/runs/{run_id}        → estado y resultado de un run
   POST /simulations/batches              → lanzar batch ASYNC, retorna batch_id
   GET  /simulations/batches/{batch_id}   → listar runs del batch (polling)
+  POST /simulations/chats                → abrir sesión de "Probar agente" (super_admin)
+  POST /simulations/chats/{id}/messages  → un turno real del grafo, sync (super_admin)
+  GET  /simulations/chats/{id}           → transcript de la sesión (super_admin)
 
 Tenant gate: el run se atribuye al tenant del scenario.
 super_admin puede operar cross-tenant con X-Tenant-Id.
@@ -18,11 +21,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import asdict
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from apps.api.core.errors import ForbiddenError, NotFoundError
-from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id
+from apps.api.core.security import (
+    AuthContext,
+    get_auth_context,
+    get_tenant_id,
+    require_role,
+)
 from apps.api.db.client import tenant_scope
 from apps.api.db.queries import (
     get_simulation_run,
@@ -34,6 +43,7 @@ from apps.api.db.queries import (
     list_runs_for_scenario,
     list_simulation_scenarios,
 )
+from apps.api.simulator.chat import ChatTurnTimeout, create_chat, get_chat, send_message
 from apps.api.simulator.cost_guard import (
     check_global_cost_cap,
     check_tenant_batch_rate_limit,
@@ -42,7 +52,7 @@ from apps.api.simulator.cost_guard import (
 )
 from apps.api.simulator.runner import run_batch, run_simulation
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -176,11 +186,13 @@ def _run_to_out(run) -> dict:
 
 def _get_deps():
     from apps.api.main import app
+
     return app.state.agent_deps
 
 
 def _get_graph():
     from apps.api.main import app
+
     return app.state.agent_service._graph
 
 
@@ -360,3 +372,86 @@ async def get_batch_runs(batch_id: UUID, auth: AuthDep, tenant_id: TenantIdDep) 
     for run in runs:
         _assert_tenant_access(auth, run.tenant_id, "run")
     return [RunOut(**_run_to_out(r)) for r in runs]
+
+
+# ─── Probar agente (chat interactivo) ──────────────────────────────────────────
+
+SuperAdminDep = Depends(require_role("super_admin"))
+
+
+class ChatMessageRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class ChatTurnOut(BaseModel):
+    decision: str
+    response_text: str
+    escalation_reason: str | None = None
+    skills: list[str] = []
+    trace_id: str | None = None
+    cost_cents: float
+    session_cost_cents: float
+    error: str | None = None
+
+
+class ChatOut(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    conversation_id: UUID | None = None
+    turns: list[dict]
+    cost_cents: float
+    started_at: str | None = None
+
+
+def _chat_to_out(run) -> ChatOut:
+    return ChatOut(
+        id=run.id,
+        tenant_id=run.tenant_id,
+        conversation_id=run.conversation_id,
+        turns=run.transcript or [],
+        cost_cents=float(run.cost_cents or 0),
+        started_at=run.started_at.isoformat() if run.started_at else None,
+    )
+
+
+@router.post(
+    "/chats",
+    summary="Abrir una sesión de Probar agente",
+    dependencies=[SuperAdminDep],
+)
+async def create_chat_session(auth: AuthDep, tenant_id: TenantIdDep) -> ChatOut:
+    run = await create_chat(tenant_id, triggered_by=auth.user_id)
+    return _chat_to_out(run)
+
+
+@router.post(
+    "/chats/{chat_id}/messages",
+    summary="Un turno real del grafo (sync)",
+    dependencies=[SuperAdminDep],
+)
+async def post_chat_message(
+    chat_id: UUID, body: ChatMessageRequest, tenant_id: TenantIdDep
+) -> ChatTurnOut:
+    deps = _get_deps()
+    try:
+        turn = await send_message(
+            tenant_id,
+            chat_id,
+            body.text,
+            graph=_get_graph(),
+            observability=deps.observability,
+        )
+    except ChatTurnTimeout as exc:
+        raise HTTPException(
+            status_code=504, detail={"code": "chat_turn_timeout", "message": str(exc)}
+        ) from exc
+    return ChatTurnOut(**asdict(turn))
+
+
+@router.get(
+    "/chats/{chat_id}",
+    summary="Transcript de una sesión de Probar agente",
+    dependencies=[SuperAdminDep],
+)
+async def get_chat_session(chat_id: UUID, tenant_id: TenantIdDep) -> ChatOut:
+    return _chat_to_out(await get_chat(tenant_id, chat_id))

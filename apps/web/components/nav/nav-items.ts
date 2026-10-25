@@ -7,6 +7,7 @@ import {
   FileText,
   FlaskConical,
   Mail,
+  MessageCircleQuestion,
   MessagesSquare,
   ScrollText,
   Sparkles,
@@ -26,6 +27,7 @@ export type TenantSection =
   | 'aops'
   | 'proposals'
   | 'simulator'
+  | 'probar-agente'
   | 'doctor'
 
 export interface TenantNavItem {
@@ -121,6 +123,12 @@ export const TENANT_NAV_GROUPS: TenantNavGroup[] = [
         icon: FlaskConical,
         section: 'simulator',
         keywords: ['simulator', 'pruebas', 'tests'],
+      },
+      {
+        label: 'Probar agente',
+        icon: MessageCircleQuestion,
+        section: 'probar-agente',
+        keywords: ['chat', 'demo', 'probar', 'batería'],
       },
     ],
   },

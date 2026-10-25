@@ -64,5 +64,7 @@ export const queryKeys = {
     run: (tenantId: string, runId: string) => ['simulations', tenantId, 'runs', runId] as const,
     batch: (tenantId: string, batchId: string) =>
       ['simulations', tenantId, 'batches', batchId] as const,
+    chat: (tenantId: string, chatId: string) =>
+      ['simulations', tenantId, 'chats', chatId] as const,
   },
 } as const
