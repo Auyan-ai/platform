@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 from apps.api.services.site_ingestion.models import (
     TRANSITIONS,
     IngestionStatus,
@@ -204,3 +205,30 @@ def test_ingestion_state_machine() -> None:
     assert predecessors_of(IngestionStatus.READY) == ["extracting"]
     assert predecessors_of(IngestionStatus.EXTRACTING) == ["fetching"]
     assert predecessors_of(IngestionStatus.FETCHING) == ["extracting", "fetching", "queued"]
+
+
+async def test_a_finished_ingestion_logs_its_summary_without_breaking_logging(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from uuid import uuid4
+
+    from apps.api.db.site_ingestions import ClaimedIngestion
+    from apps.api.services.site_ingestion import worker as worker_module
+    from apps.api.services.site_ingestion.models import IngestionStats, Platform
+
+    async def fake_run(job: ClaimedIngestion, *, transport: object = None) -> IngestionStats:
+        return IngestionStats(root_url=job.root_url, platform=Platform.SHOPIFY, created=11)
+
+    monkeypatch.setattr(worker_module, "run_ingestion", fake_run)
+    job = ClaimedIngestion(
+        id=uuid4(), tenant_id=uuid4(), root_url="https://alohas.io", attempts=1,
+        max_attempts=3, requested_by=None,
+    )
+    worker = worker_module.SiteIngestionWorker(lease_seconds=3600)
+
+    with caplog.at_level("INFO", logger=worker_module.__name__):
+        await worker.execute(job)
+
+    ready = [r for r in caplog.records if r.getMessage() == "site_ingestion_ready"]
+    assert len(ready) == 1
+    assert ready[0].submissions_created == 11
