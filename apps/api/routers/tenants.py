@@ -40,6 +40,8 @@ from apps.api.db.queries import (
     list_weekly_reports,
     mark_weekly_report_send_failed,
     mark_weekly_report_sent,
+    merge_tenant_facts,
+    merge_tenant_playbook,
     reject_tenant_knowledge_submission,
     submit_tenant_onboarding,
     submit_weekly_report_for_review,
@@ -1210,7 +1212,8 @@ async def submit_my_tenant_onboarding(
         step2 = sd.get("2") or {}
         step3 = sd.get("3") or {}
         step9 = sd.get("9") or {}
-        await upsert_tenant_playbook(
+        # Fusiona (no reemplaza): el wizard no borra lo ya ingerido de la web ni lo editado.
+        await merge_tenant_playbook(
             conn,
             tenant_id=tenant_id,
             brand_voice=str(step2.get("voice_traits") or ""),
@@ -1228,7 +1231,7 @@ async def submit_my_tenant_onboarding(
         }
         facts_data = {k: v for k, v in _facts_candidates.items() if v is not None}
         if facts_data:
-            await upsert_tenant_facts(
+            await merge_tenant_facts(
                 conn,
                 tenant_id=tenant_id,
                 data=facts_data,

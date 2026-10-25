@@ -11,6 +11,10 @@ Flujo:
        Tenant nace con lifecycle 'discovery' porque el invite ya se mandó.
     4. Devuelve resultado con tenant + auth_user_id + invite_sent.
 
+El alta se compone de dos piezas idempotentes reutilizables (`scaffold_tenant` y
+`attach_tenant_admin`); `provision_tenant` las encadena con el invite fuera de la
+transacción.
+
 Idempotencia: si el email ya tiene auth user, lo recupera y le manda un magic link
 por correo (no falla). El INSERT en public.users hace ON CONFLICT (id) DO UPDATE para
 tolerar re-provisioning del mismo email a un tenant nuevo.
@@ -25,7 +29,7 @@ import asyncpg
 import httpx
 from apps.api.aops.canonical import provision_canonical_aops
 from apps.api.core.config import Settings
-from apps.api.db.models import PlanTier, Tenant
+from apps.api.db.models import AgentLifecycleState, PlanTier, Tenant
 
 # Prompt base que nace con cada tenant. Es el fallback legacy: en runtime
 # select_aop sobreescribe system_prompt con el AOP compilado (todo tenant nace
@@ -123,6 +127,145 @@ async def ensure_tenant_config_and_prompt(
     }
 
 
+async def scaffold_tenant(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID | None,
+    slug: str,
+    company_name: str,
+    plan_tier: PlanTier,
+    lifecycle_state: AgentLifecycleState,
+) -> Tenant:
+    """Asegura el tenant y todo lo que el agente necesita para arrancar. Idempotente.
+
+    Crea (o reutiliza) la fila de `tenants`, `tenant_configurations`, el prompt base
+    'system', `tenant_onboarding` y los 8 AOPs canónicos con sus permisos. Volver a
+    llamarla no duplica ni pisa nada: cada INSERT lleva ON CONFLICT / NOT EXISTS.
+
+    `tenant_id=None`: reutiliza el tenant vivo con ese slug o crea uno nuevo. Con un
+    id explícito, el `INSERT ... ON CONFLICT (id)` converge a la misma fila.
+
+    No abre transacción: el llamador decide el alcance atómico (`provision_tenant`
+    la comparte con `attach_tenant_admin`).
+    """
+    if tenant_id is None:
+        existing = await conn.fetchval(
+            "SELECT id FROM tenants WHERE slug = $1 AND deleted_at IS NULL",
+            slug,
+        )
+        tenant_id = existing if existing is not None else uuid4()
+
+    row = await conn.fetchrow(
+        """
+        INSERT INTO tenants (id, slug, name, plan_tier, agent_lifecycle_state)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (id) DO UPDATE SET slug = tenants.slug
+        RETURNING id, slug, name, status, agent_lifecycle_state, plan_tier
+        """,
+        tenant_id,
+        slug,
+        company_name,
+        plan_tier,
+        lifecycle_state,
+    )
+    assert row is not None
+    tenant = Tenant(**dict(row))
+
+    await conn.execute(
+        "INSERT INTO tenant_onboarding (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING",
+        tenant.id,
+    )
+
+    # tenant_configurations (1:1) + prompt 'system' activo. Sin ambos,
+    # load_tenant_context hard-failea (tenant_config_missing /
+    # no_active_system_prompt) en el primer mensaje.
+    await ensure_tenant_config_and_prompt(conn, tenant.id, company_name=company_name)
+
+    # Copy-on-create: cada tenant nace con su propia copia de los 8 AOPs canónicos
+    # + permisos default (L1/L2 auto, L3 approval, refund_partial apagada).
+    # created_by=None: el creador es un internal_user, y aop_versions.created_by
+    # referencia users(id); None evita una violación de FK.
+    await provision_canonical_aops(conn, tenant.id, created_by=None)
+    return tenant
+
+
+async def _write_tenant_admin_rows(
+    conn: asyncpg.Connection,
+    *,
+    tenant_id: UUID,
+    auth_user_id: UUID,
+    email: str,
+    name: str,
+    creator_internal_user_id: UUID,
+) -> None:
+    """Escrituras de DB del tenant_admin: `users` + `tenant_assignments`. Idempotente."""
+    await conn.execute(
+        """
+        INSERT INTO users (id, tenant_id, email, full_name, role)
+        VALUES ($1, $2, $3, $4, 'tenant_admin')
+        ON CONFLICT (id) DO UPDATE
+          SET tenant_id  = EXCLUDED.tenant_id,
+              email      = EXCLUDED.email,
+              full_name  = EXCLUDED.full_name,
+              role       = EXCLUDED.role,
+              deleted_at = NULL
+        """,
+        auth_user_id,
+        tenant_id,
+        email,
+        name,
+    )
+
+    # ON CONFLICT sin target: lo cubre el índice único parcial
+    # (tenant_id, internal_user_id, role_in_tenant) WHERE unassigned_at IS NULL.
+    await conn.execute(
+        """
+        INSERT INTO tenant_assignments
+          (tenant_id, internal_user_id, role_in_tenant, assigned_by)
+        VALUES ($1, $2, 'aide_primary', $2)
+        ON CONFLICT DO NOTHING
+        """,
+        tenant_id,
+        creator_internal_user_id,
+    )
+
+
+async def attach_tenant_admin(
+    conn: asyncpg.Connection,
+    http: httpx.AsyncClient,
+    settings: Settings,
+    *,
+    tenant_id: UUID,
+    email: str,
+    name: str,
+    creator_internal_user_id: UUID,
+) -> UUID:
+    """Invita (o recupera) al tenant_admin y lo enlaza al tenant. Idempotente.
+
+    Orden: primero el correo de acceso (Supabase Auth); si falla, lanza
+    SupabaseAdminError sin tocar la DB. Luego `users` y `tenant_assignments`.
+    Repetirla reenvía el correo (magic link si el usuario ya existe) pero no
+    duplica filas. El tenant debe existir (`scaffold_tenant`). No abre transacción.
+
+    Returns: el id del auth user.
+    """
+    auth_user_id = await _invite_or_get_user(
+        http=http,
+        supabase_url=str(settings.supabase_url).rstrip("/"),
+        service_role=settings.supabase_service_role_key.get_secret_value(),
+        email=email,
+    )
+    await _write_tenant_admin_rows(
+        conn,
+        tenant_id=tenant_id,
+        auth_user_id=auth_user_id,
+        email=email,
+        name=name,
+        creator_internal_user_id=creator_internal_user_id,
+    )
+    return auth_user_id
+
+
 async def provision_tenant(
     conn: asyncpg.Connection,
     *,
@@ -130,7 +273,12 @@ async def provision_tenant(
     http: httpx.AsyncClient,
     request: ProvisionRequest,
 ) -> ProvisionResult:
-    """Crea tenant + tenant_admin + manda invite. Ver docstring del módulo."""
+    """Crea tenant + tenant_admin + manda invite. Ver docstring del módulo.
+
+    Compone `scaffold_tenant` + las escrituras de `attach_tenant_admin`, pero el
+    invite va ANTES de abrir la transacción (no se sostiene una transacción durante
+    una llamada HTTP, y un correo fallido no toca la DB).
+    """
     existing_slug = await conn.fetchval(
         "SELECT 1 FROM tenants WHERE slug = $1 AND deleted_at IS NULL",
         request.slug,
@@ -138,76 +286,31 @@ async def provision_tenant(
     if existing_slug is not None:
         raise SlugTakenError(request.slug)
 
-    supabase_url = str(settings.supabase_url).rstrip("/")
-    service_role = settings.supabase_service_role_key.get_secret_value()
-
     auth_user_id = await _invite_or_get_user(
         http=http,
-        supabase_url=supabase_url,
-        service_role=service_role,
+        supabase_url=str(settings.supabase_url).rstrip("/"),
+        service_role=settings.supabase_service_role_key.get_secret_value(),
         email=request.tenant_admin_email,
     )
 
+    # Un solo bloque atómico: si algo falla, no queda un tenant a medio provisionar.
     async with conn.transaction():
-        tenant_id = uuid4()
-        row = await conn.fetchrow(
-            """
-            INSERT INTO tenants (id, slug, name, plan_tier, agent_lifecycle_state)
-            VALUES ($1, $2, $3, $4, 'discovery')
-            RETURNING id, slug, name, status, agent_lifecycle_state, plan_tier
-            """,
-            tenant_id,
-            request.slug,
-            request.company_name,
-            request.plan_tier,
+        tenant = await scaffold_tenant(
+            conn,
+            tenant_id=uuid4(),
+            slug=request.slug,
+            company_name=request.company_name,
+            plan_tier=request.plan_tier,
+            lifecycle_state="discovery",
         )
-        assert row is not None
-        tenant = Tenant(**dict(row))
-
-        await conn.execute(
-            """
-            INSERT INTO users (id, tenant_id, email, full_name, role)
-            VALUES ($1, $2, $3, $4, 'tenant_admin')
-            ON CONFLICT (id) DO UPDATE
-              SET tenant_id  = EXCLUDED.tenant_id,
-                  email      = EXCLUDED.email,
-                  full_name  = EXCLUDED.full_name,
-                  role       = EXCLUDED.role,
-                  deleted_at = NULL
-            """,
-            auth_user_id,
-            tenant_id,
-            request.tenant_admin_email,
-            request.tenant_admin_name,
+        await _write_tenant_admin_rows(
+            conn,
+            tenant_id=tenant.id,
+            auth_user_id=auth_user_id,
+            email=request.tenant_admin_email,
+            name=request.tenant_admin_name,
+            creator_internal_user_id=request.creator_internal_user_id,
         )
-
-        await conn.execute(
-            "INSERT INTO tenant_onboarding (tenant_id) VALUES ($1)",
-            tenant_id,
-        )
-
-        await conn.execute(
-            """
-            INSERT INTO tenant_assignments
-              (tenant_id, internal_user_id, role_in_tenant, assigned_by)
-            VALUES ($1, $2, 'aide_primary', $2)
-            """,
-            tenant_id,
-            request.creator_internal_user_id,
-        )
-
-        # tenant_configurations (1:1) + prompt 'system' activo. Sin ambos,
-        # load_tenant_context hard-failea (tenant_config_missing /
-        # no_active_system_prompt) en el primer mensaje.
-        await ensure_tenant_config_and_prompt(conn, tenant_id, company_name=request.company_name)
-
-        # Copy-on-create: cada tenant nace con su propia copia de los 8 AOPs canónicos
-        # + permisos default (L1/L2 auto, L3 approval, refund_partial apagada). Dentro de
-        # la misma transacción → atómico: si algo falla, no queda un tenant a medio
-        # provisionar.
-        # created_by=None: el creador es un internal_user, y aop_versions.created_by
-        # referencia users(id); None evita una violación de FK.
-        await provision_canonical_aops(conn, tenant_id, created_by=None)
 
     return ProvisionResult(
         tenant=tenant,
