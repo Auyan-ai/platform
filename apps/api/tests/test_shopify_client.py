@@ -5,7 +5,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from apps.api.integrations.shopify import ShopifyClient, _country_to_iso2
+from apps.api.integrations.commerce import country_to_iso2
+from apps.api.integrations.shopify import ShopifyClient
 
 DOMAIN = "myshop.myshopify.com"
 TOKEN = "shpat_test_token"
@@ -367,7 +368,7 @@ class TestCountryToIso2:
         ],
     )
     def test_resolves_or_none(self, raw: str, expected: str | None) -> None:
-        assert _country_to_iso2(raw) == expected
+        assert country_to_iso2(raw) == expected
 
 
 class TestUpdateShippingAddress:

@@ -19,7 +19,7 @@ from apps.api.db.queries import (
     get_integration_credentials_encrypted,
     get_primary_integration_for_kind,
 )
-from apps.api.integrations import shopify
+from apps.api.integrations import shopify, woocommerce  # noqa: F401  (registran su adapter)
 from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.commerce import CommerceAdapter
 from apps.api.integrations.registry import IntegrationRegistry

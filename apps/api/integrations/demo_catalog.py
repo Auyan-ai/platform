@@ -105,6 +105,7 @@ class DemoCatalogAdapter:
     """Catálogo en vivo de una tienda pública. Sin credenciales, solo lectura."""
 
     capabilities = frozenset({CommerceCapability.PRODUCT_READ})
+    platform_name = "la tienda"
 
     def __init__(
         self,
