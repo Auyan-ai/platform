@@ -132,7 +132,7 @@ class SiteIngestionWorker:
                 **extra,
                 "platform": stats.platform.value if stats.platform else None,
                 "docs": stats.docs,
-                "created": stats.created,
+                "submissions_created": stats.created,
                 "requests": stats.requests,
                 "rate_limited": stats.rate_limited,
                 "seconds": round(stats.seconds, 1),
