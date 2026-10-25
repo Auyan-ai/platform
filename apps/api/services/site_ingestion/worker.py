@@ -14,6 +14,8 @@ from apps.api.db.site_ingestions import (
     fail_site_ingestion,
     release_site_ingestion,
 )
+from apps.api.services.knowledge_ingestion import Embedder
+from apps.api.services.site_ingestion.auto_approve import auto_approve_if_demo
 from apps.api.services.site_ingestion.models import IngestionStatus
 from apps.api.services.site_ingestion.orchestrator import NoContentError, run_ingestion
 
@@ -35,8 +37,10 @@ class SiteIngestionWorker:
         poll_interval_seconds: float = 15.0,
         lease_seconds: int = 120,
         transport: httpx.AsyncBaseTransport | None = None,
+        embedder: Embedder | None = None,
     ) -> None:
         self._transport = transport
+        self._embedder = embedder
         self._concurrency = concurrency
         self._poll_interval = poll_interval_seconds
         self._lease_seconds = lease_seconds
@@ -138,6 +142,16 @@ class SiteIngestionWorker:
                 "seconds": round(stats.seconds, 1),
             },
         )
+        await self._auto_approve_demo(job)
+
+    async def _auto_approve_demo(self, job: ClaimedIngestion) -> None:
+        if self._embedder is None:
+            logger.warning("demo_auto_approve_without_embedder", extra=_log_extra(job))
+            return
+        try:
+            await auto_approve_if_demo(job, self._embedder)
+        except Exception:
+            logger.exception("demo_auto_approve_failed", extra=_log_extra(job))
 
     async def _fail(self, job: ClaimedIngestion, reason: str, *, retry: bool) -> None:
         extra = {**_log_extra(job), "reason": reason}

@@ -14,7 +14,6 @@ from apps.api.core.security import AuthContext, get_auth_context, get_tenant_id,
 from apps.api.db.client import bootstrap_connection, tenant_scope
 from apps.api.db.models import IntegrationGroup, OnboardingChecklist
 from apps.api.db.queries import (
-    approve_tenant_knowledge_submission_with_document,
     approve_weekly_report,
     compute_onboarding_checklist,
     create_or_refresh_weekly_report_draft,
@@ -26,7 +25,6 @@ from apps.api.db.queries import (
     get_outbound_email_template,
     get_tenant_configuration,
     get_tenant_facts,
-    get_tenant_knowledge_submission,
     get_tenant_onboarding,
     get_tenant_playbook,
     get_tenant_usage_range,
@@ -70,7 +68,8 @@ from apps.api.services.integrations_crypto import (
     encrypt_credentials,
     get_integration_crypto_key,
 )
-from apps.api.services.knowledge_ingestion import chunk_text_for_kb, embed_kb_chunks
+from apps.api.services.kb_approval import FailureCode, approve_submissions_batch
+from apps.api.services.knowledge_ingestion import make_embedder
 from apps.api.services.tenant_provisioning import (
     ProvisionRequest,
     SlugTakenError,
@@ -1662,43 +1661,30 @@ async def approve_my_kb_submission(
     auth: AuthDep,
     settings: SettingsDep,
 ) -> TenantKnowledgeSubmissionResponse:
-    async with tenant_scope(tenant_id) as conn:
-        submission = await get_tenant_knowledge_submission(conn, tenant_id, submission_id)
-    if submission is None:
-        raise HTTPException(status_code=404, detail="Submission no encontrado")
-    if submission.status != "pending_review":
-        raise HTTPException(status_code=409, detail="Submission ya revisado")
-    if not submission.content.strip() or (
-        submission.source_url and submission.content.strip() == submission.source_url.strip()
-    ):
-        raise HTTPException(status_code=400, detail="Submission sin contenido indexable")
-
-    chunks = chunk_text_for_kb(submission.content)
-    if not chunks:
-        raise HTTPException(status_code=400, detail="Submission sin contenido indexable")
-
     deps = getattr(request.app.state, "agent_deps", None)
     openai_client = getattr(deps, "openai", None)
     if openai_client is None:
         raise HTTPException(status_code=503, detail="Cliente OpenAI no inicializado")
 
-    embedded_chunks = await embed_kb_chunks(
-        openai_client,
-        chunks,
-        settings=settings,
+    result = await approve_submissions_batch(
+        tenant_id=tenant_id,
+        submission_ids=[submission_id],
+        reviewed_by=auth.user_id,
+        review_note=body.review_note,
+        confirmation="confirmed",
+        embedder=make_embedder(openai_client, settings=settings),
     )
-    async with tenant_scope(tenant_id) as conn:
-        approved = await approve_tenant_knowledge_submission_with_document(
-            conn,
-            tenant_id,
-            submission_id,
-            reviewed_by=auth.user_id,
-            review_note=body.review_note,
-            chunks=embedded_chunks,
-        )
-    if approved is None:
-        raise HTTPException(status_code=409, detail="Submission ya revisado")
-    return TenantKnowledgeSubmissionResponse.model_validate(approved)
+    if result.approved:
+        return TenantKnowledgeSubmissionResponse.model_validate(result.approved[0])
+    if result.failures:
+        failure = result.failures[0]
+        status_code = {
+            FailureCode.NOT_FOUND: 404,
+            FailureCode.NO_CONTENT: 400,
+            FailureCode.EMBEDDING_FAILED: 502,
+        }.get(failure.code, 500)
+        raise HTTPException(status_code=status_code, detail=failure.detail)
+    raise HTTPException(status_code=409, detail="Submission ya revisado")
 
 
 @router.get(

@@ -37,6 +37,7 @@ AgentLifecycleState = Literal[
 ]
 PlanTier = Literal["founding", "standard", "trial"]
 TenantOrigin = Literal["client", "demo"]
+KbConfirmation = Literal["confirmed", "unconfirmed"]
 TenantKnowledgeSourceType = Literal["text", "url", "file"]
 TenantKnowledgeSubmissionStatus = Literal["pending_review", "approved", "rejected", "superseded"]
 WeeklyReportStatus = Literal["draft", "pending_review", "approved", "sent"]

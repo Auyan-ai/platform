@@ -47,5 +47,35 @@ async def get_query_embedding(
     return last_embedding
 
 
+async def get_embeddings(
+    client: openai.AsyncOpenAI,
+    texts: list[str],
+    *,
+    model: str = "text-embedding-3-small",
+    max_retries: int = 3,
+) -> list[list[float]]:
+    """Embeddings de una lista de textos en UNA petición, en el mismo orden que la entrada."""
+    if not texts:
+        return []
+    if any(not text.strip() for text in texts):
+        raise ValueError("No se puede embedir texto vacío")
+
+    result: list[list[float]] | None = None
+    async for attempt in AsyncRetrying(
+        stop=stop_after_attempt(max_retries),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type(RETRYABLE_ERRORS),
+        reraise=True,
+    ):
+        with attempt:
+            resp = await client.embeddings.create(model=model, input=texts)
+            ordered = sorted(resp.data, key=lambda item: item.index)
+            result = [item.embedding for item in ordered]
+    assert result is not None
+    if len(result) != len(texts):
+        raise ValueError(f"OpenAI devolvió {len(result)} embeddings para {len(texts)} textos")
+    return result
+
+
 def build_openai_client(api_key: str, *, timeout: float = 30.0) -> openai.AsyncOpenAI:
     return openai.AsyncOpenAI(api_key=api_key, timeout=timeout)

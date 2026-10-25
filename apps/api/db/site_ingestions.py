@@ -116,6 +116,28 @@ async def get_active_site_ingestion(
     return _ingestion_from_row(row) if row else None
 
 
+async def get_latest_site_ingestion(
+    conn: asyncpg.Connection, tenant_id: UUID
+) -> SiteIngestion | None:
+    """La ingesta a mostrar en la ficha: la activa; si no hay, la última que dejó fuentes
+    (una reingesta sin cambios no crea ninguna y no debe tapar el lote pendiente); si no, la
+    última."""
+    row = await conn.fetchrow(
+        """
+        SELECT i.* FROM site_ingestions i
+         WHERE i.tenant_id = $1 AND i.deleted_at IS NULL
+         ORDER BY (i.status = ANY($2::text[])) DESC,
+                  EXISTS (SELECT 1 FROM tenant_knowledge_submissions s
+                           WHERE s.ingestion_id = i.id AND s.deleted_at IS NULL) DESC,
+                  i.created_at DESC
+         LIMIT 1
+        """,
+        tenant_id,
+        _ACTIVE,
+    )
+    return _ingestion_from_row(row) if row else None
+
+
 async def get_site_ingestion(
     conn: asyncpg.Connection, tenant_id: UUID, ingestion_id: UUID
 ) -> SiteIngestion | None:
@@ -298,6 +320,47 @@ async def known_source_contents(
     return [
         KnownContent(
             source_key=r["source_key"], sha256=content_sha256(r["content"]), pending=r["pending"]
+        )
+        for r in rows
+    ]
+
+
+@dataclass(frozen=True)
+class IngestionSubmission:
+    id: UUID
+    title: str
+    source_url: str | None
+    source_key: str | None
+    status: str
+    metadata: dict[str, Any]
+    review_note: str | None
+    reviewed_at: datetime | None
+
+
+async def list_ingestion_submissions(
+    conn: asyncpg.Connection, tenant_id: UUID, ingestion_id: UUID
+) -> list[IngestionSubmission]:
+    rows = await conn.fetch(
+        """
+        SELECT id, title, source_url, source_key, status::text AS status, metadata,
+               review_note, reviewed_at
+          FROM tenant_knowledge_submissions
+         WHERE tenant_id = $1 AND ingestion_id = $2 AND deleted_at IS NULL
+         ORDER BY source_key, created_at
+        """,
+        tenant_id,
+        ingestion_id,
+    )
+    return [
+        IngestionSubmission(
+            id=r["id"],
+            title=r["title"],
+            source_url=r["source_url"],
+            source_key=r["source_key"],
+            status=r["status"],
+            metadata=json.loads(r["metadata"]) if isinstance(r["metadata"], str) else r["metadata"],
+            review_note=r["review_note"],
+            reviewed_at=r["reviewed_at"],
         )
         for r in rows
     ]
