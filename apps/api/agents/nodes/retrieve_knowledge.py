@@ -1,7 +1,9 @@
 """Nodo: retrieve_knowledge.
 
-RAG sobre `knowledge_base_chunks` del tenant. Embedding del inbound vía OpenAI,
-luego top-K por similitud coseno con filtro de similitud mínima (config).
+RAG sobre `knowledge_base_chunks` del tenant. La consulta junta los últimos
+mensajes del cliente (un seguimiento como "¿Y a Canarias?" no dice nada solo),
+se embebe vía OpenAI y se buscan los top-K por similitud coseno con un umbral
+opcional (config; 0 = sin umbral).
 
 Si la KB está vacía o no hay chunks suficientemente similares, `retrieved_chunks`
 queda vacío — el agente igual puede decidir respond/escalate sin contexto extra.
@@ -23,11 +25,34 @@ from apps.api.integrations.openai_embeddings import get_query_embedding
 logger = logging.getLogger(__name__)
 
 
+def build_retrieval_query(
+    history: list[dict],
+    inbound_content: str,
+    *,
+    max_messages: int,
+) -> tuple[str, int]:
+    """Consulta del RAG: los últimos `max_messages` mensajes del cliente, el más nuevo al final.
+
+    Devuelve (consulta, nº de mensajes usados). El inbound siempre entra, esté o no
+    ya en el historial.
+    """
+    texts = [
+        m["content"]
+        for m in history
+        if m.get("role") == "customer" and (m.get("content") or "").strip()
+    ]
+    if not texts or texts[-1] != inbound_content:
+        texts = [t for t in texts if t != inbound_content] + [inbound_content]
+    used = texts[-max(1, max_messages) :]
+    return "\n".join(used), len(used)
+
+
 def _emit_retrieval_event(
     deps: AgentDependencies,
     state: AgentState,
     *,
     chunks: list[KnowledgeChunk],
+    query_messages: int = 0,
     error_type: str | None = None,
 ) -> None:
     """Un evento por turno con lo que recuperó el RAG. Sin contenido de chunks."""
@@ -37,6 +62,7 @@ def _emit_retrieval_event(
         label = "Knowledge retrieval failed"
         detail: dict[str, object] = {
             "chunk_count": 0,
+            "query_messages": query_messages,
             "error_type": error_type,
             "chunks": [],
         }
@@ -46,6 +72,8 @@ def _emit_retrieval_event(
         label = f"Knowledge retrieved ({len(chunks)} {noun})"
         detail = {
             "chunk_count": len(chunks),
+            "query_messages": query_messages,
+            "top_similarity": round(max(c.similarity for c in chunks), 4) if chunks else None,
             "chunks": [
                 {
                     "document_id": str(c.document_id),
@@ -72,7 +100,11 @@ def make_retrieve_knowledge_node(
 ) -> Callable[[AgentState], Awaitable[dict]]:
     async def _node(state: AgentState) -> dict:
         tenant_id = UUID(state["tenant_id"])
-        query = state["inbound_message_content"]
+        query, query_messages = build_retrieval_query(
+            state.get("conversation_history") or [],
+            state["inbound_message_content"],
+            max_messages=deps.settings.rag_query_messages,
+        )
 
         # OpenAI embeddings caído NO tumba el turno: el RAG es contexto opcional
         # por diseño (KB vacía ya devuelve []), así que se degrada a chunks=[]
@@ -92,8 +124,18 @@ def make_retrieve_knowledge_node(
                     "conversation_id": state.get("conversation_id"),
                 },
             )
-            _emit_retrieval_event(deps, state, chunks=[], error_type=type(exc).__name__)
-            return {"retrieved_chunks": []}
+            _emit_retrieval_event(
+                deps, state, chunks=[], query_messages=query_messages, error_type=type(exc).__name__
+            )
+            return {
+                "retrieved_chunks": [],
+                "retrieval_summary": {
+                    "query_messages": query_messages,
+                    "chunk_count": 0,
+                    "top_similarity": None,
+                    "error_type": type(exc).__name__,
+                },
+            }
 
         async with tenant_scope(tenant_id) as conn:
             chunks = await search_knowledge_chunks(
@@ -104,9 +146,14 @@ def make_retrieve_knowledge_node(
                 min_similarity=deps.settings.rag_min_similarity,
             )
 
-        _emit_retrieval_event(deps, state, chunks=chunks)
+        _emit_retrieval_event(deps, state, chunks=chunks, query_messages=query_messages)
         return {
             "retrieved_chunks": [c.model_dump(mode="json") for c in chunks],
+            "retrieval_summary": {
+                "query_messages": query_messages,
+                "chunk_count": len(chunks),
+                "top_similarity": round(max(c.similarity for c in chunks), 4) if chunks else None,
+            },
         }
 
     return _node

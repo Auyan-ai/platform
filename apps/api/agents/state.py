@@ -73,6 +73,8 @@ class AgentState(TypedDict, total=False):
 
     # --- Producido por retrieve_knowledge ---
     retrieved_chunks: list[dict]
+    # Resumen sin contenido para LangSmith: nº de mensajes de la consulta, chunks, similitud máxima.
+    retrieval_summary: dict
 
     # --- Producido por reason ---
     # None explícito cuando reason pide una skill: anula la decisión de una

@@ -140,8 +140,11 @@ class Settings(BaseSettings):
     # Los modelos de LLM viven en `ModelRegistry` / `get_models()`.
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int = 1536
-    rag_top_k: int = 5
-    rag_min_similarity: float = 0.6
+    rag_top_k: int = 20
+    # 0.0 = sin umbral: text-embedding-3-small da 0,5-0,65 al fragmento correcto (#410).
+    rag_min_similarity: float = 0.0
+    # Mensajes del cliente (los últimos) que forman la consulta del RAG.
+    rag_query_messages: int = 3
     history_limit: int = 20
     # Intentos por llamada y tope de cada intento; el total lo acota LLM_CALL_BUDGET_SECONDS.
     llm_max_retries: int = 3

@@ -84,6 +84,7 @@ GRAPH_RECURSION_LIMIT = 50
 _NODE_OUTPUT_KEYS: dict[str, list[str]] = {
     "resolve_identity": ["identity_summary", "identity_error"],
     "select_aop": ["aop_slug", "aop_version", "intent_confidence", "llm_call"],
+    "retrieve_knowledge": ["retrieval_summary"],
     "reason": ["decision", "confidence", "pending_tool_call", "agent_response", "llm_call"],
     "execute_skill": ["tool_results", "pending_approval_id", "escalation_reason"],
     "supervise": [
