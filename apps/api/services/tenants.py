@@ -8,7 +8,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from apps.api.core.errors import NotFoundError
+from apps.api.core.errors import ConflictError, NotFoundError
+from apps.api.db.kb_confirmation import count_unconfirmed_kb_documents
 from apps.api.db.models import (
     IntegrationGroup,
     IntegrationKind,
@@ -36,6 +37,28 @@ async def get_tenant(conn: asyncpg.Connection, tenant_id: UUID) -> Tenant:
     if tenant is None:
         raise NotFoundError(f"tenant {tenant_id} not found", code="tenant_not_found")
     return tenant
+
+
+# Estados en los que el agente atiende (en sombra o en vivo): con conocimiento sin confirmar
+# no se entra en ellos (ADR 0015 §6).
+LIFECYCLE_STATES_REQUIRING_CONFIRMED_KB: frozenset[str] = frozenset({"shadow", "ramping", "active"})
+
+
+async def set_lifecycle_state(conn: asyncpg.Connection, tenant_id: UUID, state: str) -> Tenant:
+    """Cambia el lifecycle a mano (super_admin). `shadow`, `ramping` y `active` exigen que no
+    quede ningún documento de la KB sin confirmar.
+
+    Raises:
+        ConflictError: `unconfirmed_knowledge`, con cuántos documentos faltan.
+    """
+    if state in LIFECYCLE_STATES_REQUIRING_CONFIRMED_KB:
+        pending = await count_unconfirmed_kb_documents(conn, tenant_id)
+        if pending:
+            raise ConflictError(
+                f"{pending} documentos de la KB sin confirmar; confírmalos antes de {state}",
+                code="unconfirmed_knowledge",
+            )
+    return await update_tenant_lifecycle_state(conn, tenant_id, state)
 
 
 async def evaluate_and_advance_lifecycle(

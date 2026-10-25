@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 from apps.api.core.errors import ConflictError
+from apps.api.db.kb_confirmation import count_unconfirmed_kb_documents
 from apps.api.db.models import (
     AgentReasoningEvent,
     AopVersion,
@@ -80,6 +81,7 @@ from apps.api.db.models import (
     WeeklyReport,
     WeeklyReportStatus,
 )
+from apps.api.db.returns_policy import get_current_returns_policy
 from apps.api.services.kb_source_key import canonical_source_key, content_sha256
 
 logger = logging.getLogger(__name__)
@@ -5163,6 +5165,8 @@ async def compute_onboarding_checklist(
         has_commerce_integration=row["has_commerce"],
         has_helpdesk_integration=row["has_helpdesk"],
         has_knowledge=row["has_knowledge"],
+        unconfirmed_kb_documents=await count_unconfirmed_kb_documents(conn, tenant_id),
+        has_returns_policy=await get_current_returns_policy(conn, tenant_id) is not None,
     )
 
 
@@ -5176,7 +5180,8 @@ async def update_tenant_lifecycle_state(
         UPDATE tenants
            SET agent_lifecycle_state = $2::agent_lifecycle_state
          WHERE id = $1 AND deleted_at IS NULL
-         RETURNING id, slug, name, status, agent_lifecycle_state
+         RETURNING id, slug, name, status, agent_lifecycle_state, plan_tier,
+                   origin, demo_expires_at, demo_source_url
         """,
         tenant_id,
         state,

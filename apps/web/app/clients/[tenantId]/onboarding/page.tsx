@@ -1,3 +1,4 @@
+import { PendingConfirmationBanner } from '@/components/knowledge/PendingConfirmationBanner'
 import { OnboardingWizard } from '@/components/onboarding/OnboardingWizard'
 import { apiClient } from '@/lib/api/client'
 import { createClient } from '@/lib/supabase/server'
@@ -43,6 +44,7 @@ export default async function ClientOnboardingPage({ params }: Props) {
         </p>
       </div>
 
+      <PendingConfirmationBanner tenantId={tenantId} />
       <OnboardingWizard tenantId={tenantId} />
     </div>
   )

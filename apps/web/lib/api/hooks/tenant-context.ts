@@ -94,6 +94,15 @@ export interface OnboardingChecklist {
 export interface OnboardingChecklistResponse extends OnboardingChecklist {
   complete: boolean
   agent_lifecycle_state: string
+  unconfirmed_kb_documents: number
+  has_returns_policy: boolean
+}
+
+export interface UnconfirmedKbDocument {
+  id: string
+  title: string
+  source: string | null
+  created_at: string
 }
 
 export interface TenantIntegrationStatus {
@@ -537,6 +546,43 @@ export function useKnowledgeDocuments(tenantId: string) {
       return tenantContextFetch<KnowledgeDocument[]>(token, tenantId, '/tenants/me/kb-documents')
     },
     staleTime: 20_000,
+  })
+}
+
+export function useUnconfirmedKbDocuments(tenantId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.tenants.kbUnconfirmed(tenantId),
+    queryFn: async () => {
+      const token = await getToken()
+      return tenantContextFetch<UnconfirmedKbDocument[]>(
+        token,
+        tenantId,
+        '/tenants/me/kb-documents/unconfirmed',
+      )
+    },
+    enabled,
+    staleTime: 20_000,
+  })
+}
+
+export function useConfirmKbDocuments(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (selection: { documentIds: string[] } | { all: true }) => {
+      const token = await getToken()
+      const body = 'all' in selection ? { all: true } : { document_ids: selection.documentIds }
+      return tenantContextFetch<{ confirmed: number; remaining_unconfirmed: number }>(
+        token,
+        tenantId,
+        '/tenants/me/kb-documents/confirm',
+        { method: 'POST', body: JSON.stringify(body) },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.kbUnconfirmed(tenantId) })
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.kbDocuments(tenantId) })
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.onboardingChecklist(tenantId) })
+    },
   })
 }
 

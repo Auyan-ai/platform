@@ -17,7 +17,7 @@ from apps.api.db.queries import (
 from apps.api.services.knowledge_ingestion import Embedder, chunk_text_for_kb
 
 if TYPE_CHECKING:
-    import asyncpg
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -179,33 +179,3 @@ async def approve_submissions_batch(
         else:
             result.approved.append(approved)
     return result
-
-
-async def confirm_kb_documents(
-    conn: asyncpg.Connection,
-    tenant_id: UUID,
-    document_ids: list[UUID],
-    confirmed_by: UUID | None,
-) -> int:
-    """Pasa de `unconfirmed` a `confirmed` los documentos vivos de ESTE tenant. Devuelve cuántos."""
-    if not document_ids:
-        return 0
-    rows = await conn.fetch(
-        """
-        UPDATE knowledge_base_documents
-           SET metadata = metadata || jsonb_strip_nulls(jsonb_build_object(
-                   'confirmation', 'confirmed',
-                   'confirmed_by', $3::text,
-                   'confirmed_at', to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
-               ))
-         WHERE tenant_id = $1
-           AND id = ANY($2::uuid[])
-           AND deleted_at IS NULL
-           AND metadata->>'confirmation' = 'unconfirmed'
-        RETURNING id
-        """,
-        tenant_id,
-        document_ids,
-        str(confirmed_by) if confirmed_by else None,
-    )
-    return len(rows)

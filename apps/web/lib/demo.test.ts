@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { demoBadgeLabel, isDemo } from './demo'
+import { demoBadgeLabel, isDemo, suggestClientSlug } from './demo'
+
+describe('suggestClientSlug', () => {
+  it('quita acentos y símbolos', () => {
+    expect(suggestClientSlug('Ñandú Café & Co.')).toBe('nandu-cafe-co')
+  })
+})
 
 describe('demoBadgeLabel', () => {
   it('muestra la fecha de caducidad en español', () => {

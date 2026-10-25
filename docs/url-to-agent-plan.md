@@ -210,7 +210,7 @@ Es lo que distingue la demo: precio y stock por talla en vivo, por la API oficia
 
 ## PR 10. Convertir la demo en cliente
 
-- [ ] `POST /tenants/{id}/promote {admin_email, admin_name, plan_tier, slug}`:
+- [x] `POST /tenants/{id}/promote {admin_email, admin_name, plan_tier, slug}`:
   `attach_tenant_admin`, `origin = 'client'`, slug nuevo, `discovery` y sin caducidad.
 - [ ] El checklist del cliente lista lo `applied_unconfirmed`, la política de devoluciones y
   las fuentes que el sitio no sirvió. El tenant no pasa a `shadow` ni a `active` con nada sin
