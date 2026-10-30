@@ -425,7 +425,7 @@ async def test_recovery_hands_an_unknowable_execution_to_the_team(
     assert await _status(pool, s) == "failed"
     assert await _outcome_messages(pool, s) == []
     [reason] = await _open_escalations(pool, s)
-    assert "no se pudo comprobar en Shopify si se aplicó" in reason
+    assert "no se pudo comprobar en la tienda si se aplicó" in reason
     assert "ejecución interrumpida" in reason
 
 
