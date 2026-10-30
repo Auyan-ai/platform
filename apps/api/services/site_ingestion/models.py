@@ -87,6 +87,7 @@ class Priority(StrEnum):
 
 class DiscardReason(StrEnum):
     TOO_SHORT = "too_short"
+    BOILERPLATE_ONLY = "boilerplate_only"
     NOISE_PAGE = "noise_page"
     NOT_CX_RELEVANT = "not_cx_relevant"
     SHOPIFY_DEFAULT_AGENT_FILE = "shopify_default_agent_file"

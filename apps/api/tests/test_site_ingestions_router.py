@@ -222,9 +222,29 @@ def test_both_roles_list_the_submissions_of_an_ingestion(monkeypatch: pytest.Mon
                 "priority": "normal",
                 "source": None,
                 "words": 310,
+                "duplicate_of": None,
+                "duplicate_kind": None,
                 "review_note": None,
             }
         ]
+
+
+def test_a_duplicate_across_keys_is_exposed_to_the_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    other = "22222222-2222-2222-2222-222222222222"
+    monkeypatch.setattr(
+        f"{MODULE}.get_site_ingestion", AsyncMock(return_value=_ingestion(IngestionStatus.READY))
+    )
+    monkeypatch.setattr(
+        f"{MODULE}.list_ingestion_submissions",
+        AsyncMock(return_value=[_submission(duplicate_of=other, duplicate_kind="document")]),
+    )
+
+    resp = _client(monkeypatch, "tenant_admin", FakeWorker()).get(
+        f"/tenants/me/site-ingestions/{INGESTION_ID}/submissions", headers=_headers()
+    )
+
+    assert resp.json()[0]["duplicate_of"] == other
+    assert resp.json()[0]["duplicate_kind"] == "document"
 
 
 def test_the_store_cannot_approve_a_batch(monkeypatch: pytest.MonkeyPatch) -> None:
