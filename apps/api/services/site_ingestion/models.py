@@ -165,6 +165,8 @@ class IngestionStats:
     sources: dict[str, SourceStats] = field(default_factory=dict)
     robots_txt: SourceStats = field(default_factory=SourceStats)
     created: int = 0
+    # Nombre oficial de la tienda según su fuente (Shopify `shop.name`, WordPress `name`...).
+    store_name: str | None = None
 
     def source(self, name: str) -> SourceStats:
         return self.sources.setdefault(name, SourceStats())
@@ -198,6 +200,7 @@ class IngestionStats:
             "docs": self.docs,
             "words": self.words,
             "created": self.created,
+            "store_name": self.store_name,
             "robots_txt": _source_json(self.robots_txt),
             "sources": {name: _source_json(s) for name, s in self.sources.items()},
         }

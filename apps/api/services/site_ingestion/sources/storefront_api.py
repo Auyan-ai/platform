@@ -109,6 +109,9 @@ async def collect(ctx: SourceContext) -> list[SourceDoc]:
         return []
     docs: list[SourceDoc] = []
     shop = data.get("shop") or {}
+    name = str(shop.get("name") or "").strip()
+    if name:
+        ctx.store_name = name
     if shop.get("description"):
         docs.append(
             SourceDoc.build(
