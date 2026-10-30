@@ -1,6 +1,6 @@
 # ADR 0016 — Comercio multiplataforma: contrato de comercio común y WooCommerce como segundo proveedor
 
-**Estado:** Aceptada (contrato en #430, adapter de WooCommerce en el PR que cierra este punto)
+**Estado:** Aceptada (contrato en #430; adapter de WooCommerce, alta y CI en vivo en el PR de `feature/adapter-woocommerce`)
 **Fecha:** 2026-10-25 (sesión 88, issue [#422](https://github.com/Auyan-ai/platform/issues/422))
 **Relación:** extiende las skills por niveles de [ADR 0005](0005-skills-tiered-l1-l2-l3.md), el
 gate de identidad de [ADR 0013](0013-verificacion-identidad-por-niveles.md), las devoluciones
