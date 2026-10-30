@@ -181,3 +181,20 @@ async def test_shopify_client_credentials_trigger_token_exchange(monkeypatch) ->
         client_id="cid",
         client_secret="csecret",
     )
+
+
+async def test_a_commerce_integration_without_adapter_is_not_saved() -> None:
+    from apps.api.db.queries import upsert_integration
+
+    conn = AsyncMock()
+
+    with pytest.raises(ValueError, match="unknown_integration: commerce/magento"):
+        await upsert_integration(
+            conn,
+            tenant_id=TENANT_ID,
+            kind="commerce",
+            provider="magento",
+            credentials_encrypted=b"x",
+            config={},
+        )
+    conn.fetchrow.assert_not_awaited()

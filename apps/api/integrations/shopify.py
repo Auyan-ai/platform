@@ -18,7 +18,7 @@ import datetime as _dt
 import logging
 from collections import OrderedDict
 from decimal import Decimal
-from typing import Any
+from typing import Any, ClassVar
 from uuid import UUID
 
 import httpx
@@ -35,6 +35,7 @@ from apps.api.integrations.commerce import (
     RefundableBalance,
     SnapshotFulfillment,
     SnapshotTransaction,
+    country_to_iso2,
     refund_marker,
 )
 from apps.api.integrations.registry import IntegrationRegistry
@@ -75,59 +76,6 @@ def _token_cache_set(tenant_id: UUID, token: str, expires_at: _dt.datetime) -> N
     _token_cache.move_to_end(tenant_id)
     while len(_token_cache) > _TOKEN_CACHE_MAXSIZE:
         _token_cache.popitem(last=False)
-
-
-# Shopify rechaza el campo `country` en texto libre que no sea el nombre EN exacto
-# (ej. "España" → 422 "Country/region not supported"). En su lugar mandamos
-# `country_code` (ISO-3166-1 alfa-2), que sí resuelve. El agente recoge el país tal
-# como lo escribe el cliente (normalmente en español), así que normalizamos aquí.
-# Auyan es ES-first; cubrimos España + destinos de envío habituales (UE + comunes).
-_COUNTRY_TO_ISO2: dict[str, str] = {
-    "españa": "ES",
-    "espana": "ES",
-    "spain": "ES",
-    "portugal": "PT",
-    "francia": "FR",
-    "france": "FR",
-    "italia": "IT",
-    "italy": "IT",
-    "alemania": "DE",
-    "germany": "DE",
-    "deutschland": "DE",
-    "andorra": "AD",
-    "reino unido": "GB",
-    "united kingdom": "GB",
-    "uk": "GB",
-    "irlanda": "IE",
-    "ireland": "IE",
-    "países bajos": "NL",
-    "paises bajos": "NL",
-    "holanda": "NL",
-    "netherlands": "NL",
-    "bélgica": "BE",
-    "belgica": "BE",
-    "belgium": "BE",
-    "suiza": "CH",
-    "switzerland": "CH",
-    "estados unidos": "US",
-    "united states": "US",
-    "usa": "US",
-    "méxico": "MX",
-    "mexico": "MX",
-}
-
-
-def _country_to_iso2(country: str) -> str | None:
-    """Resuelve un país en texto libre a su código ISO-2, o None si no se reconoce.
-
-    Acepta un código de 2 letras tal cual (Shopify lo valida). Para nombres,
-    mapea español/inglés comunes. Si devuelve None, el caller manda el texto
-    original como `country` (best-effort).
-    """
-    c = country.strip()
-    if len(c) == 2 and c.isalpha():
-        return c.upper()
-    return _COUNTRY_TO_ISO2.get(c.lower())
 
 
 async def exchange_client_credentials(
@@ -482,7 +430,7 @@ class ShopifyClient:
         }
         # Shopify quiere country_code (ISO-2) cuando se puede resolver; si no, el
         # nombre original como best-effort.
-        iso2 = _country_to_iso2(country) if country else None
+        iso2 = country_to_iso2(country) if country else None
         if iso2:
             shipping_address["country_code"] = iso2
         elif country:
@@ -1160,6 +1108,7 @@ class ShopifyAdapter:
     """
 
     capabilities = ALL_CAPABILITIES
+    platform_name: ClassVar[str] = "Shopify"
 
     def _client(self, ctx: IntegrationContext) -> ShopifyClient:
         creds = ctx.credentials

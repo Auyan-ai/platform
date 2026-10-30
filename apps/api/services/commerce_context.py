@@ -19,7 +19,7 @@ from apps.api.db.queries import (
     get_integration_credentials_encrypted,
     get_primary_integration_for_kind,
 )
-from apps.api.integrations import shopify
+from apps.api.integrations import shopify, woocommerce  # noqa: F401  (registran su adapter)
 from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.commerce import CommerceAdapter
 from apps.api.integrations.registry import IntegrationRegistry
@@ -90,6 +90,11 @@ async def build_commerce_integration_ctx(
             provider="shopify",
         )
     return None
+
+
+def require_commerce_provider(provider: str) -> None:
+    """Lanza `ValueError("unknown_integration: commerce/<provider>")` si no hay adapter."""
+    IntegrationRegistry.get("commerce", provider)
 
 
 def commerce_adapter(integration: IntegrationContext) -> CommerceAdapter:

@@ -113,6 +113,7 @@ def _order(delivered_days_ago: int = 3, quantity: int = 1) -> ReturnableOrder:
 
 @dataclass
 class FakeShopify:
+    platform_name = "Shopify"
     order: ReturnableOrder = field(default_factory=_order)
     variants: tuple[ExchangeVariant, ...] = ()
     created_status: str = "open"
@@ -482,7 +483,7 @@ async def test_a_return_created_before_a_timeout_is_applied() -> None:
     assert result.output["plan"]["plan_id"] == str(inputs.plan.plan_id)
     assert len(shopify.called("create_return")) == 1
     assert outcome_message("shopify.start_return", result.output, "es", "es")
-    assert team_followup_reason("shopify.start_return", result.output) is None
+    assert team_followup_reason("shopify.start_return", result.output, platform="Shopify") is None
 
 
 async def test_a_read_failure_before_creating_is_not_applied() -> None:

@@ -1,6 +1,6 @@
 # ADR 0016 — Comercio multiplataforma: contrato de comercio común y WooCommerce como segundo proveedor
 
-**Estado:** Propuesta (pasa a Aceptada cuando se mergeen el contrato y el adapter de WooCommerce)
+**Estado:** Aceptada (contrato en #430; adapter de WooCommerce, alta y CI en vivo en el PR de `feature/adapter-woocommerce`)
 **Fecha:** 2026-10-25 (sesión 88, issue [#422](https://github.com/Auyan-ai/platform/issues/422))
 **Relación:** extiende las skills por niveles de [ADR 0005](0005-skills-tiered-l1-l2-l3.md), el
 gate de identidad de [ADR 0013](0013-verificacion-identidad-por-niveles.md), las devoluciones
@@ -82,7 +82,11 @@ wordpress.org, REST `wc/v3` con consumer key y secret):
 6. **Credenciales de WooCommerce:** `{"store_url", "consumer_key", "consumer_secret"}` cifradas
    en `tenant_integrations` como cualquier otra. El adapter exige HTTPS y autentica con Basic
    auth. Permisos `read_write` (las L2 y L3 escriben). Se validan al registrar la integración
-   leyendo `GET /wc/v3/system_status`.
+   leyendo `GET /wc/v3/system_status` y con un `POST /wc/v3/orders/batch` vacío, que no crea
+   nada pero WooCommerce rechaza con 401 si la clave es de solo lectura. HTTP solo se admite
+   contra loopback con `WOOCOMMERCE_ALLOW_HTTP_LOOPBACK` (desarrollo), y una IP privada o de
+   enlace local se rechaza siempre. Ninguna integración de comercio se guarda sin adapter
+   registrado para su proveedor.
 7. **Ingesta y demo (#422):** `Platform.WOOCOMMERCE` y `Platform.WORDPRESS` se detectan por
    `/wp-json/` (con `?rest_route=/` de respaldo), la fuente `wordpress_api` trae páginas y
    entradas, y `demo_catalog` elige el adapter de catálogo por la plataforma de la demo.

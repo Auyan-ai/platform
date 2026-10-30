@@ -15,6 +15,10 @@ porque una skill puede hacer varias llamadas y el mock opera a nivel de método:
         "get_policies": [{...}]
     }
 
+`_provider` elige la plataforma que se simula (por defecto `shopify`): el mock toma sus
+capacidades y su nombre del adapter registrado, así que con `"_provider": "woocommerce"` el
+agente no ve las skills de tags, devoluciones ni cambios, como con un WooCommerce real.
+
 Un fixture con la clave `_error` hace que el método lance `MockShopifyError`,
 para probar que el agente maneja fallos de integración correctamente.
 
@@ -46,13 +50,15 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from apps.api.integrations import woocommerce  # noqa: F401  (registra su adapter)
 from apps.api.integrations.commerce import (
-    ALL_CAPABILITIES,
+    CommerceCapability,
     CreatedReturn,
     IssuedRefund,
     OrderSnapshot,
     RefundableBalance,
 )
+from apps.api.integrations.registry import IntegrationRegistry
 from apps.api.integrations.shopify import (
     exchange_variants_from_graphql,
     order_snapshot_from_graphql,
@@ -96,9 +102,20 @@ _SNAPSHOT_DEFAULT: dict[str, Any] = {
 class MockShopifyAdapter:
     """Implementa la superficie de ShopifyAdapter con respuestas predefinidas."""
 
-    capabilities = ALL_CAPABILITIES
     fixtures: dict[str, Any] = field(default_factory=dict)
     _snapshot_calls: int = field(default=0, init=False)
+
+    @property
+    def _simulated(self) -> type[Any]:
+        return IntegrationRegistry.get("commerce", self.fixtures.get("_provider", "shopify"))
+
+    @property
+    def capabilities(self) -> frozenset[CommerceCapability]:
+        return frozenset(self._simulated.capabilities)
+
+    @property
+    def platform_name(self) -> str:
+        return str(self._simulated.platform_name)
 
     def _resolve(self, method: str, default: Any) -> Any:
         if method not in self.fixtures:

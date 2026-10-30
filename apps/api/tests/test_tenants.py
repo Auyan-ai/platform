@@ -50,6 +50,7 @@ class FakeAuthSettings:
     llm_max_retries: int = 1
     integrations_secret_key: str | None = None
     api_base_url: str | None = None
+    woocommerce_allow_http_loopback: bool = False
 
     @property
     def supabase_jwt_secret(self) -> _SecretWrap:
@@ -1468,6 +1469,130 @@ class TestTenantIntegrationsEndpoints:
         )
 
         assert resp.status_code == 422
+
+    @staticmethod
+    def _woocommerce(
+        monkeypatch: pytest.MonkeyPatch, *, batch_status: int = 200
+    ) -> tuple[TestClient, AsyncMock, list[httpx.Request]]:
+        """El endpoint con un WooCommerce falso detrás del adapter real."""
+        from apps.api.core.config import get_settings
+        from apps.api.db.models import OnboardingChecklist
+        from apps.api.integrations.woocommerce import WooCommerceAdapter
+
+        sent: list[httpx.Request] = []
+
+        def store(request: httpx.Request) -> httpx.Response:
+            sent.append(request)
+            if request.url.path.endswith("/system_status"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "environment": {"site_url": "https://tienda.es", "version": "11.2.1"},
+                        "settings": {"currency": "EUR"},
+                    },
+                )
+            if batch_status == 401:
+                return httpx.Response(
+                    401,
+                    json={
+                        "code": "woocommerce_rest_authentication_error",
+                        "message": "The API key provided does not have write permissions.",
+                    },
+                )
+            return httpx.Response(200, json=[])
+
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.WooCommerceAdapter",
+            lambda **kw: WooCommerceAdapter(transport=httpx.MockTransport(store), **kw),
+        )
+        upsert_mock = AsyncMock(return_value=_make_integration("commerce", "woocommerce"))
+        monkeypatch.setattr("apps.api.routers.tenants.upsert_integration", upsert_mock)
+        monkeypatch.setattr(
+            "apps.api.routers.tenants.evaluate_and_advance_lifecycle",
+            AsyncMock(
+                return_value=(
+                    make_tenant(agent_lifecycle_state="discovery"),
+                    OnboardingChecklist(onboarding_submitted=True, has_commerce_integration=True),
+                )
+            ),
+        )
+        app = _make_app(monkeypatch)
+        app.dependency_overrides[get_settings] = lambda: FakeAuthSettings(
+            integrations_secret_key=_CRYPTO_KEY_HEX
+        )
+        return TestClient(app), upsert_mock, sent
+
+    def test_connect_woocommerce_validates_the_store_and_saves_encrypted_keys(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import json as _json
+
+        from apps.api.services.integrations_crypto import decrypt_credentials
+
+        client, upsert_mock, sent = self._woocommerce(monkeypatch)
+
+        resp = client.post(
+            "/tenants/me/integrations/woocommerce",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={
+                "store_url": "https://tienda.es/",
+                "consumer_key": "ck_1",
+                "consumer_secret": "cs_1",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert [(r.method, r.url.path) for r in sent] == [
+            ("GET", "/wp-json/wc/v3/system_status"),
+            ("POST", "/wp-json/wc/v3/orders/batch"),
+        ]
+        kwargs = upsert_mock.await_args.kwargs
+        assert (kwargs["kind"], kwargs["provider"]) == ("commerce", "woocommerce")
+        assert kwargs["is_primary_for_kind"] is True
+        assert kwargs["config"]["currency"] == "EUR"
+        assert kwargs["config"]["wc_version"] == "11.2.1"
+        creds = _json.loads(
+            decrypt_credentials(kwargs["credentials_encrypted"], bytes.fromhex(_CRYPTO_KEY_HEX))
+        )
+        assert creds == {
+            "store_url": "https://tienda.es",
+            "consumer_key": "ck_1",
+            "consumer_secret": "cs_1",
+        }
+
+    @pytest.mark.parametrize(
+        "store_url",
+        ["http://tienda.es", "https://10.0.0.8", "https://169.254.169.254", "http://127.0.0.1:9400"],
+    )
+    def test_connect_woocommerce_refuses_a_store_that_is_not_public_https(
+        self, monkeypatch: pytest.MonkeyPatch, store_url: str
+    ) -> None:
+        client, upsert_mock, sent = self._woocommerce(monkeypatch)
+
+        resp = client.post(
+            "/tenants/me/integrations/woocommerce",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={"store_url": store_url, "consumer_key": "ck", "consumer_secret": "cs"},
+        )
+
+        assert resp.status_code == 422
+        assert sent == []
+        upsert_mock.assert_not_awaited()
+
+    def test_connect_woocommerce_refuses_a_read_only_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        client, upsert_mock, _ = self._woocommerce(monkeypatch, batch_status=401)
+
+        resp = client.post(
+            "/tenants/me/integrations/woocommerce",
+            headers={"Authorization": f"Bearer {_make_jwt()}"},
+            json={"store_url": "https://tienda.es", "consumer_key": "ck", "consumer_secret": "cs"},
+        )
+
+        assert resp.status_code == 422
+        assert "solo lectura" in resp.json()["detail"]
+        upsert_mock.assert_not_awaited()
 
     def test_connect_chatwoot_registers_webhook_and_advances(
         self, monkeypatch: pytest.MonkeyPatch

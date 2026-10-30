@@ -24,6 +24,10 @@ Uso:
     poetry run python -m scripts.configure_staging_integrations \\
         --tenant marea-studio --only zendesk
 
+    # Sólo WooCommerce (claves REST read_write) en un tenant.
+    poetry run python -m scripts.configure_staging_integrations \\
+        --tenant lunaria --only woocommerce
+
 Variables esperadas en .env:
     DATABASE_URL
     INTEGRATIONS_SECRET_KEY
@@ -41,6 +45,8 @@ Variables esperadas en .env:
     ZENDESK_CLIENT_SECRET      (secreto del OAuth client)
       — legacy, solo cuentas previas al 2026-07-28 y hasta el 2027-04-30 —
     ZENDESK_EMAIL + ZENDESK_API_TOKEN  (API token; se usan solo si no hay CLIENT_ID)
+    WOOCOMMERCE_STORE_URL      (https://tienda.es)
+    WOOCOMMERCE_CONSUMER_KEY + WOOCOMMERCE_CONSUMER_SECRET  (permisos Lectura/Escritura)
 
 Opcionales:
     CHATWOOT_WEBHOOK_SECRET_TOKEN
@@ -74,6 +80,8 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from apps.api.db.queries import get_tenant_by_id, get_tenant_by_slug, upsert_integration
+from apps.api.integrations.base import IntegrationContext
+from apps.api.integrations.woocommerce import WooCommerceAdapter, store_base_url
 from apps.api.integrations.zendesk import ZendeskClient
 from apps.api.services.integrations_crypto import encrypt_credentials
 
@@ -82,7 +90,7 @@ load_dotenv(_ENV_FILE)
 
 SHOPIFY_API_VERSION = "2026-04"
 DEFAULT_E2E_ORDER_TAG = "auyan-e2e"
-Provider = Literal["shopify", "chatwoot", "gorgias", "zendesk"]
+Provider = Literal["shopify", "woocommerce", "chatwoot", "gorgias", "zendesk"]
 
 
 @dataclass(frozen=True)
@@ -250,6 +258,31 @@ async def build_shopify_plan(
             "e2e_order_tag": e2e_order_tag,
             "e2e_order_count": len(e2e_orders),
             "e2e_order_names": [str(order.get("name")) for order in e2e_orders[:10]],
+            "verified_at": _now_iso(),
+        },
+    )
+
+
+async def build_woocommerce_plan() -> IntegrationPlan:
+    """Valida la tienda y que la clave pueda escribir antes de guardar nada."""
+    store_url = store_base_url(_require_env("WOOCOMMERCE_STORE_URL"), allow_http_loopback=False)
+    credentials = {
+        "store_url": store_url,
+        "consumer_key": _require_env("WOOCOMMERCE_CONSUMER_KEY"),
+        "consumer_secret": _require_env("WOOCOMMERCE_CONSUMER_SECRET"),
+    }
+    store = await WooCommerceAdapter(allow_http_loopback=False).validate(
+        IntegrationContext(tenant_id=UUID(int=0), credentials=credentials, provider="woocommerce")
+    )
+    return IntegrationPlan(
+        provider="woocommerce",
+        kind="commerce",
+        credentials=credentials,
+        config={
+            "store_url": store_url,
+            "site_url": store.get("site_url"),
+            "wc_version": store.get("wc_version"),
+            "currency": store.get("currency"),
             "verified_at": _now_iso(),
         },
     )
@@ -489,6 +522,8 @@ async def run(
                 allow_missing_e2e_orders=allow_missing_e2e_orders,
             )
         )
+    if "woocommerce" in providers:
+        plans.append(await build_woocommerce_plan())
     if "chatwoot" in providers:
         plans.append(await build_chatwoot_plan())
     if "gorgias" in providers:
@@ -520,11 +555,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--tenant", default="lunaria", help="Slug o UUID del tenant")
     parser.add_argument(
         "--only",
-        choices=["shopify", "chatwoot", "gorgias", "zendesk"],
+        choices=["shopify", "woocommerce", "chatwoot", "gorgias", "zendesk"],
         default=None,
         help=(
             "Configura sólo un proveedor. Default: shopify + chatwoot "
-            "(gorgias/zendesk solo con --only)."
+            "(woocommerce/gorgias/zendesk solo con --only)."
         ),
     )
     parser.add_argument("--dry-run", action="store_true", help="Valida y muestra sin guardar")

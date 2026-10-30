@@ -19,16 +19,21 @@ from apps.api.agents.nodes.reason import _visible_skills
 from apps.api.integrations.commerce import ALL_CAPABILITIES, CommerceCapability
 from apps.api.integrations.demo_catalog import DemoCatalogAdapter
 from apps.api.integrations.shopify import ShopifyAdapter
+from apps.api.integrations.woocommerce import WooCommerceAdapter
 from apps.api.services.fixed_texts import fixed_text
 from apps.api.services.identity import IdentityContext
 from apps.api.services.skill_access import visible_skills
 from apps.api.simulator.mocks import MockShopifyAdapter
+from apps.api.simulator.scenarios.returns import SCENARIOS as RETURN_SCENARIOS
 from apps.api.skills.base import Skill
 from apps.api.skills.identity.check_order_contact import CheckOrderContact
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify.get_order_status import GetOrderStatus
 from apps.api.skills.shopify.get_product_info import GetProductInfo
 from apps.api.skills.shopify.get_shop_policies import GetShopPolicies
+from apps.api.skills.shopify.start_exchange import StartExchange
+from apps.api.skills.shopify.start_return import StartReturn
+from apps.api.skills.shopify.tag_order import TagOrder
 from apps.api.tests.identity_support import identity_state
 
 SKILLS_DIR = Path(shopify_skills.__file__).parent
@@ -36,6 +41,7 @@ SKILLS_DIR = Path(shopify_skills.__file__).parent
 CONCRETE_ADAPTER_MODULES = (
     "apps.api.integrations.shopify",
     "apps.api.integrations.demo_catalog",
+    "apps.api.integrations.woocommerce",
     "apps.api.simulator.mocks",
 )
 TENANT = "11111111-1111-1111-1111-111111111111"
@@ -96,7 +102,15 @@ def test_capability_of_each_skill() -> None:
 
 def test_adapters_declare_their_capabilities() -> None:
     assert ShopifyAdapter.capabilities == ALL_CAPABILITIES
-    assert MockShopifyAdapter.capabilities == ALL_CAPABILITIES
+    assert MockShopifyAdapter().capabilities == ALL_CAPABILITIES
+    assert WooCommerceAdapter.capabilities == ALL_CAPABILITIES - {
+        CommerceCapability.ORDER_TAGS,
+        CommerceCapability.RETURNS,
+        CommerceCapability.EXCHANGES,
+    }
+    assert MockShopifyAdapter({"_provider": "woocommerce"}).capabilities == (
+        WooCommerceAdapter.capabilities
+    )
     assert DemoCatalogAdapter.capabilities == frozenset({CommerceCapability.PRODUCT_READ})
 
 
@@ -181,3 +195,62 @@ def test_a_skill_that_touches_an_order_also_needs_order_read() -> None:
     assert capability_missing(CancelOrder, only_cancel) == CommerceCapability.ORDER_READ
     assert capability_missing(CancelOrder, both) is None
     assert capability_missing(GetProductInfo, frozenset({CommerceCapability.PRODUCT_READ})) is None
+
+
+# ─── Tenant WooCommerce en el simulador (RE-09): sin devoluciones, escala ─────
+
+_WC_SCENARIO = next(sc for sc in RETURN_SCENARIOS if sc["id"] == "RE-09")
+_RETURN_SLUGS = [GetOrderStatus.slug, StartReturn.slug, StartExchange.slug, TagOrder.slug]
+
+
+@pytest.fixture
+def _return_registry() -> Generator[None, None, None]:
+    saved = dict(SkillRegistry._by_slug)
+    for cls in (GetOrderStatus, StartReturn, StartExchange, TagOrder, CheckOrderContact):
+        SkillRegistry.register(cls)
+    yield
+    SkillRegistry._by_slug.clear()
+    SkillRegistry._by_slug.update(saved)
+
+
+def _woocommerce_sim_state(**extra: Any) -> dict[str, Any]:
+    return identity_state(
+        email="cliente@example.com",
+        tenant_id=TENANT,
+        simulation_mode=True,
+        simulation_fixtures=_WC_SCENARIO["mock_fixtures"],
+        allowed_skills=_RETURN_SLUGS,
+        tool_permissions={
+            slug: {"is_enabled": True, "human_approval_required": False} for slug in _RETURN_SLUGS
+        },
+        tool_results=[],
+        tool_iterations=0,
+        **extra,
+    )
+
+
+@pytest.mark.usefixtures("_return_registry")
+def test_a_woocommerce_tenant_is_not_offered_returns_exchanges_or_tags() -> None:
+    assert _visible_skills(_woocommerce_sim_state()) == [GetOrderStatus.slug]
+
+
+@pytest.mark.usefixtures("_return_registry")
+async def test_a_return_on_woocommerce_escalates_with_its_reason(
+    fake_deps: AgentDependencies,
+) -> None:
+    pending = {
+        "id": "toolu_1",
+        "slug": StartReturn.slug,
+        "input": {"order_id": 1234, "lines": [], "reason_code": "talla"},
+    }
+
+    out = await make_execute_skill_node(fake_deps)(
+        _woocommerce_sim_state(pending_tool_call=pending)
+    )
+
+    assert out["decision"] == "escalate"
+    assert out["agent_response"] == fixed_text("commerce_capability_missing", "es")
+    assert out["escalation_reason"].startswith(
+        "commerce_capability_missing: la tienda no admite `returns`, que necesita "
+        "shopify.start_return."
+    )

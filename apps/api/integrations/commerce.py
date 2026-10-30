@@ -195,6 +195,58 @@ class OrderSnapshot:
         return tuple(t for t in self.transactions if t.kind == "refund" and t.id not in seen)
 
 
+# Shopify rechaza un `country` en texto libre que no sea el nombre en inglés exacto
+# ("España" → 422) y WooCommerce guarda el código ISO-3166-1 alfa-2. El agente recoge el
+# país tal como lo escribe el cliente (normalmente en español). Auyan es ES-first:
+# España y los destinos de envío habituales.
+_COUNTRY_TO_ISO2: dict[str, str] = {
+    "españa": "ES",
+    "espana": "ES",
+    "spain": "ES",
+    "portugal": "PT",
+    "francia": "FR",
+    "france": "FR",
+    "italia": "IT",
+    "italy": "IT",
+    "alemania": "DE",
+    "germany": "DE",
+    "deutschland": "DE",
+    "andorra": "AD",
+    "reino unido": "GB",
+    "united kingdom": "GB",
+    "uk": "GB",
+    "irlanda": "IE",
+    "ireland": "IE",
+    "países bajos": "NL",
+    "paises bajos": "NL",
+    "holanda": "NL",
+    "netherlands": "NL",
+    "bélgica": "BE",
+    "belgica": "BE",
+    "belgium": "BE",
+    "suiza": "CH",
+    "switzerland": "CH",
+    "estados unidos": "US",
+    "united states": "US",
+    "usa": "US",
+    "méxico": "MX",
+    "mexico": "MX",
+}
+
+
+def country_to_iso2(country: str) -> str | None:
+    """Resuelve un país en texto libre a su código ISO-2, o None si no se reconoce.
+
+    Acepta un código de 2 letras tal cual (lo valida la tienda). Para nombres,
+    mapea español/inglés comunes. Si devuelve None, el adapter manda el texto
+    original (best-effort).
+    """
+    c = country.strip()
+    if len(c) == 2 and c.isalpha():
+        return c.upper()
+    return _COUNTRY_TO_ISO2.get(c.lower())
+
+
 @dataclass(frozen=True)
 class CreatedReturn:
     return_id: int
@@ -323,3 +375,4 @@ class CommerceAdapter(Protocol):
     ) -> CreatedReturn | None: ...
 
     async def create_return(self, ctx: IntegrationContext, plan: ReturnPlan) -> CreatedReturn: ...
+

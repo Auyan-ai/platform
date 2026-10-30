@@ -3840,44 +3840,68 @@ async def upsert_integration(
     is_primary_for_kind: bool = False,
     enabled_by: UUID | None = None,
 ) -> TenantIntegration:
-    """Crea o actualiza una integración. Las credentials ya deben venir cifradas."""
-    row = await conn.fetchrow(
-        """
-        INSERT INTO tenant_integrations
-            (tenant_id, kind, provider, credentials_encrypted, config,
-             is_active, is_primary_for_kind, enabled_at, enabled_by)
-        VALUES ($1, $2, $3, $4, $5, $6, $7,
-                CASE WHEN $6 THEN NOW() ELSE NULL END, $8)
-        ON CONFLICT (tenant_id, kind, provider) WHERE deleted_at IS NULL
-        DO UPDATE SET
-            credentials_encrypted = EXCLUDED.credentials_encrypted,
-            config                = EXCLUDED.config,
-            is_active             = EXCLUDED.is_active,
-            is_primary_for_kind   = EXCLUDED.is_primary_for_kind,
-            enabled_at            = CASE WHEN EXCLUDED.is_active
-                                      THEN COALESCE(
-                                            tenant_integrations.enabled_at,
-                                            NOW()
-                                          )
-                                      ELSE tenant_integrations.enabled_at
-                                    END,
-            enabled_by            = COALESCE(
-                                        EXCLUDED.enabled_by,
-                                        tenant_integrations.enabled_by
-                                    ),
-            updated_at            = NOW()
-        RETURNING id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
-                  enabled_at, enabled_by, created_at, updated_at
-        """,
-        tenant_id,
-        kind,
-        provider,
-        credentials_encrypted,
-        config,
-        is_active,
-        is_primary_for_kind,
-        enabled_by,
-    )
+    """Crea o actualiza una integración. Las credentials ya deben venir cifradas.
+
+    Una de comercio solo se guarda si su proveedor tiene adapter (ADR 0016 §2): si no, el
+    turno del agente no podría resolverlo. Lanza `ValueError("unknown_integration: …")`.
+
+    Con `is_primary_for_kind`, la que fuera primaria de ese kind con otro proveedor deja de
+    serlo (p. ej. un tenant que pasa de Shopify a WooCommerce): solo hay una por kind.
+    """
+    if kind == "commerce":
+        from apps.api.services.commerce_context import require_commerce_provider
+
+        require_commerce_provider(provider)
+    async with conn.transaction():
+        if is_primary_for_kind:
+            await conn.execute(
+                """
+                UPDATE tenant_integrations
+                   SET is_primary_for_kind = FALSE, updated_at = NOW()
+                 WHERE tenant_id = $1 AND kind = $2 AND provider <> $3
+                   AND deleted_at IS NULL AND is_primary_for_kind
+                """,
+                tenant_id,
+                kind,
+                provider,
+            )
+        row = await conn.fetchrow(
+            """
+            INSERT INTO tenant_integrations
+                (tenant_id, kind, provider, credentials_encrypted, config,
+                 is_active, is_primary_for_kind, enabled_at, enabled_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7,
+                    CASE WHEN $6 THEN NOW() ELSE NULL END, $8)
+            ON CONFLICT (tenant_id, kind, provider) WHERE deleted_at IS NULL
+            DO UPDATE SET
+                credentials_encrypted = EXCLUDED.credentials_encrypted,
+                config                = EXCLUDED.config,
+                is_active             = EXCLUDED.is_active,
+                is_primary_for_kind   = EXCLUDED.is_primary_for_kind,
+                enabled_at            = CASE WHEN EXCLUDED.is_active
+                                          THEN COALESCE(
+                                                tenant_integrations.enabled_at,
+                                                NOW()
+                                              )
+                                          ELSE tenant_integrations.enabled_at
+                                        END,
+                enabled_by            = COALESCE(
+                                            EXCLUDED.enabled_by,
+                                            tenant_integrations.enabled_by
+                                        ),
+                updated_at            = NOW()
+            RETURNING id, tenant_id, kind, provider, config, is_active, is_primary_for_kind,
+                      enabled_at, enabled_by, created_at, updated_at
+            """,
+            tenant_id,
+            kind,
+            provider,
+            credentials_encrypted,
+            config,
+            is_active,
+            is_primary_for_kind,
+            enabled_by,
+        )
     return _row_to_integration(row)
 
 

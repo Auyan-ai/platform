@@ -245,6 +245,7 @@ async def approve_action(
         result=result,
         language=run.language,
         tenant_default=run.tenant_default,
+        platform=run.skill_ctx.platform_name,
         anthropic_client=getattr(agent_deps, "anthropic", None),
     )
     if settlement is None:

@@ -1,0 +1,863 @@
+{
+ "refs": {
+  "order_id": 60
+ },
+ "exchanges": [
+  {
+   "request": "GET /wp-json/wc/v3/orders/60",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": {
+    "id": 60,
+    "parent_id": 0,
+    "status": "processing",
+    "currency": "EUR",
+    "version": "11.2.1",
+    "prices_include_tax": false,
+    "date_created": "2026-10-30T10:08:10",
+    "date_modified": "2026-10-30T10:08:11",
+    "discount_total": "0.00",
+    "discount_tax": "0.00",
+    "shipping_total": "0.00",
+    "shipping_tax": "0.00",
+    "cart_tax": "0.00",
+    "total": "29.90",
+    "total_tax": "0.00",
+    "customer_id": 0,
+    "order_key": "wc_order_OXFh9PrMJmBat",
+    "billing": {
+     "first_name": "Ana",
+     "last_name": "García",
+     "company": "",
+     "address_1": "Calle Mayor 1",
+     "address_2": "",
+     "city": "Madrid",
+     "state": "M",
+     "postcode": "28013",
+     "country": "ES",
+     "email": "rec-ae24b070@example.com",
+     "phone": "+34600111222"
+    },
+    "shipping": {
+     "first_name": "Ana",
+     "last_name": "García",
+     "company": "",
+     "address_1": "Calle Mayor 1",
+     "address_2": "",
+     "city": "Madrid",
+     "state": "M",
+     "postcode": "28013",
+     "country": "ES",
+     "phone": "+34600111222"
+    },
+    "payment_method": "auyan_test",
+    "payment_method_title": "",
+    "transaction_id": "",
+    "customer_ip_address": "",
+    "customer_user_agent": "",
+    "created_via": "rest-api",
+    "customer_note": "",
+    "date_completed": null,
+    "date_paid": "2026-10-30T10:08:11",
+    "cart_hash": "",
+    "number": "60",
+    "meta_data": [],
+    "line_items": [
+     {
+      "id": 31,
+      "name": "Camiseta Lino Azul",
+      "product_id": 10,
+      "variation_id": 0,
+      "quantity": 1,
+      "tax_class": "",
+      "subtotal": "29.90",
+      "subtotal_tax": "0.00",
+      "total": "29.90",
+      "total_tax": "0.00",
+      "taxes": [],
+      "meta_data": [
+       {
+        "id": 310,
+        "key": "_reduced_stock",
+        "value": "1",
+        "display_key": "_reduced_stock",
+        "display_value": "1"
+       }
+      ],
+      "sku": "CAM-AZ",
+      "global_unique_id": "",
+      "price": 29.9,
+      "image": {
+       "id": "",
+       "src": ""
+      },
+      "parent_name": null
+     }
+    ],
+    "tax_lines": [],
+    "shipping_lines": [],
+    "fee_lines": [],
+    "coupon_lines": [],
+    "refunds": [],
+    "payment_url": "https://tienda-prueba.test/checkout/order-pay/60/?pay_for_order=true&key=wc_order_OXFh9PrMJmBat",
+    "is_editable": false,
+    "needs_payment": false,
+    "needs_processing": true,
+    "date_created_gmt": "2026-10-30T10:08:10",
+    "date_modified_gmt": "2026-10-30T10:08:11",
+    "date_completed_gmt": null,
+    "date_paid_gmt": "2026-10-30T10:08:11",
+    "currency_symbol": "€",
+    "_links": {
+     "self": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60",
+       "targetHints": {
+        "allow": [
+         "GET",
+         "POST",
+         "PUT",
+         "PATCH",
+         "DELETE"
+        ]
+       }
+      }
+     ],
+     "collection": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders"
+      }
+     ],
+     "email_templates": [
+      {
+       "embeddable": true,
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/actions/email_templates"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "request": "POST /wp-json/wc/v3/orders/60/notes",
+   "body": {
+    "note": "Cliente avisado",
+    "customer_note": false
+   },
+   "status": 201,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": {
+    "id": 164,
+    "author": "WooCommerce",
+    "date_created": "2026-10-30T10:08:16",
+    "date_created_gmt": "2026-10-30T10:08:16",
+    "note": "Cliente avisado",
+    "customer_note": false,
+    "_links": {
+     "self": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes/164",
+       "targetHints": {
+        "allow": [
+         "GET",
+         "DELETE"
+        ]
+       }
+      }
+     ],
+     "collection": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes"
+      }
+     ],
+     "up": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "request": "GET /wp-json/wc/v3/orders/60",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": {
+    "id": 60,
+    "parent_id": 0,
+    "status": "processing",
+    "currency": "EUR",
+    "version": "11.2.1",
+    "prices_include_tax": false,
+    "date_created": "2026-10-30T10:08:10",
+    "date_modified": "2026-10-30T10:08:11",
+    "discount_total": "0.00",
+    "discount_tax": "0.00",
+    "shipping_total": "0.00",
+    "shipping_tax": "0.00",
+    "cart_tax": "0.00",
+    "total": "29.90",
+    "total_tax": "0.00",
+    "customer_id": 0,
+    "order_key": "wc_order_OXFh9PrMJmBat",
+    "billing": {
+     "first_name": "Ana",
+     "last_name": "García",
+     "company": "",
+     "address_1": "Calle Mayor 1",
+     "address_2": "",
+     "city": "Madrid",
+     "state": "M",
+     "postcode": "28013",
+     "country": "ES",
+     "email": "rec-ae24b070@example.com",
+     "phone": "+34600111222"
+    },
+    "shipping": {
+     "first_name": "Ana",
+     "last_name": "García",
+     "company": "",
+     "address_1": "Calle Mayor 1",
+     "address_2": "",
+     "city": "Madrid",
+     "state": "M",
+     "postcode": "28013",
+     "country": "ES",
+     "phone": "+34600111222"
+    },
+    "payment_method": "auyan_test",
+    "payment_method_title": "",
+    "transaction_id": "",
+    "customer_ip_address": "",
+    "customer_user_agent": "",
+    "created_via": "rest-api",
+    "customer_note": "",
+    "date_completed": null,
+    "date_paid": "2026-10-30T10:08:11",
+    "cart_hash": "",
+    "number": "60",
+    "meta_data": [],
+    "line_items": [
+     {
+      "id": 31,
+      "name": "Camiseta Lino Azul",
+      "product_id": 10,
+      "variation_id": 0,
+      "quantity": 1,
+      "tax_class": "",
+      "subtotal": "29.90",
+      "subtotal_tax": "0.00",
+      "total": "29.90",
+      "total_tax": "0.00",
+      "taxes": [],
+      "meta_data": [
+       {
+        "id": 310,
+        "key": "_reduced_stock",
+        "value": "1",
+        "display_key": "_reduced_stock",
+        "display_value": "1"
+       }
+      ],
+      "sku": "CAM-AZ",
+      "global_unique_id": "",
+      "price": 29.9,
+      "image": {
+       "id": "",
+       "src": ""
+      },
+      "parent_name": null
+     }
+    ],
+    "tax_lines": [],
+    "shipping_lines": [],
+    "fee_lines": [],
+    "coupon_lines": [],
+    "refunds": [],
+    "payment_url": "https://tienda-prueba.test/checkout/order-pay/60/?pay_for_order=true&key=wc_order_OXFh9PrMJmBat",
+    "is_editable": false,
+    "needs_payment": false,
+    "needs_processing": true,
+    "date_created_gmt": "2026-10-30T10:08:10",
+    "date_modified_gmt": "2026-10-30T10:08:11",
+    "date_completed_gmt": null,
+    "date_paid_gmt": "2026-10-30T10:08:11",
+    "currency_symbol": "€",
+    "_links": {
+     "self": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60",
+       "targetHints": {
+        "allow": [
+         "GET",
+         "POST",
+         "PUT",
+         "PATCH",
+         "DELETE"
+        ]
+       }
+      }
+     ],
+     "collection": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders"
+      }
+     ],
+     "email_templates": [
+      {
+       "embeddable": true,
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/actions/email_templates"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "request": "GET /wp-json/wc/v3/orders/60/notes?type=internal",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": [
+    {
+     "id": 164,
+     "author": "WooCommerce",
+     "date_created": "2026-10-30T10:08:16",
+     "date_created_gmt": "2026-10-30T10:08:16",
+     "note": "Cliente avisado",
+     "customer_note": false,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes/164",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60"
+       }
+      ]
+     }
+    },
+    {
+     "id": 162,
+     "author": "WooCommerce",
+     "date_created": "2026-10-30T10:08:12",
+     "date_created_gmt": "2026-10-30T10:08:12",
+     "note": "Email \"New order\" failed to send: Could not instantiate mail function..",
+     "customer_note": false,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes/162",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60"
+       }
+      ]
+     }
+    },
+    {
+     "id": 163,
+     "author": "WooCommerce",
+     "date_created": "2026-10-30T10:08:12",
+     "date_created_gmt": "2026-10-30T10:08:12",
+     "note": "Email \"Processing order\" failed to send: Could not instantiate mail function..",
+     "customer_note": false,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes/163",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60"
+       }
+      ]
+     }
+    },
+    {
+     "id": 160,
+     "author": "WooCommerce",
+     "date_created": "2026-10-30T10:08:11",
+     "date_created_gmt": "2026-10-30T10:08:11",
+     "note": "Payment complete.",
+     "customer_note": false,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes/160",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60"
+       }
+      ]
+     }
+    },
+    {
+     "id": 161,
+     "author": "WooCommerce",
+     "date_created": "2026-10-30T10:08:11",
+     "date_created_gmt": "2026-10-30T10:08:11",
+     "note": "Stock levels reduced: Camiseta Lino Azul (23&rarr;22)",
+     "customer_note": false,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes/161",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "request": "POST /wp-json/wc/v3/orders/60/notes",
+   "body": {
+    "note": "Liquidación A",
+    "customer_note": false
+   },
+   "status": 201,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": {
+    "id": 165,
+    "author": "WooCommerce",
+    "date_created": "2026-10-30T10:08:22",
+    "date_created_gmt": "2026-10-30T10:08:22",
+    "note": "Liquidación A",
+    "customer_note": false,
+    "_links": {
+     "self": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes/165",
+       "targetHints": {
+        "allow": [
+         "GET",
+         "DELETE"
+        ]
+       }
+      }
+     ],
+     "collection": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes"
+      }
+     ],
+     "up": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "request": "GET /wp-json/wc/v3/orders/60",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": {
+    "id": 60,
+    "parent_id": 0,
+    "status": "processing",
+    "currency": "EUR",
+    "version": "11.2.1",
+    "prices_include_tax": false,
+    "date_created": "2026-10-30T10:08:10",
+    "date_modified": "2026-10-30T10:08:11",
+    "discount_total": "0.00",
+    "discount_tax": "0.00",
+    "shipping_total": "0.00",
+    "shipping_tax": "0.00",
+    "cart_tax": "0.00",
+    "total": "29.90",
+    "total_tax": "0.00",
+    "customer_id": 0,
+    "order_key": "wc_order_OXFh9PrMJmBat",
+    "billing": {
+     "first_name": "Ana",
+     "last_name": "García",
+     "company": "",
+     "address_1": "Calle Mayor 1",
+     "address_2": "",
+     "city": "Madrid",
+     "state": "M",
+     "postcode": "28013",
+     "country": "ES",
+     "email": "rec-ae24b070@example.com",
+     "phone": "+34600111222"
+    },
+    "shipping": {
+     "first_name": "Ana",
+     "last_name": "García",
+     "company": "",
+     "address_1": "Calle Mayor 1",
+     "address_2": "",
+     "city": "Madrid",
+     "state": "M",
+     "postcode": "28013",
+     "country": "ES",
+     "phone": "+34600111222"
+    },
+    "payment_method": "auyan_test",
+    "payment_method_title": "",
+    "transaction_id": "",
+    "customer_ip_address": "",
+    "customer_user_agent": "",
+    "created_via": "rest-api",
+    "customer_note": "",
+    "date_completed": null,
+    "date_paid": "2026-10-30T10:08:11",
+    "cart_hash": "",
+    "number": "60",
+    "meta_data": [],
+    "line_items": [
+     {
+      "id": 31,
+      "name": "Camiseta Lino Azul",
+      "product_id": 10,
+      "variation_id": 0,
+      "quantity": 1,
+      "tax_class": "",
+      "subtotal": "29.90",
+      "subtotal_tax": "0.00",
+      "total": "29.90",
+      "total_tax": "0.00",
+      "taxes": [],
+      "meta_data": [
+       {
+        "id": 310,
+        "key": "_reduced_stock",
+        "value": "1",
+        "display_key": "_reduced_stock",
+        "display_value": "1"
+       }
+      ],
+      "sku": "CAM-AZ",
+      "global_unique_id": "",
+      "price": 29.9,
+      "image": {
+       "id": "",
+       "src": ""
+      },
+      "parent_name": null
+     }
+    ],
+    "tax_lines": [],
+    "shipping_lines": [],
+    "fee_lines": [],
+    "coupon_lines": [],
+    "refunds": [],
+    "payment_url": "https://tienda-prueba.test/checkout/order-pay/60/?pay_for_order=true&key=wc_order_OXFh9PrMJmBat",
+    "is_editable": false,
+    "needs_payment": false,
+    "needs_processing": true,
+    "date_created_gmt": "2026-10-30T10:08:10",
+    "date_modified_gmt": "2026-10-30T10:08:11",
+    "date_completed_gmt": null,
+    "date_paid_gmt": "2026-10-30T10:08:11",
+    "currency_symbol": "€",
+    "_links": {
+     "self": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60",
+       "targetHints": {
+        "allow": [
+         "GET",
+         "POST",
+         "PUT",
+         "PATCH",
+         "DELETE"
+        ]
+       }
+      }
+     ],
+     "collection": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders"
+      }
+     ],
+     "email_templates": [
+      {
+       "embeddable": true,
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/actions/email_templates"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "request": "GET /wp-json/wc/v3/orders/60/notes?type=internal",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": [
+    {
+     "id": 165,
+     "author": "WooCommerce",
+     "date_created": "2026-10-30T10:08:22",
+     "date_created_gmt": "2026-10-30T10:08:22",
+     "note": "Liquidación A",
+     "customer_note": false,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes/165",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60"
+       }
+      ]
+     }
+    },
+    {
+     "id": 164,
+     "author": "WooCommerce",
+     "date_created": "2026-10-30T10:08:16",
+     "date_created_gmt": "2026-10-30T10:08:16",
+     "note": "Cliente avisado",
+     "customer_note": false,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes/164",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60"
+       }
+      ]
+     }
+    },
+    {
+     "id": 162,
+     "author": "WooCommerce",
+     "date_created": "2026-10-30T10:08:12",
+     "date_created_gmt": "2026-10-30T10:08:12",
+     "note": "Email \"New order\" failed to send: Could not instantiate mail function..",
+     "customer_note": false,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes/162",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60"
+       }
+      ]
+     }
+    },
+    {
+     "id": 163,
+     "author": "WooCommerce",
+     "date_created": "2026-10-30T10:08:12",
+     "date_created_gmt": "2026-10-30T10:08:12",
+     "note": "Email \"Processing order\" failed to send: Could not instantiate mail function..",
+     "customer_note": false,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes/163",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60"
+       }
+      ]
+     }
+    },
+    {
+     "id": 160,
+     "author": "WooCommerce",
+     "date_created": "2026-10-30T10:08:11",
+     "date_created_gmt": "2026-10-30T10:08:11",
+     "note": "Payment complete.",
+     "customer_note": false,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes/160",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60"
+       }
+      ]
+     }
+    },
+    {
+     "id": 161,
+     "author": "WooCommerce",
+     "date_created": "2026-10-30T10:08:11",
+     "date_created_gmt": "2026-10-30T10:08:11",
+     "note": "Stock levels reduced: Camiseta Lino Azul (23&rarr;22)",
+     "customer_note": false,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes/161",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60/notes"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/60"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

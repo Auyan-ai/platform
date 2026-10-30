@@ -105,6 +105,11 @@ class Settings(BaseSettings):
     gorgias_oauth_client_secret: SecretStr | None = None
     gorgias_oauth_redirect_uri: str | None = None
 
+    # --- WooCommerce (ADR 0016 §6) ---
+    # Solo desarrollo: permite `http://127.0.0.1` o `http://localhost` como tienda (el
+    # WordPress Playground de `scripts/woocommerce_dev/`). Cualquier otra tienda exige HTTPS.
+    woocommerce_allow_http_loopback: bool = False
+
     # --- Webhook security ---
     webhook_secret: SecretStr = Field(
         ..., description="HMAC shared secret para validar webhooks entrantes"
