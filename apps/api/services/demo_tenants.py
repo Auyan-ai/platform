@@ -159,7 +159,9 @@ async def start_demo_ingestion(
     return ingestion_id
 
 
-def demo_state_overrides(tenant: Tenant, *, scripted_commerce: bool = False) -> dict[str, object]:
+def demo_state_overrides(
+    tenant: Tenant, *, scripted_commerce: bool = False, platform: str | None = None
+) -> dict[str, object]:
     """Campos del estado del turno que fija el origen del tenant.
 
     Una demo nunca usa comercio `live`: lee el catálogo público de su tienda, también en
@@ -172,11 +174,14 @@ def demo_state_overrides(tenant: Tenant, *, scripted_commerce: bool = False) -> 
     if scripted_commerce:
         return {"commerce_integration_ctx": None}
     domain = normalize_domain(tenant.demo_source_url or "")
-    return {
+    overrides: dict[str, object] = {
         "commerce_integration_ctx": None,
         "commerce_mode": "demo_catalog",
         "demo_catalog_domain": domain,
     }
+    if platform:
+        overrides["demo_catalog_platform"] = platform
+    return overrides
 
 
 def reject_demo_intake(tenant: Tenant | None, *, source: str) -> None:

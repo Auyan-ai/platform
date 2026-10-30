@@ -101,6 +101,21 @@ def test_demo_catalog_gets_the_public_adapter_and_never_the_credentials() -> Non
     assert ctx.integration_ctx.credentials == {}
 
 
+def test_demo_catalog_adapter_follows_the_demo_platform() -> None:
+    from apps.api.integrations.demo_catalog_woocommerce import WooCommerceDemoCatalogAdapter
+
+    ctx = build_skill_context(
+        _state(
+            commerce_mode="demo_catalog",
+            demo_catalog_domain="tienda.example",
+            demo_catalog_platform="woocommerce",
+        )
+    )
+
+    assert isinstance(ctx.commerce, WooCommerceDemoCatalogAdapter)
+    assert ctx.integration_ctx is not None and ctx.integration_ctx.credentials == {}
+
+
 async def test_demo_catalog_never_builds_the_real_shopify_adapter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -136,3 +151,16 @@ async def test_demo_catalog_never_builds_the_real_shopify_adapter(
 def test_demo_catalog_without_domain_fails_loudly() -> None:
     with pytest.raises(ValueError, match="demo_catalog_domain_missing"):
         build_skill_context(_state(commerce_mode="demo_catalog"))
+
+
+def test_a_demo_without_a_public_catalog_offers_no_commerce_skill() -> None:
+    ctx = build_skill_context(
+        _state(
+            commerce_mode="demo_catalog",
+            demo_catalog_domain="blog.example",
+            demo_catalog_platform="wordpress",
+        )
+    )
+
+    assert ctx.commerce is not None
+    assert ctx.commerce.capabilities == frozenset()

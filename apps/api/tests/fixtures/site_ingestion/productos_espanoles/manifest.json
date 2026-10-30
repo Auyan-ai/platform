@@ -1,0 +1,100 @@
+[
+ {
+  "method": "GET",
+  "url": "https://productos-espanoles.com/robots.txt",
+  "status": 301,
+  "headers": {
+   "location": "https://www.productos-espanoles.com/robots.txt",
+   "content-type": "text/html; charset=UTF-8"
+  },
+  "file": "00-robots-txt.txt"
+ },
+ {
+  "method": "GET",
+  "url": "https://www.productos-espanoles.com/robots.txt",
+  "status": 200,
+  "headers": {
+   "content-type": "text/plain; charset=utf-8"
+  },
+  "file": "01-robots-txt.txt"
+ },
+ {
+  "method": "GET",
+  "url": "https://productos-espanoles.com/wp-json/?_fields=name,description,namespaces",
+  "status": 200,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "02-wp-json-fields-name-description-namespaces.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://productos-espanoles.com/wp-json/wp/v2/pages?per_page=100&page=1&_fields=slug,title,content,link,modified",
+  "status": 200,
+  "headers": {
+   "x-wp-total": "13",
+   "x-wp-totalpages": "1",
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "03-wp-json-wp-v2-pages-per-page-100-page-1-fields-slu.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://productos-espanoles.com/llms-full.txt",
+  "status": 301,
+  "headers": {
+   "location": "https://www.productos-espanoles.com/llms-full.txt",
+   "content-type": "text/html; charset=UTF-8"
+  },
+  "file": "04-llms-full-txt.txt"
+ },
+ {
+  "method": "GET",
+  "url": "https://www.productos-espanoles.com/robots.txt",
+  "status": 200,
+  "headers": {
+   "content-type": "text/plain; charset=utf-8"
+  },
+  "file": "05-robots-txt.txt"
+ },
+ {
+  "method": "GET",
+  "url": "https://productos-espanoles.com/llms.txt",
+  "status": 301,
+  "headers": {
+   "location": "https://www.productos-espanoles.com/llms.txt",
+   "content-type": "text/html; charset=UTF-8"
+  },
+  "file": "06-llms-txt.txt"
+ },
+ {
+  "method": "GET",
+  "url": "https://productos-espanoles.com/agents.md",
+  "status": 301,
+  "headers": {
+   "location": "https://www.productos-espanoles.com/agents.md",
+   "content-type": "text/html; charset=UTF-8"
+  },
+  "file": "07-agents-md.txt"
+ },
+ {
+  "method": "GET",
+  "url": "https://productos-espanoles.com/wp-json/wc/store/v1/products?search=aceite&per_page=3",
+  "status": 404,
+  "headers": {
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "08-wp-json-wc-store-v1-products-search-aceite-per-pag.json"
+ },
+ {
+  "method": "GET",
+  "url": "https://productos-espanoles.com/wp-json/wc/store/products?search=aceite&per_page=3",
+  "status": 200,
+  "headers": {
+   "x-wp-total": "1",
+   "x-wp-totalpages": "1",
+   "content-type": "application/json; charset=UTF-8"
+  },
+  "file": "09-wp-json-wc-store-products-search-aceite-per-page-3.json"
+ }
+]

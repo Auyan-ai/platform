@@ -23,6 +23,7 @@ from apps.api.db.queries import (
     list_tool_permissions,
 )
 from apps.api.db.returns_policy import load_current_returns_policy
+from apps.api.db.site_ingestions import get_demo_platform
 from apps.api.services.commerce_context import build_commerce_integration_ctx
 from apps.api.services.demo_tenants import demo_state_overrides
 from apps.api.services.knowledge_mode import (
@@ -57,6 +58,9 @@ def make_load_tenant_context_node(
             playbook = await get_tenant_playbook(conn, tenant_id)
             facts = await get_tenant_facts(conn, tenant_id)
             stored_policy = await load_current_returns_policy(conn, tenant_id)
+            demo_platform = (
+                await get_demo_platform(conn, tenant_id) if tenant.origin == "demo" else None
+            )
 
             config_dump = config.model_dump(mode="json")
             extra = config_dump.get("extra") or {}
@@ -129,7 +133,11 @@ def make_load_tenant_context_node(
         scripted_commerce = bool(
             state.get("simulation_mode") and (state.get("simulation_fixtures") or {}).get("shopify")
         )
-        out.update(demo_state_overrides(tenant, scripted_commerce=scripted_commerce))
+        out.update(
+            demo_state_overrides(
+                tenant, scripted_commerce=scripted_commerce, platform=demo_platform
+            )
+        )
         # Fallback sin AOPs: el tenant puede opt-in a skills vía tenant_config.extra.
         # select_aop (Sprint 7+) sobreescribe estos si el tenant tiene AOPs configurados.
         if isinstance(extra.get("allowed_skills"), list):

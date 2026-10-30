@@ -138,6 +138,20 @@ async def get_latest_site_ingestion(
     return _ingestion_from_row(row) if row else None
 
 
+async def get_demo_platform(conn: asyncpg.Connection, tenant_id: UUID) -> str | None:
+    """Plataforma que dejó la última ingesta terminada de la demo; elige su catálogo."""
+    platform: str | None = await conn.fetchval(
+        """
+        SELECT platform FROM site_ingestions
+         WHERE tenant_id = $1 AND deleted_at IS NULL AND status = 'ready' AND platform IS NOT NULL
+         ORDER BY finished_at DESC NULLS LAST, created_at DESC
+         LIMIT 1
+        """,
+        tenant_id,
+    )
+    return platform
+
+
 async def get_site_ingestion(
     conn: asyncpg.Connection, tenant_id: UUID, ingestion_id: UUID
 ) -> SiteIngestion | None:
