@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils'
 import { HelpdeskConnectStep } from './HelpdeskConnectStep'
 import { KbUploadStep } from './KbUploadStep'
 import { OnboardingChecklistBanner } from './OnboardingChecklistBanner'
-import { ShopifyConnectStep } from './ShopifyConnectStep'
+import { CommerceConnectStep } from './CommerceConnectStep'
 
 type Field = {
   key: string
@@ -67,7 +67,7 @@ const STEPS: Array<{ id: number; title: string; fields: Field[] }> = [
   },
   {
     id: 4,
-    title: 'Conexión Shopify',
+    title: 'Conexión de la tienda',
     fields: [],
   },
   {
@@ -277,7 +277,7 @@ export function OnboardingWizard({ tenantId }: { tenantId: string }) {
 
         <div className="mt-6 grid gap-4">
           {step === 4 ? (
-            <ShopifyConnectStep tenantId={tenantId} />
+            <CommerceConnectStep tenantId={tenantId} />
           ) : step === 5 ? (
             <HelpdeskConnectStep tenantId={tenantId} />
           ) : step === 6 ? (

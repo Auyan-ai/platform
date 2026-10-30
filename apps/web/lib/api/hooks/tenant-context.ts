@@ -125,6 +125,12 @@ export interface ConnectShopifyPayload {
   client_secret: string
 }
 
+export interface ConnectWooCommercePayload {
+  store_url: string
+  consumer_key: string
+  consumer_secret: string
+}
+
 export interface ConnectChatwootPayload {
   base_url: string
   account_id: string
@@ -467,6 +473,25 @@ export function useConnectShopify(tenantId: string) {
         token,
         tenantId,
         '/tenants/me/integrations/shopify',
+        { method: 'POST', body: JSON.stringify(payload) },
+      )
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.integrations(tenantId) })
+      qc.invalidateQueries({ queryKey: queryKeys.tenants.onboardingChecklist(tenantId) })
+    },
+  })
+}
+
+export function useConnectWooCommerce(tenantId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (payload: ConnectWooCommercePayload) => {
+      const token = await getToken()
+      return tenantContextFetch<ConnectIntegrationResponse>(
+        token,
+        tenantId,
+        '/tenants/me/integrations/woocommerce',
         { method: 'POST', body: JSON.stringify(payload) },
       )
     },
