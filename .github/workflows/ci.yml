@@ -40,6 +40,72 @@ jobs:
       - name: Pytest
         run: poetry run pytest --tb=short -q
 
+  api-pg:
+    name: API — tests contra Postgres real (bloqueante)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AUYAN_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pip install poetry==1.8.5
+
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry/virtualenvs
+          key: poetry-${{ runner.os }}-${{ hashFiles('apps/api/poetry.lock') }}
+          restore-keys: poetry-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Guard — la variable del Postgres de pruebas debe existir
+        run: |
+          test -n "$AUYAN_TEST_DATABASE_URL" || { echo "AUYAN_TEST_DATABASE_URL vacía: los _pg se saltarían en silencio"; exit 1; }
+
+      - name: Pytest _pg
+        run: poetry run pytest tests/*_pg.py --tb=short -q --junitxml=pg-report.xml
+
+      - name: Guard — ningún test _pg se salta
+        run: |
+          python3 - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("pg-report.xml").getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          total = int(suite.get("tests"))
+          skipped = int(suite.get("skipped"))
+          print(f"tests _pg ejecutados: {total - skipped} (saltados: {skipped}, total: {total})")
+          if skipped or total == 0:
+            print("Hay tests _pg saltados o ninguno corrió: el job no puede pasar en silencio.")
+            sys.exit(1)
+          PY
+
   evals-static:
     name: Evals estáticas (sin LLM, bloqueante)
     runs-on: ubuntu-latest

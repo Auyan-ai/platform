@@ -1,0 +1,56 @@
+[
+ {
+  "method": "GET",
+  "url": "https://thinkingmu.com/robots.txt",
+  "status": 200,
+  "headers": {
+   "content-type": "text/plain; charset=utf-8"
+  },
+  "file": "robots.txt"
+ },
+ {
+  "method": "GET",
+  "url": "https://thinkingmu.com/sitemap.xml",
+  "status": 200,
+  "headers": {
+   "content-type": "application/xml; charset=utf-8"
+  },
+  "file": "sitemap.xml"
+ },
+ {
+  "method": "GET",
+  "url": "https://thinkingmu.com/pages/localizador-tiendas",
+  "status": 200,
+  "headers": {
+   "content-type": "text/html; charset=utf-8"
+  },
+  "file": "localizador-tiendas.html"
+ },
+ {
+  "method": "GET",
+  "url": "https://thinkingmu.com/pages/faqs-ayuda",
+  "status": 200,
+  "headers": {
+   "content-type": "text/html; charset=utf-8"
+  },
+  "file": "faqs-ayuda.html"
+ },
+ {
+  "method": "GET",
+  "url": "https://thinkingmu.com/pages/tablas-de-tallas",
+  "status": 200,
+  "headers": {
+   "content-type": "text/html; charset=utf-8"
+  },
+  "file": "tablas-de-tallas.html"
+ },
+ {
+  "method": "GET",
+  "url": "https://thinkingmu.com/pages/pagos-condiciones",
+  "status": 200,
+  "headers": {
+   "content-type": "text/html; charset=utf-8"
+  },
+  "file": "pagos-condiciones.html"
+ }
+]

@@ -202,7 +202,14 @@ export function KnowledgeReviewQueue({ tenantId }: { tenantId: string }) {
                     isActive ? 'bg-accent-subtle text-accent-foreground' : 'hover:bg-surface-muted',
                   )}
                 >
-                  <p className="truncate text-sm font-medium">{item.title}</p>
+                  <p className="truncate text-sm font-medium">
+                    {item.title}
+                    {item.metadata.duplicate_of ? (
+                      <Badge variant="warning" className="ml-2">
+                        Duplicado
+                      </Badge>
+                    ) : null}
+                  </p>
                   <p className="mt-1 truncate text-xs text-foreground-muted">{sourceLabel(item)}</p>
                 </button>
               )
@@ -245,6 +252,19 @@ export function KnowledgeReviewQueue({ tenantId }: { tenantId: string }) {
                   </Button>
                 </div>
               </div>
+
+              {typeof active.metadata.duplicate_of === 'string' && (
+                <div className="mt-5 rounded-md border border-border bg-warning-subtle px-4 py-3">
+                  <p className="text-sm text-foreground-body">
+                    Mismo texto que{' '}
+                    {active.metadata.duplicate_kind === 'submission'
+                      ? 'otra fuente pendiente'
+                      : 'un documento ya indexado'}{' '}
+                    bajo otra clave ({active.metadata.duplicate_of}). Aprobarla dejaría el contenido
+                    dos veces en la KB.
+                  </p>
+                </div>
+              )}
 
               {active.notes && (
                 <div className="mt-5 rounded-md border border-border-subtle bg-surface-muted px-4 py-3">
