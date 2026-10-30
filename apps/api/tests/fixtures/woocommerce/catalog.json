@@ -1,0 +1,1294 @@
+{
+ "refs": {},
+ "exchanges": [
+  {
+   "request": "GET /wp-json/wc/v3/products?per_page=10&search=sudadera&status=publish",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": [
+    {
+     "id": 12,
+     "name": "Sudadera Orgánica",
+     "slug": "sudadera-organica",
+     "permalink": "https://tienda-prueba.test/product/sudadera-organica/",
+     "date_created": "2026-10-30T09:46:43",
+     "date_created_gmt": "2026-10-30T09:46:43",
+     "date_modified": "2026-10-30T09:46:53",
+     "date_modified_gmt": "2026-10-30T09:46:53",
+     "type": "variable",
+     "status": "publish",
+     "featured": false,
+     "catalog_visibility": "visible",
+     "description": "",
+     "short_description": "",
+     "sku": "",
+     "price": "45.00",
+     "regular_price": "",
+     "sale_price": "",
+     "date_on_sale_from": null,
+     "date_on_sale_from_gmt": null,
+     "date_on_sale_to": null,
+     "date_on_sale_to_gmt": null,
+     "on_sale": false,
+     "purchasable": true,
+     "total_sales": 0,
+     "virtual": false,
+     "downloadable": false,
+     "downloads": [],
+     "download_limit": -1,
+     "download_expiry": -1,
+     "external_url": "",
+     "button_text": "",
+     "tax_status": "taxable",
+     "tax_class": "",
+     "manage_stock": false,
+     "stock_quantity": null,
+     "backorders": "no",
+     "backorders_allowed": false,
+     "backordered": false,
+     "low_stock_amount": null,
+     "sold_individually": false,
+     "weight": "",
+     "dimensions": {
+      "length": "",
+      "width": "",
+      "height": ""
+     },
+     "shipping_required": true,
+     "shipping_taxable": true,
+     "shipping_class": "",
+     "shipping_class_id": 0,
+     "reviews_allowed": true,
+     "average_rating": "0.00",
+     "rating_count": 0,
+     "upsell_ids": [],
+     "cross_sell_ids": [],
+     "parent_id": 0,
+     "purchase_note": "",
+     "categories": [
+      {
+       "id": 15,
+       "name": "Uncategorized",
+       "slug": "uncategorized"
+      }
+     ],
+     "brands": [],
+     "tags": [],
+     "images": [],
+     "attributes": [
+      {
+       "id": 0,
+       "name": "Talla",
+       "slug": "Talla",
+       "position": 0,
+       "visible": true,
+       "variation": true,
+       "options": [
+        "S",
+        "M",
+        "L"
+       ]
+      }
+     ],
+     "default_attributes": [],
+     "variations": [
+      13,
+      14,
+      15
+     ],
+     "grouped_products": [],
+     "menu_order": 0,
+     "price_html": "<span class=\"woocommerce-Price-amount amount\"><bdi><span class=\"woocommerce-Price-currencySymbol\" translate=\"no\" dir=\"auto\">&euro;</span>45.00</bdi></span>",
+     "related_ids": [
+      10,
+      11
+     ],
+     "meta_data": [],
+     "stock_status": "instock",
+     "has_options": true,
+     "post_password": "",
+     "global_unique_id": "",
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/products/12",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "POST",
+          "PUT",
+          "PATCH",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/products"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "request": "GET /wp-json/wc/v3/products/12/variations?per_page=100",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": [
+    {
+     "id": 15,
+     "type": "variation",
+     "date_created": "2026-10-30T09:46:45",
+     "date_created_gmt": "2026-10-30T09:46:45",
+     "date_modified": "2026-10-30T09:46:45",
+     "date_modified_gmt": "2026-10-30T09:46:45",
+     "description": "",
+     "permalink": "https://tienda-prueba.test/product/sudadera-organica/?attribute_talla=L",
+     "sku": "",
+     "global_unique_id": "",
+     "price": "45.00",
+     "regular_price": "45.00",
+     "sale_price": "",
+     "date_on_sale_from": null,
+     "date_on_sale_from_gmt": null,
+     "date_on_sale_to": null,
+     "date_on_sale_to_gmt": null,
+     "on_sale": false,
+     "status": "publish",
+     "purchasable": true,
+     "virtual": false,
+     "downloadable": false,
+     "downloads": [],
+     "download_limit": -1,
+     "download_expiry": -1,
+     "tax_status": "taxable",
+     "tax_class": "",
+     "manage_stock": true,
+     "stock_quantity": 3,
+     "stock_status": "instock",
+     "backorders": "no",
+     "backorders_allowed": false,
+     "backordered": false,
+     "low_stock_amount": null,
+     "weight": "",
+     "dimensions": {
+      "length": "",
+      "width": "",
+      "height": ""
+     },
+     "shipping_class": "",
+     "shipping_class_id": 0,
+     "image": null,
+     "gallery_image_ids": [],
+     "attributes": [
+      {
+       "id": 0,
+       "name": "Talla",
+       "slug": "talla",
+       "option": "L"
+      }
+     ],
+     "menu_order": 0,
+     "meta_data": [],
+     "name": "L",
+     "parent_id": 12,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/products/12/variations/15",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "POST",
+          "PUT",
+          "PATCH",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/products/12/variations"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/products/12"
+       }
+      ]
+     }
+    },
+    {
+     "id": 14,
+     "type": "variation",
+     "date_created": "2026-10-30T09:46:44",
+     "date_created_gmt": "2026-10-30T09:46:44",
+     "date_modified": "2026-10-30T09:46:44",
+     "date_modified_gmt": "2026-10-30T09:46:44",
+     "description": "",
+     "permalink": "https://tienda-prueba.test/product/sudadera-organica/?attribute_talla=M",
+     "sku": "",
+     "global_unique_id": "",
+     "price": "45.00",
+     "regular_price": "45.00",
+     "sale_price": "",
+     "date_on_sale_from": null,
+     "date_on_sale_from_gmt": null,
+     "date_on_sale_to": null,
+     "date_on_sale_to_gmt": null,
+     "on_sale": false,
+     "status": "publish",
+     "purchasable": true,
+     "virtual": false,
+     "downloadable": false,
+     "downloads": [],
+     "download_limit": -1,
+     "download_expiry": -1,
+     "tax_status": "taxable",
+     "tax_class": "",
+     "manage_stock": true,
+     "stock_quantity": 0,
+     "stock_status": "outofstock",
+     "backorders": "no",
+     "backorders_allowed": false,
+     "backordered": false,
+     "low_stock_amount": null,
+     "weight": "",
+     "dimensions": {
+      "length": "",
+      "width": "",
+      "height": ""
+     },
+     "shipping_class": "",
+     "shipping_class_id": 0,
+     "image": null,
+     "gallery_image_ids": [],
+     "attributes": [
+      {
+       "id": 0,
+       "name": "Talla",
+       "slug": "talla",
+       "option": "M"
+      }
+     ],
+     "menu_order": 0,
+     "meta_data": [],
+     "name": "M",
+     "parent_id": 12,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/products/12/variations/14",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "POST",
+          "PUT",
+          "PATCH",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/products/12/variations"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/products/12"
+       }
+      ]
+     }
+    },
+    {
+     "id": 13,
+     "type": "variation",
+     "date_created": "2026-10-30T09:46:44",
+     "date_created_gmt": "2026-10-30T09:46:44",
+     "date_modified": "2026-10-30T09:46:44",
+     "date_modified_gmt": "2026-10-30T09:46:44",
+     "description": "",
+     "permalink": "https://tienda-prueba.test/product/sudadera-organica/?attribute_talla=S",
+     "sku": "",
+     "global_unique_id": "",
+     "price": "45.00",
+     "regular_price": "45.00",
+     "sale_price": "",
+     "date_on_sale_from": null,
+     "date_on_sale_from_gmt": null,
+     "date_on_sale_to": null,
+     "date_on_sale_to_gmt": null,
+     "on_sale": false,
+     "status": "publish",
+     "purchasable": true,
+     "virtual": false,
+     "downloadable": false,
+     "downloads": [],
+     "download_limit": -1,
+     "download_expiry": -1,
+     "tax_status": "taxable",
+     "tax_class": "",
+     "manage_stock": true,
+     "stock_quantity": 5,
+     "stock_status": "instock",
+     "backorders": "no",
+     "backorders_allowed": false,
+     "backordered": false,
+     "low_stock_amount": null,
+     "weight": "",
+     "dimensions": {
+      "length": "",
+      "width": "",
+      "height": ""
+     },
+     "shipping_class": "",
+     "shipping_class_id": 0,
+     "image": null,
+     "gallery_image_ids": [],
+     "attributes": [
+      {
+       "id": 0,
+       "name": "Talla",
+       "slug": "talla",
+       "option": "S"
+      }
+     ],
+     "menu_order": 0,
+     "meta_data": [],
+     "name": "S",
+     "parent_id": 12,
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/products/12/variations/13",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "POST",
+          "PUT",
+          "PATCH",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/products/12/variations"
+       }
+      ],
+      "up": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/products/12"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "request": "GET /wp-json/wc/v3/products?per_page=10&search=camiseta&status=publish",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": [
+    {
+     "id": 10,
+     "name": "Camiseta Lino Azul",
+     "slug": "camiseta-lino-azul",
+     "permalink": "https://tienda-prueba.test/product/camiseta-lino-azul/",
+     "date_created": "2026-10-30T09:46:41",
+     "date_created_gmt": "2026-10-30T09:46:41",
+     "date_modified": "2026-10-30T10:08:11",
+     "date_modified_gmt": "2026-10-30T10:08:11",
+     "type": "simple",
+     "status": "publish",
+     "featured": false,
+     "catalog_visibility": "visible",
+     "description": "<p>Descripción de Camiseta Lino Azul, algodón orgánico.</p>\n",
+     "short_description": "",
+     "sku": "CAM-AZ",
+     "price": "29.90",
+     "regular_price": "29.90",
+     "sale_price": "",
+     "date_on_sale_from": null,
+     "date_on_sale_from_gmt": null,
+     "date_on_sale_to": null,
+     "date_on_sale_to_gmt": null,
+     "on_sale": false,
+     "purchasable": true,
+     "total_sales": 28,
+     "virtual": false,
+     "downloadable": false,
+     "downloads": [],
+     "download_limit": -1,
+     "download_expiry": -1,
+     "external_url": "",
+     "button_text": "",
+     "tax_status": "taxable",
+     "tax_class": "",
+     "manage_stock": true,
+     "stock_quantity": 22,
+     "backorders": "no",
+     "backorders_allowed": false,
+     "backordered": false,
+     "low_stock_amount": null,
+     "sold_individually": false,
+     "weight": "",
+     "dimensions": {
+      "length": "",
+      "width": "",
+      "height": ""
+     },
+     "shipping_required": true,
+     "shipping_taxable": true,
+     "shipping_class": "",
+     "shipping_class_id": 0,
+     "reviews_allowed": true,
+     "average_rating": "0.00",
+     "rating_count": 0,
+     "upsell_ids": [],
+     "cross_sell_ids": [],
+     "parent_id": 0,
+     "purchase_note": "",
+     "categories": [
+      {
+       "id": 15,
+       "name": "Uncategorized",
+       "slug": "uncategorized"
+      }
+     ],
+     "brands": [],
+     "tags": [],
+     "images": [],
+     "attributes": [],
+     "default_attributes": [],
+     "variations": [],
+     "grouped_products": [],
+     "menu_order": 0,
+     "price_html": "<span class=\"woocommerce-Price-amount amount\"><bdi><span class=\"woocommerce-Price-currencySymbol\" translate=\"no\" dir=\"auto\">&euro;</span>29.90</bdi></span>",
+     "related_ids": [
+      11,
+      12
+     ],
+     "meta_data": [],
+     "stock_status": "instock",
+     "has_options": false,
+     "post_password": "",
+     "global_unique_id": "",
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/products/10",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "POST",
+          "PUT",
+          "PATCH",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/products"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "request": "GET /wp-json/wc/v3/settings/general/woocommerce_currency",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": {
+    "id": "woocommerce_currency",
+    "label": "Currency",
+    "description": "This controls what currency prices are listed at in the catalog and which currency gateways will take payments in.",
+    "type": "select",
+    "default": "USD",
+    "options": {
+     "AED": "United Arab Emirates dirham (&#x62f;.&#x625;) — AED",
+     "AFN": "Afghan afghani (&#x60b;) — AFN",
+     "ALL": "Albanian lek (L) — ALL",
+     "AMD": "Armenian dram (AMD) — AMD",
+     "ANG": "Netherlands Antillean guilder (&fnof;) — ANG",
+     "AOA": "Angolan kwanza (Kz) — AOA",
+     "ARS": "Argentine peso (&#36;) — ARS",
+     "AUD": "Australian dollar (&#36;) — AUD",
+     "AWG": "Aruban florin (Afl.) — AWG",
+     "AZN": "Azerbaijani manat (&#8380;) — AZN",
+     "BAM": "Bosnia and Herzegovina convertible mark (KM) — BAM",
+     "BBD": "Barbadian dollar (&#36;) — BBD",
+     "BDT": "Bangladeshi taka (&#2547;&nbsp;) — BDT",
+     "BGN": "Bulgarian lev (&#1083;&#1074;.) — BGN",
+     "BHD": "Bahraini dinar (.&#x62f;.&#x628;) — BHD",
+     "BIF": "Burundian franc (Fr) — BIF",
+     "BMD": "Bermudian dollar (&#36;) — BMD",
+     "BND": "Brunei dollar (&#36;) — BND",
+     "BOB": "Bolivian boliviano (Bs.) — BOB",
+     "BRL": "Brazilian real (&#82;&#36;) — BRL",
+     "BSD": "Bahamian dollar (&#36;) — BSD",
+     "BTC": "Bitcoin (&#3647;) — BTC",
+     "BTN": "Bhutanese ngultrum (Nu.) — BTN",
+     "BWP": "Botswana pula (P) — BWP",
+     "BYR": "Belarusian ruble (old) (Br) — BYR",
+     "BYN": "Belarusian ruble (Br) — BYN",
+     "BZD": "Belize dollar (&#36;) — BZD",
+     "CAD": "Canadian dollar (&#36;) — CAD",
+     "CDF": "Congolese franc (Fr) — CDF",
+     "CHF": "Swiss franc (&#67;&#72;&#70;) — CHF",
+     "CHW": "WIR franc (CHW) — CHW",
+     "CLP": "Chilean peso (&#36;) — CLP",
+     "CNY": "Chinese yuan (&yen;) — CNY",
+     "COP": "Colombian peso (&#36;) — COP",
+     "CRC": "Costa Rican col&oacute;n (&#x20a1;) — CRC",
+     "CUC": "Cuban convertible peso (&#36;) — CUC",
+     "CUP": "Cuban peso (&#36;) — CUP",
+     "CVE": "Cape Verdean escudo (&#36;) — CVE",
+     "CZK": "Czech koruna (&#75;&#269;) — CZK",
+     "DJF": "Djiboutian franc (Fr) — DJF",
+     "DKK": "Danish krone (kr.) — DKK",
+     "DOP": "Dominican peso (RD&#36;) — DOP",
+     "DZD": "Algerian dinar (&#x62f;.&#x62c;) — DZD",
+     "EGP": "Egyptian pound (EGP) — EGP",
+     "ERN": "Eritrean nakfa (Nfk) — ERN",
+     "ETB": "Ethiopian birr (Br) — ETB",
+     "EUR": "Euro (&euro;) — EUR",
+     "FJD": "Fijian dollar (&#36;) — FJD",
+     "FKP": "Falkland Islands pound (&pound;) — FKP",
+     "GBP": "Pound sterling (&pound;) — GBP",
+     "GEL": "Georgian lari (&#x20be;) — GEL",
+     "GGP": "Guernsey pound (&pound;) — GGP",
+     "GHS": "Ghana cedi (&#x20b5;) — GHS",
+     "GIP": "Gibraltar pound (&pound;) — GIP",
+     "GMD": "Gambian dalasi (D) — GMD",
+     "GNF": "Guinean franc (Fr) — GNF",
+     "GTQ": "Guatemalan quetzal (Q) — GTQ",
+     "GYD": "Guyanese dollar (&#36;) — GYD",
+     "HKD": "Hong Kong dollar (&#36;) — HKD",
+     "HNL": "Honduran lempira (L) — HNL",
+     "HRK": "Croatian kuna (kn) — HRK",
+     "HTG": "Haitian gourde (G) — HTG",
+     "HUF": "Hungarian forint (&#70;&#116;) — HUF",
+     "IDR": "Indonesian rupiah (Rp) — IDR",
+     "ILS": "Israeli new shekel (&#8362;) — ILS",
+     "IMP": "Manx pound (&pound;) — IMP",
+     "INR": "Indian rupee (&#8377;) — INR",
+     "IQD": "Iraqi dinar (&#x62f;.&#x639;) — IQD",
+     "IRR": "Iranian rial (&#xfdfc;) — IRR",
+     "IRT": "Iranian toman (&#x062A;&#x0648;&#x0645;&#x0627;&#x0646;) — IRT",
+     "ISK": "Icelandic kr&oacute;na (kr.) — ISK",
+     "JEP": "Jersey pound (&pound;) — JEP",
+     "JMD": "Jamaican dollar (&#36;) — JMD",
+     "JOD": "Jordanian dinar (&#x62f;.&#x627;) — JOD",
+     "JPY": "Japanese yen (&yen;) — JPY",
+     "KES": "Kenyan shilling (KSh) — KES",
+     "KGS": "Kyrgyzstani som (&#x441;&#x43e;&#x43c;) — KGS",
+     "KHR": "Cambodian riel (&#x17db;) — KHR",
+     "KMF": "Comorian franc (Fr) — KMF",
+     "KPW": "North Korean won (&#x20a9;) — KPW",
+     "KRW": "South Korean won (&#8361;) — KRW",
+     "KWD": "Kuwaiti dinar (&#x62f;.&#x643;) — KWD",
+     "KYD": "Cayman Islands dollar (&#36;) — KYD",
+     "KZT": "Kazakhstani tenge (&#8376;) — KZT",
+     "LAK": "Lao kip (&#8365;) — LAK",
+     "LBP": "Lebanese pound (&#x644;.&#x644;) — LBP",
+     "LKR": "Sri Lankan rupee (&#xdbb;&#xdd4;) — LKR",
+     "LRD": "Liberian dollar (&#36;) — LRD",
+     "LSL": "Lesotho loti (L) — LSL",
+     "LYD": "Libyan dinar (&#x62f;.&#x644;) — LYD",
+     "MAD": "Moroccan dirham (&#x62f;.&#x645;.) — MAD",
+     "MDL": "Moldovan leu (MDL) — MDL",
+     "MGA": "Malagasy ariary (Ar) — MGA",
+     "MKD": "Macedonian denar (&#x434;&#x435;&#x43d;) — MKD",
+     "MMK": "Burmese kyat (Ks) — MMK",
+     "MNT": "Mongolian t&ouml;gr&ouml;g (&#x20ae;) — MNT",
+     "MOP": "Macanese pataca (MOP&#36;) — MOP",
+     "MRU": "Mauritanian ouguiya (UM) — MRU",
+     "MUR": "Mauritian rupee (&#x20a8;) — MUR",
+     "MVR": "Maldivian rufiyaa (.&#x783;) — MVR",
+     "MWK": "Malawian kwacha (MK) — MWK",
+     "MXN": "Mexican peso (&#36;) — MXN",
+     "MYR": "Malaysian ringgit (&#82;&#77;) — MYR",
+     "MZN": "Mozambican metical (MT) — MZN",
+     "NAD": "Namibian dollar (N&#36;) — NAD",
+     "NGN": "Nigerian naira (&#8358;) — NGN",
+     "NIO": "Nicaraguan c&oacute;rdoba (C&#36;) — NIO",
+     "NOK": "Norwegian krone (&#107;&#114;) — NOK",
+     "NPR": "Nepalese rupee (&#8360;) — NPR",
+     "NZD": "New Zealand dollar (&#36;) — NZD",
+     "OMR": "Omani rial (&#x631;.&#x639;.) — OMR",
+     "PAB": "Panamanian balboa (B/.) — PAB",
+     "PEN": "Sol (S/) — PEN",
+     "PGK": "Papua New Guinean kina (K) — PGK",
+     "PHP": "Philippine peso (&#8369;) — PHP",
+     "PKR": "Pakistani rupee (&#8360;) — PKR",
+     "PLN": "Polish z&#x142;oty (&#122;&#322;) — PLN",
+     "PRB": "Transnistrian ruble (&#x440;.) — PRB",
+     "PYG": "Paraguayan guaran&iacute; (&#8370;) — PYG",
+     "QAR": "Qatari riyal (&#x631;.&#x642;) — QAR",
+     "RON": "Romanian leu (lei) — RON",
+     "RSD": "Serbian dinar (&#1088;&#1089;&#1076;) — RSD",
+     "RUB": "Russian ruble (&#8381;) — RUB",
+     "RWF": "Rwandan franc (Fr) — RWF",
+     "SAR": "Saudi riyal (&#x631;.&#x633;) — SAR",
+     "SBD": "Solomon Islands dollar (&#36;) — SBD",
+     "SCR": "Seychellois rupee (&#x20a8;) — SCR",
+     "SDG": "Sudanese pound (&#x62c;.&#x633;.) — SDG",
+     "SEK": "Swedish krona (&#107;&#114;) — SEK",
+     "SGD": "Singapore dollar (&#36;) — SGD",
+     "SHP": "Saint Helena pound (&pound;) — SHP",
+     "SLL": "Sierra Leonean leone (Le) — SLL",
+     "SOS": "Somali shilling (Sh) — SOS",
+     "SRD": "Surinamese dollar (&#36;) — SRD",
+     "SSP": "South Sudanese pound (&pound;) — SSP",
+     "STN": "S&atilde;o Tom&eacute; and Pr&iacute;ncipe dobra (Db) — STN",
+     "SYP": "Syrian pound (&#x644;.&#x633;) — SYP",
+     "SZL": "Swazi lilangeni (E) — SZL",
+     "THB": "Thai baht (&#3647;) — THB",
+     "TJS": "Tajikistani somoni (&#x405;&#x41c;) — TJS",
+     "TMT": "Turkmenistan manat (m) — TMT",
+     "TND": "Tunisian dinar (&#x62f;.&#x62a;) — TND",
+     "TOP": "Tongan pa&#x2bb;anga (T&#36;) — TOP",
+     "TRY": "Turkish lira (&#8378;) — TRY",
+     "TTD": "Trinidad and Tobago dollar (&#36;) — TTD",
+     "TWD": "New Taiwan dollar (&#78;&#84;&#36;) — TWD",
+     "TZS": "Tanzanian shilling (Sh) — TZS",
+     "UAH": "Ukrainian hryvnia (&#8372;) — UAH",
+     "UGX": "Ugandan shilling (UGX) — UGX",
+     "USD": "United States (US) dollar (&#36;) — USD",
+     "UYU": "Uruguayan peso (&#36;) — UYU",
+     "UZS": "Uzbekistani som (UZS) — UZS",
+     "VEF": "Venezuelan bol&iacute;var (2008–2018) (Bs F) — VEF",
+     "VES": "Venezuelan bol&iacute;var (Bs.) — VES",
+     "VND": "Vietnamese &#x111;&#x1ed3;ng (&#8363;) — VND",
+     "VUV": "Vanuatu vatu (Vt) — VUV",
+     "WST": "Samoan t&#x101;l&#x101; (T) — WST",
+     "XAF": "Central African CFA franc (CFA) — XAF",
+     "XCD": "East Caribbean dollar (&#36;) — XCD",
+     "XOF": "West African CFA franc (CFA) — XOF",
+     "XPF": "CFP franc (XPF) — XPF",
+     "YER": "Yemeni rial (&#xfdfc;) — YER",
+     "ZAR": "South African rand (&#82;) — ZAR",
+     "ZMW": "Zambian kwacha (K) — ZMW"
+    },
+    "tip": "This controls what currency prices are listed at in the catalog and which currency gateways will take payments in.",
+    "value": "EUR",
+    "group_id": "general",
+    "_links": {
+     "self": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/settings/general/woocommerce_currency",
+       "targetHints": {
+        "allow": [
+         "GET",
+         "POST",
+         "PUT",
+         "PATCH"
+        ]
+       }
+      }
+     ],
+     "collection": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/settings/general"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "request": "GET /wp-json/wp/v2/pages?_fields=slug,title,content,link&per_page=100&slug=refund_returns,politica-de-devoluciones,devoluciones,envios,politica-de-envios,shipping,terms,terms-and-conditions,terminos-y-condiciones,condiciones-generales,condiciones-de-venta,privacy-policy,politica-de-privacidad,aviso-legal",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": [
+    {
+     "slug": "envios",
+     "link": "https://tienda-prueba.test/envios/",
+     "title": {
+      "rendered": "Envíos"
+     },
+     "content": {
+      "rendered": "<p>Enviamos en 24-48 horas laborables a toda la península. Gratis a partir de 50 euros.</p>\n",
+      "protected": false
+     }
+    },
+    {
+     "slug": "refund_returns",
+     "link": "https://tienda-prueba.test/refund_returns/",
+     "title": {
+      "rendered": "Refund and Returns Policy"
+     },
+     "content": {
+      "rendered": "\n<p class=\"wp-block-paragraph\"><b>This is a sample page.</b></p>\n\n\n\n<h2 class=\"wp-block-heading\">Overview</h2>\n\n\n\n<p class=\"wp-block-paragraph\">Our refund and returns policy lasts 30 days. If 30 days have passed since your purchase, we can’t offer you a full refund or exchange.</p>\n\n\n\n<p class=\"wp-block-paragraph\">To be eligible for a return, your item must be unused and in the same condition that you received it. It must also be in the original packaging.</p>\n\n\n\n<p class=\"wp-block-paragraph\">Several types of goods are exempt from being returned. Perishable goods such as food, flowers, newspapers or magazines cannot be returned. We also do not accept products that are intimate or sanitary goods, hazardous materials, or flammable liquids or gases.</p>\n\n\n\n<p class=\"wp-block-paragraph\">Additional non-returnable items:</p>\n\n\n\n<ul class=\"wp-block-list\">\n<li>Gift cards</li>\n<li>Downloadable software products</li>\n<li>Some health and personal care items</li>\n</ul>\n\n\n\n<p class=\"wp-block-paragraph\">To complete your return, we require a receipt or proof of purchase.</p>\n\n\n\n<p class=\"wp-block-paragraph\">Please do not send your purchase back to the manufacturer.</p>\n\n\n\n<p class=\"wp-block-paragraph\">There are certain situations where only partial refunds are granted:</p>\n\n\n\n<ul class=\"wp-block-list\">\n<li>Book with obvious signs of use</li>\n<li>CD, DVD, VHS tape, software, video game, cassette tape, or vinyl record that has been opened.</li>\n<li>Any item not in its original condition, is damaged or missing parts for reasons not due to our error.</li>\n<li>Any item that is returned more than 30 days after delivery</li>\n</ul>\n\n\n\n<h2 class=\"wp-block-heading\">Refunds</h2>\n\n\n\n<p class=\"wp-block-paragraph\">Once your return is received and inspected, we will send you an email to notify you that we have received your returned item. We will also notify you of the approval or rejection of your refund.</p>\n\n\n\n<p class=\"wp-block-paragraph\">If you are approved, then your refund will be processed, and a credit will automatically be applied to your credit card or original method of payment, within a certain amount of days.</p>\n\n\n\n<h3 class=\"wp-block-heading\">Late or missing refunds</h3>\n\n\n\n<p class=\"wp-block-paragraph\">If you haven’t received a refund yet, first check your bank account again.</p>\n\n\n\n<p class=\"wp-block-paragraph\">Then contact your credit card company, it may take some time before your refund is officially posted.</p>\n\n\n\n<p class=\"wp-block-paragraph\">Next contact your bank. There is often some processing time before a refund is posted.</p>\n\n\n\n<p class=\"wp-block-paragraph\">If you’ve done all of this and you still have not received your refund yet, please contact us at {email address}.</p>\n\n\n\n<h3 class=\"wp-block-heading\">Sale items</h3>\n\n\n\n<p class=\"wp-block-paragraph\">Only regular priced items may be refunded. Sale items cannot be refunded.</p>\n\n\n\n<h2 class=\"wp-block-heading\">Exchanges</h2>\n\n\n\n<p class=\"wp-block-paragraph\">We only replace items if they are defective or damaged. If you need to exchange it for the same item, send us an email at {email address} and send your item to: {physical address}.</p>\n\n\n\n<h2 class=\"wp-block-heading\">Gifts</h2>\n\n\n\n<p class=\"wp-block-paragraph\">If the item was marked as a gift when purchased and shipped directly to you, you’ll receive a gift credit for the value of your return. Once the returned item is received, a gift certificate will be mailed to you.</p>\n\n\n\n<p class=\"wp-block-paragraph\">If the item wasn’t marked as a gift when purchased, or the gift giver had the order shipped to themselves to give to you later, we will send a refund to the gift giver and they will find out about your return.</p>\n\n\n\n<h2 class=\"wp-block-heading\">Shipping returns</h2>\n\n\n\n<p class=\"wp-block-paragraph\">To return your product, you should mail your product to: {physical address}.</p>\n\n\n\n<p class=\"wp-block-paragraph\">You will be responsible for paying for your own shipping costs for returning your item. Shipping costs are non-refundable. If you receive a refund, the cost of return shipping will be deducted from your refund.</p>\n\n\n\n<p class=\"wp-block-paragraph\">Depending on where you live, the time it may take for your exchanged product to reach you may vary.</p>\n\n\n\n<p class=\"wp-block-paragraph\">If you are returning more expensive items, you may consider using a trackable shipping service or purchasing shipping insurance. We don’t guarantee that we will receive your returned item.</p>\n\n\n\n<h2 class=\"wp-block-heading\">Need help?</h2>\n\n\n\n<p class=\"wp-block-paragraph\">Contact us at {email} for questions related to refunds and returns.</p>\n",
+      "protected": false
+     }
+    },
+    {
+     "slug": "privacy-policy",
+     "link": "https://tienda-prueba.test/privacy-policy/",
+     "title": {
+      "rendered": "Privacy Policy"
+     },
+     "content": {
+      "rendered": "\n<h2 class=\"wp-block-heading\">Who we are</h2>\n\n\n<p class=\"wp-block-paragraph\"><strong class=\"privacy-policy-tutorial\">Suggested text: </strong>Our website address is: https://tienda-prueba.test.</p>\n\n\n<h2 class=\"wp-block-heading\">Comments</h2>\n\n\n<p class=\"wp-block-paragraph\"><strong class=\"privacy-policy-tutorial\">Suggested text: </strong>When visitors leave comments on the site we collect the data shown in the comments form, and also the visitor&#8217;s IP address and browser user agent string to help spam detection.</p>\n\n\n<p class=\"wp-block-paragraph\">An anonymized string created from your email address (also called a hash) may be provided to the Gravatar service to see if you are using it. The Gravatar service privacy policy is available here: https://automattic.com/privacy/. After approval of your comment, your profile picture is visible to the public in the context of your comment.</p>\n\n\n<h2 class=\"wp-block-heading\">Media</h2>\n\n\n<p class=\"wp-block-paragraph\"><strong class=\"privacy-policy-tutorial\">Suggested text: </strong>If you upload images to the website, you should avoid uploading images with embedded location data (EXIF GPS) included. Visitors to the website can download and extract any location data from images on the website.</p>\n\n\n<h2 class=\"wp-block-heading\">Cookies</h2>\n\n\n<p class=\"wp-block-paragraph\"><strong class=\"privacy-policy-tutorial\">Suggested text: </strong>If you leave a comment on our site you may opt-in to saving your name, email address and website in cookies. These are for your convenience so that you do not have to fill in your details again when you leave another comment. These cookies will last for one year.</p>\n\n\n<p class=\"wp-block-paragraph\">If you visit our login page, we will set a temporary cookie to determine if your browser accepts cookies. This cookie contains no personal data and is discarded when you close your browser.</p>\n\n\n<p class=\"wp-block-paragraph\">When you log in, we will also set up several cookies to save your login information and your screen display choices. Login cookies last for two days, and screen options cookies last for a year. If you select &quot;Remember Me&quot;, your login will persist for two weeks. If you log out of your account, the login cookies will be removed.</p>\n\n\n<p class=\"wp-block-paragraph\">If you edit or publish an article, an additional cookie will be saved in your browser. This cookie includes no personal data and simply indicates the post ID of the article you just edited. It expires after 1 day.</p>\n\n\n<h2 class=\"wp-block-heading\">Embedded content from other websites</h2>\n\n\n<p class=\"wp-block-paragraph\"><strong class=\"privacy-policy-tutorial\">Suggested text: </strong>Articles on this site may include embedded content (e.g. videos, images, articles, etc.). Embedded content from other websites behaves in the exact same way as if the visitor has visited the other website.</p>\n\n\n<p class=\"wp-block-paragraph\">These websites may collect data about you, use cookies, embed additional third-party tracking, and monitor your interaction with that embedded content, including tracking your interaction with the embedded content if you have an account and are logged in to that website.</p>\n\n\n<h2 class=\"wp-block-heading\">Who we share your data with</h2>\n\n\n<p class=\"wp-block-paragraph\"><strong class=\"privacy-policy-tutorial\">Suggested text: </strong>If you request a password reset, your IP address will be included in the reset email.</p>\n\n\n<h2 class=\"wp-block-heading\">How long we retain your data</h2>\n\n\n<p class=\"wp-block-paragraph\"><strong class=\"privacy-policy-tutorial\">Suggested text: </strong>If you leave a comment, the comment and its metadata are retained indefinitely. This is so we can recognize and approve any follow-up comments automatically instead of holding them in a moderation queue.</p>\n\n\n<p class=\"wp-block-paragraph\">For users that register on our website (if any), we also store the personal information they provide in their user profile. All users can see, edit, or delete their personal information at any time (except they cannot change their username). Website administrators can also see and edit that information.</p>\n\n\n<h2 class=\"wp-block-heading\">What rights you have over your data</h2>\n\n\n<p class=\"wp-block-paragraph\"><strong class=\"privacy-policy-tutorial\">Suggested text: </strong>If you have an account on this site, or have left comments, you can request to receive an exported file of the personal data we hold about you, including any data you have provided to us. You can also request that we erase any personal data we hold about you. This does not include any data we are obliged to keep for administrative, legal, or security purposes.</p>\n\n\n<h2 class=\"wp-block-heading\">Where your data is sent</h2>\n\n\n<p class=\"wp-block-paragraph\"><strong class=\"privacy-policy-tutorial\">Suggested text: </strong>Visitor comments may be checked through an automated spam detection service.</p>\n\n",
+      "protected": false
+     }
+    }
+   ]
+  },
+  {
+   "request": "GET /wp-json/wc/v3/system_status",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": {
+    "environment": {
+     "home_url": "https://tienda-prueba.test",
+     "site_url": "https://tienda-prueba.test",
+     "store_id": "7ffb86cb-49df-4c28-9295-4cec4e520a4e",
+     "version": "11.2.1",
+     "log_directory": "/wordpress/wp-content/uploads/wc-logs/",
+     "log_directory_writable": true,
+     "wp_version": "7.1.3",
+     "wp_multisite": false,
+     "wp_memory_limit": 268435456,
+     "wp_debug_mode": true,
+     "wp_cron": false,
+     "wp_environment_type": "production",
+     "language": "en_US",
+     "external_object_cache": null,
+     "server_info": "PHP.wasm",
+     "server_architecture": "Emscripten 4.0.19 wasm32",
+     "php_version": "8.3.33",
+     "php_post_max_size": 2097152000,
+     "php_max_execution_time": 0,
+     "php_max_input_vars": 1000,
+     "curl_version": "7.69.1, OpenSSL/1.1.1t",
+     "suhosin_installed": false,
+     "max_upload_size": 2097152000,
+     "mysql_version": "",
+     "mysql_version_string": "",
+     "default_timezone": "UTC",
+     "fsockopen_or_curl_enabled": true,
+     "soapclient_enabled": true,
+     "domdocument_enabled": true,
+     "gzip_enabled": true,
+     "mbstring_enabled": true,
+     "remote_post_successful": false,
+     "remote_post_response": false,
+     "remote_get_successful": false,
+     "remote_get_response": false
+    },
+    "database": {
+     "wc_database_version": "11.2.1",
+     "database_prefix": "wp_",
+     "maxmind_geoip_database": "",
+     "database_tables": {
+      "woocommerce": {
+       "wp_woocommerce_sessions": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_woocommerce_api_keys": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_woocommerce_attribute_taxonomies": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_woocommerce_downloadable_product_permissions": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_woocommerce_order_items": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_woocommerce_order_itemmeta": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_woocommerce_tax_rates": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_woocommerce_tax_rate_locations": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_woocommerce_shipping_zones": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_woocommerce_shipping_zone_locations": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_woocommerce_shipping_zone_methods": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_woocommerce_payment_tokens": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_woocommerce_payment_tokenmeta": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_woocommerce_log": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       }
+      },
+      "other": {
+       "wp_actionscheduler_actions": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_actionscheduler_claims": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_actionscheduler_groups": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_actionscheduler_logs": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_commentmeta": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_comments": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_links": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_options": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_postmeta": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_posts": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_term_relationships": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_term_taxonomy": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_termmeta": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_terms": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_usermeta": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_users": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_admin_note_actions": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_admin_notes": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_category_lookup": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_customer_lookup": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_download_log": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_order_coupon_lookup": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_order_product_lookup": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_order_stats": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_order_tax_lookup": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_product_attributes_lookup": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_product_download_directories": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_product_meta_lookup": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_rate_limits": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_reserved_stock": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_stock_notificationmeta": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_stock_notifications": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_tax_rate_classes": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       },
+       "wp_wc_webhooks": {
+        "data": "0",
+        "index": "0",
+        "engine": "InnoDB"
+       }
+      }
+     },
+     "database_size": {
+      "data": 0,
+      "index": 0
+     }
+    },
+    "active_plugins": [
+     {
+      "plugin": "woocommerce/woocommerce.php",
+      "name": "WooCommerce",
+      "version": "11.2.1",
+      "version_latest": "11.2.1",
+      "url": "https://woocommerce.com/",
+      "author_name": "Automattic",
+      "author_url": "https://woocommerce.com",
+      "network_activated": false
+     }
+    ],
+    "inactive_plugins": [
+     {
+      "plugin": "akismet/akismet.php",
+      "name": "Akismet Anti-spam: Spam Protection",
+      "version": "5.7.2",
+      "version_latest": "5.7.2",
+      "url": "https://akismet.com/",
+      "author_name": "Automattic - Anti-spam Team",
+      "author_url": "https://automattic.com/wordpress-plugins/",
+      "network_activated": false
+     },
+     {
+      "plugin": "hello.php",
+      "name": "Hello Dolly",
+      "version": "1.7.2",
+      "version_latest": "1.7.2",
+      "url": "http://wordpress.org/plugins/hello-dolly/",
+      "author_name": "Matt Mullenweg",
+      "author_url": "http://ma.tt/",
+      "network_activated": false
+     }
+    ],
+    "dropins_mu_plugins": {
+     "dropins": [],
+     "mu_plugins": [
+      {
+       "plugin": "auyan-dev.php",
+       "name": "auyan-dev.php",
+       "version": "",
+       "url": "",
+       "author_name": "",
+       "author_url": ""
+      }
+     ]
+    },
+    "theme": {
+     "name": "Twenty Twenty-Five",
+     "version": "1.5",
+     "version_latest": 0,
+     "author_url": "https://wordpress.org",
+     "is_child_theme": false,
+     "is_block_theme": true,
+     "has_woocommerce_support": false,
+     "has_woocommerce_file": false,
+     "has_outdated_templates": false,
+     "overrides": [],
+     "parent_name": "",
+     "parent_version": "",
+     "parent_version_latest": "",
+     "parent_author_url": ""
+    },
+    "settings": {
+     "api_enabled": false,
+     "force_ssl": false,
+     "currency": "EUR",
+     "currency_symbol": "&euro;",
+     "currency_position": "left",
+     "thousand_separator": ",",
+     "decimal_separator": ".",
+     "number_of_decimals": 2,
+     "geolocation_enabled": false,
+     "taxonomies": {
+      "external": "external",
+      "grouped": "grouped",
+      "simple": "simple",
+      "variable": "variable"
+     },
+     "product_visibility_terms": {
+      "exclude-from-catalog": "exclude-from-catalog",
+      "exclude-from-search": "exclude-from-search",
+      "featured": "featured",
+      "outofstock": "outofstock",
+      "rated-1": "rated-1",
+      "rated-2": "rated-2",
+      "rated-3": "rated-3",
+      "rated-4": "rated-4",
+      "rated-5": "rated-5"
+     },
+     "woocommerce_com_connected": "no",
+     "enforce_approved_download_dirs": true,
+     "order_datastore": "WC_Order_Data_Store_CPT",
+     "HPOS_enabled": false,
+     "HPOS_sync_enabled": false,
+     "enabled_features": [
+      "analytics",
+      "marketplace",
+      "order_attribution",
+      "site_visibility_badge",
+      "remote_logging",
+      "blueprint",
+      "variation_gallery",
+      "point_of_sale",
+      "push_notifications"
+     ]
+    },
+    "security": {
+     "secure_connection": true,
+     "hide_errors": true
+    },
+    "pages": [
+     {
+      "page_name": "Shop base",
+      "page_id": "5",
+      "page_set": true,
+      "page_exists": true,
+      "page_visible": true,
+      "shortcode": "",
+      "block": "",
+      "shortcode_required": false,
+      "shortcode_present": false,
+      "block_present": false,
+      "block_required": false
+     },
+     {
+      "page_name": "Cart",
+      "page_id": "6",
+      "page_set": true,
+      "page_exists": true,
+      "page_visible": true,
+      "shortcode": "[woocommerce_cart]",
+      "block": "woocommerce/cart",
+      "shortcode_required": true,
+      "shortcode_present": false,
+      "block_present": true,
+      "block_required": true
+     },
+     {
+      "page_name": "Checkout",
+      "page_id": "7",
+      "page_set": true,
+      "page_exists": true,
+      "page_visible": true,
+      "shortcode": "[woocommerce_checkout]",
+      "block": "woocommerce/checkout",
+      "shortcode_required": true,
+      "shortcode_present": false,
+      "block_present": true,
+      "block_required": true
+     },
+     {
+      "page_name": "My account",
+      "page_id": "8",
+      "page_set": true,
+      "page_exists": true,
+      "page_visible": true,
+      "shortcode": "[woocommerce_my_account]",
+      "block": "",
+      "shortcode_required": true,
+      "shortcode_present": true,
+      "block_present": false,
+      "block_required": false
+     },
+     {
+      "page_name": "Terms and conditions",
+      "page_id": "",
+      "page_set": false,
+      "page_exists": false,
+      "page_visible": false,
+      "shortcode": "",
+      "block": "",
+      "shortcode_required": false,
+      "shortcode_present": false,
+      "block_present": false,
+      "block_required": false
+     }
+    ],
+    "post_type_counts": [
+     {
+      "type": "attachment",
+      "count": "1"
+     },
+     {
+      "type": "page",
+      "count": "9"
+     },
+     {
+      "type": "post",
+      "count": "1"
+     },
+     {
+      "type": "product",
+      "count": "3"
+     },
+     {
+      "type": "product_variation",
+      "count": "3"
+     },
+     {
+      "type": "revision",
+      "count": "2"
+     },
+     {
+      "type": "shop_order",
+      "count": "31"
+     },
+     {
+      "type": "shop_order_refund",
+      "count": "9"
+     }
+    ],
+    "logging": {
+     "logging_enabled": true,
+     "default_handler": "Automattic\\WooCommerce\\Internal\\Admin\\Logging\\LogHandlerFileV2",
+     "retention_period_days": 30,
+     "level_threshold": "",
+     "log_directory_size": "18 KB"
+    }
+   }
+  },
+  {
+   "request": "POST /wp-json/wc/v3/orders/batch",
+   "body": {},
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": []
+  }
+ ]
+}

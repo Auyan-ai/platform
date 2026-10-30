@@ -1,0 +1,221 @@
+{
+ "refs": {
+  "order_id": 43
+ },
+ "exchanges": [
+  {
+   "request": "GET /wp-json/wc/v3/orders/43",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": {
+    "id": 43,
+    "parent_id": 0,
+    "status": "processing",
+    "currency": "EUR",
+    "version": "11.2.1",
+    "prices_include_tax": false,
+    "date_created": "2026-10-30T10:05:10",
+    "date_modified": "2026-10-30T10:05:11",
+    "discount_total": "0.00",
+    "discount_tax": "0.00",
+    "shipping_total": "0.00",
+    "shipping_tax": "0.00",
+    "cart_tax": "0.00",
+    "total": "29.90",
+    "total_tax": "0.00",
+    "customer_id": 0,
+    "order_key": "wc_order_rfUXO1nCa9juI",
+    "billing": {
+     "first_name": "Ana",
+     "last_name": "García",
+     "company": "",
+     "address_1": "Calle Mayor 1",
+     "address_2": "",
+     "city": "Madrid",
+     "state": "M",
+     "postcode": "28013",
+     "country": "ES",
+     "email": "rec-66942038@example.com",
+     "phone": "612333444"
+    },
+    "shipping": {
+     "first_name": "Ana",
+     "last_name": "García",
+     "company": "",
+     "address_1": "Calle Mayor 1",
+     "address_2": "",
+     "city": "Madrid",
+     "state": "M",
+     "postcode": "28013",
+     "country": "ES",
+     "phone": "612333444"
+    },
+    "payment_method": "bacs",
+    "payment_method_title": "",
+    "transaction_id": "",
+    "customer_ip_address": "",
+    "customer_user_agent": "",
+    "created_via": "rest-api",
+    "customer_note": "",
+    "date_completed": null,
+    "date_paid": "2026-10-30T10:05:11",
+    "cart_hash": "",
+    "number": "43",
+    "meta_data": [],
+    "line_items": [
+     {
+      "id": 18,
+      "name": "Camiseta Lino Azul",
+      "product_id": 10,
+      "variation_id": 0,
+      "quantity": 1,
+      "tax_class": "",
+      "subtotal": "29.90",
+      "subtotal_tax": "0.00",
+      "total": "29.90",
+      "total_tax": "0.00",
+      "taxes": [],
+      "meta_data": [
+       {
+        "id": 180,
+        "key": "_reduced_stock",
+        "value": "1",
+        "display_key": "_reduced_stock",
+        "display_value": "1"
+       }
+      ],
+      "sku": "CAM-AZ",
+      "global_unique_id": "",
+      "price": 29.9,
+      "image": {
+       "id": "",
+       "src": ""
+      },
+      "parent_name": null
+     }
+    ],
+    "tax_lines": [],
+    "shipping_lines": [],
+    "fee_lines": [],
+    "coupon_lines": [],
+    "refunds": [],
+    "payment_url": "https://tienda-prueba.test/checkout/order-pay/43/?pay_for_order=true&key=wc_order_rfUXO1nCa9juI",
+    "is_editable": false,
+    "needs_payment": false,
+    "needs_processing": true,
+    "date_created_gmt": "2026-10-30T10:05:10",
+    "date_modified_gmt": "2026-10-30T10:05:11",
+    "date_completed_gmt": null,
+    "date_paid_gmt": "2026-10-30T10:05:11",
+    "currency_symbol": "€",
+    "_links": {
+     "self": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/43",
+       "targetHints": {
+        "allow": [
+         "GET",
+         "POST",
+         "PUT",
+         "PATCH",
+         "DELETE"
+        ]
+       }
+      }
+     ],
+     "collection": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders"
+      }
+     ],
+     "email_templates": [
+      {
+       "embeddable": true,
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/43/actions/email_templates"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "request": "GET /wp-json/wc/v3/orders/43/refunds?per_page=100",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": []
+  },
+  {
+   "request": "GET /wp-json/wc/v3/payment_gateways/bacs",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": {
+    "id": "bacs",
+    "title": "Direct bank transfer",
+    "description": "Make your payment directly into our bank account. Please use your Order ID as the payment reference. Your order will not be shipped until the funds have cleared in our account.",
+    "order": "",
+    "enabled": false,
+    "method_title": "Direct bank transfer",
+    "method_description": "Take payments in person via BACS. More commonly known as direct bank/wire transfer.",
+    "method_supports": [
+     "products"
+    ],
+    "settings": {
+     "title": {
+      "id": "title",
+      "label": "Title",
+      "description": "This controls the title which the user sees during checkout.",
+      "type": "safe_text",
+      "value": "Direct bank transfer",
+      "default": "Direct bank transfer",
+      "tip": "This controls the title which the user sees during checkout.",
+      "placeholder": ""
+     },
+     "instructions": {
+      "id": "instructions",
+      "label": "Instructions",
+      "description": "Instructions that will be added to the thank you page and emails.",
+      "type": "textarea",
+      "value": "",
+      "default": "",
+      "tip": "Instructions that will be added to the thank you page and emails.",
+      "placeholder": ""
+     }
+    },
+    "needs_setup": false,
+    "post_install_scripts": [],
+    "settings_url": "https://tienda-prueba.test/wp-admin/admin.php?page=wc-settings&tab=checkout&path=/offline/bacs",
+    "connection_url": null,
+    "setup_help_text": null,
+    "required_settings_keys": [],
+    "_links": {
+     "self": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/payment_gateways/bacs",
+       "targetHints": {
+        "allow": [
+         "GET",
+         "POST",
+         "PUT",
+         "PATCH"
+        ]
+       }
+      }
+     ],
+     "collection": [
+      {
+       "href": "https://tienda-prueba.test/wp-json/wc/v3/payment_gateways"
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,545 @@
+{
+ "refs": {
+  "email": "rec-5ef4330f@example.com",
+  "phone": "+34642718581",
+  "mine": 49
+ },
+ "exchanges": [
+  {
+   "request": "GET /wp-json/wc/v3/orders?per_page=50&search=rec-5ef4330f@example.com",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": [
+    {
+     "id": 50,
+     "parent_id": 0,
+     "status": "processing",
+     "currency": "EUR",
+     "version": "11.2.1",
+     "prices_include_tax": false,
+     "date_created": "2026-10-30T10:06:36",
+     "date_modified": "2026-10-30T10:06:36",
+     "discount_total": "0.00",
+     "discount_tax": "0.00",
+     "shipping_total": "0.00",
+     "shipping_tax": "0.00",
+     "cart_tax": "0.00",
+     "total": "29.90",
+     "total_tax": "0.00",
+     "customer_id": 0,
+     "order_key": "wc_order_d6yngJGDtRiqQ",
+     "billing": {
+      "first_name": "Ana",
+      "last_name": "García",
+      "company": "",
+      "address_1": "Calle Mayor 1",
+      "address_2": "",
+      "city": "Madrid",
+      "state": "M",
+      "postcode": "28013",
+      "country": "ES",
+      "email": "otra-rec-5ef4330f@example.com",
+      "phone": "+34642718581"
+     },
+     "shipping": {
+      "first_name": "Ana",
+      "last_name": "García",
+      "company": "",
+      "address_1": "Calle Mayor 1",
+      "address_2": "",
+      "city": "Madrid",
+      "state": "M",
+      "postcode": "28013",
+      "country": "ES",
+      "phone": "+34642718581"
+     },
+     "payment_method": "auyan_test",
+     "payment_method_title": "",
+     "transaction_id": "",
+     "customer_ip_address": "",
+     "customer_user_agent": "",
+     "created_via": "rest-api",
+     "customer_note": "",
+     "date_completed": null,
+     "date_paid": "2026-10-30T10:06:36",
+     "cart_hash": "",
+     "number": "50",
+     "meta_data": [],
+     "line_items": [
+      {
+       "id": 25,
+       "name": "Camiseta Lino Azul",
+       "product_id": 10,
+       "variation_id": 0,
+       "quantity": 1,
+       "tax_class": "",
+       "subtotal": "29.90",
+       "subtotal_tax": "0.00",
+       "total": "29.90",
+       "total_tax": "0.00",
+       "taxes": [],
+       "meta_data": [
+        {
+         "id": 250,
+         "key": "_reduced_stock",
+         "value": "1",
+         "display_key": "_reduced_stock",
+         "display_value": "1"
+        }
+       ],
+       "sku": "CAM-AZ",
+       "global_unique_id": "",
+       "price": 29.9,
+       "image": {
+        "id": "",
+        "src": ""
+       },
+       "parent_name": null
+      }
+     ],
+     "tax_lines": [],
+     "shipping_lines": [],
+     "fee_lines": [],
+     "coupon_lines": [],
+     "refunds": [],
+     "payment_url": "https://tienda-prueba.test/checkout/order-pay/50/?pay_for_order=true&key=wc_order_d6yngJGDtRiqQ",
+     "is_editable": false,
+     "needs_payment": false,
+     "needs_processing": true,
+     "date_created_gmt": "2026-10-30T10:06:36",
+     "date_modified_gmt": "2026-10-30T10:06:36",
+     "date_completed_gmt": null,
+     "date_paid_gmt": "2026-10-30T10:06:36",
+     "currency_symbol": "€",
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/50",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "POST",
+          "PUT",
+          "PATCH",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders"
+       }
+      ],
+      "email_templates": [
+       {
+        "embeddable": true,
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/50/actions/email_templates"
+       }
+      ]
+     }
+    },
+    {
+     "id": 49,
+     "parent_id": 0,
+     "status": "processing",
+     "currency": "EUR",
+     "version": "11.2.1",
+     "prices_include_tax": false,
+     "date_created": "2026-10-30T10:06:30",
+     "date_modified": "2026-10-30T10:06:31",
+     "discount_total": "0.00",
+     "discount_tax": "0.00",
+     "shipping_total": "0.00",
+     "shipping_tax": "0.00",
+     "cart_tax": "0.00",
+     "total": "29.90",
+     "total_tax": "0.00",
+     "customer_id": 0,
+     "order_key": "wc_order_YBg1lakYrEBqL",
+     "billing": {
+      "first_name": "Ana",
+      "last_name": "García",
+      "company": "",
+      "address_1": "Calle Mayor 1",
+      "address_2": "",
+      "city": "Madrid",
+      "state": "M",
+      "postcode": "28013",
+      "country": "ES",
+      "email": "rec-5ef4330f@example.com",
+      "phone": "642718581"
+     },
+     "shipping": {
+      "first_name": "Ana",
+      "last_name": "García",
+      "company": "",
+      "address_1": "Calle Mayor 1",
+      "address_2": "",
+      "city": "Madrid",
+      "state": "M",
+      "postcode": "28013",
+      "country": "ES",
+      "phone": "642718581"
+     },
+     "payment_method": "auyan_test",
+     "payment_method_title": "",
+     "transaction_id": "",
+     "customer_ip_address": "",
+     "customer_user_agent": "",
+     "created_via": "rest-api",
+     "customer_note": "",
+     "date_completed": null,
+     "date_paid": "2026-10-30T10:06:31",
+     "cart_hash": "",
+     "number": "49",
+     "meta_data": [],
+     "line_items": [
+      {
+       "id": 24,
+       "name": "Camiseta Lino Azul",
+       "product_id": 10,
+       "variation_id": 0,
+       "quantity": 1,
+       "tax_class": "",
+       "subtotal": "29.90",
+       "subtotal_tax": "0.00",
+       "total": "29.90",
+       "total_tax": "0.00",
+       "taxes": [],
+       "meta_data": [
+        {
+         "id": 240,
+         "key": "_reduced_stock",
+         "value": "1",
+         "display_key": "_reduced_stock",
+         "display_value": "1"
+        }
+       ],
+       "sku": "CAM-AZ",
+       "global_unique_id": "",
+       "price": 29.9,
+       "image": {
+        "id": "",
+        "src": ""
+       },
+       "parent_name": null
+      }
+     ],
+     "tax_lines": [],
+     "shipping_lines": [],
+     "fee_lines": [],
+     "coupon_lines": [],
+     "refunds": [],
+     "payment_url": "https://tienda-prueba.test/checkout/order-pay/49/?pay_for_order=true&key=wc_order_YBg1lakYrEBqL",
+     "is_editable": false,
+     "needs_payment": false,
+     "needs_processing": true,
+     "date_created_gmt": "2026-10-30T10:06:30",
+     "date_modified_gmt": "2026-10-30T10:06:31",
+     "date_completed_gmt": null,
+     "date_paid_gmt": "2026-10-30T10:06:31",
+     "currency_symbol": "€",
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/49",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "POST",
+          "PUT",
+          "PATCH",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders"
+       }
+      ],
+      "email_templates": [
+       {
+        "embeddable": true,
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/49/actions/email_templates"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "request": "GET /wp-json/wc/v3/orders?per_page=50&search=642718581",
+   "body": null,
+   "status": 200,
+   "headers": {
+    "content-type": "application/json; charset=UTF-8"
+   },
+   "response": [
+    {
+     "id": 50,
+     "parent_id": 0,
+     "status": "processing",
+     "currency": "EUR",
+     "version": "11.2.1",
+     "prices_include_tax": false,
+     "date_created": "2026-10-30T10:06:36",
+     "date_modified": "2026-10-30T10:06:36",
+     "discount_total": "0.00",
+     "discount_tax": "0.00",
+     "shipping_total": "0.00",
+     "shipping_tax": "0.00",
+     "cart_tax": "0.00",
+     "total": "29.90",
+     "total_tax": "0.00",
+     "customer_id": 0,
+     "order_key": "wc_order_d6yngJGDtRiqQ",
+     "billing": {
+      "first_name": "Ana",
+      "last_name": "García",
+      "company": "",
+      "address_1": "Calle Mayor 1",
+      "address_2": "",
+      "city": "Madrid",
+      "state": "M",
+      "postcode": "28013",
+      "country": "ES",
+      "email": "otra-rec-5ef4330f@example.com",
+      "phone": "+34642718581"
+     },
+     "shipping": {
+      "first_name": "Ana",
+      "last_name": "García",
+      "company": "",
+      "address_1": "Calle Mayor 1",
+      "address_2": "",
+      "city": "Madrid",
+      "state": "M",
+      "postcode": "28013",
+      "country": "ES",
+      "phone": "+34642718581"
+     },
+     "payment_method": "auyan_test",
+     "payment_method_title": "",
+     "transaction_id": "",
+     "customer_ip_address": "",
+     "customer_user_agent": "",
+     "created_via": "rest-api",
+     "customer_note": "",
+     "date_completed": null,
+     "date_paid": "2026-10-30T10:06:36",
+     "cart_hash": "",
+     "number": "50",
+     "meta_data": [],
+     "line_items": [
+      {
+       "id": 25,
+       "name": "Camiseta Lino Azul",
+       "product_id": 10,
+       "variation_id": 0,
+       "quantity": 1,
+       "tax_class": "",
+       "subtotal": "29.90",
+       "subtotal_tax": "0.00",
+       "total": "29.90",
+       "total_tax": "0.00",
+       "taxes": [],
+       "meta_data": [
+        {
+         "id": 250,
+         "key": "_reduced_stock",
+         "value": "1",
+         "display_key": "_reduced_stock",
+         "display_value": "1"
+        }
+       ],
+       "sku": "CAM-AZ",
+       "global_unique_id": "",
+       "price": 29.9,
+       "image": {
+        "id": "",
+        "src": ""
+       },
+       "parent_name": null
+      }
+     ],
+     "tax_lines": [],
+     "shipping_lines": [],
+     "fee_lines": [],
+     "coupon_lines": [],
+     "refunds": [],
+     "payment_url": "https://tienda-prueba.test/checkout/order-pay/50/?pay_for_order=true&key=wc_order_d6yngJGDtRiqQ",
+     "is_editable": false,
+     "needs_payment": false,
+     "needs_processing": true,
+     "date_created_gmt": "2026-10-30T10:06:36",
+     "date_modified_gmt": "2026-10-30T10:06:36",
+     "date_completed_gmt": null,
+     "date_paid_gmt": "2026-10-30T10:06:36",
+     "currency_symbol": "€",
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/50",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "POST",
+          "PUT",
+          "PATCH",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders"
+       }
+      ],
+      "email_templates": [
+       {
+        "embeddable": true,
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/50/actions/email_templates"
+       }
+      ]
+     }
+    },
+    {
+     "id": 49,
+     "parent_id": 0,
+     "status": "processing",
+     "currency": "EUR",
+     "version": "11.2.1",
+     "prices_include_tax": false,
+     "date_created": "2026-10-30T10:06:30",
+     "date_modified": "2026-10-30T10:06:31",
+     "discount_total": "0.00",
+     "discount_tax": "0.00",
+     "shipping_total": "0.00",
+     "shipping_tax": "0.00",
+     "cart_tax": "0.00",
+     "total": "29.90",
+     "total_tax": "0.00",
+     "customer_id": 0,
+     "order_key": "wc_order_YBg1lakYrEBqL",
+     "billing": {
+      "first_name": "Ana",
+      "last_name": "García",
+      "company": "",
+      "address_1": "Calle Mayor 1",
+      "address_2": "",
+      "city": "Madrid",
+      "state": "M",
+      "postcode": "28013",
+      "country": "ES",
+      "email": "rec-5ef4330f@example.com",
+      "phone": "642718581"
+     },
+     "shipping": {
+      "first_name": "Ana",
+      "last_name": "García",
+      "company": "",
+      "address_1": "Calle Mayor 1",
+      "address_2": "",
+      "city": "Madrid",
+      "state": "M",
+      "postcode": "28013",
+      "country": "ES",
+      "phone": "642718581"
+     },
+     "payment_method": "auyan_test",
+     "payment_method_title": "",
+     "transaction_id": "",
+     "customer_ip_address": "",
+     "customer_user_agent": "",
+     "created_via": "rest-api",
+     "customer_note": "",
+     "date_completed": null,
+     "date_paid": "2026-10-30T10:06:31",
+     "cart_hash": "",
+     "number": "49",
+     "meta_data": [],
+     "line_items": [
+      {
+       "id": 24,
+       "name": "Camiseta Lino Azul",
+       "product_id": 10,
+       "variation_id": 0,
+       "quantity": 1,
+       "tax_class": "",
+       "subtotal": "29.90",
+       "subtotal_tax": "0.00",
+       "total": "29.90",
+       "total_tax": "0.00",
+       "taxes": [],
+       "meta_data": [
+        {
+         "id": 240,
+         "key": "_reduced_stock",
+         "value": "1",
+         "display_key": "_reduced_stock",
+         "display_value": "1"
+        }
+       ],
+       "sku": "CAM-AZ",
+       "global_unique_id": "",
+       "price": 29.9,
+       "image": {
+        "id": "",
+        "src": ""
+       },
+       "parent_name": null
+      }
+     ],
+     "tax_lines": [],
+     "shipping_lines": [],
+     "fee_lines": [],
+     "coupon_lines": [],
+     "refunds": [],
+     "payment_url": "https://tienda-prueba.test/checkout/order-pay/49/?pay_for_order=true&key=wc_order_YBg1lakYrEBqL",
+     "is_editable": false,
+     "needs_payment": false,
+     "needs_processing": true,
+     "date_created_gmt": "2026-10-30T10:06:30",
+     "date_modified_gmt": "2026-10-30T10:06:31",
+     "date_completed_gmt": null,
+     "date_paid_gmt": "2026-10-30T10:06:31",
+     "currency_symbol": "€",
+     "_links": {
+      "self": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/49",
+        "targetHints": {
+         "allow": [
+          "GET",
+          "POST",
+          "PUT",
+          "PATCH",
+          "DELETE"
+         ]
+        }
+       }
+      ],
+      "collection": [
+       {
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders"
+       }
+      ],
+      "email_templates": [
+       {
+        "embeddable": true,
+        "href": "https://tienda-prueba.test/wp-json/wc/v3/orders/49/actions/email_templates"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

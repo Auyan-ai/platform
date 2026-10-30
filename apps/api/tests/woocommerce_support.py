@@ -131,11 +131,15 @@ class ReplayTransport(httpx.AsyncBaseTransport):
         return not self._entries
 
 
-def recorded(scenario: str) -> tuple[WooCommerceAdapter, IntegrationContext, ReplayTransport]:
-    """Adapter que habla con las respuestas grabadas de `scenario`."""
-    entries = json.loads((FIXTURES / f"{scenario}.json").read_text())
-    transport = ReplayTransport(entries)
-    return WooCommerceAdapter(transport=transport), integration(RECORDED_STORE), transport
+def recorded(
+    scenario: str,
+) -> tuple[WooCommerceAdapter, IntegrationContext, ReplayTransport, dict[str, Any]]:
+    """Adapter que habla con las respuestas grabadas de `scenario`, y las referencias
+    (ids, números, emails) de los pedidos que creó la grabación."""
+    data = json.loads((FIXTURES / f"{scenario}.json").read_text())
+    transport = ReplayTransport(data["exchanges"])
+    adapter = WooCommerceAdapter(transport=transport)
+    return adapter, integration(RECORDED_STORE), transport, data["refs"]
 
 
 def live() -> tuple[WooCommerceAdapter, IntegrationContext, PlaygroundTransport]:
