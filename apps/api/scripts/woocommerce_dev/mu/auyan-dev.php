@@ -8,6 +8,14 @@
  * - Numeración secuencial simulada: un pedido con la meta `_auyan_order_number` la usa como
  *   número visible y la búsqueda la encuentra, como el plugin Sequential Order Numbers.
  */
+/*
+ * Sin cron, sin el runner asíncrono de Action Scheduler y sin HTTP saliente: en Playground
+ * cada uno añade segundos a cada petición, y la tienda de prueba no los necesita.
+ */
+if (!defined('DISABLE_WP_CRON')) { define('DISABLE_WP_CRON', true); }
+add_filter('action_scheduler_allow_async_request_runner', '__return_false');
+add_filter('pre_http_request', fn ($pre, $args, $url) => new WP_Error('http_blocked', "Playground de Auyan sin HTTP saliente: $url"), 10, 3);
+
 if (isset($_SERVER['REQUEST_URI']) && (str_contains($_SERVER['REQUEST_URI'], '/wp-json/') || str_contains($_SERVER['REQUEST_URI'], 'rest_route='))) {
     $_SERVER['HTTPS'] = 'on';
 }

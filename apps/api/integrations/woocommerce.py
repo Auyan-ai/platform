@@ -837,7 +837,8 @@ class WooCommerceAdapter:
         WooCommerce repone el stock al cancelar (`restock` no lo cambia) y no avisa al
         cliente (`email` tampoco). Si la pasarela rechaza el reembolso, el pedido ya está
         cancelado: no se lanza `MutationNotApplied`, y el veredicto de la skill, al releer
-        el pedido sin reembolso, lo da por fallido.
+        el pedido sin reembolso, lo da por fallido. Un reembolso del total pasa el pedido a
+        `refunded`: se vuelve a dejar en `cancelled`, que es lo que se pidió.
         """
         client = self._client(ctx)
         try:
@@ -848,7 +849,7 @@ class WooCommerceAdapter:
         response = await client.write("PUT", f"wc/v3/orders/{order['id']}", {"status": "cancelled"})
         self._raise_for_write(response, "order_cancel")
         cancelled: dict[str, Any] = response.json()
-        if refund:
+        if refund and cancelled.get("date_paid"):
             balance = refundable_balance(cancelled)
             if balance.remaining > 0:
                 try:
@@ -866,6 +867,13 @@ class WooCommerceAdapter:
                         exc,
                     )
             cancelled = await client.get(f"wc/v3/orders/{order['id']}")
+            if cancelled.get("status") != "cancelled":
+                response = await client.write(
+                    "PUT", f"wc/v3/orders/{order['id']}", {"status": "cancelled"}
+                )
+                # Ya hubo cancelación y reembolso: un fallo aquí no es "no aplicado".
+                response.raise_for_status()
+                cancelled = response.json()
         return canonical_order(cancelled)
 
     async def update_shipping_address(

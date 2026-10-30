@@ -52,8 +52,16 @@ async def _card_order(**kw: Any) -> dict[str, Any]:
 
 
 async def _cod_order() -> dict[str, Any]:
+    """Contra reembolso en `processing`: WooCommerce no le pone `date_paid`, no hay cobro."""
     return await create_order(
         email=_email(), phone="+34600111222", payment_method="cod", paid=False, status="processing"
+    )
+
+
+async def _transfer_order() -> dict[str, Any]:
+    """Transferencia ya cobrada: pasarela sin reembolsos por API, devuelve la tienda."""
+    return await create_order(
+        email=_email(), phone="+34600111222", payment_method="bacs", paid=True
     )
 
 
@@ -129,14 +137,19 @@ async def test_finds_orders_by_phone_stored_without_prefix() -> None:
 
 
 async def test_sequential_number_is_found_by_search_and_ambiguity_stops_the_action() -> None:
-    first = await _card_order()
-    renumbered = await _card_order(meta=[{"key": "_auyan_order_number", "value": str(first["id"])}])
+    visible = str(random.randint(700_000, 799_999))
+    first = await _card_order(meta=[{"key": "_auyan_order_number", "value": visible}])
+    second = await _card_order(meta=[{"key": "_auyan_order_number", "value": str(first["id"])}])
     adapter, ctx, _ = live()
 
-    by_number = await adapter.get_order_by_name(ctx, f"#{first['id']}")
+    by_visible = await adapter.get_order_by_name(ctx, f"#{visible}")
+    snapshot = await adapter.get_order_snapshot(ctx, int(visible))
+    by_number = await adapter.get_order_by_name(ctx, str(first["id"]))
 
-    assert renumbered["number"] == str(first["id"])
-    assert by_number is not None and by_number["id"] == renumbered["id"]
+    assert by_visible is not None and by_visible["id"] == first["id"]
+    assert by_visible["name"] == f"#{visible}"
+    assert (snapshot.order_id, snapshot.name) == (first["id"], f"#{visible}")
+    assert by_number is not None and by_number["id"] == second["id"]
     with pytest.raises(WooCommerceError, match="order_ref_ambiguous"):
         await adapter.get_order_snapshot(ctx, first["id"])
 
@@ -169,21 +182,31 @@ async def test_tracking_from_shipment_tracking_marks_the_order_shipped() -> None
     assert snapshot.shipped is True
 
 
-async def test_snapshot_routes_card_to_automatic_and_cod_to_manual() -> None:
+async def test_snapshot_routes_card_to_automatic_and_transfer_to_manual() -> None:
     card = await _card_order()
+    transfer = await _transfer_order()
     cod = await _cod_order()
     adapter, ctx, _ = live()
 
     card_snapshot = await adapter.get_order_snapshot(ctx, card["id"])
+    transfer_snapshot = await adapter.get_order_snapshot(ctx, transfer["id"])
     cod_snapshot = await adapter.get_order_snapshot(ctx, cod["id"])
+    cod_order = await adapter.get_order(ctx, str(cod["id"]))
 
     assert (card_snapshot.refund_route.mode, card_snapshot.refund_route.gateway) == (
         "automatic",
         "auyan_test",
     )
-    assert (cod_snapshot.refund_route.mode, cod_snapshot.refund_route.gateway) == ("manual", "cod")
-    assert card_snapshot.paid and cod_snapshot.paid
+    assert (transfer_snapshot.refund_route.mode, transfer_snapshot.refund_route.gateway) == (
+        "manual",
+        "bacs",
+    )
+    assert card_snapshot.paid and transfer_snapshot.paid
     assert not card_snapshot.cancelled and not card_snapshot.shipped
+    assert not cod_snapshot.paid
+    assert cod_order["financial_status"] == "pending"
+    with pytest.raises(WooCommerceError, match="order_has_no_refundable_payment"):
+        await adapter.get_refundable_balance(ctx, cod["id"])
 
 
 async def test_catalog_policies_currency_and_validation() -> None:
@@ -241,14 +264,14 @@ async def test_refund_the_gateway_declines_is_not_applied_and_leaves_nothing() -
 
 
 async def test_manual_refund_is_only_recorded() -> None:
-    cod = await _cod_order()
+    transfer = await _transfer_order()
     adapter, ctx, _ = live()
 
     issued = await adapter.refund_partial(
-        ctx, cod["id"], amount=Decimal("2.00"), idempotency_key=str(uuid.uuid4())
+        ctx, transfer["id"], amount=Decimal("2.00"), idempotency_key=str(uuid.uuid4())
     )
 
-    refunds = await _refunds(cod["id"])
+    refunds = await _refunds(transfer["id"])
     assert [(r["id"], r["refunded_payment"]) for r in refunds] == [(issued.refund_id, False)]
 
 
@@ -268,7 +291,9 @@ async def test_cancel_refunds_through_the_gateway() -> None:
     adapter, ctx, _ = live()
 
     order = await adapter.cancel_order(ctx, card["id"], refund=True, restock=True)
+    snapshot = await adapter.get_order_snapshot(ctx, card["id"])
 
+    assert snapshot.cancelled is True
     assert order["financial_status"] == "refunded"
     assert order["cancelled_at"] is not None
     assert [r["amount"] for r in await _refunds(card["id"])] == ["29.90"]
@@ -320,7 +345,23 @@ async def test_cancel_order_skill_confirms_a_card_cancellation() -> None:
     assert reconciled is not None and reconciled.outcome is ActionOutcome.CONFIRMED  # type: ignore[attr-defined]
 
 
-async def test_cancel_order_skill_hands_a_cod_refund_to_the_store() -> None:
+async def test_cancel_order_skill_hands_a_transfer_refund_to_the_store() -> None:
+    transfer = await _transfer_order()
+    skill = CancelOrder()
+    ctx = _skill_ctx(str(uuid.uuid4()))
+
+    result = await execute_once(
+        skill, ctx, CancelOrderInput(order_id=transfer["id"]), earlier_attempt=False
+    )
+
+    assert isinstance(result, Applied)
+    assert result.output["outcome"] == ActionOutcome.REFUND_MANUAL
+    assert result.output["cancelled"] is True
+    assert (result.output["refund_mode"], result.output["refund_gateway"]) == ("manual", "bacs")
+    assert [r["refunded_payment"] for r in await _refunds(transfer["id"])] == [False]
+
+
+async def test_cancel_order_skill_on_unpaid_cod_cancels_without_refund() -> None:
     cod = await _cod_order()
     skill = CancelOrder()
     ctx = _skill_ctx(str(uuid.uuid4()))
@@ -330,8 +371,9 @@ async def test_cancel_order_skill_hands_a_cod_refund_to_the_store() -> None:
     )
 
     assert isinstance(result, Applied)
+    assert result.output["cancelled"] is True
     assert result.output["outcome"] == ActionOutcome.REFUND_MANUAL
-    assert (result.output["refund_mode"], result.output["refund_gateway"]) == ("manual", "cod")
+    assert await _refunds(cod["id"]) == []
 
 
 async def test_cancel_order_skill_refuses_a_completed_order_naming_woocommerce() -> None:
@@ -381,15 +423,14 @@ async def test_refund_partial_skill_declined_by_the_gateway_is_not_applied() -> 
     assert await _refunds(card["id"]) == []
 
 
-async def test_refund_partial_skill_on_cod_is_a_manual_refund() -> None:
-    cod = await _cod_order()
+async def test_refund_partial_skill_on_a_transfer_is_a_manual_refund() -> None:
+    transfer = await _transfer_order()
     skill = RefundPartial()
     ctx = _skill_ctx(str(uuid.uuid4()))
+    inputs = RefundPartialInput(order_id=transfer["id"], amount=Decimal("4.00"))
 
-    result = await execute_once(
-        skill, ctx, RefundPartialInput(order_id=cod["id"], amount=Decimal("4.00")), earlier_attempt=False
-    )
-    found = await skill.reconcile(ctx, RefundPartialInput(order_id=cod["id"], amount=Decimal("4.00")))
+    result = await execute_once(skill, ctx, inputs, earlier_attempt=False)
+    found = await skill.reconcile(ctx, inputs)
 
     assert isinstance(result, Applied)
     assert result.output["outcome"] == ActionOutcome.REFUND_MANUAL
