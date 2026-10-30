@@ -23,7 +23,6 @@ from enum import StrEnum
 from typing import Any, Literal, Protocol
 
 from apps.api.integrations.base import IntegrationContext
-from apps.api.integrations.registry import IntegrationRegistry
 from apps.api.services.returns import (
     ExchangeVariant,
     ReturnableOrder,
@@ -379,9 +378,3 @@ class CommerceAdapter(Protocol):
 
     async def create_return(self, ctx: IntegrationContext, plan: ReturnPlan) -> CreatedReturn: ...
 
-
-def platform_name(provider: str | None) -> str:
-    """Nombre de la plataforma de comercio del tenant para los textos al equipo, o "la
-    tienda" si no hay proveedor o no tiene adapter registrado."""
-    adapter = dict(IntegrationRegistry.list_for_kind("commerce")).get(provider or "")
-    return str(adapter.platform_name) if adapter is not None else "la tienda"

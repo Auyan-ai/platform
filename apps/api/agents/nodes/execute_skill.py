@@ -330,7 +330,12 @@ def _identity_update(state: AgentState, output: Any) -> dict[str, Any]:
 
 
 def _outcome_reply(
-    state: AgentState, skill_cls: type[Skill], slug: str, output: dict[str, Any]
+    state: AgentState,
+    skill_cls: type[Skill],
+    slug: str,
+    output: dict[str, Any],
+    *,
+    platform: str,
 ) -> dict[str, Any]:
     """Texto fijo del resultado para las skills que no dejan redactarlo al LLM (p. ej. una
     devolución abierta no promete el dinero). Si no quedó cerrada, escala al equipo."""
@@ -340,7 +345,7 @@ def _outcome_reply(
     reply = outcome_message(slug, output, language, default_language)
     if reply is None:
         return {}
-    followup = team_followup_reason(slug, output)
+    followup = team_followup_reason(slug, output, platform=platform)
     if followup is None:
         return {"decision": "respond", "agent_response": reply}
     return {"decision": "escalate", "agent_response": reply, "escalation_reason": followup}
@@ -534,12 +539,17 @@ def make_execute_skill_node(
             )
 
         def _escalate_unknown(
-            skill_cls: type[Skill], inputs: dict[str, Any], result: ExecutionResult
+            skill_cls: type[Skill],
+            inputs: dict[str, Any],
+            result: ExecutionResult,
+            platform: str,
         ) -> dict[str, Any]:
             # Sin aprobación (la política no la exige y hay autonomía L3) y sin saber si
-            # Shopify aplicó la acción: texto fijo que no promete nada y caso al equipo.
+            # la tienda aplicó la acción: texto fijo que no promete nada y caso al equipo.
             error = getattr(result, "error", type(result).__name__)
-            reason = unknown_outcome_reason(slug, inputs, error, approved=False)
+            reason = unknown_outcome_reason(
+                slug, inputs, error, platform=platform, approved=False
+            )
             language, default_language = state_languages(state)
             logger.error(
                 "skill_outcome_unknown",
@@ -945,7 +955,7 @@ def make_execute_skill_node(
                 # si no consta, al equipo. Nunca vuelve al LLM ni se reintenta.
                 settled = await reconcile(skill, ctx, validated_input, exc)
                 if not isinstance(settled, Applied):
-                    return _escalate_unknown(skill_cls, raw_input, settled)
+                    return _escalate_unknown(skill_cls, raw_input, settled, ctx.platform_name)
                 output = skill_cls.output_schema.model_validate(settled.output)
             else:
                 return _execution_failed(exc, skill_cls, raw_input, t0)
@@ -986,7 +996,9 @@ def make_execute_skill_node(
         return {
             **_append_and_finish(result_entry),
             **_identity_update(state, output),
-            **_outcome_reply(state, skill_cls, slug, result_entry["output"]),
+            **_outcome_reply(
+                state, skill_cls, slug, result_entry["output"], platform=ctx.platform_name
+            ),
         }
 
     return _node

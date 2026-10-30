@@ -2,7 +2,7 @@
 
 Antes de pedir aprobación y otra vez al ejecutar, `ensure_order_changeable` rechaza un
 pedido cancelado o que ya salió. Tras ejecutar, el pedido se relee y el resultado se
-clasifica en un `ActionOutcome`: nunca se da por hecho lo que Shopify no confirma.
+clasifica en un `ActionOutcome`: nunca se da por hecho lo que la tienda no confirma.
 """
 
 from __future__ import annotations
@@ -20,12 +20,12 @@ OrderAction = Literal["address", "cancel"]
 
 
 class ActionOutcome(StrEnum):
-    """Cómo acabó una L3 sobre un pedido, releído de Shopify."""
+    """Cómo acabó una L3 sobre un pedido, releído de la tienda."""
 
     CONFIRMED = "confirmed"
     # El reembolso automático existe pero la pasarela aún no lo completó.
     REFUND_PENDING = "refund_pending"
-    # Pasarela manual o sin cobro registrado: devuelve la tienda, no Shopify.
+    # Pasarela manual o sin cobro registrado: el dinero lo devuelve la tienda a mano.
     REFUND_MANUAL = "refund_manual"
     REFUND_FAILED = "refund_failed"
     # Releído el pedido, el cambio no aparece.
@@ -66,17 +66,19 @@ def ensure_order_changeable(
 ) -> None:
     """Lanza `SkillRefusal` si el pedido está cancelado o ya salió.
 
-    El texto al cliente sale en el idioma de la conversación; `team_reason` va en español.
+    El texto al cliente sale en el idioma de la conversación; `team_reason` va en español y
+    nombra la plataforma de la tienda.
     """
+    platform = ctx.platform_name
     if snapshot.cancelled:
         code = "order_cancelled"
-        why = "Shopify ya lo tiene cancelado"
+        why = f"{platform} ya lo tiene cancelado"
         next_step = "revisad el estado del pedido y del reembolso"
     elif snapshot.shipped:
         code = "order_shipped"
         tracking = sum(len(f.tracking_numbers) for f in snapshot.fulfillments if f.active)
         why = (
-            f"Shopify lo marca como enviado (estado {snapshot.fulfillment_status or 'n/d'}, "
+            f"{platform} lo marca como enviado (estado {snapshot.fulfillment_status or 'n/d'}, "
             f"{tracking} número(s) de seguimiento)"
         )
         next_step = "revisad el caso con el almacén o el transportista"
@@ -98,8 +100,8 @@ def ensure_order_changeable(
 def refund_verdict(route: RefundRoute, before: OrderSnapshot, after: OrderSnapshot) -> Verdict:
     """Estado del reembolso emitido entre `before` y `after`.
 
-    Con pasarela manual Shopify marca el REFUND como SUCCESS sin mover dinero (visto
-    en Marea), así que su estado no dice nada: devuelve la tienda.
+    Con pasarela manual la tienda apunta el reembolso como hecho sin mover dinero (visto
+    en Marea con Shopify), así que su estado no dice nada: devuelve la tienda.
     """
     return refund_transactions_verdict(route, after.refunds_since(before))
 

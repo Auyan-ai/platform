@@ -119,10 +119,33 @@ def test_followup_reason_for_failed_refund_names_the_gateway_error() -> None:
     reason = approval_resolution.team_followup_reason(
         "shopify.refund_partial",
         {"order_id": 1001, "outcome": "refund_failed", "detail": "CARD_DECLINED"},
+        platform="Shopify",
     )
     assert reason == (
         "El reembolso parcial del pedido 1001 se ejecutó en Shopify, pero el reembolso no "
         "se completó (CARD_DECLINED). Revisad el pago y devolvedlo a mano si hace falta."
+    )
+
+
+def test_followup_reason_names_the_platform_of_the_tenant() -> None:
+    output = {"order_id": 31, "outcome": "refund_manual", "refund_gateway": "cod"}
+
+    reason = approval_resolution.team_followup_reason(
+        "shopify.cancel_order", output, platform="WooCommerce"
+    )
+    unknown = approval_resolution.unknown_outcome_reason(
+        "shopify.cancel_order", {"order_id": 31}, "ReadTimeout", platform="WooCommerce"
+    )
+
+    assert reason == (
+        "La cancelación del pedido 31 se ejecutó en WooCommerce, pero el cobro es de una "
+        "pasarela manual (cod) o no consta en WooCommerce: la pasarela no devuelve el dinero. "
+        "Haced el reembolso a mano si el cliente pagó y confirmádselo."
+    )
+    assert unknown == (
+        "La cancelación del pedido 31 se aprobó, pero no se pudo comprobar en WooCommerce si "
+        "se aplicó (ReadTimeout). No se reintentó: revisad el pedido en WooCommerce antes de "
+        "volver a hacerlo y contestad al cliente."
     )
 
 
@@ -132,7 +155,10 @@ def test_followup_reason_for_failed_refund_names_the_gateway_error() -> None:
     ids=["confirmed", "pending", "no-outcome"],
 )
 def test_no_followup_when_the_action_is_settled(output: dict) -> None:
-    assert approval_resolution.team_followup_reason("shopify.cancel_order", output) is None
+    assert (
+        approval_resolution.team_followup_reason("shopify.cancel_order", output, platform="Shopify")
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -174,7 +200,9 @@ def test_an_opened_return_without_its_settlement_note_goes_to_the_team() -> None
         "return_name": "#1431-R2",
     }
 
-    reason = approval_resolution.team_followup_reason("shopify.start_return", output)
+    reason = approval_resolution.team_followup_reason(
+        "shopify.start_return", output, platform="Shopify"
+    )
 
     assert reason == (
         "La devolución del pedido 1431 se abrió en Shopify (#1431-R2), pero no se pudo "
@@ -182,7 +210,7 @@ def test_an_opened_return_without_its_settlement_note_goes_to_the_team() -> None
     )
     assert (
         approval_resolution.team_followup_reason(
-            "shopify.start_return", {**output, "note_written": True}
+            "shopify.start_return", {**output, "note_written": True}, platform="Shopify"
         )
         is None
     )

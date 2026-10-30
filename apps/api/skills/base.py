@@ -107,6 +107,11 @@ class SkillContext:
     customer_photos: tuple[PhotoRef, ...] = field(default=())
     attachments_readable: bool = field(default=False)
 
+    @property
+    def platform_name(self) -> str:
+        """La plataforma de la tienda en los textos al equipo ("Shopify", "WooCommerce")."""
+        return self.commerce.platform_name if self.commerce is not None else "la tienda"
+
     def require_commerce(self) -> CommerceAdapter:
         """El adapter del turno. Sin integración de comercio, `commerce_not_configured`."""
         if self.commerce is None:

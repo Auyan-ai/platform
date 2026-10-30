@@ -503,7 +503,7 @@ class TestExecutionErrors:
         assert data["execution_status"] == "unknown"
         reason = w.hand_off.await_args.kwargs["reason"]
         assert reason.startswith(
-            "La cancelación del pedido 1001 se aprobó, pero no se pudo comprobar en Shopify"
+            "La cancelación del pedido 1001 se aprobó, pero no se pudo comprobar en la tienda"
         )
         assert data["team_followup"] == reason
         assert w.push.await_args.kwargs["reason"] == reason
@@ -753,9 +753,9 @@ class TestCloseAfterApproval:
         resp = _approve(client)
 
         expected_reason = (
-            "La cancelación del pedido 1001 se ejecutó en Shopify, pero el cobro es de una "
-            "pasarela manual (Transferencia) o no consta en Shopify: Shopify no devuelve el "
-            "dinero. Haced el reembolso a mano si el cliente pagó y confirmádselo."
+            "La cancelación del pedido 1001 se ejecutó en la tienda, pero el cobro es de una "
+            "pasarela manual (Transferencia) o no consta en la tienda: la pasarela no devuelve "
+            "el dinero. Haced el reembolso a mano si el cliente pagó y confirmádselo."
         )
         assert resp.json()["team_followup"] == expected_reason
         assert w.hand_off.await_args.kwargs["reason"] == expected_reason

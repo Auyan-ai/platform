@@ -142,14 +142,15 @@ _ACTION_NAME: dict[str, str] = {
 }
 
 
-def team_followup_reason(skill_slug: str, output: dict[str, Any]) -> str | None:
+def team_followup_reason(skill_slug: str, output: dict[str, Any], *, platform: str) -> str | None:
     """Motivo para el equipo cuando la acción aprobada se ejecutó pero no quedó
-    cerrada. None si no hace falta nadie (sin `outcome` o resultado ya resuelto)."""
+    cerrada. None si no hace falta nadie (sin `outcome` o resultado ya resuelto).
+    `platform` es la de la tienda ("Shopify", "WooCommerce" o "la tienda")."""
     raw = output.get("outcome")
     if raw is not None and output.get("note_written") is False:
         action = _ACTION_NAME.get(skill_slug, f"La acción {skill_slug}")
         return (
-            f"{action} del pedido {output.get('order_id')} se abrió en Shopify "
+            f"{action} del pedido {output.get('order_id')} se abrió en {platform} "
             f"({output.get('return_name') or 'sin nombre'}), pero no se pudo escribir la "
             "liquidación en la nota del pedido. Copiadla desde la aprobación."
         )
@@ -162,23 +163,28 @@ def team_followup_reason(skill_slug: str, output: dict[str, Any]) -> str | None:
     detail = output.get("detail") or "sin detalle"
     if outcome is ActionOutcome.REFUND_MANUAL:
         return (
-            f"{action} del pedido {order} se ejecutó en Shopify, pero el cobro es de una "
-            f"pasarela manual ({gateway}) o no consta en Shopify: Shopify no devuelve el "
-            "dinero. Haced el reembolso a mano si el cliente pagó y confirmádselo."
+            f"{action} del pedido {order} se ejecutó en {platform}, pero el cobro es de una "
+            f"pasarela manual ({gateway}) o no consta en {platform}: la pasarela no devuelve "
+            "el dinero. Haced el reembolso a mano si el cliente pagó y confirmádselo."
         )
     if outcome is ActionOutcome.REFUND_FAILED:
         return (
-            f"{action} del pedido {order} se ejecutó en Shopify, pero el reembolso no se "
+            f"{action} del pedido {order} se ejecutó en {platform}, pero el reembolso no se "
             f"completó ({detail}). Revisad el pago y devolvedlo a mano si hace falta."
         )
     return (
         f"{action} del pedido {order} se aprobó y se ejecutó, pero al releer el pedido "
-        f"en Shopify el cambio no aparece ({detail}). Revisad el pedido."
+        f"en {platform} el cambio no aparece ({detail}). Revisad el pedido."
     )
 
 
 def unknown_outcome_reason(
-    skill_slug: str, inputs: dict[str, Any], error: str, *, approved: bool = True
+    skill_slug: str,
+    inputs: dict[str, Any],
+    error: str,
+    *,
+    platform: str,
+    approved: bool = True,
 ) -> str:
     """Motivo para el equipo cuando no se puede saber si la acción se aplicó: tras una
     aprobación, o lanzada sin ella en el turno (`approved=False`)."""
@@ -186,8 +192,8 @@ def unknown_outcome_reason(
     how = "se aprobó" if approved else "se lanzó sin aprobación humana"
     return (
         f"{action} del pedido {inputs.get('order_id')} {how}, pero no se pudo "
-        f"comprobar en Shopify si se aplicó ({error}). No se reintentó: revisad el pedido "
-        "en Shopify antes de volver a hacerlo y contestad al cliente."
+        f"comprobar en {platform} si se aplicó ({error}). No se reintentó: revisad el pedido "
+        f"en {platform} antes de volver a hacerlo y contestad al cliente."
     )
 
 

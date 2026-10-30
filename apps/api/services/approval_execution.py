@@ -195,6 +195,7 @@ async def settle(
     result: ExecutionResult,
     language: str,
     tenant_default: str,
+    platform: str,
     anthropic_client: anthropic.AsyncAnthropic | None,
 ) -> Settlement | None:
     """Cierra la ejecución con el CAS desde `executing` y, ya committed, avisa al cliente y
@@ -202,7 +203,7 @@ async def settle(
     match result:
         case Applied(output=output):
             return await _settle_applied(
-                tenant_id, approval, output, language, tenant_default, anthropic_client
+                tenant_id, approval, output, language, tenant_default, platform, anthropic_client
             )
         case Refused(refusal=refusal):
             return await _settle_refused(tenant_id, approval, refusal)
@@ -219,7 +220,7 @@ async def settle(
                 return None
             return Settlement("pending", "failed", None, {"error": error}, None)
         case Unknown(error=error):
-            return await _settle_unknown(tenant_id, approval, error)
+            return await _settle_unknown(tenant_id, approval, error, platform)
 
 
 async def _settle_applied(
@@ -228,11 +229,12 @@ async def _settle_applied(
     output: dict[str, Any],
     language: str,
     tenant_default: str,
+    platform: str,
     anthropic_client: anthropic.AsyncAnthropic | None,
 ) -> Settlement | None:
     # Ejecutada pero sin cerrar (reembolso manual o fallido, cambio que no aparece):
     # el equipo tiene que rematarla.
-    followup = team_followup_reason(approval.skill_slug, output)
+    followup = team_followup_reason(approval.skill_slug, output, platform=platform)
     content = await generate_customer_reply(
         anthropic_client,
         approval.skill_slug,
@@ -342,11 +344,13 @@ async def _settle_refused(
 
 
 async def _settle_unknown(
-    tenant_id: UUID, approval: PendingApproval, error: str
+    tenant_id: UUID, approval: PendingApproval, error: str, platform: str
 ) -> Settlement | None:
     """No se sabe si la acción se aplicó: nada al cliente y el caso al equipo, que lo
     comprueba en el proveedor. Nunca se reintenta solo."""
-    reason = unknown_outcome_reason(approval.skill_slug, approval.inputs_raw, error)
+    reason = unknown_outcome_reason(
+        approval.skill_slug, approval.inputs_raw, error, platform=platform
+    )
     async with tenant_scope(tenant_id) as conn:
         settled = await settle_executing_approval(
             conn,
@@ -435,6 +439,7 @@ async def recover_execution(tenant_id: UUID, approval: PendingApproval) -> Settl
         result=result,
         language=run.language,
         tenant_default=run.tenant_default,
+        platform=run.skill_ctx.platform_name,
         anthropic_client=None,
     )
 

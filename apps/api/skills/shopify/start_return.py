@@ -175,7 +175,7 @@ class _ReturnSkill(Skill):
         try:
             plan = build_plan(decision, calculation, requested_at=now)
         except KeyError as exc:
-            raise _shopify_refusal(ctx, "cuadrar el cálculo de Shopify con el pedido", exc) from exc
+            raise _shopify_refusal(ctx, "cuadrar el cálculo de la tienda con el pedido", exc) from exc
         if isinstance(plan, Refused):
             raise self._refusal(ctx, plan)
         if isinstance(plan, Rejected):
@@ -252,7 +252,7 @@ class _ReturnSkill(Skill):
                 ),
                 team_reason=(
                     f"La devolución aprobada de {plan.order_name} ya no se puede crear tal "
-                    f"cual: {problem}. Revisad el pedido en Shopify."
+                    f"cual: {problem}. Revisad el pedido en {ctx.platform_name}."
                 ),
             )
         created = await adapter.create_return(ctx.integration_ctx, plan)
@@ -335,8 +335,8 @@ def _shopify_refusal(ctx: SkillContext, step: str, exc: BaseException) -> SkillR
             "refusal.returns.shopify_error", ctx.language, tenant_default=ctx.default_language
         ),
         team_reason=(
-            f"Shopify falló al {step} ({type(exc).__name__}: {exc}). No se abrió nada desde "
-            "Auyan: revisad el pedido en Shopify antes de reintentarlo."
+            f"{ctx.platform_name} falló al {step} ({type(exc).__name__}: {exc}). No se abrió "
+            f"nada desde Auyan: revisad el pedido en {ctx.platform_name} antes de reintentarlo."
         ),
     )
 
@@ -369,7 +369,7 @@ def _no_longer_possible(plan: ReturnPlan, order: Any) -> str | None:
         if current is None or current.returnable_quantity < line.quantity:
             return f"'{line.title}' ya no tiene {line.quantity} unidad(es) devolvible(s)"
         if current.fulfillment_line_item_id != line.fulfillment_line_item_id:
-            return f"'{line.title}' cambió de envío en Shopify"
+            return f"'{line.title}' cambió de envío en la tienda"
     return None
 
 
