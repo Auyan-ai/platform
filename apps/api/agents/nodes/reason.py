@@ -22,7 +22,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, Literal
 
-from apps.api.agents.commerce_mode import commerce_mode
+from apps.api.agents.commerce_mode import resolve_commerce
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.nodes._reply import surface_of
 from apps.api.agents.prompts.builder import (
@@ -248,14 +248,16 @@ def _select_reason_model(state: AgentState) -> str:
 
 
 def _visible_skills(state: AgentState) -> list[str]:
-    """Skills del AOP que el LLM puede ver (ADR 0013 §5): las que el tenant tiene
-    encendidas en `tenant_tool_permissions` y que la identidad del turno permite. El
-    código no ofrece lo que el gate de `execute_skill` rechazaría."""
+    """Skills del AOP que el LLM puede ver (ADR 0013 §5, ADR 0016 §3): las que el tenant
+    tiene encendidas en `tenant_tool_permissions`, que el adapter de comercio del turno
+    sabe hacer y que la identidad del turno permite. El código no ofrece lo que el gate de
+    `execute_skill` rechazaría."""
+    _, commerce = resolve_commerce(state)
     return visible_skills(
         state.get("allowed_skills") or [],
         state.get("tool_permissions") or {},
         IdentityContext.from_state(state.get("identity")),
-        commerce=bool(state.get("commerce_integration_ctx") or commerce_mode(state) != "live"),
+        capabilities=commerce.capabilities if commerce is not None else None,
     )
 
 

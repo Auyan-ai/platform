@@ -23,7 +23,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from apps.api.agents.commerce_mode import commerce_mode, demo_catalog_domain
+from apps.api.agents.commerce_mode import resolve_commerce
 from apps.api.agents.dependencies import AgentDependencies
 from apps.api.agents.state import AgentState
 from apps.api.db.client import tenant_scope
@@ -33,7 +33,7 @@ from apps.api.db.queries import (
     get_recent_approval_for_skill,
     get_tenant_pii_salt,
 )
-from apps.api.integrations.base import IntegrationContext, MutationNotApplied
+from apps.api.integrations.base import MutationNotApplied
 from apps.api.services.approval_execution import Applied, ExecutionResult, reconcile
 from apps.api.services.approval_reply import done_followup_message, outcome_message
 from apps.api.services.approval_resolution import (
@@ -63,7 +63,7 @@ from apps.api.services.language import state_languages
 from apps.api.services.pii import redact_inputs
 from apps.api.services.returns import customer_photos
 from apps.api.services.returns_policy import ActivePolicy
-from apps.api.services.skill_access import IdentityVerdict, identity_verdict
+from apps.api.services.skill_access import IdentityVerdict, capability_missing, identity_verdict
 from apps.api.skills.base import Skill, SkillContext, SkillRefusal, SkillRejection
 from apps.api.skills.identity.check_order_contact import CheckOrderContactOutput
 from apps.api.skills.registry import SkillRegistry
@@ -76,43 +76,9 @@ logger = logging.getLogger(__name__)
 
 
 def build_skill_context(state: AgentState) -> SkillContext:
-    """Construye un SkillContext a partir del state del grafo.
-
-    La integración commerce (Shopify) se carga desde `commerce_integration_ctx`
-    que load_tenant_context pre-computa — primero desde tenant_integrations DB,
-    fallback a tenant_config.extra para tenants no migrados.
-    """
-    commerce_data: dict[str, Any] | None = state.get("commerce_integration_ctx")
-    integration_ctx: IntegrationContext | None = None
-    if commerce_data:
-        from uuid import UUID as _UUID
-
-        integration_ctx = IntegrationContext(
-            tenant_id=_UUID(commerce_data["tenant_id"]),
-            credentials=commerce_data["credentials"],
-            config=commerce_data.get("config", {}),
-        )
-
-    # El modo de comercio decide el adaptador (agents/commerce_mode.py). `live` no inyecta
-    # nada: las skills construyen el ShopifyAdapter real con `integration_ctx`.
-    commerce_adapter: Any = None
-    mode = commerce_mode(state)
-    if mode == "mock":
-        from apps.api.simulator.mocks import MockShopifyAdapter
-
-        shopify_fixtures = (state.get("simulation_fixtures") or {}).get("shopify", {})
-        commerce_adapter = MockShopifyAdapter(shopify_fixtures)
-    elif mode == "demo_catalog":
-        from apps.api.integrations.demo_catalog_registry import demo_catalog_for
-
-        domain = demo_catalog_domain(state)
-        commerce_adapter = demo_catalog_for(domain, state.get("demo_catalog_platform"))
-        # Nunca las credenciales del tenant: la demo solo trae el dominio público.
-        integration_ctx = IntegrationContext(
-            tenant_id=UUID(state["tenant_id"]),
-            credentials={},
-            config={"store_domain": domain},
-        )
+    """Construye un SkillContext a partir del state del grafo, con la integración y el
+    adapter de comercio del turno ya resueltos (`resolve_commerce`)."""
+    integration_ctx, commerce = resolve_commerce(state)
 
     # Solo cuenta el contacto que el origen del mensaje verifica (ADR 0013): lo escribió el
     # intake en `identity_evidence`. Un email de chat lo teclea el visitante.
@@ -125,7 +91,7 @@ def build_skill_context(state: AgentState) -> SkillContext:
         tenant_id=state["tenant_id"],
         conversation_id=state["conversation_id"],
         integration_ctx=integration_ctx,
-        commerce_mock=commerce_adapter,
+        commerce=commerce,
         customer_email=evidence.email,
         customer_phone=evidence.phone,
         identity=IdentityContext.from_state(state.get("identity")),
@@ -172,13 +138,9 @@ async def _refs_point_to_same_order(state: AgentState, ref_a: str, ref_b: str) -
     duplicar una aprobación es inocuo; tragarse una acción sobre OTRO pedido no.
     """
     ctx = build_skill_context(state)
-    adapter: Any = ctx.commerce_mock
+    adapter = ctx.commerce
     if adapter is None:
-        if ctx.integration_ctx is None:
-            return False
-        from apps.api.integrations.shopify import ShopifyAdapter
-
-        adapter = ShopifyAdapter()
+        return False
 
     async def _to_internal(ref: str) -> int:
         found = await adapter.get_order_by_name(ctx.integration_ctx, ref)
@@ -306,6 +268,28 @@ async def _identity_gate(
     if ctx.channel is not None and is_messaging_channel(ctx.channel):
         return verdict, _IDENTITY_REQUIRED_ERROR_MESSAGING
     return verdict, _IDENTITY_REQUIRED_ERROR
+
+
+def _capability_refusal(state: AgentState, skill_cls: type[Skill]) -> SkillRefusal | None:
+    """La tienda del turno no sabe hacer lo que pide la skill (ADR 0016 §3): texto fijo al
+    cliente y el caso al equipo. None si la tiene, o si el turno no tiene comercio."""
+    _, commerce = resolve_commerce(state)
+    missing = capability_missing(
+        skill_cls, commerce.capabilities if commerce is not None else None
+    )
+    if missing is None:
+        return None
+    language, default_language = state_languages(state)
+    return SkillRefusal(
+        "commerce_capability_missing",
+        customer_message=fixed_text(
+            "commerce_capability_missing", language, tenant_default=default_language
+        ),
+        team_reason=(
+            f"commerce_capability_missing: la tienda no admite `{missing}`, que necesita "
+            f"{skill_cls.slug}. Hay que gestionarlo a mano en la tienda."
+        ),
+    )
 
 
 def _identity_update(state: AgentState, output: Any) -> dict[str, Any]:
@@ -778,6 +762,11 @@ def make_execute_skill_node(
                     error=tier_error,
                 )
             )
+
+        # La tienda del tenant tiene que saber hacerlo: si no, ni se mira el pedido.
+        capability_refusal = _capability_refusal(state, skill_cls)
+        if capability_refusal is not None:
+            return _escalate_refusal(capability_refusal, skill_cls, raw_input)
 
         # Identidad en código: el pedido que toca la skill tiene que ser de quien escribe.
         try:

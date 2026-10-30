@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from apps.api.integrations.shopify import OrderSnapshot, order_snapshot_from_graphql
+from apps.api.integrations.commerce import OrderSnapshot
+from apps.api.integrations.shopify import order_snapshot_from_graphql
 
 
 def tx(

@@ -274,16 +274,12 @@ class GuestAttempt:
 
 
 def can_lookup_orders(ctx: SkillContext) -> bool:
-    return ctx.commerce_mock is not None or ctx.integration_ctx is not None
+    return ctx.commerce is not None
 
 
 async def lookup_order(ctx: SkillContext, order_ref: str) -> dict[str, Any] | None:
     """El pedido de la referencia vía el adapter de commerce. Lanza `OrderLookupError`."""
-    adapter: Any = ctx.commerce_mock
-    if adapter is None and ctx.integration_ctx is not None:
-        from apps.api.integrations.shopify import ShopifyAdapter
-
-        adapter = ShopifyAdapter()
+    adapter = ctx.commerce
     if adapter is None:
         raise OrderLookupError("no_commerce_adapter")
     try:

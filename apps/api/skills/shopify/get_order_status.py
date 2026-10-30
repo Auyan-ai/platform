@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from apps.api.integrations.shopify import ShopifyAdapter
+from apps.api.integrations.commerce import CommerceCapability
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
 from apps.api.skills.shopify._models import (
@@ -120,8 +120,9 @@ def map_order_detail(raw: dict[str, Any]) -> OrderDetail:
 @SkillRegistry.register
 class GetOrderStatus(Skill):
     slug = "shopify.get_order_status"
+    required_capability = CommerceCapability.ORDER_READ
     description = (
-        "Devuelve el estado detallado de un pedido de Shopify. "
+        "Devuelve el estado detallado de un pedido de la tienda. "
         "Acepta el número de orden (#1234 o 1234). "
         "Incluye estado de pago, fulfillment, tracking, artículos y dirección de envío. "
         "Solo funciona con pedidos del email o teléfono desde el que escribe el cliente. "
@@ -137,9 +138,7 @@ class GetOrderStatus(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, GetOrderStatusInput)
-        if not ctx.integration_ctx:
-            raise ValueError("shopify_not_configured")
-        adapter = ctx.commerce_mock or ShopifyAdapter()
+        adapter = ctx.require_commerce()
         raw = await adapter.get_order_by_name(ctx.integration_ctx, inputs.order_identifier)
 
         if raw is None:

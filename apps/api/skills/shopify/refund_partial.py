@@ -15,7 +15,12 @@ from decimal import Decimal
 from typing import Any
 
 from apps.api.integrations.base import MutationNotApplied
-from apps.api.integrations.shopify import MarkedRefund, RefundMode, RefundRoute, ShopifyAdapter
+from apps.api.integrations.commerce import (
+    CommerceCapability,
+    MarkedRefund,
+    RefundMode,
+    RefundRoute,
+)
 from apps.api.skills.base import (
     ReconcileUnknown,
     Skill,
@@ -65,8 +70,9 @@ class RefundPartialOutput(SkillOutput):
 @SkillRegistry.register
 class RefundPartial(Skill):
     slug = "shopify.refund_partial"
+    required_capability = CommerceCapability.REFUNDS
     description = (
-        "Emite un reembolso parcial sobre un pedido de Shopify. "
+        "Emite un reembolso parcial sobre un pedido de la tienda. "
         "Usa esta skill SOLO cuando el cliente haya acordado el importe a reembolsar "
         "y haya confirmado el método de pago original. "
         "Requiere el ID del pedido y el importe (como string, ej: '12.50') en la moneda "
@@ -85,9 +91,7 @@ class RefundPartial(Skill):
         """Rechaza un importe por encima de lo reembolsable y fija la moneda del pedido
         y por dónde vuelve el dinero, para que quien aprueba vea los datos reales."""
         inputs = RefundPartialInput.model_validate(raw_input)
-        if not ctx.integration_ctx:
-            raise ValueError("shopify_not_configured")
-        adapter = ctx.commerce_mock or ShopifyAdapter()
+        adapter = ctx.require_commerce()
         balance = await adapter.get_refundable_balance(ctx.integration_ctx, inputs.order_id)
         balance.require(inputs.amount)
         snapshot = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
@@ -101,11 +105,9 @@ class RefundPartial(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, RefundPartialInput)
-        if not ctx.integration_ctx:
-            raise ValueError("shopify_not_configured")
+        adapter = ctx.require_commerce()
         if not ctx.idempotency_key:
             raise ValueError("idempotency_key_required")
-        adapter = ctx.commerce_mock or ShopifyAdapter()
         before = await snapshot_before_mutation(adapter, ctx, inputs.order_id)
         # Un intento anterior de esta aprobación pudo crearlo ya: pasadas 24 h Shopify no
         # deduplica la clave y `refundCreate` crearía otro.
@@ -142,9 +144,9 @@ class RefundPartial(Skill):
     async def reconcile(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput | None:
         """Busca en el pedido el reembolso con la marca de esta ejecución."""
         assert isinstance(inputs, RefundPartialInput)
-        if not ctx.integration_ctx or not ctx.idempotency_key:
+        adapter = ctx.commerce
+        if adapter is None or not ctx.idempotency_key:
             raise ReconcileUnknown("sin integración o sin clave de idempotencia")
-        adapter = ShopifyAdapter()
         found = await adapter.find_refund(ctx.integration_ctx, inputs.order_id, ctx.idempotency_key)
         if found is None:
             return None

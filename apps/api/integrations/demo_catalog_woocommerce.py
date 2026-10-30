@@ -20,6 +20,7 @@ from decimal import Decimal
 from typing import Any
 
 import httpx
+from apps.api.integrations.commerce import CommerceCapability
 from apps.api.integrations.demo_catalog import (
     BOT_USER_AGENT,
     MAX_RETRIES,
@@ -134,6 +135,7 @@ def product_from_store_api(
 class WooCommerceDemoCatalogAdapter(DemoCatalogBase):
     """Catálogo en vivo de una tienda WooCommerce pública. Sin credenciales, solo lectura."""
 
+    capabilities = frozenset({CommerceCapability.PRODUCT_READ})
     _route: tuple[bool, str] | None = None
     _currency: str | None = None
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from apps.api.integrations.shopify import OrderSnapshot, ShopifyAdapter
+from apps.api.integrations.commerce import CommerceCapability, OrderSnapshot
 from apps.api.skills.base import (
     ReconcileUnknown,
     Skill,
@@ -79,8 +79,9 @@ def _output(after: OrderSnapshot, verdict: Verdict) -> UpdateShippingAddressOutp
 @SkillRegistry.register
 class UpdateShippingAddress(Skill):
     slug = "shopify.update_shipping_address"
+    required_capability = CommerceCapability.SHIPPING_ADDRESS
     description = (
-        "Actualiza la dirección de envío de un pedido de Shopify. "
+        "Actualiza la dirección de envío de un pedido de la tienda. "
         "Usa esta skill SOLO cuando el pedido no haya sido enviado todavía. "
         "Requiere el ID del pedido y la dirección completa nueva. "
         "Si el pedido ya tiene tracking activo, escala — no intentes cambiar la dirección."
@@ -95,18 +96,14 @@ class UpdateShippingAddress(Skill):
 
     async def prepare(self, ctx: SkillContext, raw_input: dict[str, Any]) -> dict[str, Any]:
         inputs = UpdateShippingAddressInput.model_validate(raw_input)
-        if not ctx.integration_ctx:
-            raise ValueError("shopify_not_configured")
-        adapter = ctx.commerce_mock or ShopifyAdapter()
+        adapter = ctx.require_commerce()
         snapshot = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
         ensure_order_changeable(snapshot, "address", ctx)
         return raw_input
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, UpdateShippingAddressInput)
-        if not ctx.integration_ctx:
-            raise ValueError("shopify_not_configured")
-        adapter = ctx.commerce_mock or ShopifyAdapter()
+        adapter = ctx.require_commerce()
         # La aprobación puede llevar horas en cola: el pedido pudo salir entretanto.
         before = await snapshot_before_mutation(adapter, ctx, inputs.order_id)
         ensure_order_changeable(before, "address", ctx)
@@ -132,9 +129,9 @@ class UpdateShippingAddress(Skill):
         """El cambio de dirección no admite clave de idempotencia: consta aplicado si el
         pedido ya tiene la dirección pedida."""
         assert isinstance(inputs, UpdateShippingAddressInput)
-        if not ctx.integration_ctx:
-            raise ReconcileUnknown("shopify_not_configured")
-        after = await ShopifyAdapter().get_order_snapshot(ctx.integration_ctx, inputs.order_id)
+        if ctx.commerce is None:
+            raise ReconcileUnknown("commerce_not_configured")
+        after = await ctx.commerce.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
         verdict = address_verdict(
             after, address1=inputs.address1, zip_code=inputs.zip_code, city=inputs.city
         )

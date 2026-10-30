@@ -2,8 +2,8 @@
 
 `MockShopifyAdapter` es un drop-in del `ShopifyAdapter` real: implementa la misma
 superficie de métodos pero devuelve respuestas predefinidas (fixtures) en vez de
-llamar a la API de Shopify. Se inyecta en `SkillContext.commerce_mock` desde
-`execute_skill` cuando el state tiene `simulation_mode=True`.
+llamar a la API de Shopify. Es el `SkillContext.commerce` que resuelve
+`agents/commerce_mode.resolve_commerce` cuando el state tiene `simulation_mode=True`.
 
 Las fixtures se indexan por NOMBRE DE MÉTODO del adapter (no por skill slug),
 porque una skill puede hacer varias llamadas y el mock opera a nivel de método:
@@ -46,11 +46,14 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
-from apps.api.integrations.shopify import (
+from apps.api.integrations.commerce import (
+    ALL_CAPABILITIES,
     CreatedReturn,
     IssuedRefund,
     OrderSnapshot,
     RefundableBalance,
+)
+from apps.api.integrations.shopify import (
     exchange_variants_from_graphql,
     order_snapshot_from_graphql,
     return_calculation_from_graphql,
@@ -93,6 +96,7 @@ _SNAPSHOT_DEFAULT: dict[str, Any] = {
 class MockShopifyAdapter:
     """Implementa la superficie de ShopifyAdapter con respuestas predefinidas."""
 
+    capabilities = ALL_CAPABILITIES
     fixtures: dict[str, Any] = field(default_factory=dict)
     _snapshot_calls: int = field(default=0, init=False)
 
@@ -113,8 +117,6 @@ class MockShopifyAdapter:
                 if isinstance(order, dict) and matches(order):
                     return order
         return None
-
-    # ── CommerceProvider protocol ──────────────────────────────────────────────
 
     async def get_order(self, ctx: Any, order_id: str) -> dict[str, Any] | None:
         if "get_order" in self.fixtures:

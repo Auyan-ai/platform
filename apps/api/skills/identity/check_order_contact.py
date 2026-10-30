@@ -13,6 +13,7 @@ from typing import Any
 from uuid import UUID
 
 from apps.api.db.client import tenant_scope
+from apps.api.integrations.commerce import CommerceCapability
 from apps.api.services.identity_guest import (
     Pair,
     can_lookup_orders,
@@ -52,6 +53,7 @@ class CheckOrderContactOutput(SkillOutput):
 @SkillRegistry.register
 class CheckOrderContact(Skill):
     slug = "identity.check_order_contact"
+    required_capability = CommerceCapability.ORDER_READ
     description = (
         "Comprueba que el número de pedido y el email o teléfono que dio el cliente "
         "coinciden con el pedido. Úsala solo cuando el cliente ya los dio en la conversación "
@@ -68,7 +70,7 @@ class CheckOrderContact(Skill):
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, CheckOrderContactInput)
         if not can_lookup_orders(ctx):
-            raise ValueError("shopify_not_configured")
+            raise ValueError("commerce_not_configured")
         contacts = extract_provided([inputs.contact], region=ctx.phone_region).contacts
         order_ref = normalize_order_ref(inputs.order_number)
         pairs = [Pair(order_ref, contact) for contact in contacts] if order_ref else []

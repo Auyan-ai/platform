@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from apps.api.integrations.shopify import IssuedRefund, ShopifyActionError
+from apps.api.integrations.commerce import CommerceActionError, IssuedRefund
 from apps.api.simulator.mocks import MockShopifyAdapter, MockShopifyError
 
 _GBP_BALANCE = {
@@ -67,7 +67,7 @@ async def test_refund_uses_the_order_currency_from_the_balance() -> None:
 
 
 async def test_refund_above_refundable_is_rejected_like_the_real_adapter() -> None:
-    with pytest.raises(ShopifyActionError, match="refund_amount_exceeds_refundable"):
+    with pytest.raises(CommerceActionError, match="refund_amount_exceeds_refundable"):
         await MockShopifyAdapter(_GBP_BALANCE).refund_partial(None, 1, amount=Decimal("40.01"))
 
 

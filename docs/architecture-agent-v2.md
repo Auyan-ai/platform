@@ -256,7 +256,7 @@ Métricas: abandonment_rate, nudge_recovery_rate, reopen_rate.
 
 - Adapters vigentes: **Chatwoot** (API key, E2E ✅), **Gorgias** (dual-auth Bearer|Basic, E2E ✅,
   outbound espeja el último mensaje entrante + `body_html`), **Zendesk** (dual-auth, código ✅,
-  E2E pendiente), **Postmark** (outbound Auyan→cliente). Shopify = `CommerceProvider` aparte.
+  E2E pendiente), **Postmark** (outbound Auyan→cliente). Comercio = `CommerceAdapter` aparte (`integrations/commerce.py`, ADR 0016).
 - Escalación = push al helpdesk del cliente (nota interna en lenguaje natural con el motivo;
   asignación a equipo solo si el tenant tiene Teams; email fallback sin helpdesk).
   `escalations` guarda `external_provider` + `external_ticket_ref`.

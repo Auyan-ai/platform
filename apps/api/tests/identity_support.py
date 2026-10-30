@@ -57,7 +57,7 @@ def patch_commerce(monkeypatch: pytest.MonkeyPatch, adapter: Any) -> None:
         return dataclasses.replace(
             real(state),
             integration_ctx=IntegrationContext(tenant_id=TENANT_ID, credentials={}, config={}),
-            commerce_mock=adapter,
+            commerce=adapter,
         )
 
     monkeypatch.setattr(f"{EXECUTE_SKILL_MODULE}.build_skill_context", _ctx)

@@ -17,16 +17,25 @@ import asyncio
 import datetime as _dt
 import logging
 from collections import OrderedDict
-from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any
 from uuid import UUID
 
 import httpx
-from apps.api.integrations.base import (
-    CommerceProvider,
-    IntegrationContext,
-    MutationNotApplied,
+from apps.api.integrations.base import IntegrationContext, MutationNotApplied
+from apps.api.integrations.commerce import (
+    ALL_CAPABILITIES,
+    PAYMENT_KINDS,
+    CommerceActionError,
+    CommerceAdapter,
+    CreatedReturn,
+    IssuedRefund,
+    MarkedRefund,
+    OrderSnapshot,
+    RefundableBalance,
+    SnapshotFulfillment,
+    SnapshotTransaction,
+    refund_marker,
 )
 from apps.api.integrations.registry import IntegrationRegistry
 from apps.api.services.returns import (
@@ -555,12 +564,12 @@ class ShopifyClient:
                 transactions = await self._get_transactions(client, order_id)
                 balance = refundable_balance(transactions)
                 balance.require(amount)
-            except ShopifyActionError as exc:
+            except CommerceActionError as exc:
                 # Antes de `refundCreate`: el reembolso no llegó a pedirse.
                 raise ShopifyRejected(str(exc)) from exc
             except httpx.HTTPError as exc:
                 raise ShopifyRejected(f"{type(exc).__name__}: {exc}") from exc
-            parent = _successful(transactions, _PAYMENT_KINDS)[-1]
+            parent = _successful(transactions, PAYMENT_KINDS)[-1]
             refund_input = {
                 "orderId": order_gid,
                 "currency": balance.currency,
@@ -781,7 +790,7 @@ class ShopifyClient:
         await self.add_order_note(order_id, f"{current}\n\n{text}" if current else text)
 
 
-class ShopifyActionError(RuntimeError):
+class ShopifyActionError(CommerceActionError):
     """Shopify no permite la acción con el estado actual del pedido."""
 
 
@@ -799,55 +808,13 @@ class ShopifyRejected(ShopifyActionError, MutationNotApplied):
     """La mutación no se aplicó: Shopify la rechazó o no llegó a enviarse."""
 
 
-_PAYMENT_KINDS = ("sale", "capture")
-
-
 def _successful(transactions: list[dict[str, Any]], kinds: tuple[str, ...]) -> list[dict[str, Any]]:
     return [t for t in transactions if t.get("kind") in kinds and t.get("status") == "success"]
 
 
-@dataclass(frozen=True)
-class RefundableBalance:
-    """Lo que queda por reembolsar de un pedido, en la moneda en que pagó el cliente.
-
-    Las transacciones de Shopify van en la moneda de presentación (la del cliente con
-    Shopify Markets), así que moneda y tope salen de ellas, nunca del input del LLM.
-    """
-
-    captured: Decimal
-    refunded: Decimal
-    currency: str
-
-    @property
-    def remaining(self) -> Decimal:
-        return self.captured - self.refunded
-
-    def require(self, amount: Decimal) -> None:
-        if amount <= 0:
-            raise ShopifyActionError(f"refund_amount_not_positive: {amount}")
-        if amount > self.remaining:
-            raise ShopifyActionError(
-                f"refund_amount_exceeds_refundable: se pidió reembolsar {amount} "
-                f"{self.currency} y solo quedan {self.remaining} {self.currency} "
-                f"(cobrado {self.captured}, ya reembolsado {self.refunded})"
-            )
-
-
-@dataclass(frozen=True)
-class IssuedRefund:
-    refund_id: int | None
-    amount: Decimal
-    currency: str
-
-
-def refund_marker(idempotency_key: str) -> str:
-    """Marca en la nota del reembolso (solo la ve el staff) que lo ata a su ejecución."""
-    return f"[auyan:{idempotency_key}]"
-
-
 def refundable_balance(transactions: list[dict[str, Any]]) -> RefundableBalance:
     """Cobrado menos reembolsado, a partir de las transacciones exitosas del pedido."""
-    payments = _successful(transactions, _PAYMENT_KINDS)
+    payments = _successful(transactions, PAYMENT_KINDS)
     if not payments:
         raise ShopifyActionError("order_has_no_refundable_payment")
     refunds = _successful(transactions, ("refund",))
@@ -859,107 +826,6 @@ def refundable_balance(transactions: list[dict[str, Any]]) -> RefundableBalance:
         refunded=sum((Decimal(str(t["amount"])) for t in refunds), Decimal(0)),
         currency=str(currencies.pop()),
     )
-
-
-RefundMode = Literal["automatic", "manual"]
-
-# Fulfillments que no cuentan como envío: cancelados o fallidos.
-_INACTIVE_FULFILLMENT = frozenset({"cancelled", "error", "failure"})
-# `displayFulfillmentStatus` de un pedido que ya salió, entero o en parte.
-_SHIPPED_DISPLAY = frozenset({"fulfilled", "partially_fulfilled"})
-
-
-@dataclass(frozen=True)
-class RefundRoute:
-    """Por dónde vuelve el dinero si se reembolsa el pedido.
-
-    `automatic`: todos los cobros son de una pasarela que devuelve el dinero al
-    reembolsar en Shopify. `manual`: algún cobro es de pasarela manual
-    (transferencia, contra reembolso, Bizum fuera de Shopify), donde Shopify solo
-    apunta el reembolso, o no hay cobro registrado y no se puede saber si el
-    cliente pagó por fuera. En ese caso devuelve la tienda.
-    """
-
-    mode: RefundMode
-    gateway: str | None
-
-
-@dataclass(frozen=True)
-class SnapshotTransaction:
-    id: str
-    kind: str  # sale, capture, authorization, refund, void…
-    status: str  # success, pending, failure, error, awaiting_response, unknown
-    gateway: str | None
-    manual_gateway: bool
-    error_code: str | None
-
-
-@dataclass(frozen=True)
-class MarkedRefund:
-    """Un reembolso del pedido encontrado por su `refund_marker`."""
-
-    refund_id: int
-    amount: Decimal
-    currency: str
-    transactions: tuple[SnapshotTransaction, ...]
-
-
-@dataclass(frozen=True)
-class SnapshotFulfillment:
-    status: str
-    tracking_numbers: tuple[str, ...]
-
-    @property
-    def active(self) -> bool:
-        return self.status not in _INACTIVE_FULFILLMENT
-
-
-@dataclass(frozen=True)
-class OrderSnapshot:
-    """Lo que decide si una L3 puede tocar un pedido y cómo acabó la acción."""
-
-    order_id: int
-    name: str  # número visible, "#1431"
-    cancelled: bool
-    fulfillment_status: str
-    fulfillments: tuple[SnapshotFulfillment, ...]
-    transactions: tuple[SnapshotTransaction, ...]
-    shipping_address: dict[str, str | None]
-
-    @property
-    def shipped(self) -> bool:
-        """Shopify lo da por enviado o algún envío vivo lleva tracking. No garantiza
-        lo contrario: muchas tiendas preparan y etiquetan fuera de Shopify."""
-        return self.fulfillment_status in _SHIPPED_DISPLAY or any(
-            f.active and f.tracking_numbers for f in self.fulfillments
-        )
-
-    @property
-    def has_active_fulfillment(self) -> bool:
-        return any(f.active for f in self.fulfillments)
-
-    @property
-    def payments(self) -> tuple[SnapshotTransaction, ...]:
-        return tuple(
-            t for t in self.transactions if t.kind in _PAYMENT_KINDS and t.status == "success"
-        )
-
-    @property
-    def paid(self) -> bool:
-        return bool(self.payments)
-
-    @property
-    def refund_route(self) -> RefundRoute:
-        payments = self.payments
-        manual = [t for t in payments if t.manual_gateway]
-        if payments and not manual:
-            return RefundRoute(mode="automatic", gateway=payments[-1].gateway)
-        return RefundRoute(mode="manual", gateway=manual[-1].gateway if manual else None)
-
-    def refunds_since(self, before: OrderSnapshot) -> tuple[SnapshotTransaction, ...]:
-        """Transacciones de reembolso que no estaban en `before`."""
-        seen = {t.id for t in before.transactions}
-        return tuple(t for t in self.transactions if t.kind == "refund" and t.id not in seen)
 
 
 def snapshot_transaction(t: dict[str, Any]) -> SnapshotTransaction:
@@ -1127,14 +993,6 @@ def return_input(plan: ReturnPlan, reason_definition_id: str) -> dict[str, Any]:
     return payload
 
 
-@dataclass(frozen=True)
-class CreatedReturn:
-    return_id: int
-    name: str
-    status: str  # open, requested, closed, declined, canceled
-    reason_handle: str
-
-
 _CANCEL_REASONS = frozenset({"CUSTOMER", "DECLINED", "FRAUD", "INVENTORY", "STAFF", "OTHER"})
 _CANCEL_POLL_ATTEMPTS = 8
 _CANCEL_POLL_SECONDS = 1.0
@@ -1280,12 +1138,12 @@ mutation ReturnCreate($input: ReturnInput!) {
 """
 
 
-# ─── Adapter stateless — implementa CommerceProvider ──────────────────────────
+# ─── Adapter stateless — implementa CommerceAdapter ───────────────────────────
 
 
 @IntegrationRegistry.register(kind="commerce", provider="shopify")
 class ShopifyAdapter:
-    """CommerceProvider stateless para Shopify.
+    """CommerceAdapter stateless para Shopify. Tiene todas las capacidades.
 
     Crea un ShopifyClient por llamada con un access_token YA VÁLIDO. Quien construye
     el IntegrationContext (router connect, build_skill_context del agente) debe llamar
@@ -1301,14 +1159,14 @@ class ShopifyAdapter:
     re-conectan vía el wizard.
     """
 
+    capabilities = ALL_CAPABILITIES
+
     def _client(self, ctx: IntegrationContext) -> ShopifyClient:
         creds = ctx.credentials
         token = creds.get("access_token") or creds.get("token")
         if not token:
             raise ValueError("shopify credentials missing access_token / token")
         return ShopifyClient(creds["domain"], token)
-
-    # ── CommerceProvider protocol ──────────────────────────────────────────────
 
     async def get_order(self, ctx: IntegrationContext, order_id: str) -> dict[str, Any]:
         return await self._client(ctx).get_order(int(order_id))
@@ -1330,8 +1188,6 @@ class ShopifyAdapter:
         if customer is None:
             return []
         return await client.get_orders_by_customer_id(customer["id"], limit=limit)
-
-    # ── Métodos extendidos usados por las skills ───────────────────────────────
 
     async def _resolve_order_id(self, ctx: IntegrationContext, order_ref: int) -> int:
         """Resuelve el número de pedido visible para el cliente (p.ej. 1181) al
@@ -1508,5 +1364,4 @@ class ShopifyAdapter:
         await self._client(ctx).append_order_note(order_id, text)
 
 
-# Satisface el type-checker: ShopifyAdapter implementa CommerceProvider structuralmente.
-_: CommerceProvider = ShopifyAdapter()  # type: ignore[assignment]
+_: CommerceAdapter = ShopifyAdapter()

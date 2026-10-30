@@ -204,7 +204,7 @@ async def test_get_product_info_cannot_tell_it_apart_from_shopify() -> None:
         integration_ctx=IntegrationContext(
             tenant_id=TENANT, credentials={}, config={"store_domain": DOMAIN}
         ),
-        commerce_mock=_adapter(Replay(("woocommerce",))),
+        commerce=_adapter(Replay(("woocommerce",))),
     )
 
     out: Any = await GetProductInfo().execute(ctx, GetProductInfoInput(query="sudadera"))
