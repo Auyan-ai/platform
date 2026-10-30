@@ -12,6 +12,7 @@ if TYPE_CHECKING:
         SourceName,
         SourceStats,
     )
+    from apps.api.services.site_ingestion.wordpress import WordPressIndex
 
 
 @dataclass
@@ -24,6 +25,8 @@ class SourceContext:
     accepted_keys: frozenset[str] = frozenset()
     # Cada fuente rellena aquí el nombre oficial de la tienda si lo trae; la ingesta lo recoge.
     store_name: str | None = None
+    # Índice REST de WordPress que dejó la detección de plataforma (solo WordPress/WooCommerce).
+    wordpress: WordPressIndex | None = None
 
     @property
     def stats(self) -> SourceStats:

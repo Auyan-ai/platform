@@ -101,9 +101,11 @@ async def test_mimitos_html_from_sitemap_to_markdown() -> None:
     assert blog.title == "Cuidado durante las vacaciones · mimitos.es"
     assert "Aprende cómo darle a tu mascota una experiencia de vacaciones segura" in blog.markdown
     assert "<div" not in blog.markdown
-    assert replay.urls()[:8] == [
+    assert replay.urls()[:10] == [
         "https://mimitos.es/robots.txt",
         "https://mimitos.es/api/2025-07/graphql.json",
+        "https://mimitos.es/wp-json/?_fields=name,description,namespaces",
+        "https://mimitos.es/?rest_route=/&_fields=name,description,namespaces",
         "https://mimitos.es/llms-full.txt",
         "https://mimitos.es/llms.txt",
         "https://mimitos.es/agents.md",
@@ -191,10 +193,10 @@ async def test_request_budget_stops_the_ingestion() -> None:
         "mimitos.es",
         transport=replay.transport(),
         sleep=SleepLog(),
-        limits=Limits(max_requests=8),
+        limits=Limits(max_requests=10),
     )
 
-    assert len(replay.requests) == 8
+    assert len(replay.requests) == 10
     assert collection.stats.budget_exhausted is True
     assert _keys(collection, SourceName.HTML) == [
         "mimitos.es",

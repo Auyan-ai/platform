@@ -32,6 +32,7 @@ from apps.api.services.site_ingestion.models import (
 )
 from apps.api.services.site_ingestion.sources import SOURCES, SourceContext, SourceSpec
 from apps.api.services.site_ingestion.sources.storefront_api import probe_primary_domain
+from apps.api.services.site_ingestion.wordpress import WordPressIndex, probe_wordpress
 
 if TYPE_CHECKING:
     import asyncpg
@@ -55,12 +56,16 @@ class SiteCollection:
         return [doc for docs in self.docs_by_source.values() for doc in docs]
 
 
-async def detect_platform(fetcher: PoliteFetcher, origin: str) -> tuple[Platform, str]:
-    session = fetcher.session(SourceName.STOREFRONT_API)
-    primary = await probe_primary_domain(session, origin)
-    if primary is None:
-        return Platform.OTHER, origin
-    return Platform.SHOPIFY, primary
+async def detect_platform(
+    fetcher: PoliteFetcher, origin: str
+) -> tuple[Platform, str, WordPressIndex | None]:
+    primary = await probe_primary_domain(fetcher.session(SourceName.STOREFRONT_API), origin)
+    if primary is not None:
+        return Platform.SHOPIFY, primary, None
+    index = await probe_wordpress(fetcher.session(SourceName.WORDPRESS_API), origin)
+    if index is not None:
+        return index.platform, origin, index
+    return Platform.OTHER, origin, None
 
 
 async def collect_site(
@@ -76,7 +81,7 @@ async def collect_site(
     stats = IngestionStats(root_url=root_url)
     origin = f"https://{normalize_domain(root_url)}"
     async with PoliteFetcher(stats, limits=limits, transport=transport, sleep=sleep) as fetcher:
-        platform, origin = await detect_platform(fetcher, origin)
+        platform, origin, wordpress = await detect_platform(fetcher, origin)
         stats.origin, stats.platform = origin, platform
         collection = SiteCollection(origin=origin, platform=platform, stats=stats)
         accepted_keys: set[str] = set()
@@ -92,6 +97,7 @@ async def collect_site(
                 session=session,
                 remaining_pages=limits.max_pages - len(accepted_keys),
                 accepted_keys=frozenset(accepted_keys),
+                wordpress=wordpress,
             )
             source_started = time.monotonic()
             try:

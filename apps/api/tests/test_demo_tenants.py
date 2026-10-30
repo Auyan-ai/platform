@@ -248,6 +248,11 @@ class TestDemoTurnState:
             "demo_catalog_domain": "www.thinkingmu.com",
         }
 
+    def test_demo_carries_the_platform_its_ingestion_detected(self) -> None:
+        overrides = demo_state_overrides(_demo(), platform="woocommerce")
+
+        assert overrides["demo_catalog_platform"] == "woocommerce"
+
     def test_scripted_simulator_keeps_the_mock_but_still_gets_no_credentials(self) -> None:
         overrides = demo_state_overrides(_demo(), scripted_commerce=True)
 

@@ -101,10 +101,12 @@ def retry_after_seconds(response: httpx.Response) -> float:
         return _DEFAULT_RETRY_AFTER_SECONDS
 
 
-class DemoCatalogAdapter:
-    """Catálogo en vivo de una tienda pública. Sin credenciales, solo lectura."""
+class DemoCatalogBase:
+    """Base de los catálogos de demo: dominio, transporte y el rechazo de todo lo que no sea
+    catálogo. Una plataforma sin catálogo público usa esta clase tal cual: toda operación lanza
+    `DemoCatalogUnavailable`, y sin capacidades el agente no ofrece ninguna skill de comercio."""
 
-    capabilities = frozenset({CommerceCapability.PRODUCT_READ})
+    capabilities: frozenset[CommerceCapability] = frozenset()
 
     def __init__(
         self,
@@ -116,6 +118,21 @@ class DemoCatalogAdapter:
         self.domain = normalize_domain(store_domain)
         self._transport = transport
         self._sleep = sleep
+
+    def __getattr__(self, name: str) -> Callable[..., Awaitable[Any]]:
+        if name.startswith("_"):
+            raise AttributeError(name)
+
+        async def _unavailable(*args: Any, **kwargs: Any) -> Any:
+            raise DemoCatalogUnavailable(f"{name}: la demo solo lee el catálogo público")
+
+        return _unavailable
+
+
+class DemoCatalogAdapter(DemoCatalogBase):
+    """Catálogo en vivo de una tienda Shopify pública. Sin credenciales, solo lectura."""
+
+    capabilities = frozenset({CommerceCapability.PRODUCT_READ})
 
     async def _graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         url = f"https://{self.domain}/api/{STOREFRONT_API_VERSION}/graphql.json"
@@ -154,12 +171,3 @@ class DemoCatalogAdapter:
     async def get_shop_currency(self, ctx: Any) -> str:
         data = await self._graphql(_SHOP_CURRENCY)
         return str(data["shop"]["paymentSettings"]["currencyCode"])
-
-    def __getattr__(self, name: str) -> Callable[..., Awaitable[Any]]:
-        if name.startswith("_"):
-            raise AttributeError(name)
-
-        async def _unavailable(*args: Any, **kwargs: Any) -> Any:
-            raise DemoCatalogUnavailable(f"{name}: la demo solo lee el catálogo público")
-
-        return _unavailable

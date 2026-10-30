@@ -71,7 +71,7 @@ def resolve_commerce(
         fixtures = (state.get("simulation_fixtures") or {}).get("shopify", {})
         return integration, MockShopifyAdapter(fixtures)
     if mode == "demo_catalog":
-        from apps.api.integrations.demo_catalog import DemoCatalogAdapter
+        from apps.api.integrations.demo_catalog_registry import demo_catalog_for
 
         domain = demo_catalog_domain(state)
         # Nunca las credenciales del tenant: la demo solo trae el dominio público.
@@ -80,7 +80,7 @@ def resolve_commerce(
             credentials={},
             config={"store_domain": domain},
         )
-        return demo, DemoCatalogAdapter(domain)
+        return demo, demo_catalog_for(domain, state.get("demo_catalog_platform"))
     if integration is None:
         return None, None
     try:

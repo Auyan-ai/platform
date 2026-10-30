@@ -208,6 +208,8 @@ class AgentState(TypedDict, total=False):
     # público del dominio `demo_catalog_domain`, sin credenciales y de solo lectura.
     commerce_mode: Literal["live", "mock", "demo_catalog"]
     demo_catalog_domain: str
+    # Plataforma de la demo según su última ingesta; elige el catálogo (ADR 0016 §7).
+    demo_catalog_platform: str
     # forced_aop_slug: si está presente en modo simulación, select_aop carga ese AOP
     # directamente sin llamar al intent classifier. Permite que los scenarios controlen
     # qué AOP usa el grafo, aislando el test del clasificador de intent.

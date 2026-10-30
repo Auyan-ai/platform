@@ -276,6 +276,7 @@ async def test_a_store_that_serves_nothing_fails_without_retrying(pool: asyncpg.
     row = await _row(pool, ingestion_id)
     assert row["status"] == "failed"
     assert row["failure_reason"] == (
-        "no_content: robots=unavailable, storefront_api=0req, agent_files=0req, html=0req"
+        "no_content: robots=unavailable, storefront_api=0req, wordpress_api=0req, "
+        "agent_files=0req, html=0req"
     )
     assert await _submissions(pool, tid) == []
