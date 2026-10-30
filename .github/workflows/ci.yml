@@ -106,6 +106,86 @@ jobs:
             sys.exit(1)
           PY
 
+  api-woocommerce:
+    name: API — adapter y skills L3 contra un WooCommerce real (bloqueante)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      AUYAN_TEST_WOOCOMMERCE_URL: http://127.0.0.1:9400
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: WordPress Playground con WooCommerce
+        working-directory: apps/api/scripts/woocommerce_dev
+        run: |
+          npm ci --no-audit --no-fund
+          nohup npx wp-playground-cli server --port 9400 --php 8.3 --wp 7.1.3 \
+            --blueprint ./blueprint.json \
+            --mount "$PWD/mu:/wordpress/wp-content/mu-plugins" > playground.log 2>&1 &
+          for i in $(seq 1 120); do
+            grep -q "Ready!" playground.log && break
+            sleep 5
+          done
+          grep -q "Ready!" playground.log || { cat playground.log; exit 1; }
+          for i in $(seq 1 20); do
+            out=$(curl -s -b playground_auto_login_already_happened=1 \
+              http://127.0.0.1:9400/wp-content/mu-plugins/seed/seed.php || true)
+            echo "$out"
+            echo "$out" | grep -q '"seeded"' && break
+            sleep 5
+          done
+          echo "$out" | grep -q '"seeded"' || { cat playground.log; exit 1; }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pip install poetry==1.8.5
+
+      - name: Cache Poetry virtualenv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pypoetry/virtualenvs
+          key: poetry-${{ runner.os }}-${{ hashFiles('apps/api/poetry.lock') }}
+          restore-keys: poetry-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Pytest WooCommerce en vivo
+        run: >-
+          poetry run pytest tests/integrations/test_woocommerce_live.py
+          --tb=short -q --junitxml=woocommerce-report.xml
+
+      - name: Guard — ningún test en vivo de WooCommerce se salta
+        run: |
+          python3 - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("woocommerce-report.xml").getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          total = int(suite.get("tests"))
+          skipped = int(suite.get("skipped"))
+          print(f"tests WooCommerce ejecutados: {total - skipped} (saltados: {skipped})")
+          if skipped or total == 0:
+            print("Hay tests en vivo saltados o ninguno corrió: el job no puede pasar en silencio.")
+            sys.exit(1)
+          PY
+
+      - name: Log del Playground si falla
+        if: failure()
+        run: cat scripts/woocommerce_dev/playground.log || true
+
   evals-static:
     name: Evals estáticas (sin LLM, bloqueante)
     runs-on: ubuntu-latest
