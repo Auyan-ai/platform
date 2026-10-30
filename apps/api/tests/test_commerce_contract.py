@@ -96,7 +96,7 @@ def test_capability_of_each_skill() -> None:
 
 def test_adapters_declare_their_capabilities() -> None:
     assert ShopifyAdapter.capabilities == ALL_CAPABILITIES
-    assert MockShopifyAdapter.capabilities == ALL_CAPABILITIES
+    assert MockShopifyAdapter().capabilities == ALL_CAPABILITIES
     assert DemoCatalogAdapter.capabilities == frozenset({CommerceCapability.PRODUCT_READ})
 
 

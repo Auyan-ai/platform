@@ -1,0 +1,9 @@
+{
+  "name": "auyan-woocommerce-dev",
+  "private": true,
+  "version": "1.0.0",
+  "description": "WooCommerce real en local (WordPress Playground) para probar el adapter de comercio",
+  "dependencies": {
+    "@wp-playground/cli": "3.1.57"
+  }
+}
