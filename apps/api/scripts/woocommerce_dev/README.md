@@ -45,8 +45,7 @@ Playground responde 302. La base de datos vive en memoria: al parar el servidor 
 ## Tests
 
 Los tests en vivo crean sus propios pedidos, así que se pueden repetir sobre la misma tienda.
-Cada petición al Playground tarda unos segundos, y la batería completa tarda entre 15 y 20
-minutos.
+Cada petición al Playground tarda unos segundos, y la batería completa tarda unos 10 minutos.
 
 ```bash
 cd apps/api
