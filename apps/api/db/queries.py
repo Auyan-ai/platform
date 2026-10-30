@@ -5260,6 +5260,47 @@ async def get_tenant_knowledge_submission(
     return _tenant_knowledge_submission_from_row(row) if row else None
 
 
+async def find_cross_key_duplicate(
+    conn: asyncpg.Connection,
+    tenant_id: UUID,
+    *,
+    sha256: str,
+    source_key: str | None,
+) -> tuple[UUID, Literal["document", "submission"]] | None:
+    """Documento vivo o submission pendiente del tenant con el mismo texto bajo OTRA clave.
+
+    La misma clave la resuelve el ciclo de vida (sustituye); esto cubre claves distintas y la
+    carga manual sin clave (#420). Los documentos viejos sin `content_sha256` se comparan por el
+    hash calculado en SQL, igual que `content_sha256()` (texto con los bordes recortados).
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT id, kind FROM (
+          SELECT id, 'document' AS kind, 0 AS ord, created_at
+            FROM knowledge_base_documents
+           WHERE tenant_id = $1 AND deleted_at IS NULL
+             AND ($2::text IS NULL OR source_key IS DISTINCT FROM $2::text)
+             AND COALESCE(content_sha256,
+                          encode(sha256(convert_to(btrim(content, E' \\t\\r\\n'), 'UTF8')), 'hex'))
+                 = $3
+          UNION ALL
+          SELECT id, 'submission' AS kind, 1 AS ord, created_at
+            FROM tenant_knowledge_submissions
+           WHERE tenant_id = $1 AND deleted_at IS NULL
+             AND status = 'pending_review'::tenant_knowledge_submission_status
+             AND ($2::text IS NULL OR source_key IS DISTINCT FROM $2::text)
+             AND encode(sha256(convert_to(btrim(content, E' \\t\\r\\n'), 'UTF8')), 'hex') = $3
+        ) d
+         ORDER BY ord, created_at
+         LIMIT 1
+        """,
+        tenant_id,
+        source_key,
+        sha256,
+    )
+    return (row["id"], row["kind"]) if row else None
+
+
 async def create_tenant_knowledge_submission(
     conn: asyncpg.Connection,
     tenant_id: UUID,
@@ -5292,6 +5333,15 @@ async def create_tenant_knowledge_submission(
             tenant_id,
             source_key,
         )
+    metadata = dict(metadata or {})
+    if content.strip() and "duplicate_of" not in metadata:
+        duplicate = await find_cross_key_duplicate(
+            conn, tenant_id, sha256=content_sha256(content), source_key=source_key
+        )
+        if duplicate is not None:
+            # No se descarta: queda para revisar, y el lote la deja desmarcada.
+            metadata["duplicate_of"] = str(duplicate[0])
+            metadata["duplicate_kind"] = duplicate[1]
     row = await conn.fetchrow(
         """
         INSERT INTO tenant_knowledge_submissions
@@ -5308,7 +5358,7 @@ async def create_tenant_knowledge_submission(
         original_filename,
         content,
         notes,
-        metadata or {},  # el codec del pool serializa a jsonb (no json.dumps manual)
+        metadata,  # el codec del pool serializa a jsonb (no json.dumps manual)
         submitted_by,
         source_key,
         ingestion_id,

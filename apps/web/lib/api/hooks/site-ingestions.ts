@@ -54,6 +54,8 @@ export interface IngestionSubmission {
   priority: 'normal' | 'low' | null
   source: string | null
   words: number | null
+  duplicate_of: string | null
+  duplicate_kind: 'document' | 'submission' | null
   review_note: string | null
 }
 

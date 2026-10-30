@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 import html
 import re
+from dataclasses import dataclass
 from urllib.parse import urljoin, urlsplit
 
 from apps.api.services.kb_source_key import canonical_source_key
+from apps.api.services.site_ingestion.boilerplate import strip_boilerplate
 from apps.api.services.site_ingestion.markdown import page_to_markdown
 from apps.api.services.site_ingestion.models import (
+    MIN_WORDS,
     DiscardReason,
     Platform,
     SourceDoc,
@@ -78,7 +81,14 @@ def choose_pages(urls: list[str], budget: int, accepted_keys: frozenset[str]) ->
     return ranked[: max(budget, 0)]
 
 
-async def _read_page(ctx: SourceContext, url: str) -> SourceDoc | None:
+@dataclass(frozen=True)
+class _Page:
+    url: str
+    title: str
+    markdown: str
+
+
+async def _read_page(ctx: SourceContext, url: str) -> _Page | None:
     response = await ctx.session.get(url)
     if response is None or response.status_code != 200:
         return None
@@ -89,13 +99,30 @@ async def _read_page(ctx: SourceContext, url: str) -> SourceDoc | None:
     if not markdown:
         ctx.stats.discard(DiscardReason.EMPTY_EXTRACTION)
         return None
-    return SourceDoc.build(
-        url=str(response.url),
-        kind=SourceKind.WEB_PAGE,
-        title=title,
-        markdown=markdown,
-        priority=priority_of(urlsplit(str(response.url)).path),
-    )
+    return _Page(url=str(response.url), title=title, markdown=markdown)
+
+
+def _docs_without_boilerplate(pages: list[_Page], ctx: SourceContext) -> list[SourceDoc]:
+    """Quita el texto de plantilla que repiten las páginas de esta ingesta (#421). Una página
+    que solo era plantilla se descarta aquí como `boilerplate_only`; la que ya era corta antes
+    de quitarlo la descarta el orquestador como `too_short`."""
+    cleaned = strip_boilerplate([page.markdown for page in pages])
+    minimum = MIN_WORDS[SourceKind.WEB_PAGE]
+    docs: list[SourceDoc] = []
+    for page, markdown in zip(pages, cleaned, strict=True):
+        if len(markdown.split()) < minimum <= len(page.markdown.split()):
+            ctx.stats.discard(DiscardReason.BOILERPLATE_ONLY)
+            continue
+        docs.append(
+            SourceDoc.build(
+                url=page.url,
+                kind=SourceKind.WEB_PAGE,
+                title=page.title,
+                markdown=markdown,
+                priority=priority_of(urlsplit(page.url).path),
+            )
+        )
+    return docs
 
 
 async def collect(ctx: SourceContext) -> list[SourceDoc]:
@@ -105,7 +132,7 @@ async def collect(ctx: SourceContext) -> list[SourceDoc]:
         urls = await _discover_from_home(ctx, host)
     pages = choose_pages(urls, ctx.remaining_pages, ctx.accepted_keys)
     results = await asyncio.gather(*(_read_page(ctx, url) for url in pages))
-    return [doc for doc in results if doc is not None]
+    return _docs_without_boilerplate([page for page in results if page is not None], ctx)
 
 
 SPEC = SourceSpec(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import httpx
 import pytest
+from apps.api.services.site_ingestion.boilerplate import strip_boilerplate
 from apps.api.services.site_ingestion.models import (
     TRANSITIONS,
     IngestionStatus,
@@ -232,3 +233,48 @@ async def test_a_finished_ingestion_logs_its_summary_without_breaking_logging(
     ready = [r for r in caplog.records if r.getMessage() == "site_ingestion_ready"]
     assert len(ready) == 1
     assert ready[0].submissions_created == 11
+
+
+async def test_html_boilerplate_shared_by_most_pages_is_removed_and_faq_is_discarded() -> None:
+    # Fixtures sintéticas con la forma de Thinking MU (la web respondía 429 a la grabación):
+    # 4 páginas HTML comparten bloque de bolsa de regalo, aviso de contraseña y pie.
+    collection = await collect_site(
+        "thinkingmu.com", transport=Replay(("thinkingmu_html",)).transport(), sleep=SleepLog()
+    )
+
+    by_key = {d.source_key: d for d in collection.docs_by_source[SourceName.HTML]}
+    assert sorted(by_key) == [
+        "thinkingmu.com/pages/localizador-tiendas",
+        "thinkingmu.com/pages/pagos-condiciones",
+        "thinkingmu.com/pages/tablas-de-tallas",
+    ]
+    stores = by_key["thinkingmu.com/pages/localizador-tiendas"].markdown
+    assert "lunes a sábado de 10:00 a 21:00" in stores
+    assert "domingos cerrado" in stores
+    for doc in by_key.values():
+        assert "bolsa de tela" not in doc.markdown
+        assert "restablecer tu contraseña" not in doc.markdown
+    discarded = collection.stats.source(SourceName.HTML).discarded
+    assert dict(discarded) == {"boilerplate_only": 1}
+
+
+def test_strip_boilerplate_needs_three_pages_and_more_than_half() -> None:
+    shared = "Incluye una bolsa de tela."
+    two = [f"# A\n\n{shared}", f"# B\n\n{shared}"]
+    assert strip_boilerplate(two) == two
+
+    four = [f"# A\n\nuno\n\n{shared}", f"# B\n\ndos\n\n{shared}", "# C\n\ntres", "# D\n\ncuatro"]
+    # Aparece en 2 de 4: no es más de la mitad.
+    assert strip_boilerplate(four) == four
+
+    five = [*four, f"# E\n\ncinco\n\n{shared.upper()}"]
+    # 3 de 5 (ignora mayúsculas): se quita de las tres.
+    cleaned = strip_boilerplate(five)
+    assert cleaned[0] == "# A\n\nuno"
+    assert cleaned[4] == "# E\n\ncinco"
+    assert cleaned[2] == "# C\n\ntres"
+
+
+def test_strip_boilerplate_counts_a_line_once_per_page() -> None:
+    pages = ["x repetido\nx repetido\nx repetido\núnico uno", "otra cosa", "nada más"]
+    assert strip_boilerplate(pages) == pages
