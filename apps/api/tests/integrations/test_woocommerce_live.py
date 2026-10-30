@@ -7,7 +7,7 @@ REST, así que se pueden repetir sobre la misma tienda.
 
 from __future__ import annotations
 
-import random
+import secrets
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -38,7 +38,7 @@ def _email() -> str:
 
 
 def _phone() -> str:
-    return f"6{random.randint(10_000_000, 99_999_999)}"
+    return f"6{10_000_000 + secrets.randbelow(90_000_000)}"
 
 
 async def _card_order(**kw: Any) -> dict[str, Any]:
@@ -137,7 +137,7 @@ async def test_finds_orders_by_phone_stored_without_prefix() -> None:
 
 
 async def test_sequential_number_is_found_by_search_and_ambiguity_stops_the_action() -> None:
-    visible = str(random.randint(700_000, 799_999))
+    visible = str(700_000 + secrets.randbelow(100_000))
     first = await _card_order(meta=[{"key": "_auyan_order_number", "value": visible}])
     second = await _card_order(meta=[{"key": "_auyan_order_number", "value": str(first["id"])}])
     adapter, ctx, _ = live()
@@ -463,7 +463,11 @@ async def test_update_shipping_address_skill_confirms_the_saved_address() -> Non
 
     assert isinstance(result, Applied)
     assert result.output["outcome"] == ActionOutcome.CONFIRMED
-    assert (result.output["new_address1"], result.output["new_zip"], result.output["new_country"]) == (
+    assert (
+        result.output["new_address1"],
+        result.output["new_zip"],
+        result.output["new_country"],
+    ) == (
         "Avenida de la Constitución 20",
         "41004",
         "ES",
@@ -477,6 +481,4 @@ async def test_store_url_over_plain_http_is_refused_without_the_dev_flag() -> No
 
     assert LIVE_URL
     with pytest.raises(ValueError, match="woocommerce_store_url_must_be_public"):
-        await WooCommerceAdapter(allow_http_loopback=False).get_shop_currency(
-            integration(LIVE_URL)
-        )
+        await WooCommerceAdapter(allow_http_loopback=False).get_shop_currency(integration(LIVE_URL))

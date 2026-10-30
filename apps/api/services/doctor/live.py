@@ -18,8 +18,8 @@ from apps.api.integrations.anthropic_client import (
     LLMProviderUnavailable,
     call_claude_with_tools,
 )
-from apps.api.integrations.chatwoot import ChatwootClient
 from apps.api.integrations.base import IntegrationContext
+from apps.api.integrations.chatwoot import ChatwootClient
 from apps.api.integrations.shopify import ShopifyClient, ensure_shopify_access_token
 from apps.api.integrations.woocommerce import WooCommerceAdapter, WooCommerceRejected
 from apps.api.integrations.zendesk import ZendeskClient

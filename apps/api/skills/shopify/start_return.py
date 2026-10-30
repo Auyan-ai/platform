@@ -175,7 +175,8 @@ class _ReturnSkill(Skill):
         try:
             plan = build_plan(decision, calculation, requested_at=now)
         except KeyError as exc:
-            raise _shopify_refusal(ctx, "cuadrar el cálculo de la tienda con el pedido", exc) from exc
+            step = "cuadrar el cálculo de la tienda con el pedido"
+            raise _shopify_refusal(ctx, step, exc) from exc
         if isinstance(plan, Refused):
             raise self._refusal(ctx, plan)
         if isinstance(plan, Rejected):

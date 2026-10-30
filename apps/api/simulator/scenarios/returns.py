@@ -1,4 +1,4 @@
-"""Scenarios RE-* — Devoluciones y reembolsos (8 scenarios)."""
+"""Scenarios RE-* — Devoluciones y reembolsos (9 scenarios)."""
 
 from __future__ import annotations
 
@@ -365,6 +365,34 @@ SCENARIOS: list[dict[str, Any]] = [
         "assertions": {
             "must_escalate": True,
             "escalation_reason_present": True,
+        },
+        "max_turns": 4,
+    },
+    {
+        "id": "RE-09",
+        "name": "RE-09: Devolución en una tienda WooCommerce",
+        "description": (
+            "El tenant vende en WooCommerce, que no tiene API de devoluciones (ADR 0016 §3). "
+            "Aunque haya política, el agente no ve start_return ni start_exchange y pasa el "
+            "caso al equipo."
+        ),
+        "aop_slug": "returns",
+        "capabilities": [],
+        "profile": "cooperativo",
+        "goal": "Devolver el pedido #1234 porque la talla no me queda bien.",
+        "initial_message": "Hola, quiero devolver mi pedido #1234 porque la talla no me queda bien",
+        "expected_outcome": (
+            "El agente no abre ninguna devolución: explica que el equipo gestionará la "
+            "devolución y escala con la razón."
+        ),
+        "mock_fixtures": {
+            "shopify": {**_ORDER_IN_WINDOW, "_provider": "woocommerce"},
+            "returns_policy": _POLICY,
+        },
+        "assertions": {
+            "must_escalate": True,
+            "escalation_reason_present": True,
+            "skills_not_called": ["shopify.start_return", "shopify.start_exchange"],
         },
         "max_turns": 4,
     },
