@@ -202,6 +202,7 @@ async def test_serializes_commerce_ctx_to_dict(fake_deps, monkeypatch) -> None:
         tenant_id=TENANT_ID,
         credentials={"domain": "tenant-a.myshopify.com", "access_token": "shpat_x"},
         config={"shop_name": "Tenant A"},
+        provider="shopify",
     )
     _patch_module(
         monkeypatch,
@@ -219,6 +220,7 @@ async def test_serializes_commerce_ctx_to_dict(fake_deps, monkeypatch) -> None:
         "tenant_id": str(TENANT_ID),
         "credentials": {"domain": "tenant-a.myshopify.com", "access_token": "shpat_x"},
         "config": {"shop_name": "Tenant A"},
+        "provider": "shopify",
     }
     assert isinstance(result["tenant_id"], str)  # UUID serializado a str para el state
 

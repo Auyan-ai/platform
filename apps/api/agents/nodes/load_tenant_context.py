@@ -89,8 +89,8 @@ def make_load_tenant_context_node(
             for p in perm_rows
         }
 
-        # `build_commerce_integration_ctx` resuelve las creds (descifrado + token
-        # exchange Shopify) desde tenant_integrations, o cae a tenant_config.extra.
+        # `build_commerce_integration_ctx` resuelve las creds y el proveedor (descifrado +
+        # token exchange Shopify) desde tenant_integrations, o cae a tenant_config.extra.
         # Aquí solo serializamos el IntegrationContext al state (JSON-safe).
         commerce_integration_ctx: dict | None = None
         if commerce_ctx is not None:
@@ -98,6 +98,7 @@ def make_load_tenant_context_node(
                 "tenant_id": str(commerce_ctx.tenant_id),
                 "credentials": commerce_ctx.credentials,
                 "config": commerce_ctx.config,
+                "provider": commerce_ctx.provider,
             }
 
         policy = parse_stored_policy(stored_policy.policy) if stored_policy else None

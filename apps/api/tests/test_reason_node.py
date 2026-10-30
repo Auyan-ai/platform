@@ -628,7 +628,7 @@ async def test_tool_results_with_error_propagate_to_messages(
             "input": {"query": "x"},
             "output": None,
             "is_error": True,
-            "error": "shopify_not_configured",
+            "error": "commerce_not_configured",
         }
     ]
     await node(state)
@@ -636,7 +636,7 @@ async def test_tool_results_with_error_propagate_to_messages(
     msgs = captured["messages"]
     tool_result_block = msgs[2]["content"][0]
     assert tool_result_block["is_error"] is True
-    assert tool_result_block["content"] == "shopify_not_configured"
+    assert tool_result_block["content"] == "commerce_not_configured"
 
 
 @pytest.mark.asyncio

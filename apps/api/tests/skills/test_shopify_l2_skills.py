@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 from apps.api.integrations.base import IntegrationContext
+from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import SkillContext
 from apps.api.skills.shopify.add_order_note import (
     AddOrderNote,
@@ -35,6 +36,7 @@ CTX = SkillContext(
     tenant_id="11111111-1111-1111-1111-111111111111",
     conversation_id="22222222-2222-2222-2222-222222222222",
     integration_ctx=_SHOPIFY_INTEGRATION_CTX,
+    commerce=ShopifyAdapter(),
 )
 
 CTX_NO_SHOPIFY = SkillContext(
@@ -103,11 +105,11 @@ class TestAddOrderNote:
         assert result.note == "Nota de prueba"
 
     @pytest.mark.asyncio
-    async def test_raises_if_shopify_not_configured(self) -> None:
+    async def test_raises_if_commerce_not_configured(self) -> None:
         skill = AddOrderNote()
         inputs = AddOrderNoteInput(order_id=1001, note="Test")
 
-        with pytest.raises(ValueError, match="shopify_not_configured"):
+        with pytest.raises(ValueError, match="commerce_not_configured"):
             await skill.execute(CTX_NO_SHOPIFY, inputs)
 
     def test_to_anthropic_tool_shape(self) -> None:
@@ -168,11 +170,11 @@ class TestTagOrder:
         assert result.current_tags == []
 
     @pytest.mark.asyncio
-    async def test_raises_if_shopify_not_configured(self) -> None:
+    async def test_raises_if_commerce_not_configured(self) -> None:
         skill = TagOrder()
         inputs = TagOrderInput(order_id=1001, tags=["priority"])
 
-        with pytest.raises(ValueError, match="shopify_not_configured"):
+        with pytest.raises(ValueError, match="commerce_not_configured"):
             await skill.execute(CTX_NO_SHOPIFY, inputs)
 
     def test_to_anthropic_tool_shape(self) -> None:

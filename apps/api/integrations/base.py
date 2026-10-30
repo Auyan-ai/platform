@@ -3,7 +3,7 @@
 Jerarquía:
 - MessageProvider  → cualquier canal que puede recibir/enviar mensajes.
 - HelpdeskProvider → extends MessageProvider con operaciones propias de helpdesk.
-- CommerceProvider → operaciones de lectura/escritura sobre plataformas commerce.
+- El contrato de comercio vive aparte, en `integrations/commerce.py`.
 
 Los adapters concretos (chatwoot.py, zendesk.py, ...) implementan estos Protocols
 sin herencia explícita — Python structural typing los valida en tiempo de type-check.
@@ -56,6 +56,9 @@ class IntegrationContext:
     tenant_id: UUID
     credentials: dict[str, Any]
     config: dict[str, Any] = field(default_factory=dict)
+    # Proveedor de la integración ("shopify", "woocommerce"…). El de comercio lo lleva
+    # siempre: con él se resuelve el adapter en `IntegrationRegistry`.
+    provider: str | None = None
 
 
 @dataclass(frozen=True)
@@ -147,28 +150,6 @@ class MutationNotApplied(Exception):
     """Consta que una mutación no se aplicó: falló antes de enviarse o el proveedor la
     rechazó. Cualquier otro error tras enviarla deja el resultado sin saber: el
     proveedor pudo aplicarla, o seguir aplicándola."""
-
-
-class CommerceProvider(Protocol):
-    """Plataforma commerce: lectura de pedidos, clientes, productos."""
-
-    async def get_order(
-        self,
-        ctx: IntegrationContext,
-        order_id: str,
-    ) -> dict[str, Any]: ...
-
-    async def search_orders_by_email(
-        self,
-        ctx: IntegrationContext,
-        email: str,
-    ) -> list[dict[str, Any]]: ...
-
-    async def search_orders_by_phone(
-        self,
-        ctx: IntegrationContext,
-        phone: str,
-    ) -> list[dict[str, Any]]: ...
 
 
 class HandoffTarget(Protocol):

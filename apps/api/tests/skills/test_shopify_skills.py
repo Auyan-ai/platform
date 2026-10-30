@@ -11,6 +11,7 @@ from uuid import UUID
 
 import pytest
 from apps.api.integrations.base import IntegrationContext
+from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.skills.base import SkillContext
 from apps.api.skills.shopify._models import Money, OrderSummary
 from apps.api.skills.shopify.get_order_status import (
@@ -50,18 +51,27 @@ _SHOPIFY_INTEGRATION_CTX = IntegrationContext(
 OWNER_EMAIL = "cliente@example.com"
 
 # Remitente verificado: el dueño de los pedidos de prueba escribe desde su email.
-CTX = verified_context(email=OWNER_EMAIL, integration_ctx=_SHOPIFY_INTEGRATION_CTX)
+CTX = verified_context(
+    email=OWNER_EMAIL, integration_ctx=_SHOPIFY_INTEGRATION_CTX, commerce=ShopifyAdapter()
+)
 
 # Otro remitente verificado: no es dueño de ningún pedido de prueba.
 CTX_OTHER_SENDER = verified_context(
-    email="ajeno@example.com", integration_ctx=_SHOPIFY_INTEGRATION_CTX
+    email="ajeno@example.com",
+    integration_ctx=_SHOPIFY_INTEGRATION_CTX,
+    commerce=ShopifyAdapter(),
 )
 
 # Sin remitente verificado (ticket de chat): no hay grants.
-CTX_NO_SENDER = verified_context(channel="zendesk", integration_ctx=_SHOPIFY_INTEGRATION_CTX)
+CTX_NO_SENDER = verified_context(
+    channel="zendesk", integration_ctx=_SHOPIFY_INTEGRATION_CTX, commerce=ShopifyAdapter()
+)
 
 CTX_PHONE_SENDER = verified_context(
-    phone="+34600111222", channel="whatsapp", integration_ctx=_SHOPIFY_INTEGRATION_CTX
+    phone="+34600111222",
+    channel="whatsapp",
+    integration_ctx=_SHOPIFY_INTEGRATION_CTX,
+    commerce=ShopifyAdapter(),
 )
 
 CTX_NO_SHOPIFY = SkillContext(
@@ -232,8 +242,8 @@ class TestListMyOrders:
         assert result.orders[0].total == Money(amount="45.00", currency="GBP")
         assert result.orders[0].total_in_shop_currency == Money(amount="52.00", currency="EUR")
 
-    async def test_raises_when_shopify_not_configured(self) -> None:
-        with pytest.raises(ValueError, match="shopify_not_configured"):
+    async def test_raises_when_commerce_not_configured(self) -> None:
+        with pytest.raises(ValueError, match="commerce_not_configured"):
             await ListMyOrders().execute(CTX_NO_SHOPIFY, ListMyOrdersInput())
 
 
@@ -307,8 +317,8 @@ class TestGetOrderStatus:
             )
         assert result.model_dump() == _NOT_FOUND_DUMP
 
-    async def test_raises_when_shopify_not_configured(self) -> None:
-        with pytest.raises(ValueError, match="shopify_not_configured"):
+    async def test_raises_when_commerce_not_configured(self) -> None:
+        with pytest.raises(ValueError, match="commerce_not_configured"):
             await GetOrderStatus().execute(
                 CTX_NO_SHOPIFY, GetOrderStatusInput(order_identifier="#1")
             )
@@ -426,8 +436,8 @@ class TestGetProductInfo:
         ):
             await GetProductInfo().execute(CTX, GetProductInfoInput(query="camiseta"))
 
-    async def test_raises_when_shopify_not_configured(self) -> None:
-        with pytest.raises(ValueError, match="shopify_not_configured"):
+    async def test_raises_when_commerce_not_configured(self) -> None:
+        with pytest.raises(ValueError, match="commerce_not_configured"):
             await GetProductInfo().execute(CTX_NO_SHOPIFY, GetProductInfoInput(query="q"))
 
 
@@ -488,8 +498,8 @@ class TestGetShopPolicies:
             result = await GetShopPolicies().execute(CTX, GetShopPoliciesInput())
         assert result.policies == []
 
-    async def test_raises_when_shopify_not_configured(self) -> None:
-        with pytest.raises(ValueError, match="shopify_not_configured"):
+    async def test_raises_when_commerce_not_configured(self) -> None:
+        with pytest.raises(ValueError, match="commerce_not_configured"):
             await GetShopPolicies().execute(CTX_NO_SHOPIFY, GetShopPoliciesInput())
 
 

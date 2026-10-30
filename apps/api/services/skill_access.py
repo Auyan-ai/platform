@@ -1,8 +1,9 @@
 """Qué skills puede usar el turno (ADR 0013 §5): tools visibles y veredicto del gate.
 
-Puro y determinista. El LLM solo ve las skills que el tenant tiene encendidas y que la
-identidad del turno permite; el gate de `execute_skill` repite la comprobación sobre el
-pedido concreto con `identity_verdict`.
+Puro y determinista. El LLM solo ve las skills que el tenant tiene encendidas, que la
+tienda del turno sabe hacer (ADR 0016 §3) y que la identidad del turno permite; el gate de
+`execute_skill` repite las comprobaciones con `capability_missing` y, sobre el pedido
+concreto, con `identity_verdict`.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
+from apps.api.integrations.commerce import CommerceCapability
 from apps.api.services.identity import ClaimHash, IdentityContext, level_at_least
 from apps.api.skills.base import Skill
 from apps.api.skills.registry import SkillRegistry
@@ -22,6 +24,22 @@ IdentityVerdict = Literal["identity_required", "verified_required"]
 def skill_enabled(perm: dict[str, Any] | None) -> bool:
     """Encendida en `tenant_tool_permissions`. Sin fila = apagada (fail-closed)."""
     return perm is not None and bool(perm.get("is_enabled", False))
+
+
+def capability_missing(
+    skill_cls: type[Skill], capabilities: frozenset[CommerceCapability] | None
+) -> CommerceCapability | None:
+    """La capacidad que la skill necesita y el adapter del turno no tiene, o None.
+
+    `capabilities=None` es un turno sin adapter de comercio: no falta ninguna, y la skill
+    falla al ejecutar con `commerce_not_configured`. Toda skill que toca un pedido lo lee
+    antes (gate de identidad, guardas de las L3), así que además necesita `order_read`."""
+    if capabilities is None:
+        return None
+    needs = [skill_cls.required_capability]
+    if skill_cls.identity_scope != "public":
+        needs.insert(0, CommerceCapability.ORDER_READ)
+    return next((n for n in needs if n is not None and n not in capabilities), None)
 
 
 def skill_visible(skill_cls: type[Skill], identity: IdentityContext) -> bool:
@@ -39,12 +57,14 @@ def visible_skills(
     tool_permissions: dict[str, Any],
     identity: IdentityContext,
     *,
-    commerce: bool = False,
+    capabilities: frozenset[CommerceCapability] | None = None,
 ) -> list[str]:
-    """Las `slugs` del AOP que el LLM puede ver: encendidas, registradas y permitidas
-    por la identidad. Conserva el orden. Con `commerce`, suma las skills `core` del
-    sistema (la de respaldo del nivel `guest`) solo si el AOP tiene alguna skill de pedido
-    y el turno aún no tiene ningún grant: en el resto de turnos no aparece."""
+    """Las `slugs` del AOP que el LLM puede ver: encendidas, registradas, que la tienda
+    sabe hacer y permitidas por la identidad. Conserva el orden. `capabilities` son las del
+    adapter de comercio del turno (None = sin comercio). Con comercio, suma las skills
+    `core` del sistema (la de respaldo del nivel `guest`) solo si el AOP ofrece alguna
+    skill de pedido y el turno aún no tiene ningún grant: en el resto de turnos no
+    aparece."""
     visible: list[str] = []
     has_order_skill = False
     for slug in slugs:
@@ -55,11 +75,17 @@ def visible_skills(
         except ValueError:
             logger.warning("allowed_skill_not_in_registry: %s", slug)
             continue
+        if capability_missing(skill_cls, capabilities) is not None:
+            continue
         has_order_skill = has_order_skill or skill_cls.identity_scope == "order"
         if skill_visible(skill_cls, identity):
             visible.append(slug)
-    if commerce and has_order_skill and not identity.has_grant():
-        visible.extend(s for s in SkillRegistry.core_slugs() if s not in visible)
+    if capabilities is not None and has_order_skill and not identity.has_grant():
+        visible.extend(
+            s
+            for s in SkillRegistry.core_slugs()
+            if s not in visible and capability_missing(SkillRegistry.get(s), capabilities) is None
+        )
     return visible
 
 

@@ -1,4 +1,4 @@
-"""Skill L3: cancela un pedido en Shopify.
+"""Skill L3: cancela un pedido de la tienda.
 
 Requiere aprobación humana (human_approval_required=True en tenant_tool_permissions).
 El supervisor usa Opus antes de crear la solicitud de aprobación.
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from apps.api.integrations.shopify import RefundMode, ShopifyAdapter
+from apps.api.integrations.commerce import CommerceCapability, RefundMode
 from apps.api.skills.base import (
     ReconcileUnknown,
     Skill,
@@ -56,8 +56,9 @@ class CancelOrderOutput(SkillOutput):
 @SkillRegistry.register
 class CancelOrder(Skill):
     slug = "shopify.cancel_order"
+    required_capability = CommerceCapability.CANCEL
     description = (
-        "Cancela un pedido de Shopify. "
+        "Cancela un pedido de la tienda. "
         "Usa esta skill SOLO cuando el cliente haya confirmado explícitamente que quiere cancelar "
         "y el pedido no haya sido enviado todavía. "
         "Requiere el ID numérico del pedido. "
@@ -76,9 +77,7 @@ class CancelOrder(Skill):
         """Rechaza un pedido cancelado o enviado y añade a la tarjeta por dónde vuelve
         el dinero. `refund_payment`, si el LLM lo manda, no llega a la aprobación."""
         inputs = CancelOrderInput.model_validate(raw_input)
-        if not ctx.integration_ctx:
-            raise ValueError("shopify_not_configured")
-        adapter = ctx.commerce_mock or ShopifyAdapter()
+        adapter = ctx.require_commerce()
         snapshot = await adapter.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
         ensure_order_changeable(snapshot, "cancel", ctx)
         route = snapshot.refund_route
@@ -90,9 +89,7 @@ class CancelOrder(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, CancelOrderInput)
-        if not ctx.integration_ctx:
-            raise ValueError("shopify_not_configured")
-        adapter = ctx.commerce_mock or ShopifyAdapter()
+        adapter = ctx.require_commerce()
         # La aprobación puede llevar horas en cola: el pedido pudo salir entretanto.
         before = await snapshot_before_mutation(adapter, ctx, inputs.order_id)
         ensure_order_changeable(before, "cancel", ctx)
@@ -121,9 +118,9 @@ class CancelOrder(Skill):
         figura cancelado. El reembolso se juzga por todas las transacciones de reembolso
         del pedido, porque no queda la foto de antes de cancelar."""
         assert isinstance(inputs, CancelOrderInput)
-        if not ctx.integration_ctx:
-            raise ReconcileUnknown("shopify_not_configured")
-        snapshot = await ShopifyAdapter().get_order_snapshot(ctx.integration_ctx, inputs.order_id)
+        if ctx.commerce is None:
+            raise ReconcileUnknown("commerce_not_configured")
+        snapshot = await ctx.commerce.get_order_snapshot(ctx.integration_ctx, inputs.order_id)
         if not snapshot.cancelled:
             return None
         route = snapshot.refund_route

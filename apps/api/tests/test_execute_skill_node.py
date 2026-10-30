@@ -22,6 +22,7 @@ from apps.api.agents.nodes.execute_skill import (
     make_execute_skill_node,
 )
 from apps.api.integrations.base import MutationNotApplied
+from apps.api.integrations.shopify import ShopifyAdapter
 from apps.api.services.approval_reply import done_followup_message
 from apps.api.services.approval_resolution import ApprovalGate
 from apps.api.skills.base import (
@@ -347,9 +348,11 @@ class TestBuildSkillContext:
                 "tenant_id": "11111111-1111-1111-1111-111111111111",
                 "credentials": {"domain": "myshop.myshopify.com", "token": "shpat_x"},
                 "config": {},
+                "provider": "shopify",
             },
         }
         ctx = build_skill_context(state)
+        assert isinstance(ctx.commerce, ShopifyAdapter)
         assert ctx.tenant_id == "11111111-1111-1111-1111-111111111111"
         assert ctx.conversation_id == "c-1"
         assert ctx.integration_ctx is not None
@@ -444,6 +447,7 @@ class TestSkillContextPropagation:
                 "tenant_id": "11111111-1111-1111-1111-111111111111",
                 "credentials": {"domain": "x.myshopify.com", "token": "shpat_t"},
                 "config": {},
+                "provider": "shopify",
             },
         )
         await node(state)
@@ -1087,7 +1091,7 @@ class TestRefundApprovalPrecheck:
 
         entry = result["tool_results"][-1]
         assert entry["is_error"] is True
-        assert entry["error"].startswith("skill_precheck_failed: ShopifyActionError: ")
+        assert entry["error"].startswith("skill_precheck_failed: CommerceActionError: ")
         assert "solo quedan 45.00 GBP" in entry["error"]
         assert "pending_approval_id" not in result
         self.create.assert_not_awaited()

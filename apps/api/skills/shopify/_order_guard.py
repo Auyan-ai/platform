@@ -12,7 +12,7 @@ from enum import StrEnum
 from typing import Any, Literal
 
 from apps.api.integrations.base import MutationNotApplied
-from apps.api.integrations.shopify import OrderSnapshot, RefundRoute, SnapshotTransaction
+from apps.api.integrations.commerce import OrderSnapshot, RefundRoute, SnapshotTransaction
 from apps.api.services.fixed_texts import fixed_text
 from apps.api.skills.base import SkillContext, SkillRefusal
 

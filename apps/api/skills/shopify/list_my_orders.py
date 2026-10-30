@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apps.api.integrations.shopify import ShopifyAdapter
+from apps.api.integrations.commerce import CommerceCapability
 from apps.api.services.identity import normalize_phone
 from apps.api.skills.base import Skill, SkillContext, SkillInput, SkillOutput, SkillTier
 from apps.api.skills.registry import SkillRegistry
@@ -40,8 +40,9 @@ NO_ORDERS_FOR_SENDER_NOTE = (
 @SkillRegistry.register
 class ListMyOrders(Skill):
     slug = "shopify.list_my_orders"
+    required_capability = CommerceCapability.ORDER_READ
     description = (
-        "Lista los pedidos de Shopify de quien escribe, buscados con el email o el "
+        "Lista los pedidos en la tienda de quien escribe, buscados con el email o el "
         "teléfono desde el que llega el mensaje. No recibe parámetros: nunca busca con "
         "un email que escriba el cliente. Devuelve hasta 10 pedidos recientes con "
         "estado, total y tracking. El total viene en la moneda en que pagó el cliente: "
@@ -56,9 +57,7 @@ class ListMyOrders(Skill):
 
     async def execute(self, ctx: SkillContext, inputs: SkillInput) -> SkillOutput:
         assert isinstance(inputs, ListMyOrdersInput)
-        if not ctx.integration_ctx:
-            raise ValueError("shopify_not_configured")
-        adapter = ctx.commerce_mock or ShopifyAdapter()
+        adapter = ctx.require_commerce()
         phone = normalize_phone(ctx.customer_phone, ctx.phone_region)
         if ctx.customer_email:
             raw_orders = await adapter.search_orders_by_email(

@@ -14,9 +14,12 @@ import httpx
 import pytest
 import respx
 from apps.api.integrations.base import MutationNotApplied
-from apps.api.integrations.shopify import (
+from apps.api.integrations.commerce import (
+    CommerceActionError,
     IssuedRefund,
     RefundableBalance,
+)
+from apps.api.integrations.shopify import (
     ShopifyActionError,
     ShopifyClient,
     refundable_balance,
@@ -271,7 +274,7 @@ def test_refundable_balance_rejects_mixed_currencies() -> None:
 
 def test_refund_amount_must_be_positive() -> None:
     balance = RefundableBalance(captured=Decimal("10"), refunded=Decimal("0"), currency="GBP")
-    with pytest.raises(ShopifyActionError, match="refund_amount_not_positive"):
+    with pytest.raises(CommerceActionError, match="refund_amount_not_positive"):
         balance.require(Decimal("0"))
 
 
