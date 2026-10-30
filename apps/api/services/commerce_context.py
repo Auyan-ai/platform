@@ -92,6 +92,11 @@ async def build_commerce_integration_ctx(
     return None
 
 
+def require_commerce_provider(provider: str) -> None:
+    """Lanza `ValueError("unknown_integration: commerce/<provider>")` si no hay adapter."""
+    IntegrationRegistry.get("commerce", provider)
+
+
 def commerce_adapter(integration: IntegrationContext) -> CommerceAdapter:
     """El adapter registrado para el proveedor de la integración de comercio."""
     if integration.provider is None:

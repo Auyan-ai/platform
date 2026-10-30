@@ -713,6 +713,64 @@ class TestRunLiveChecks:
         assert "SANDBOX" in health.detail
 
 
+class TestWooCommerceLive:
+    @staticmethod
+    def _store(batch_status: int) -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/system_status"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "environment": {"site_url": "https://tienda.es", "version": "11.2.1"},
+                        "settings": {"currency": "EUR"},
+                    },
+                )
+            return httpx.Response(
+                batch_status,
+                json=[] if batch_status == 200 else {"code": "x", "message": "sin escritura"},
+            )
+
+        return httpx.MockTransport(handler)
+
+    @staticmethod
+    def _woo() -> IntegrationSnapshot:
+        return _integration(
+            "commerce",
+            "woocommerce",
+            credentials={
+                "store_url": "https://tienda.es",
+                "consumer_key": "ck",
+                "consumer_secret": "cs",
+            },
+        )
+
+    @pytest.mark.parametrize(
+        ("batch_status", "status", "detail"),
+        [
+            (
+                200,
+                "ok",
+                "Tienda `https://tienda.es` (WooCommerce 11.2.1, moneda EUR), clave con escritura.",
+            ),
+            (401, "fail", "La clave no puede escribir"),
+        ],
+    )
+    async def test_checks_the_store_and_that_the_key_can_write(
+        self, batch_status: int, status: str, detail: str
+    ) -> None:
+        checks = _by_id(
+            await run_live_checks(
+                _snapshot(self._woo()),
+                api_base_url=API_BASE,
+                woocommerce_transport=self._store(batch_status),
+            )
+        )
+
+        check = checks["commerce.woocommerce.auth"]
+        assert check.status == status
+        assert check.detail.startswith(detail)
+
+
 class TestCliLogging:
     def test_live_failure_logs_exception_but_cli_output_has_no_traceback(
         self, capsys: pytest.CaptureFixture[str]

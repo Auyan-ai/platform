@@ -57,10 +57,16 @@ from apps.api.db.queries import (
     upsert_tenant_onboarding,
     upsert_tenant_playbook,
 )
+from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.chatwoot import ChatwootClient
 from apps.api.integrations.shopify import (
     ShopifyClient,
     exchange_client_credentials,
+)
+from apps.api.integrations.woocommerce import (
+    WooCommerceAdapter,
+    WooCommerceRejected,
+    store_base_url,
 )
 from apps.api.services.demo_tenants import (
     DemoSlugExhaustedError,
@@ -347,6 +353,15 @@ class IntegrationStatusResponse(BaseModel):
 class IntegrationsOverviewResponse(BaseModel):
     integrations: list[IntegrationStatusResponse]
     checklist: OnboardingChecklistResponse
+
+
+class ConnectWooCommerceRequest(BaseModel):
+    """Claves REST de WooCommerce (Ajustes → Avanzado → REST API), con permisos
+    `read_write`: las skills L2 y L3 escriben en el pedido."""
+
+    store_url: str = Field(min_length=1, max_length=255)
+    consumer_key: str = Field(min_length=1, max_length=255)
+    consumer_secret: str = Field(min_length=1, max_length=255)
 
 
 class ConnectShopifyRequest(BaseModel):
@@ -1567,6 +1582,90 @@ async def connect_shopify(
             tenant_id=tenant_id,
             kind="commerce",
             provider="shopify",
+            credentials_encrypted=encrypted,
+            config=config,
+            is_active=True,
+            is_primary_for_kind=True,
+            enabled_by=auth.user_id,
+        )
+        tenant, checklist = await evaluate_and_advance_lifecycle(conn, tenant_id)
+
+    return ConnectIntegrationResponse(
+        integration=IntegrationStatusResponse.model_validate(integration),
+        checklist=_checklist_response(checklist, tenant.agent_lifecycle_state),
+    )
+
+
+@router.post(
+    "/me/integrations/woocommerce",
+    response_model=ConnectIntegrationResponse,
+    summary="Conecta la tienda WooCommerce del tenant (valida, cifra y guarda)",
+    dependencies=[Depends(require_role("tenant_admin", "super_admin"))],
+)
+async def connect_woocommerce(
+    body: ConnectWooCommerceRequest,
+    tenant_id: TenantIdDep,
+    auth: AuthDep,
+    settings: SettingsDep,
+) -> ConnectIntegrationResponse:
+    """Comprueba la tienda (`GET /system_status`) y que la clave pueda escribir antes de
+    guardar nada (ADR 0016 §6). Solo HTTPS y tiendas públicas."""
+    try:
+        store_url = store_base_url(
+            body.store_url, allow_http_loopback=settings.woocommerce_allow_http_loopback
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="La URL de la tienda debe ser pública y empezar por https://",
+        ) from exc
+    credentials = {
+        "store_url": store_url,
+        "consumer_key": body.consumer_key.strip(),
+        "consumer_secret": body.consumer_secret.strip(),
+    }
+    adapter = WooCommerceAdapter(allow_http_loopback=settings.woocommerce_allow_http_loopback)
+    try:
+        store = await adapter.validate(
+            IntegrationContext(
+                tenant_id=tenant_id, credentials=credentials, provider="woocommerce"
+            )
+        )
+    except WooCommerceRejected as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "La clave de WooCommerce es de solo lectura: créala con permisos "
+                "Lectura/Escritura"
+            ),
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code
+        detail = (
+            "No pudimos validar las claves de WooCommerce (consumer key o secret inválidos)"
+            if code in (401, 403)
+            else f"La tienda no expone la REST API de WooCommerce (HTTP {code})"
+        )
+        raise HTTPException(status_code=422, detail=detail) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=422, detail="No pudimos conectar con la tienda WooCommerce"
+        ) from exc
+
+    encrypted = encrypt_credentials(json.dumps(credentials).encode(), _crypto_key(settings))
+    config: dict[str, Any] = {
+        "store_url": store_url,
+        "site_url": store.get("site_url"),
+        "wc_version": store.get("wc_version"),
+        "currency": store.get("currency"),
+        "verified_at": datetime.datetime.now(datetime.UTC).isoformat(),
+    }
+    async with tenant_scope(tenant_id) as conn:
+        integration = await upsert_integration(
+            conn,
+            tenant_id=tenant_id,
+            kind="commerce",
+            provider="woocommerce",
             credentials_encrypted=encrypted,
             config=config,
             is_active=True,

@@ -265,8 +265,6 @@ class CommerceAdapter(Protocol):
     """
 
     capabilities: frozenset[CommerceCapability]
-    # Nombre de la plataforma en los textos para el equipo ("Shopify", "WooCommerce").
-    platform_name: str
 
     # ── order_read ─────────────────────────────────────────────────────────────
     async def get_order(self, ctx: IntegrationContext, order_id: str) -> dict[str, Any]: ...

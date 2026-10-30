@@ -109,8 +109,9 @@ class SkillContext:
 
     @property
     def platform_name(self) -> str:
-        """La plataforma de la tienda en los textos al equipo ("Shopify", "WooCommerce")."""
-        return self.commerce.platform_name if self.commerce is not None else "la tienda"
+        """La plataforma de la tienda en los textos al equipo ("Shopify", "WooCommerce"), o
+        "la tienda" si el adapter del turno no es de una plataforma (catálogo de la demo)."""
+        return str(getattr(self.commerce, "platform_name", None) or "la tienda")
 
     def require_commerce(self) -> CommerceAdapter:
         """El adapter del turno. Sin integración de comercio, `commerce_not_configured`."""

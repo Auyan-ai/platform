@@ -442,26 +442,32 @@ def canonical_policy(page: dict[str, Any]) -> dict[str, Any]:
 # ─── Cliente HTTP ─────────────────────────────────────────────────────────────
 
 
-def _is_loopback(host: str) -> bool:
+def _ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     if host == "localhost":
-        return True
+        return ipaddress.ip_address("127.0.0.1")
     try:
-        return ipaddress.ip_address(host).is_loopback
+        return ipaddress.ip_address(host)
     except ValueError:
-        return False
+        return None
 
 
 def store_base_url(store_url: str, *, allow_http_loopback: bool) -> str:
-    """La URL de la tienda, solo HTTPS: Basic auth viaja con la clave en claro. HTTP solo
-    contra loopback y con el flag explícito de desarrollo."""
+    """La URL de la tienda, solo HTTPS: Basic auth viaja con la clave en claro.
+
+    Una IP privada, de enlace local o de loopback no es una tienda: se rechaza para que la
+    API no llame a su propia red. Loopback por HTTP solo con el flag de desarrollo.
+    """
     parts = urlsplit(store_url.strip())
-    if not parts.hostname:
+    host = parts.hostname
+    if not host:
         raise ValueError(f"woocommerce_store_url_invalid: {store_url!r}")
-    if parts.scheme == "https":
-        pass
-    elif parts.scheme == "http" and _is_loopback(parts.hostname) and allow_http_loopback:
-        pass
-    else:
+    ip = _ip(host)
+    if ip is not None and ip.is_loopback:
+        if not allow_http_loopback or parts.scheme not in ("http", "https"):
+            raise ValueError("woocommerce_store_url_must_be_public")
+    elif ip is not None and (ip.is_private or ip.is_link_local or ip.is_reserved):
+        raise ValueError("woocommerce_store_url_must_be_public")
+    elif parts.scheme != "https":
         raise ValueError("woocommerce_store_url_must_be_https")
     path = parts.path.rstrip("/")
     return f"{parts.scheme}://{parts.netloc}{path}"
@@ -583,7 +589,8 @@ class WooCommerceAdapter:
         if missing:
             raise ValueError(f"woocommerce credentials missing {', '.join(missing)}")
         url = str(creds["store_url"])
-        allow = urlsplit(url).scheme == "http" and self._http_loopback_allowed()
+        host = _ip(urlsplit(url.strip()).hostname or "")
+        allow = host is not None and host.is_loopback and self._http_loopback_allowed()
         return WooCommerceClient(
             store_base_url(url, allow_http_loopback=allow),
             str(creds["consumer_key"]),

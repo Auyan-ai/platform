@@ -476,7 +476,7 @@ async def test_store_url_over_plain_http_is_refused_without_the_dev_flag() -> No
     from apps.api.tests.woocommerce_support import integration
 
     assert LIVE_URL
-    with pytest.raises(ValueError, match="woocommerce_store_url_must_be_https"):
+    with pytest.raises(ValueError, match="woocommerce_store_url_must_be_public"):
         await WooCommerceAdapter(allow_http_loopback=False).get_shop_currency(
             integration(LIVE_URL)
         )

@@ -3840,7 +3840,15 @@ async def upsert_integration(
     is_primary_for_kind: bool = False,
     enabled_by: UUID | None = None,
 ) -> TenantIntegration:
-    """Crea o actualiza una integración. Las credentials ya deben venir cifradas."""
+    """Crea o actualiza una integración. Las credentials ya deben venir cifradas.
+
+    Una de comercio solo se guarda si su proveedor tiene adapter (ADR 0016 §2): si no, el
+    turno del agente no podría resolverlo. Lanza `ValueError("unknown_integration: …")`.
+    """
+    if kind == "commerce":
+        from apps.api.services.commerce_context import require_commerce_provider
+
+        require_commerce_provider(provider)
     row = await conn.fetchrow(
         """
         INSERT INTO tenant_integrations

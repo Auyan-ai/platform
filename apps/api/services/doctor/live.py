@@ -19,7 +19,9 @@ from apps.api.integrations.anthropic_client import (
     call_claude_with_tools,
 )
 from apps.api.integrations.chatwoot import ChatwootClient
+from apps.api.integrations.base import IntegrationContext
 from apps.api.integrations.shopify import ShopifyClient, ensure_shopify_access_token
+from apps.api.integrations.woocommerce import WooCommerceAdapter, WooCommerceRejected
 from apps.api.integrations.zendesk import ZendeskClient
 from apps.api.integrations.zendesk_triggers import (
     NOT_HANDOFF_CONDITION,
@@ -367,6 +369,47 @@ async def shopify_live_checks(
     ]
 
 
+async def woocommerce_live_checks(
+    snapshot: TenantSnapshot,
+    integration: IntegrationSnapshot,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> list[DoctorCheck]:
+    """La tienda responde y la clave puede escribir (ADR 0016 §6), sin tocar nada."""
+    adapter = WooCommerceAdapter(transport=transport)
+    ctx = IntegrationContext(
+        tenant_id=snapshot.tenant_id,
+        credentials=integration.credentials or {},
+        config=integration.config,
+        provider="woocommerce",
+    )
+    try:
+        store = await adapter.validate(ctx)
+    except WooCommerceRejected as exc:
+        return [
+            DoctorCheck(
+                id="commerce.woocommerce.auth",
+                group="commerce",
+                title="Acceso a WooCommerce",
+                status="fail",
+                detail=f"La clave no puede escribir: {exc}.",
+                hint="Crear una clave REST de WooCommerce con permisos Lectura/Escritura.",
+            )
+        ]
+    return [
+        DoctorCheck(
+            id="commerce.woocommerce.auth",
+            group="commerce",
+            title="Acceso a WooCommerce",
+            status="ok",
+            detail=(
+                f"Tienda `{store.get('site_url')}` (WooCommerce {store.get('wc_version')}, "
+                f"moneda {store.get('currency')}), clave con escritura."
+            ),
+        )
+    ]
+
+
 async def chatwoot_live_checks(
     snapshot: TenantSnapshot, integration: IntegrationSnapshot, *, api_base_url: str | None
 ) -> list[DoctorCheck]:
@@ -411,6 +454,7 @@ async def run_live_checks(
     api_base_url: str | None,
     zendesk_client_factory: ZendeskClientFactory = admin_client,
     zernio_transport: httpx.AsyncBaseTransport | None = None,
+    woocommerce_transport: httpx.AsyncBaseTransport | None = None,
 ) -> list[DoctorCheck]:
     tasks: list[Awaitable[list[DoctorCheck]]] = []
     skipped: list[DoctorCheck] = []
@@ -464,6 +508,18 @@ async def run_live_checks(
                     "commerce",
                     "Acceso a Shopify",
                     lambda i=integration: shopify_live_checks(snapshot, i),
+                )
+            )
+        elif key == ("commerce", "woocommerce"):
+            tasks.append(
+                _guarded(
+                    snapshot,
+                    "commerce.woocommerce.auth",
+                    "commerce",
+                    "Acceso a WooCommerce",
+                    lambda i=integration: woocommerce_live_checks(
+                        snapshot, i, transport=woocommerce_transport
+                    ),
                 )
             )
         elif key == ("channel", "zernio"):
