@@ -105,6 +105,7 @@ async def collect_site(
                 session.abandon(f"error: {type(exc).__name__}")
                 found = []
             session.stats.seconds += time.monotonic() - source_started
+            stats.store_name = stats.store_name or ctx.store_name
             kept = [
                 doc
                 for doc in found

@@ -16,6 +16,7 @@ from apps.api.db.site_ingestions import (
 )
 from apps.api.services.knowledge_ingestion import Embedder
 from apps.api.services.site_ingestion.auto_approve import auto_approve_if_demo
+from apps.api.services.site_ingestion.demo_name import rename_demo_to_store_name
 from apps.api.services.site_ingestion.models import IngestionStatus
 from apps.api.services.site_ingestion.orchestrator import NoContentError, run_ingestion
 
@@ -142,7 +143,14 @@ class SiteIngestionWorker:
                 "seconds": round(stats.seconds, 1),
             },
         )
+        await self._rename_demo(job, stats.store_name)
         await self._auto_approve_demo(job)
+
+    async def _rename_demo(self, job: ClaimedIngestion, store_name: str | None) -> None:
+        try:
+            await rename_demo_to_store_name(job.tenant_id, store_name)
+        except Exception:
+            logger.exception("demo_rename_failed", extra=_log_extra(job))
 
     async def _auto_approve_demo(self, job: ClaimedIngestion) -> None:
         if self._embedder is None:

@@ -22,6 +22,8 @@ class SourceContext:
     session: FetchSession
     remaining_pages: int
     accepted_keys: frozenset[str] = frozenset()
+    # Cada fuente rellena aquí el nombre oficial de la tienda si lo trae; la ingesta lo recoge.
+    store_name: str | None = None
 
     @property
     def stats(self) -> SourceStats:

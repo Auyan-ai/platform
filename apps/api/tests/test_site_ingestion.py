@@ -37,6 +37,8 @@ async def test_thinkingmu_reads_official_shopify_sources_and_drops_the_noise() -
 
     assert collection.platform is Platform.SHOPIFY
     assert collection.origin == "https://thinkingmu.com"
+    assert collection.stats.store_name == "Thinking MU"
+    assert collection.stats.to_json()["store_name"] == "Thinking MU"
     assert _keys(collection, SourceName.STOREFRONT_API) == [
         "thinkingmu.com",
         "thinkingmu.com/policies/refund-policy",
@@ -233,6 +235,36 @@ async def test_a_finished_ingestion_logs_its_summary_without_breaking_logging(
     ready = [r for r in caplog.records if r.getMessage() == "site_ingestion_ready"]
     assert len(ready) == 1
     assert ready[0].submissions_created == 11
+
+
+async def test_a_ready_ingestion_hands_its_store_name_to_the_demo_rename(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from uuid import UUID, uuid4
+
+    from apps.api.db.site_ingestions import ClaimedIngestion
+    from apps.api.services.site_ingestion import worker as worker_module
+    from apps.api.services.site_ingestion.models import IngestionStats
+
+    renamed: list[tuple[UUID, str | None]] = []
+
+    async def fake_run(job: ClaimedIngestion, *, transport: object = None) -> IngestionStats:
+        return IngestionStats(root_url=job.root_url, store_name="Thinking MU")
+
+    async def fake_rename(tenant_id: UUID, store_name: str | None) -> bool:
+        renamed.append((tenant_id, store_name))
+        return True
+
+    monkeypatch.setattr(worker_module, "run_ingestion", fake_run)
+    monkeypatch.setattr(worker_module, "rename_demo_to_store_name", fake_rename)
+    job = ClaimedIngestion(
+        id=uuid4(), tenant_id=uuid4(), root_url="https://thinkingmu.com", attempts=1,
+        max_attempts=3, requested_by=None,
+    )
+
+    await worker_module.SiteIngestionWorker(lease_seconds=3600).execute(job)
+
+    assert renamed == [(job.tenant_id, "Thinking MU")]
 
 
 async def test_html_boilerplate_shared_by_most_pages_is_removed_and_faq_is_discarded() -> None:

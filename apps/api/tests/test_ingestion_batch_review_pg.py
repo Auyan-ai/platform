@@ -331,3 +331,45 @@ async def test_the_latest_ingestion_is_the_active_one_then_the_last_that_left_so
 
     assert shown is not None and shown.id == with_sources
     assert shown_while_running is not None and shown_while_running.id == running
+
+
+async def _name_of(pool: asyncpg.Pool, tid: uuid.UUID) -> str:
+    async with pool.acquire() as conn:
+        return str(await conn.fetchval("select name from tenants where id = $1", tid))
+
+
+async def _set_name(pool: asyncpg.Pool, tid: uuid.UUID, name: str, source_url: str) -> None:
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "update tenants set name = $2, demo_source_url = $3 where id = $1",
+            tid,
+            name,
+            source_url,
+        )
+
+
+async def test_a_ready_demo_takes_the_official_shop_name(pool: asyncpg.Pool) -> None:
+    tid = await _tenant(pool, origin="demo")
+    await _set_name(pool, tid, "Thinkingmu", "https://thinkingmu.com")
+
+    await _run_ingestion(pool, tid, FakeEmbedder())
+
+    assert await _name_of(pool, tid) == "Thinking MU"
+
+
+async def test_a_ready_demo_with_an_edited_name_keeps_it(pool: asyncpg.Pool) -> None:
+    tid = await _tenant(pool, origin="demo")
+    await _set_name(pool, tid, "Demo para Laura", "https://thinkingmu.com")
+
+    await _run_ingestion(pool, tid, FakeEmbedder())
+
+    assert await _name_of(pool, tid) == "Demo para Laura"
+
+
+async def test_a_ready_client_keeps_its_name(pool: asyncpg.Pool) -> None:
+    tid = await _tenant(pool, origin="client")
+    await _set_name(pool, tid, "Thinkingmu", "https://thinkingmu.com")
+
+    await _run_ingestion(pool, tid, FakeEmbedder())
+
+    assert await _name_of(pool, tid) == "Thinkingmu"
